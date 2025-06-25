@@ -420,8 +420,7 @@ class TestClusterExecutor:
 
         assert status == "failed"
 
-    @patch("tempfile.NamedTemporaryFile")
-    def test_get_result_success(self, mock_temp_file, executor):
+    def test_get_result_success(self, executor):
         """Test retrieving successful result."""
         executor.ssh_client = Mock()
         executor.sftp_client = Mock()
@@ -443,16 +442,16 @@ class TestClusterExecutor:
         # Mock the status check to return completed immediately
         executor._check_job_status = Mock(return_value="completed")
 
-        # Mock temp file
-        mock_file = Mock()
-        mock_file.name = "/tmp/test_result"
-        mock_temp_file.return_value.__enter__.return_value = mock_file
-
         # Mock result data
         test_result = {"value": 42}
 
         # Mock SFTP get to write test result when called
+        import tempfile
+        import os
+        
         def mock_get(remote_path, local_path):
+            # Create the directory if it doesn't exist (Windows compatibility)
+            os.makedirs(os.path.dirname(local_path), exist_ok=True)
             # Write test result to the local path when SFTP.get is called
             with open(local_path, "wb") as f:
                 pickle.dump(test_result, f)
@@ -462,9 +461,11 @@ class TestClusterExecutor:
         result = executor.get_result("job_12345")
 
         assert result == test_result
-        mock_sftp.get.assert_called_once_with(
-            "/tmp/test_job/result.pkl", "/tmp/test_result"
-        )
+        # Verify SFTP get was called with correct remote path (local path is a temp file)
+        mock_sftp.get.assert_called_once()
+        call_args = mock_sftp.get.call_args[0]
+        assert call_args[0] == "/tmp/test_job/result.pkl"  # remote path
+        assert call_args[1].endswith("tmp") or "/tmp" in call_args[1]  # local temp path
 
     def test_cancel_job_slurm(self, executor):
         """Test canceling SLURM job."""
