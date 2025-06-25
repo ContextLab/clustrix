@@ -244,29 +244,29 @@ class ClusterExecutor:
     ) -> str:
         """
         Submit a job to Kubernetes cluster using containerized Python execution.
-        
+
         This method implements a sophisticated Kubernetes job submission strategy that
         packages Python functions and data into self-contained container jobs without
         requiring custom Docker images or persistent storage.
-        
+
         **Architecture:**
-        
+
         1. **Function Serialization**: Uses cloudpickle to serialize the function and all data
         2. **Base64 Encoding**: Encodes serialized data for safe embedding in container args
         3. **Container Execution**: Creates a Job with inline Python code that:
            - Decodes the base64 data
-           - Deserializes the function and arguments  
+           - Deserializes the function and arguments
            - Executes the function
            - Captures results or errors
         4. **Resource Management**: Applies CPU and memory limits from job_config
-        
+
         **Key Features:**
         - **No Custom Images**: Uses standard `python:3.11-slim` image
         - **Self-Contained**: All code and data embedded in Job manifest
         - **Resource Aware**: Respects CPU/memory requirements
         - **Error Handling**: Captures exceptions with full tracebacks
         - **Cloud Native**: Leverages Kubernetes Job semantics for reliability
-        
+
         **Job Manifest Structure:**
         ```yaml
         apiVersion: batch/v1
@@ -289,7 +289,7 @@ class ClusterExecutor:
         Args:
             func_data: Serialized function data containing:
                       - 'func': The function to execute
-                      - 'args': Positional arguments  
+                      - 'args': Positional arguments
                       - 'kwargs': Keyword arguments
                       - 'requirements': Package dependencies (not used for K8s)
             job_config: Job configuration including:
@@ -299,11 +299,11 @@ class ClusterExecutor:
 
         Returns:
             str: Kubernetes Job name that can be used for status tracking
-            
+
         Raises:
             ImportError: If kubernetes package is not installed
             Exception: If Kubernetes API calls fail
-            
+
         Examples:
             >>> func_data = {
             ...     'func': lambda x: x**2,
@@ -314,7 +314,7 @@ class ClusterExecutor:
             >>> job_config = {'cores': 2, 'memory': '4Gi'}
             >>> job_id = executor._submit_k8s_job(func_data, job_config)
             >>> print(job_id)  # "clustrix-job-1234567890"
-            
+
         Note:
             - Requires kubernetes package: `pip install kubernetes`
             - Assumes kubectl is configured with cluster access
@@ -523,53 +523,53 @@ except Exception as e:
     def _check_job_status(self, job_id: str) -> str:
         """
         Check the current status of a job across multiple cluster schedulers.
-        
+
         This method implements cluster-specific job status checking with intelligent
         fallback mechanisms to handle various edge cases including completed jobs
         that have been removed from scheduler queues.
-        
+
         **Multi-Scheduler Support:**
-        
+
         - **SLURM**: Uses `squeue -j {job_id} -h -o %T` to check job status
-        - **PBS**: Uses `qstat -f {job_id}` to query detailed job information  
+        - **PBS**: Uses `qstat -f {job_id}` to query detailed job information
         - **SGE**: Job status checking (using similar logic to PBS)
         - **SSH**: File-based status detection (result.pkl vs error files)
         - **Kubernetes**: Pod/Job status via Kubernetes API
-        
+
         **Status Detection Logic:**
-        
+
         1. **Active Jobs**: Query scheduler-specific commands for current status
         2. **Completed Jobs**: Many schedulers remove completed jobs from queues,
            requiring file-based detection using result.pkl existence
         3. **Failed Jobs**: Detected through scheduler status or error file presence
         4. **Unknown Status**: Graceful handling when commands fail
-        
+
         **Return Values:**
         - `"completed"`: Job finished successfully (result.pkl exists)
-        - `"failed"`: Job failed (scheduler reports failure or error files exist)  
+        - `"failed"`: Job failed (scheduler reports failure or error files exist)
         - `"running"`: Job is currently executing
         - `"queued"`: Job is waiting in scheduler queue
         - `"unknown"`: Status cannot be determined
-        
+
         Args:
             job_id: Unique job identifier (scheduler-specific format)
-            
+
         Returns:
             str: Current job status as a standardized string value
-            
+
         Examples:
             >>> # SLURM job running
             >>> status = executor._check_job_status("12345")
             >>> print(status)  # "running"
-            
+
             >>> # PBS job completed (removed from queue)
-            >>> status = executor._check_job_status("67890.headnode")  
+            >>> status = executor._check_job_status("67890.headnode")
             >>> print(status)  # "completed"
-            
+
             >>> # SSH job failed
             >>> status = executor._check_job_status("ssh_1234567890")
             >>> print(status)  # "failed"
-            
+
         Note:
             This method is called repeatedly by `wait_for_result()` during job polling.
             The implementation handles scheduler-specific quirks and provides robust
@@ -692,53 +692,53 @@ except Exception as e:
     def _get_error_log(self, job_id: str) -> str:
         """
         Retrieve comprehensive error information from a failed job using multiple fallback mechanisms.
-        
+
         This method implements a sophisticated error retrieval strategy that prioritizes
         structured error data (pickled exceptions) over raw log files, providing users
         with the most detailed and useful error information available.
-        
+
         **Error Retrieval Strategy (in priority order):**
-        
+
         1. **Pickled Error Data** (Highest Priority): Attempts to download and deserialize
            `error.pkl` containing structured exception information including:
            - Original exception objects
            - Error messages with full context
            - Complete stack traces
-           
+
         2. **Text Log Files** (Fallback): Searches for various scheduler-specific log files:
            - job.err (standard error output)
-           - slurm-*.out (SLURM output files) 
+           - slurm-*.out (SLURM output files)
            - job.e* (PBS/SGE error files)
-           
+
         3. **No Error Found**: Returns appropriate message if no error information exists.
-        
+
         **Structured Error Handling**: When error.pkl is found, the method handles multiple
         data formats gracefully:
         - Dictionary format: {'error': message, 'traceback': trace}
         - Direct exception objects
         - String representations
-        
+
         Args:
             job_id: Unique identifier for the failed job
-            
+
         Returns:
             str: Comprehensive error information including error messages and tracebacks.
-                 Returns detailed structured information when available, or raw log 
+                 Returns detailed structured information when available, or raw log
                  content as fallback.
-                 
+
         Examples:
             >>> # Structured error (preferred)
             >>> error_log = executor._get_error_log("job_12345")
             >>> # Returns: "ValueError: Division by zero\n\nTraceback:\n  File..."
-            
+
             >>> # Text log fallback
-            >>> error_log = executor._get_error_log("job_67890") 
+            >>> error_log = executor._get_error_log("job_67890")
             >>> # Returns: "Error from job.err: Process failed with exit code 1"
-            
+
             >>> # No error info
             >>> error_log = executor._get_error_log("job_unknown")
             >>> # Returns: "No error log found"
-            
+
         Note:
             This method is typically called automatically by `wait_for_result()` when
             a job status is detected as "failed". It provides the error information
@@ -793,52 +793,52 @@ except Exception as e:
     def _extract_original_exception(self, job_id: str) -> Optional[Exception]:
         """
         Extract and reconstruct the original exception from a failed remote job.
-        
+
         This method enables proper exception propagation by retrieving and deserializing
         exception objects that were pickled during remote execution. This allows users
         to catch specific exception types (e.g., ValueError, KeyError) rather than
         generic RuntimeError wrappers.
-        
+
         **Exception Reconstruction Process:**
-        
+
         1. **Download Pickled Data**: Retrieves the error.pkl file from the remote job directory
         2. **Deserialize Exception**: Safely unpickles the exception data
         3. **Type Preservation**: Maintains original exception types and messages
         4. **Fallback Handling**: Creates RuntimeError for malformed exception data
-        
+
         **Supported Exception Formats:**
         - **Direct Exception Objects**: Exception instances pickled directly
         - **Dictionary Format**: {'error': message, 'traceback': trace} structures
         - **Graceful Degradation**: Returns None if extraction fails
-        
+
         Args:
             job_id: Unique identifier for the failed job
-            
+
         Returns:
             Optional[Exception]: The original exception object if successfully extracted,
                                RuntimeError for recoverable data, or None if extraction
                                fails completely.
-                               
+
         Examples:
             >>> # Original ValueError preserved
             >>> exc = executor._extract_original_exception("job_123")
             >>> isinstance(exc, ValueError)  # True
             >>> str(exc)  # "Division by zero"
-            
+
             >>> # Dictionary format converted
-            >>> exc = executor._extract_original_exception("job_456") 
+            >>> exc = executor._extract_original_exception("job_456")
             >>> isinstance(exc, RuntimeError)  # True (fallback)
             >>> str(exc)  # "Original error message"
-            
+
             >>> # Extraction failed
             >>> exc = executor._extract_original_exception("job_789")
             >>> exc is None  # True
-            
+
         Note:
             This method is called by `wait_for_result()` to enable proper exception
             re-raising. When successful, users can catch specific exception types
             instead of generic RuntimeError messages.
-            
+
         See Also:
             _get_error_log(): Retrieves error information for logging/display
             wait_for_result(): Main method that uses both error retrieval functions

@@ -184,26 +184,26 @@ class LocalExecutor:
     ) -> List[Any]:
         """
         Execute a function in parallel over an iterable using intelligent chunking.
-        
+
         This method implements a sophisticated chunk-based parallelization strategy that
         handles the complex challenge of distributing iterable items across multiple
         workers while preserving order and handling functions that expect individual
         items rather than chunks.
-        
+
         **Algorithm:**
-        
+
         1. **Chunking**: Splits the iterable into approximately equal chunks based on
            worker count and optional chunk_size parameter.
-           
+
         2. **Chunk Processing**: Creates a wrapper function that processes each chunk
            by iterating over individual items and calling the original function.
-           
+
         3. **Result Flattening**: Collects results from all chunks and flattens them
            while preserving the original iteration order.
-        
-        **Key Innovation**: The chunk processor wrapper bridges the gap between 
+
+        **Key Innovation**: The chunk processor wrapper bridges the gap between
         chunk-based parallel execution and functions that expect individual items.
-        
+
         **Example Workflow**:
         ```
         range(5) with chunk_size=2 → chunks: [[0,1], [2,3], [4]]
@@ -232,13 +232,13 @@ class LocalExecutor:
             >>> executor = LocalExecutor(max_workers=4)
             >>> def square(x):
             ...     return x ** 2
-            >>> 
+            >>>
             >>> # Parallel computation over range
             >>> results = executor.execute_loop_parallel(
             ...     square, 'x', range(10), chunk_size=3
             ... )
             >>> # Results: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
-            
+
             >>> # With additional arguments
             >>> def power(base, x, exp=2):
             ...     return (base + x) ** exp
@@ -249,7 +249,7 @@ class LocalExecutor:
 
         Raises:
             Exception: Any exception raised by the function during execution.
-            
+
         Note:
             - Empty iterables return empty lists immediately
             - Single-item iterables are executed directly (no parallelization overhead)
@@ -322,22 +322,22 @@ def _safe_pickle_test(obj) -> bool:
 def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
     """
     Intelligently choose between ThreadPoolExecutor and ProcessPoolExecutor based on function characteristics.
-    
+
     This function implements a sophisticated analysis to determine the optimal execution model
     for parallel function execution. The decision tree prioritizes pickling constraints first,
     then analyzes function characteristics to detect I/O-bound vs CPU-bound workloads.
-    
+
     **Decision Logic (in priority order):**
-    
-    1. **Pickling Check (Highest Priority)**: Functions and arguments must be picklable for 
+
+    1. **Pickling Check (Highest Priority)**: Functions and arguments must be picklable for
        multiprocessing. If any component fails pickling, threads are used.
-       
-    2. **I/O Detection**: Source code analysis looks for common I/O patterns that benefit 
+
+    2. **I/O Detection**: Source code analysis looks for common I/O patterns that benefit
        from threads due to GIL release during I/O operations.
-       
+
     3. **Default**: CPU-bound tasks default to processes for true parallelism.
-    
-    **Key Insight**: `inspect.getsource(lambda x: x)` succeeds but `pickle.dumps(lambda x: x)` 
+
+    **Key Insight**: `inspect.getsource(lambda x: x)` succeeds but `pickle.dumps(lambda x: x)`
     fails, so pickling must be checked before source analysis.
 
     Args:
@@ -348,25 +348,25 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
     Returns:
         bool: True to use ThreadPoolExecutor (for I/O-bound or unpicklable functions),
               False to use ProcessPoolExecutor (for CPU-bound, picklable functions)
-              
+
     Examples:
         >>> # Lambda function (unpicklable) -> threads
         >>> choose_executor_type(lambda x: x*2, (5,), {})
         True
-        
-        >>> # I/O function -> threads  
+
+        >>> # I/O function -> threads
         >>> def io_func(filename):
         ...     with open(filename, 'r') as f:
         ...         return f.read()
         >>> choose_executor_type(io_func, ("file.txt",), {})
         True
-        
+
         >>> # CPU function -> processes
         >>> def cpu_func(n):
         ...     return sum(i**2 for i in range(n))
         >>> choose_executor_type(cpu_func, (1000,), {})
         False
-        
+
     Note:
         This function performs static analysis and may not catch all edge cases.
         The analysis is designed to be conservative - when in doubt, it defaults

@@ -1,8 +1,7 @@
-import os
 import json
 import yaml
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Optional
 from dataclasses import dataclass, asdict
 
 
@@ -43,9 +42,9 @@ class ClusterConfig:
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
 
     # Advanced settings
-    environment_variables: Dict[str, str] = None
-    module_loads: list = None
-    pre_execution_commands: list = None
+    environment_variables: Optional[Dict[str, str]] = None
+    module_loads: Optional[list] = None
+    pre_execution_commands: Optional[list] = None
 
     def __post_init__(self):
         if self.environment_variables is None:

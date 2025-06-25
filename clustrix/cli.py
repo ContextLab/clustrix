@@ -1,6 +1,4 @@
 import click
-import json
-from pathlib import Path
 
 from .config import configure, load_config, save_config, get_config
 from .executor import ClusterExecutor
