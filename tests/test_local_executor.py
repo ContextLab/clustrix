@@ -10,6 +10,28 @@ from clustrix.local_executor import (
 )
 
 
+# Module-level functions for pickling tests
+def cpu_bound_function(n):
+    """A CPU-bound function for testing."""
+    total = 0
+    for i in range(n):
+        total += i ** 2
+    return total
+
+
+def io_bound_function(filename):
+    """An I/O-bound function for testing."""
+    with open(filename, 'r') as f:
+        return f.read()
+
+
+def fibonacci(n):
+    """Fibonacci function for CPU-intensive tests."""
+    if n <= 1:
+        return n
+    return fibonacci(n-1) + fibonacci(n-2)
+
+
 class TestLocalExecutor:
     """Test LocalExecutor class thoroughly."""
     
@@ -286,13 +308,7 @@ class TestExecutorTypeSelection:
         
     def test_choose_executor_type_cpu_bound(self):
         """Test executor type choice for CPU-bound functions."""
-        def cpu_func(n):
-            total = 0
-            for i in range(n):
-                total += i ** 2
-            return total
-            
-        result = choose_executor_type(cpu_func, (1000,), {})
+        result = choose_executor_type(cpu_bound_function, (1000,), {})
         assert result is False  # Should use processes for CPU-bound
         
     def test_choose_executor_type_source_unavailable(self):
@@ -337,10 +353,7 @@ class TestCreateLocalExecutor:
         
     def test_create_with_cpu_function(self):
         """Test creating executor for CPU-bound function."""
-        def cpu_func(n):
-            return sum(i ** 2 for i in range(n))
-            
-        executor = create_local_executor(func=cpu_func, args=(1000,), kwargs={})
+        executor = create_local_executor(func=cpu_bound_function, args=(1000,), kwargs={})
         assert executor.use_threads is False  # Should use processes for CPU-bound
         
     def test_create_with_unpicklable_function(self):
@@ -356,11 +369,6 @@ class TestLocalExecutorIntegration:
     
     def test_cpu_intensive_workload(self):
         """Test with CPU-intensive workload."""
-        def fibonacci(n):
-            if n <= 1:
-                return n
-            return fibonacci(n-1) + fibonacci(n-2)
-            
         work_chunks = [
             {"args": (20,), "kwargs": {}},
             {"args": (21,), "kwargs": {}},

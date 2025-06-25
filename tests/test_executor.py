@@ -378,10 +378,22 @@ class TestClusterExecutor:
     def test_get_job_status_completed(self, executor):
         """Test job status when result file exists."""
         executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
+        mock_sftp = Mock()
+        executor.ssh_client.open_sftp.return_value = mock_sftp
         
-        # Mock file existence check
-        executor.sftp_client.stat.return_value = Mock()  # File exists
+        # Mock squeue command to return empty (job not in queue)
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b""  # Empty output - job not in queue
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+        
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+        
+        # Add job to active jobs for tracking
+        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
+        
+        # Mock file existence check - result.pkl exists
+        mock_sftp.stat.return_value = Mock()  # File exists
         
         status = executor.get_job_status("job_12345")
         
@@ -390,16 +402,28 @@ class TestClusterExecutor:
     def test_get_job_status_failed(self, executor):
         """Test job status when error file exists."""
         executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
+        mock_sftp = Mock()
+        executor.ssh_client.open_sftp.return_value = mock_sftp
         
-        # Mock file existence check
+        # Mock squeue command to return empty (job not in queue)
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b""  # Empty output - job not in queue
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+        
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+        
+        # Add job to active jobs for tracking
+        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
+        
+        # Mock file existence check - result.pkl doesn't exist, error.pkl does exist  
         def stat_side_effect(path):
-            if "error.pkl" in path:
-                return Mock()  # Error file exists
-            else:
+            if "result.pkl" in path:
                 raise IOError()  # Result file doesn't exist
+            else:
+                return Mock()  # Other files exist
                 
-        executor.sftp_client.stat.side_effect = stat_side_effect
+        mock_sftp.stat.side_effect = stat_side_effect
         
         status = executor.get_job_status("job_12345")
         

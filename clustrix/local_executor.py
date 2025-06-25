@@ -225,19 +225,7 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
     Returns:
         True for threads, False for processes
     """
-    # Use threads if objects can't be pickled (common with closures, lambdas)
-    if not _safe_pickle_test(func):
-        return True
-
-    for arg in args:
-        if not _safe_pickle_test(arg):
-            return True
-
-    for value in kwargs.values():
-        if not _safe_pickle_test(value):
-            return True
-
-    # Check for common I/O bound indicators
+    # Check for common I/O bound indicators first
     import inspect
 
     try:
@@ -250,11 +238,25 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
             "ftp.",
             "sql",
             "database",
+            "time.sleep",
+            "threading.",
         ]
         if any(indicator in source.lower() for indicator in io_indicators):
             return True
     except (OSError, TypeError):
-        pass
+        # If we can't get source code, check if function can be pickled
+        # If it can't be pickled (e.g., local functions), use threads
+        if not _safe_pickle_test(func):
+            return True
+
+    # Check if any arguments can't be pickled
+    for arg in args:
+        if not _safe_pickle_test(arg):
+            return True
+
+    for value in kwargs.values():
+        if not _safe_pickle_test(value):
+            return True
 
     # Default to processes for CPU-bound tasks
     return False

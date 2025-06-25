@@ -439,11 +439,15 @@ except Exception as e:
                 stdout, stderr = self._execute_remote_command(cmd)
                 if not stdout.strip():
                     # Job not in queue, check if result exists
-                    job_info = self.active_jobs[job_id]
-                    result_exists = self._remote_file_exists(
-                        f"{job_info['remote_dir']}/result.pkl"
-                    )
-                    return "completed" if result_exists else "failed"
+                    if job_id in self.active_jobs:
+                        job_info = self.active_jobs[job_id]
+                        result_exists = self._remote_file_exists(
+                            f"{job_info['remote_dir']}/result.pkl"
+                        )
+                        return "completed" if result_exists else "failed"
+                    else:
+                        # Job not tracked, assume completed
+                        return "completed"
                 else:
                     slurm_status = stdout.strip()
                     if slurm_status in ["COMPLETED"]:
@@ -467,36 +471,42 @@ except Exception as e:
                     return "failed"
             except:
                 # Job might be completed and removed from queue
+                if job_id in self.active_jobs:
+                    job_info = self.active_jobs[job_id]
+                    result_exists = self._remote_file_exists(
+                        f"{job_info['remote_dir']}/result.pkl"
+                    )
+                    return "completed" if result_exists else "failed"
+                else:
+                    return "completed"
+
+        elif self.config.cluster_type == "ssh":
+            # For SSH jobs, check if result file exists
+            if job_id in self.active_jobs:
                 job_info = self.active_jobs[job_id]
                 result_exists = self._remote_file_exists(
                     f"{job_info['remote_dir']}/result.pkl"
                 )
-                return "completed" if result_exists else "failed"
+                error_exists = self._remote_file_exists(f"{job_info['remote_dir']}/job.err")
 
-        elif self.config.cluster_type == "ssh":
-            # For SSH jobs, check if result file exists
-            job_info = self.active_jobs[job_id]
-            result_exists = self._remote_file_exists(
-                f"{job_info['remote_dir']}/result.pkl"
-            )
-            error_exists = self._remote_file_exists(f"{job_info['remote_dir']}/job.err")
-
-            if result_exists:
-                return "completed"
-            elif error_exists:
-                # Check if error file has content indicating failure
-                try:
-                    stdout, _ = self._execute_remote_command(
-                        f"wc -l {job_info['remote_dir']}/job.err"
-                    )
-                    line_count = int(stdout.strip().split()[0])
-                    if line_count > 0:
-                        return "failed"
-                except:
-                    pass
-                return "running"
+                if result_exists:
+                    return "completed"
+                elif error_exists:
+                    # Check if error file has content indicating failure
+                    try:
+                        stdout, _ = self._execute_remote_command(
+                            f"wc -l {job_info['remote_dir']}/job.err"
+                        )
+                        line_count = int(stdout.strip().split()[0])
+                        if line_count > 0:
+                            return "failed"
+                    except:
+                        pass
+                    return "running"
+                else:
+                    return "running"
             else:
-                return "running"
+                return "completed"
 
         return "unknown"
 
@@ -613,6 +623,53 @@ except Exception as e:
         job_id = self.submit_job(func_data, job_config)
         return self.wait_for_result(job_id)
         
+    def _check_slurm_status(self, job_id: str) -> str:
+        """Check SLURM job status."""
+        cmd = f"squeue -j {job_id} -h -o %T"
+        try:
+            stdout, stderr = self._execute_remote_command(cmd)
+            if not stdout.strip():
+                # Job not in queue, assume completed
+                return "completed"
+            else:
+                slurm_status = stdout.strip()
+                if slurm_status in ["COMPLETED"]:
+                    return "completed"
+                elif slurm_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
+                    return "failed"
+                else:
+                    return "running"
+        except:
+            return "unknown"
+    
+    def _check_pbs_status(self, job_id: str) -> str:
+        """Check PBS job status."""
+        cmd = f"qstat -f {job_id}"
+        try:
+            stdout, stderr = self._execute_remote_command(cmd)
+            # Handle full format output (qstat -f)
+            if "job_state = C" in stdout:
+                return "completed"
+            elif "job_state = Q" in stdout:
+                return "queued"
+            elif "job_state = R" in stdout:
+                return "running"
+            elif "job_state = E" in stdout:
+                return "failed"
+            # Handle short format output (qstat)
+            elif " R " in stdout:
+                return "running"
+            elif " Q " in stdout:
+                return "queued"
+            elif " C " in stdout:
+                return "completed"
+            elif " E " in stdout:
+                return "failed"
+            else:
+                return "unknown"
+        except:
+            return "unknown"
+
     def get_job_status(self, job_id: str) -> str:
         """Get job status (alias for _check_job_status)."""
         return self._check_job_status(job_id)

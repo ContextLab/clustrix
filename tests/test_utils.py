@@ -295,14 +295,17 @@ class TestScriptGeneration:
         # Check execution setup
         assert "source venv/bin/activate" in script
         
-    def test_create_job_script_sge_not_implemented(self):
-        """Test that SGE script generation is not fully implemented."""
+    def test_create_job_script_sge(self):
+        """Test SGE script generation."""
         config = ClusterConfig()
         job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
         
-        # Currently returns None since it's not implemented
         result = create_job_script("sge", job_config, "/tmp/job", config)
-        assert result is None
+        assert result is not None
+        assert "#$ -N clustrix" in result
+        assert "#$ -pe smp 4" in result
+        assert "#$ -l h_vmem=8GB" in result
+        assert "cd /tmp/job" in result
         
     def test_create_job_script_ssh(self):
         """Test SSH script generation."""
