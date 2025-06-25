@@ -49,14 +49,21 @@ jobs:
       run: |
         pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing
 
-    - name: Upload coverage to Codecov
+    - name: Generate coverage badge
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-      uses: codecov/codecov-action@v3
+      run: |
+        pip install coverage-badge
+        coverage-badge -o coverage.svg -f
+        
+    - name: Upload coverage report
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v4
       with:
-        file: ./coverage.xml
-        flags: unittests
-        name: codecov-umbrella
-        fail_ci_if_error: false
+        name: coverage-report
+        path: |
+          coverage.xml
+          htmlcov/
+          coverage.svg
 
     - name: Test installation
       run: |

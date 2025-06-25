@@ -242,7 +242,86 @@ class ClusterExecutor:
     def _submit_k8s_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
-        """Submit job via Kubernetes."""
+        """
+        Submit a job to Kubernetes cluster using containerized Python execution.
+        
+        This method implements a sophisticated Kubernetes job submission strategy that
+        packages Python functions and data into self-contained container jobs without
+        requiring custom Docker images or persistent storage.
+        
+        **Architecture:**
+        
+        1. **Function Serialization**: Uses cloudpickle to serialize the function and all data
+        2. **Base64 Encoding**: Encodes serialized data for safe embedding in container args
+        3. **Container Execution**: Creates a Job with inline Python code that:
+           - Decodes the base64 data
+           - Deserializes the function and arguments  
+           - Executes the function
+           - Captures results or errors
+        4. **Resource Management**: Applies CPU and memory limits from job_config
+        
+        **Key Features:**
+        - **No Custom Images**: Uses standard `python:3.11-slim` image
+        - **Self-Contained**: All code and data embedded in Job manifest
+        - **Resource Aware**: Respects CPU/memory requirements
+        - **Error Handling**: Captures exceptions with full tracebacks
+        - **Cloud Native**: Leverages Kubernetes Job semantics for reliability
+        
+        **Job Manifest Structure:**
+        ```yaml
+        apiVersion: batch/v1
+        kind: Job
+        metadata:
+          name: clustrix-job-{timestamp}
+        spec:
+          template:
+            spec:
+              containers:
+              - name: clustrix-worker
+                image: python:3.11-slim
+                command: ["python", "-c"]
+                args: ["<embedded Python code>"]
+                resources:
+                  requests/limits: {cpu, memory from job_config}
+              restartPolicy: Never
+        ```
+
+        Args:
+            func_data: Serialized function data containing:
+                      - 'func': The function to execute
+                      - 'args': Positional arguments  
+                      - 'kwargs': Keyword arguments
+                      - 'requirements': Package dependencies (not used for K8s)
+            job_config: Job configuration including:
+                       - 'cores': CPU request/limit (default: 1)
+                       - 'memory': Memory request/limit (default: "1Gi")
+                       - Additional K8s-specific settings
+
+        Returns:
+            str: Kubernetes Job name that can be used for status tracking
+            
+        Raises:
+            ImportError: If kubernetes package is not installed
+            Exception: If Kubernetes API calls fail
+            
+        Examples:
+            >>> func_data = {
+            ...     'func': lambda x: x**2,
+            ...     'args': (5,),
+            ...     'kwargs': {},
+            ...     'requirements': {}
+            ... }
+            >>> job_config = {'cores': 2, 'memory': '4Gi'}
+            >>> job_id = executor._submit_k8s_job(func_data, job_config)
+            >>> print(job_id)  # "clustrix-job-1234567890"
+            
+        Note:
+            - Requires kubernetes package: `pip install kubernetes`
+            - Assumes kubectl is configured with cluster access
+            - Jobs are created in the "default" namespace
+            - Cloudpickle is used for function serialization
+            - Results are captured via stdout parsing (CLUSTRIX_RESULT: prefix)
+        """
         try:
             from kubernetes import client, config as k8s_config
         except ImportError:
