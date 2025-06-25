@@ -4,3 +4,6 @@
 configs/
 !*.gitkeep
 notebooks/
+.claude*
+notes/
+CLAUDE.md

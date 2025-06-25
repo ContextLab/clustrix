@@ -1,0 +1,165 @@
+import pytest
+from unittest.mock import Mock, patch, MagicMock
+from clustrix.decorator import cluster
+from clustrix.config import configure
+
+
+class TestClusterDecorator:
+    """Test the @cluster decorator."""
+    
+    def test_basic_decoration(self):
+        """Test basic function decoration."""
+        @cluster(cores=8, memory="16GB")
+        def test_func(x, y):
+            return x + y
+            
+        assert hasattr(test_func, '__wrapped__')
+        assert hasattr(test_func, '_cluster_config')
+        assert test_func._cluster_config['cores'] == 8
+        assert test_func._cluster_config['memory'] == "16GB"
+        
+    def test_decorator_without_params(self):
+        """Test decorator without parameters."""
+        @cluster
+        def test_func(x):
+            return x * 2
+            
+        assert hasattr(test_func, '__wrapped__')
+        assert hasattr(test_func, '_cluster_config')
+        assert test_func._cluster_config == {}
+        
+    def test_decorator_with_all_params(self):
+        """Test decorator with all possible parameters."""
+        @cluster(
+            cores=16,
+            memory="32GB",
+            time="04:00:00",
+            partition="gpu",
+            parallel=True,
+            environment="test_env"
+        )
+        def test_func():
+            return "test"
+            
+        config = test_func._cluster_config
+        assert config['cores'] == 16
+        assert config['memory'] == "32GB"
+        assert config['time'] == "04:00:00"
+        assert config['partition'] == "gpu"
+        assert config['parallel'] is True
+        assert config['environment'] == "test_env"
+        
+    @patch('clustrix.executor.ClusterExecutor')
+    def test_local_execution_with_cluster_none(self, mock_executor):
+        """Test that function executes locally when cluster_host is None."""
+        configure(cluster_host=None)
+        
+        @cluster(cores=4)
+        def test_func(x, y):
+            return x + y
+            
+        result = test_func(2, 3)
+        assert result == 5
+        mock_executor.assert_not_called()
+        
+    @patch('clustrix.executor.ClusterExecutor')
+    def test_remote_execution(self, mock_executor_class):
+        """Test remote execution with cluster configured."""
+        configure(cluster_host="test.cluster.com", username="testuser")
+        
+        # Setup mock
+        mock_executor = Mock()
+        mock_executor_class.return_value = mock_executor
+        mock_executor.execute.return_value = 42
+        
+        @cluster(cores=8)
+        def test_func(x, y):
+            return x * y
+            
+        result = test_func(6, 7)
+        
+        assert result == 42
+        mock_executor_class.assert_called_once()
+        mock_executor.execute.assert_called_once()
+        
+        # Check that function and args were passed correctly
+        call_args = mock_executor.execute.call_args
+        assert call_args[0][0].__name__ == 'test_func'
+        assert call_args[0][1] == (6, 7)
+        assert call_args[0][2] == {}
+        
+    def test_function_metadata_preserved(self):
+        """Test that function metadata is preserved."""
+        @cluster(cores=4)
+        def documented_function(x, y):
+            """This function adds two numbers."""
+            return x + y
+            
+        assert documented_function.__name__ == 'documented_function'
+        assert documented_function.__doc__ == "This function adds two numbers."
+        
+    @patch('clustrix.executor.ClusterExecutor')
+    def test_exception_handling(self, mock_executor_class):
+        """Test exception handling in remote execution."""
+        configure(cluster_host="test.cluster.com")
+        
+        mock_executor = Mock()
+        mock_executor_class.return_value = mock_executor
+        mock_executor.execute.side_effect = RuntimeError("Cluster error")
+        
+        @cluster
+        def test_func():
+            return "test"
+            
+        with pytest.raises(RuntimeError, match="Cluster error"):
+            test_func()
+            
+    def test_parallel_flag(self):
+        """Test parallel execution flag."""
+        @cluster(parallel=True)
+        def parallel_func(data):
+            return [x * 2 for x in data]
+            
+        @cluster(parallel=False)
+        def sequential_func(data):
+            return [x * 2 for x in data]
+            
+        assert parallel_func._cluster_config['parallel'] is True
+        assert sequential_func._cluster_config['parallel'] is False
+        
+    @patch('clustrix.executor.ClusterExecutor')
+    def test_kwargs_handling(self, mock_executor_class):
+        """Test handling of keyword arguments."""
+        configure(cluster_host="test.cluster.com")
+        
+        mock_executor = Mock()
+        mock_executor_class.return_value = mock_executor
+        mock_executor.execute.return_value = {"result": 123}
+        
+        @cluster
+        def test_func(a, b=10, c=20):
+            return a + b + c
+            
+        result = test_func(5, c=30)
+        
+        # Verify kwargs were passed correctly
+        call_args = mock_executor.execute.call_args
+        assert call_args[0][1] == (5,)
+        assert call_args[0][2] == {'c': 30}
+        
+    def test_decorator_stacking(self):
+        """Test that decorator can be combined with other decorators."""
+        def other_decorator(func):
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs) * 2
+            return wrapper
+            
+        @other_decorator
+        @cluster(cores=4)
+        def test_func(x):
+            return x + 1
+            
+        # When executed locally
+        configure(cluster_host=None)
+        result = test_func(5)
+        assert result == 12  # (5 + 1) * 2

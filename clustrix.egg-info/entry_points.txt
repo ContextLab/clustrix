@@ -1,0 +1,2 @@
+[console_scripts]
+clustrix = clustrix.cli:cli
