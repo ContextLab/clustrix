@@ -193,15 +193,147 @@ class ClusterExecutor:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via SGE."""
-        # Similar implementation for Sun Grid Engine
-        raise NotImplementedError("SGE support not yet implemented")
+        
+        # Create remote working directory
+        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        self._execute_remote_command(f"mkdir -p {remote_job_dir}")
+
+        # Upload function data
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+            pickle.dump(func_data, f)
+            local_pickle_path = f.name
+
+        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
+        os.unlink(local_pickle_path)
+
+        # Setup environment
+        setup_remote_environment(
+            self.ssh_client, remote_job_dir, func_data["requirements"]
+        )
+
+        # Create job script
+        script_content = create_job_script(
+            cluster_type="sge",
+            job_config=job_config,
+            remote_job_dir=remote_job_dir,
+            config=self.config,
+        )
+
+        # Upload and submit job script
+        script_path = f"{remote_job_dir}/job.sge"
+        self._create_remote_file(script_path, script_content)
+
+        # Submit job
+        cmd = f"cd {remote_job_dir} && qsub job.sge"
+        stdout, stderr = self._execute_remote_command(cmd)
+
+        # Extract job ID from qsub output (SGE format: "Your job 123456 ...")
+        job_id = stdout.strip().split()[2] if "Your job" in stdout else stdout.strip()
+
+        # Store job info
+        self.active_jobs[job_id] = {
+            "remote_dir": remote_job_dir,
+            "status": "submitted",
+            "submit_time": time.time(),
+        }
+
+        return job_id
 
     def _submit_k8s_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via Kubernetes."""
-        # Kubernetes job implementation
-        raise NotImplementedError("Kubernetes support not yet implemented")
+        try:
+            from kubernetes import client, config as k8s_config
+        except ImportError:
+            raise ImportError(
+                "kubernetes package required for Kubernetes support. "
+                "Install with: pip install kubernetes"
+            )
+        
+        # Ensure Kubernetes client is set up
+        if not hasattr(self, 'k8s_client') or self.k8s_client is None:
+            self._setup_kubernetes()
+        
+        # Create a unique job name
+        job_name = f"clustrix-job-{int(time.time())}"
+        
+        # Serialize function data
+        func_data_serialized = cloudpickle.dumps(func_data)
+        import base64
+        func_data_b64 = base64.b64encode(func_data_serialized).decode('utf-8')
+        
+        # Create Kubernetes Job manifest
+        job_manifest = {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {"name": job_name},
+            "spec": {
+                "template": {
+                    "spec": {
+                        "containers": [{
+                            "name": "clustrix-worker",
+                            "image": "python:3.11-slim",  # Default Python image
+                            "command": ["python", "-c"],
+                            "args": [f"""
+import base64
+import cloudpickle
+import traceback
+
+try:
+    # Decode and deserialize function data
+    func_data_b64 = "{func_data_b64}"
+    func_data_bytes = base64.b64decode(func_data_b64)
+    func_data = cloudpickle.loads(func_data_bytes)
+    
+    # Execute function
+    func = func_data['func']
+    args = func_data['args']
+    kwargs = func_data['kwargs']
+    
+    result = func(*args, **kwargs)
+    print(f"CLUSTRIX_RESULT:{{result}}")
+    
+except Exception as e:
+    print(f"CLUSTRIX_ERROR:{{str(e)}}")
+    print(f"CLUSTRIX_TRACEBACK:{{traceback.format_exc()}}")
+    exit(1)
+"""],
+                            "resources": {
+                                "requests": {
+                                    "cpu": str(job_config.get('cores', 1)),
+                                    "memory": job_config.get('memory', '1Gi')
+                                },
+                                "limits": {
+                                    "cpu": str(job_config.get('cores', 1)),
+                                    "memory": job_config.get('memory', '1Gi')
+                                }
+                            }
+                        }],
+                        "restartPolicy": "Never"
+                    }
+                },
+                "backoffLimit": 1
+            }
+        }
+        
+        # Submit job to Kubernetes
+        batch_api = client.BatchV1Api()
+        response = batch_api.create_namespaced_job(
+            namespace="default",  # Could be configurable
+            body=job_manifest
+        )
+        
+        job_id = response.metadata.name
+        
+        # Store job info
+        self.active_jobs[job_id] = {
+            "status": "submitted",
+            "submit_time": time.time(),
+            "k8s_job": True
+        }
+        
+        return job_id
 
     def _submit_ssh_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]

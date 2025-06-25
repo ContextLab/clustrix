@@ -241,17 +241,104 @@ class TestClusterExecutor:
         qsub_calls = [call for call in execute_calls if 'qsub' in str(call)]
         assert len(qsub_calls) > 0
         
-    def test_submit_sge_job_not_implemented(self, executor):
-        """Test that SGE job submission raises NotImplementedError."""
+    @patch('os.unlink')
+    @patch('pickle.dump')
+    @patch('tempfile.NamedTemporaryFile')
+    @patch.object(clustrix.executor, 'setup_remote_environment')
+    @patch('clustrix.executor.ClusterExecutor._upload_file')
+    @patch('clustrix.executor.ClusterExecutor._create_remote_file')
+    def test_submit_sge_job(self, mock_create_file, mock_upload, mock_setup_env, mock_tempfile, mock_pickle, mock_unlink, executor):
+        """Test SGE job submission."""
         executor.ssh_client = Mock()
+        executor.sftp_client = Mock()
         
-        with pytest.raises(NotImplementedError):
-            executor._submit_sge_job("job_id", {})
+        # Mock tempfile
+        mock_file = Mock()
+        mock_file.name = "/tmp/test_file"
+        mock_tempfile.return_value.__enter__.return_value = mock_file
+        
+        # Mock command execution responses
+        command_responses = {
+            "mkdir -p": ("", ""),
+            "qsub": ("Your job 98765 has been submitted", "")  # SGE format
+        }
+        
+        def mock_execute_command(cmd):
+            for key, response in command_responses.items():
+                if key in cmd:
+                    return response
+            return ("", "")
+        
+        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
+        
+        func_data = {
+            "func": "dummy_func",
+            "args": (),
+            "kwargs": {},
+            "requirements": []
+        }
+        job_config = {
+            "cores": 4,
+            "memory": "8GB",
+            "time": "01:00:00"
+        }
+        
+        job_id = executor._submit_sge_job(func_data, job_config)
+        
+        assert job_id == "98765"
+        
+        # Verify key methods were called
+        mock_upload.assert_called()
+        mock_create_file.assert_called()
+        
+        # Verify qsub command was executed
+        execute_calls = executor._execute_remote_command.call_args_list
+        qsub_calls = [call for call in execute_calls if 'qsub' in str(call)]
+        assert len(qsub_calls) > 0
             
-    def test_submit_k8s_job_not_implemented(self, executor):
-        """Test that K8s job submission raises NotImplementedError."""
-        with pytest.raises(NotImplementedError):
-            executor._submit_k8s_job("job_id", {})
+    @patch('kubernetes.client')
+    @patch('clustrix.executor.cloudpickle')
+    def test_submit_k8s_job(self, mock_cloudpickle, mock_client, executor):
+        """Test Kubernetes job submission."""
+        # Mock cloudpickle serialization
+        mock_cloudpickle.dumps.return_value = b"serialized_data"
+        
+        # Mock Kubernetes API response
+        mock_response = Mock()
+        mock_response.metadata.name = "clustrix-job-12345"
+        
+        mock_batch_api = Mock()
+        mock_batch_api.create_namespaced_job.return_value = mock_response
+        mock_client.BatchV1Api.return_value = mock_batch_api
+        
+        # Mock k8s_client setup
+        executor.k8s_client = Mock()
+        
+        func_data = {
+            "func": "dummy_func",
+            "args": (),
+            "kwargs": {},
+            "requirements": []
+        }
+        job_config = {
+            "cores": 4,
+            "memory": "8Gi"
+        }
+        
+        job_id = executor._submit_k8s_job(func_data, job_config)
+        
+        assert job_id == "clustrix-job-12345"
+        
+        # Verify Kubernetes API was called
+        mock_batch_api.create_namespaced_job.assert_called_once()
+        call_args = mock_batch_api.create_namespaced_job.call_args
+        assert call_args[1]['namespace'] == 'default'
+        assert 'body' in call_args[1]
+        
+        # Verify job manifest structure
+        job_manifest = call_args[1]['body']
+        assert job_manifest['kind'] == 'Job'
+        assert job_manifest['spec']['template']['spec']['containers'][0]['name'] == 'clustrix-worker'
             
     def test_check_slurm_status(self, executor):
         """Test SLURM job status checking."""

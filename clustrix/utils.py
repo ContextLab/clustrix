@@ -404,8 +404,44 @@ def _create_sge_script(
     job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
 ) -> str:
     """Create SGE job script."""
-    # Similar to PBS but with SGE directives
-    pass
+    
+    script_lines = [
+        "#!/bin/bash",
+        f"#$ -N clustrix",
+        f"#$ -o {remote_job_dir}/job.out",
+        f"#$ -e {remote_job_dir}/job.err",
+        f"#$ -pe smp {job_config['cores']}",
+        f"#$ -l h_vmem={job_config['memory']}",
+        f"#$ -l h_rt={job_config['time']}",
+        f"#$ -cwd",
+        "",
+        f"cd {remote_job_dir}",
+        "source venv/bin/activate",
+        'python -c "',
+        "import pickle",
+        "import sys",
+        "import traceback",
+        "",
+        "try:",
+        "    with open('function_data.pkl', 'rb') as f:",
+        "        func_data = pickle.load(f)",
+        "    ",
+        "    func = func_data['func']",
+        "    args = func_data['args']",
+        "    kwargs = func_data['kwargs']",
+        "    ",
+        "    result = func(*args, **kwargs)",
+        "    ",
+        "    with open('result.pkl', 'wb') as f:",
+        "        pickle.dump(result, f)",
+        "except Exception as e:",
+        "    with open('error.pkl', 'wb') as f:",
+        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f)",
+        "    raise",
+        '"',
+    ]
+    
+    return "\n".join(script_lines)
 
 
 def _create_ssh_script(
