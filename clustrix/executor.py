@@ -423,9 +423,16 @@ except Exception as e:
                         os.unlink(local_result_path)
 
             elif status == "failed":
-                # Download error logs
+                # Download error logs and try to extract original exception
                 error_log = self._get_error_log(job_id)
-                raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
+                original_exception = self._extract_original_exception(job_id)
+                
+                if original_exception:
+                    # Re-raise the original exception
+                    raise original_exception
+                else:
+                    # Fallback to RuntimeError with log
+                    raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
 
             # Wait before next poll
             time.sleep(self.config.job_poll_interval)
@@ -551,6 +558,33 @@ except Exception as e:
             return "No job info available"
 
         remote_dir = job_info["remote_dir"]
+        
+        # First, try to get pickled error data
+        error_pkl_path = f"{remote_dir}/error.pkl"
+        if self._remote_file_exists(error_pkl_path):
+            try:
+                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+                    local_error_path = f.name
+                
+                self._download_file(error_pkl_path, local_error_path)
+                
+                with open(local_error_path, "rb") as f:
+                    error_data = pickle.load(f)
+                
+                os.unlink(local_error_path)
+                
+                # Handle different error data formats
+                if isinstance(error_data, dict):
+                    error_msg = error_data.get('error', str(error_data))
+                    traceback_info = error_data.get('traceback', '')
+                    return f"{error_msg}\n\nTraceback:\n{traceback_info}"
+                else:
+                    return str(error_data)
+            except Exception as e:
+                # If error.pkl exists but can't be read, continue to text logs
+                pass
+        
+        # Fallback to text error files
         error_files = ["job.err", "slurm-*.out", "job.e*"]
 
         for error_file in error_files:
@@ -564,6 +598,42 @@ except Exception as e:
                 continue
 
         return "No error log found"
+
+    def _extract_original_exception(self, job_id: str) -> Optional[Exception]:
+        """Extract and return the original exception from error.pkl if available."""
+        job_info = self.active_jobs.get(job_id)
+        if not job_info:
+            return None
+
+        remote_dir = job_info["remote_dir"]
+        error_pkl_path = f"{remote_dir}/error.pkl"
+        
+        if self._remote_file_exists(error_pkl_path):
+            try:
+                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+                    local_error_path = f.name
+                
+                self._download_file(error_pkl_path, local_error_path)
+                
+                with open(local_error_path, "rb") as f:
+                    error_data = pickle.load(f)
+                
+                os.unlink(local_error_path)
+                
+                # Return the exception object if it is one
+                if isinstance(error_data, Exception):
+                    return error_data
+                elif isinstance(error_data, dict) and 'error' in error_data:
+                    # Try to recreate exception from dict
+                    error_str = error_data['error']
+                    # This is a simplified approach - in practice you'd want more sophisticated exception recreation
+                    return RuntimeError(error_str)
+                    
+            except Exception:
+                # If we can't extract the exception, return None
+                pass
+        
+        return None
 
     def cancel_job(self, job_id: str):
         """Cancel a running job."""

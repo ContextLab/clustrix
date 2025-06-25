@@ -138,15 +138,39 @@ class TestIntegration:
         def failing_function():
             raise ValueError("This function always fails")
             
-        # Mock job submission
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b"67890"
-        mock_ssh.exec_command.return_value = (None, mock_stdout, Mock())
+        # Mock PBS-specific command responses
+        def exec_side_effect(cmd):
+            if "qsub" in cmd:
+                # Job submission returns job ID
+                submit_mock = Mock()
+                submit_mock.read.return_value = b"67890"
+                submit_mock.channel.recv_exit_status.return_value = 0
+                return (None, submit_mock, Mock())
+            elif "qstat" in cmd:
+                # Job status check - job doesn't exist in queue (completed/failed)
+                status_mock = Mock()
+                status_mock.read.return_value = b""  # Empty response means job not in queue
+                status_mock.channel.recv_exit_status.return_value = 1  # qstat returns error
+                return (None, status_mock, Mock())
+            else:
+                # For other commands (environment setup, etc.)
+                cmd_stdout = Mock()
+                cmd_stdout.read.return_value = b"Success"
+                cmd_stdout.channel.recv_exit_status.return_value = 0
+                
+                cmd_stderr = Mock()
+                cmd_stderr.read.return_value = b""
+                
+                return (None, cmd_stdout, cmd_stderr)
+            
+        mock_ssh.exec_command.side_effect = exec_side_effect
         
         # Mock error file existence
         def stat_side_effect(path):
             if "error.pkl" in path:
                 return Mock()  # Error file exists
+            elif "result.pkl" in path:
+                raise IOError()  # Result file doesn't exist 
             raise IOError()  # Other files don't exist
             
         mock_sftp.stat.side_effect = stat_side_effect
@@ -217,7 +241,7 @@ class TestIntegration:
         assert result == 1024
         
     @patch('clustrix.utils.get_environment_info')
-    def test_environment_replication(self, mock_env_info, mock_ssh_setup):
+    def test_environment_replication(self, mock_env_info, mock_ssh_setup, temp_dir):
         """Test environment replication on remote cluster."""
         mock_ssh, mock_sftp = mock_ssh_setup
         mock_env_info.return_value = "numpy==1.21.0\npandas==1.3.0\n"
@@ -233,10 +257,59 @@ class TestIntegration:
             import numpy as np
             return np.array([1, 2, 3]).sum()
             
+        # Mock SLURM-specific command responses
+        def exec_side_effect(cmd):
+            if "sbatch" in cmd:
+                # Job submission returns job ID
+                submit_mock = Mock()
+                submit_mock.read.return_value = b"12345"
+                submit_mock.channel.recv_exit_status.return_value = 0
+                return (None, submit_mock, Mock())
+            elif "squeue" in cmd:
+                # Job status check - job completed
+                status_mock = Mock()
+                status_mock.read.return_value = b"COMPLETED"
+                status_mock.channel.recv_exit_status.return_value = 0
+                return (None, status_mock, Mock())
+            else:
+                # For other commands (environment setup, etc.)
+                cmd_stdout = Mock()
+                cmd_stdout.read.return_value = b"Success"
+                cmd_stdout.channel.recv_exit_status.return_value = 0
+                
+                cmd_stderr = Mock()
+                cmd_stderr.read.return_value = b""
+                
+                return (None, cmd_stdout, cmd_stderr)
+            
+        mock_ssh.exec_command.side_effect = exec_side_effect
+        
+        # Mock result file existence and retrieval
+        def stat_side_effect(path):
+            if "result.pkl" in path:
+                return Mock()  # Result file exists
+            raise IOError()  # Other files don't exist
+            
+        mock_sftp.stat.side_effect = stat_side_effect
+        
+        # Mock result retrieval
+        result_data = 6  # sum([1, 2, 3])
+        result_file = Path(temp_dir) / "result.pkl"
+        with open(result_file, 'wb') as f:
+            pickle.dump(result_data, f)
+            
+        def get_side_effect(remote_path, local_path):
+            if "result.pkl" in remote_path:
+                import shutil
+                shutil.copy(result_file, local_path)
+                
+        mock_sftp.get.side_effect = get_side_effect
+            
         # Call the function to trigger environment replication
         result = data_processing()
-            
-        # Verify environment info is captured
+        
+        # Verify the result and environment info capture
+        assert result == 6
         mock_env_info.assert_called()
         
     def test_resource_specification_inheritance(self):
