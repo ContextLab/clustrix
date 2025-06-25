@@ -1,7 +1,6 @@
 # Clustrix
 
 [![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
-[![Coverage](https://codecov.io/gh/ContextLab/clustrix/branch/master/graph/badge.svg)](https://codecov.io/gh/ContextLab/clustrix)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
