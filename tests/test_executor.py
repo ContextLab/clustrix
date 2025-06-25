@@ -448,7 +448,7 @@ class TestClusterExecutor:
         # Mock SFTP get to write test result when called
         import tempfile
         import os
-        
+
         def mock_get(remote_path, local_path):
             # Create the directory if it doesn't exist (Windows compatibility)
             os.makedirs(os.path.dirname(local_path), exist_ok=True)
