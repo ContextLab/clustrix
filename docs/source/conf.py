@@ -47,8 +47,7 @@ html_static_path = ["_static"]
 html_theme_options = {
     "project_name": "Clustrix",
     "github_url": "https://github.com/ContextLab/clustrix",
-    "header_links": "Documentation|API Reference|Tutorials",
-    "footer_links": "GitHub|PyPI|Documentation",
+    "footer_links": "GitHub|PyPI",
 }
 
 html_title = "Clustrix Documentation"
