@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Local Executor API &#8212; Clustrix Documentation</title>
+    <link rel="stylesheet" type="text/css" href="../_static/pygments.css?v=4f649999" />
+    <link rel="stylesheet" type="text/css" href="../_static/groundwork.css?v=fc6a0523" />
+    <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+    <script src="../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <link rel="index" title="Index" href="../genindex.html" />
+    <link rel="search" title="Search" href="../search.html" />
+    <link rel="prev" title="Configuration API" href="config.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="config.html" title="Configuration API"
+             accesskey="P">previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Clustrix</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Local Executor API</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="local-executor-api">
+<h1>Local Executor API<a class="headerlink" href="#local-executor-api" title="Link to this heading">¶</a></h1>
+<p>The Local Executor enables multi-core parallel execution on the local machine using multiprocessing or threading.</p>
+<p id="module-clustrix.local_executor">Local parallel execution using multiprocessing and threading.</p>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.local_executor.</span></span><span class="sig-name descname"><span class="pre">LocalExecutor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max_workers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_threads</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Execute functions locally using multiprocessing or threading.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max_workers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_threads</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.__init__" title="Link to this definition">¶</a></dt>
+<dd><p>Initialize local executor.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>max_workers</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – Maximum number of worker processes/threads</p></li>
+<li><p><strong>use_threads</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a></span>) – If True, use ThreadPoolExecutor, else ProcessPoolExecutor</p></li>
+</ul>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.__enter__">
+<span class="sig-name descname"><span class="pre">__enter__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.__enter__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.__enter__" title="Link to this definition">¶</a></dt>
+<dd><p>Context manager entry.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.__exit__">
+<span class="sig-name descname"><span class="pre">__exit__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">exc_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exc_val</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">exc_tb</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.__exit__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.__exit__" title="Link to this definition">¶</a></dt>
+<dd><p>Context manager exit.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.execute_single">
+<span class="sig-name descname"><span class="pre">execute_single</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.execute_single"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.execute_single" title="Link to this definition">¶</a></dt>
+<dd><p>Execute a single function call locally.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a></span>) – Function to execute</p></li>
+<li><p><strong>args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Positional arguments</p></li>
+<li><p><strong>kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Keyword arguments</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Function result</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.execute_parallel">
+<span class="sig-name descname"><span class="pre">execute_parallel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">work_chunks</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">timeout</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.execute_parallel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.execute_parallel" title="Link to this definition">¶</a></dt>
+<dd><p>Execute function in parallel with different work chunks.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a></span>) – Function to execute</p></li>
+<li><p><strong>work_chunks</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span>) – List of work chunks, each containing args and kwargs</p></li>
+<li><p><strong>timeout</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span>) – Timeout for each task in seconds</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List of results in order of work_chunks</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.local_executor.LocalExecutor.execute_loop_parallel">
+<span class="sig-name descname"><span class="pre">execute_loop_parallel</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">loop_var</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">iterable</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_args</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func_kwargs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">chunk_size</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#LocalExecutor.execute_loop_parallel"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.LocalExecutor.execute_loop_parallel" title="Link to this definition">¶</a></dt>
+<dd><p>Execute a function in parallel over an iterable using intelligent chunking.</p>
+<p>This method implements a sophisticated chunk-based parallelization strategy that
+handles the complex challenge of distributing iterable items across multiple
+workers while preserving order and handling functions that expect individual
+items rather than chunks.</p>
+<p><strong>Algorithm:</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Chunking</strong>: Splits the iterable into approximately equal chunks based on
+worker count and optional chunk_size parameter.</p></li>
+<li><p><strong>Chunk Processing</strong>: Creates a wrapper function that processes each chunk
+by iterating over individual items and calling the original function.</p></li>
+<li><p><strong>Result Flattening</strong>: Collects results from all chunks and flattens them
+while preserving the original iteration order.</p></li>
+</ol>
+<p><strong>Key Innovation</strong>: The chunk processor wrapper bridges the gap between
+chunk-based parallel execution and functions that expect individual items.</p>
+<p><strong>Example Workflow</strong>:
+<code class="docutils literal notranslate"><span class="pre">`</span>
+<span class="pre">range(5)</span> <span class="pre">with</span> <span class="pre">chunk_size=2</span> <span class="pre">→</span> <span class="pre">chunks:</span> <span class="pre">[[0,1],</span> <span class="pre">[2,3],</span> <span class="pre">[4]]</span>
+<span class="pre">Each</span> <span class="pre">chunk</span> <span class="pre">processed:</span> <span class="pre">func(args,</span> <span class="pre">loop_var=0),</span> <span class="pre">func(args,</span> <span class="pre">loop_var=1),</span> <span class="pre">etc.</span>
+<span class="pre">Results</span> <span class="pre">flattened:</span> <span class="pre">[result0,</span> <span class="pre">result1,</span> <span class="pre">result2,</span> <span class="pre">result3,</span> <span class="pre">result4]</span>
+<span class="pre">`</span></code></p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a></span>) – Function to execute for each item. The function will be called with
+func_args + the item as the loop_var keyword argument.</p></li>
+<li><p><strong>loop_var</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Name of the keyword argument that will receive each item from
+the iterable.</p></li>
+<li><p><strong>iterable</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#range" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">range</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a>]</span>) – Iterable to process in parallel (range, list, tuple, etc.).</p></li>
+<li><p><strong>func_args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Additional positional arguments passed to func for each call.</p></li>
+<li><p><strong>func_kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Additional keyword arguments passed to func for each call.
+Note: loop_var will be added/overridden in these kwargs.</p></li>
+<li><p><strong>chunk_size</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – Optional size of each work chunk. If None, automatically
+calculated as len(items) // max_workers.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><dl class="simple">
+<dt>Results from function execution in the same order as the</dt><dd><p>original iterable. Each element corresponds to func() called
+with the respective item from the iterable.</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p>List[Any]</p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="n">executor</span> <span class="o">=</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">square</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+<span class="gp">&gt;&gt;&gt;</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Parallel computation over range</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute_loop_parallel</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">square</span><span class="p">,</span> <span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">),</span> <span class="n">chunk_size</span><span class="o">=</span><span class="mi">3</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Results: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># With additional arguments</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">power</span><span class="p">(</span><span class="n">base</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">exp</span><span class="o">=</span><span class="mi">2</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="p">(</span><span class="n">base</span> <span class="o">+</span> <span class="n">x</span><span class="p">)</span> <span class="o">**</span> <span class="n">exp</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute_loop_parallel</span><span class="p">(</span>
+<span class="gp">... </span>    <span class="n">power</span><span class="p">,</span> <span class="s1">&#39;x&#39;</span><span class="p">,</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">],</span> <span class="n">func_args</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,),</span> <span class="n">func_kwargs</span><span class="o">=</span><span class="p">{</span><span class="s1">&#39;exp&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+<span class="gp">... </span><span class="p">)</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="c1"># Results: [11^3, 12^3, 13^3] = [1331, 1728, 2197]</span>
+</pre></div>
+</div>
+<dl class="field-list simple">
+<dt class="field-odd">Raises<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/exceptions.html#Exception" title="(in Python v3.13)"><strong>Exception</strong></a> – Any exception raised by the function during execution.</p>
+</dd>
+</dl>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<ul class="simple">
+<li><p>Empty iterables return empty lists immediately</p></li>
+<li><p>Single-item iterables are executed directly (no parallelization overhead)</p></li>
+<li><p>Chunk size is automatically bounded by the number of available workers</p></li>
+<li><p>The method preserves the original order of results</p></li>
+</ul>
+</div>
+</dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.local_executor.choose_executor_type">
+<span class="sig-prename descclassname"><span class="pre">clustrix.local_executor.</span></span><span class="sig-name descname"><span class="pre">choose_executor_type</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">func</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kwargs</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#choose_executor_type"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.choose_executor_type" title="Link to this definition">¶</a></dt>
+<dd><p>Intelligently choose between ThreadPoolExecutor and ProcessPoolExecutor based on function characteristics.</p>
+<p>This function implements a sophisticated analysis to determine the optimal execution model
+for parallel function execution. The decision tree prioritizes pickling constraints first,
+then analyzes function characteristics to detect I/O-bound vs CPU-bound workloads.</p>
+<p><strong>Decision Logic (in priority order):</strong></p>
+<ol class="arabic simple">
+<li><p><strong>Pickling Check (Highest Priority)</strong>: Functions and arguments must be picklable for
+multiprocessing. If any component fails pickling, threads are used.</p></li>
+<li><p><strong>I/O Detection</strong>: Source code analysis looks for common I/O patterns that benefit
+from threads due to GIL release during I/O operations.</p></li>
+<li><p><strong>Default</strong>: CPU-bound tasks default to processes for true parallelism.</p></li>
+</ol>
+<p><strong>Key Insight</strong>: <cite>inspect.getsource(lambda x: x)</cite> succeeds but <cite>pickle.dumps(lambda x: x)</cite>
+fails, so pickling must be checked before source analysis.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a></span>) – Function to analyze for execution characteristics</p></li>
+<li><p><strong>args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Positional arguments that will be passed to the function</p></li>
+<li><p><strong>kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Keyword arguments that will be passed to the function</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns<span class="colon">:</span></dt>
+<dd class="field-even"><p><dl class="simple">
+<dt>True to use ThreadPoolExecutor (for I/O-bound or unpicklable functions),</dt><dd><p>False to use ProcessPoolExecutor (for CPU-bound, picklable functions)</p>
+</dd>
+</dl>
+</p>
+</dd>
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)">bool</a></p>
+</dd>
+</dl>
+<p class="rubric">Examples</p>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># Lambda function (unpicklable) -&gt; threads</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">choose_executor_type</span><span class="p">(</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="o">*</span><span class="mi">2</span><span class="p">,</span> <span class="p">(</span><span class="mi">5</span><span class="p">,),</span> <span class="p">{})</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># I/O function -&gt; threads</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">io_func</span><span class="p">(</span><span class="n">filename</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">with</span> <span class="nb">open</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+<span class="gp">... </span>        <span class="k">return</span> <span class="n">f</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">choose_executor_type</span><span class="p">(</span><span class="n">io_func</span><span class="p">,</span> <span class="p">(</span><span class="s2">&quot;file.txt&quot;</span><span class="p">,),</span> <span class="p">{})</span>
+<span class="go">True</span>
+</pre></div>
+</div>
+<div class="doctest highlight-default notranslate"><div class="highlight"><pre><span></span><span class="gp">&gt;&gt;&gt; </span><span class="c1"># CPU function -&gt; processes</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="k">def</span> <span class="nf">cpu_func</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+<span class="gp">... </span>    <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">i</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">))</span>
+<span class="gp">&gt;&gt;&gt; </span><span class="n">choose_executor_type</span><span class="p">(</span><span class="n">cpu_func</span><span class="p">,</span> <span class="p">(</span><span class="mi">1000</span><span class="p">,),</span> <span class="p">{})</span>
+<span class="go">False</span>
+</pre></div>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>This function performs static analysis and may not catch all edge cases.
+The analysis is designed to be conservative - when in doubt, it defaults
+to the safer option for the detected pattern.</p>
+</div>
+</dd></dl>
+
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.local_executor.create_local_executor">
+<span class="sig-prename descclassname"><span class="pre">clustrix.local_executor.</span></span><span class="sig-name descname"><span class="pre">create_local_executor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">max_workers</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_threads</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">func</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">args</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">()</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">kwargs</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/local_executor.html#create_local_executor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.local_executor.create_local_executor" title="Link to this definition">¶</a></dt>
+<dd><p>Create a LocalExecutor with appropriate settings.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>max_workers</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – Maximum number of workers</p></li>
+<li><p><strong>use_threads</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>]</span>) – Force thread or process usage</p></li>
+<li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a>]</span>) – Function to analyze for executor type selection</p></li>
+<li><p><strong>args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Function arguments for analysis</p></li>
+<li><p><strong>kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Function keyword arguments for analysis</p></li>
+</ul>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.local_executor.LocalExecutor" title="clustrix.local_executor.LocalExecutor"><code class="xref py py-class docutils literal notranslate"><span class="pre">LocalExecutor</span></code></a></span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Configured LocalExecutor</p>
+</dd>
+</dl>
+</dd></dl>
+
+<section id="usage-examples">
+<h2>Usage Examples<a class="headerlink" href="#usage-examples" title="Link to this heading">¶</a></h2>
+<section id="basic-local-execution">
+<h3>Basic Local Execution<a class="headerlink" href="#basic-local-execution" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix.local_executor</span> <span class="kn">import</span> <span class="n">LocalExecutor</span>
+
+<span class="k">def</span> <span class="nf">compute_square</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">**</span> <span class="mi">2</span>
+
+<span class="k">with</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+    <span class="c1"># Execute single function</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute_single</span><span class="p">(</span><span class="n">compute_square</span><span class="p">,</span> <span class="p">(</span><span class="mi">5</span><span class="p">,),</span> <span class="p">{})</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>  <span class="c1"># 25</span>
+
+    <span class="c1"># Execute multiple work chunks</span>
+    <span class="n">work_chunks</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s1">&#39;args&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">i</span><span class="p">,),</span> <span class="s1">&#39;kwargs&#39;</span><span class="p">:</span> <span class="p">{}}</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">)</span>
+    <span class="p">]</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute_parallel</span><span class="p">(</span><span class="n">compute_square</span><span class="p">,</span> <span class="n">work_chunks</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>  <span class="c1"># [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]</span>
+</pre></div>
+</div>
+</section>
+<section id="auto-detection-of-executor-type">
+<h3>Auto-Detection of Executor Type<a class="headerlink" href="#auto-detection-of-executor-type" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix.local_executor</span> <span class="kn">import</span> <span class="n">create_local_executor</span>
+
+<span class="c1"># I/O-bound function - will use threads</span>
+<span class="k">def</span> <span class="nf">download_file</span><span class="p">(</span><span class="n">url</span><span class="p">):</span>
+    <span class="kn">import</span> <span class="nn">requests</span>
+    <span class="k">return</span> <span class="n">requests</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">url</span><span class="p">)</span><span class="o">.</span><span class="n">content</span>
+
+<span class="c1"># CPU-bound function - will use processes</span>
+<span class="k">def</span> <span class="nf">compute_heavy</span><span class="p">(</span><span class="n">n</span><span class="p">):</span>
+    <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">i</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">))</span>
+
+<span class="c1"># Auto-detect appropriate executor</span>
+<span class="n">io_executor</span> <span class="o">=</span> <span class="n">create_local_executor</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">download_file</span><span class="p">)</span>
+<span class="n">cpu_executor</span> <span class="o">=</span> <span class="n">create_local_executor</span><span class="p">(</span><span class="n">func</span><span class="o">=</span><span class="n">compute_heavy</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="loop-parallelization">
+<h3>Loop Parallelization<a class="headerlink" href="#loop-parallelization" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix.local_executor</span> <span class="kn">import</span> <span class="n">LocalExecutor</span>
+
+<span class="k">def</span> <span class="nf">process_data</span><span class="p">(</span><span class="n">data_chunk</span><span class="p">):</span>
+    <span class="k">return</span> <span class="p">[</span><span class="n">x</span> <span class="o">*</span> <span class="mi">2</span> <span class="k">for</span> <span class="n">x</span> <span class="ow">in</span> <span class="n">data_chunk</span><span class="p">]</span>
+
+<span class="n">data</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">))</span>
+
+<span class="k">with</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="mi">4</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">execute_loop_parallel</span><span class="p">(</span>
+        <span class="n">func</span><span class="o">=</span><span class="n">process_data</span><span class="p">,</span>
+        <span class="n">loop_var</span><span class="o">=</span><span class="s1">&#39;data_chunk&#39;</span><span class="p">,</span>
+        <span class="n">iterable</span><span class="o">=</span><span class="n">data</span><span class="p">,</span>
+        <span class="n">chunk_size</span><span class="o">=</span><span class="mi">25</span>
+    <span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">results</span><span class="p">))</span>  <span class="c1"># 200</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="choosing-threads-vs-processes">
+<h2>Choosing Threads vs Processes<a class="headerlink" href="#choosing-threads-vs-processes" title="Link to this heading">¶</a></h2>
+<p>The executor automatically chooses between threads and processes based on:</p>
+<p><strong>Use Threads When:</strong>
+- Function performs I/O operations (file, network, database)
+- Objects cannot be pickled (closures, lambdas)
+- Shared memory access is needed</p>
+<p><strong>Use Processes When:</strong>
+- Function is CPU-intensive
+- True parallelism is required
+- Objects can be pickled safely</p>
+<p>You can override the auto-detection:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Force thread usage</span>
+<span class="n">thread_executor</span> <span class="o">=</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">use_threads</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="c1"># Force process usage</span>
+<span class="n">process_executor</span> <span class="o">=</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">use_threads</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="performance-considerations">
+<h2>Performance Considerations<a class="headerlink" href="#performance-considerations" title="Link to this heading">¶</a></h2>
+<p><strong>Process Pool Overhead:</strong>
+- Higher memory usage (separate Python interpreters)
+- Serialization overhead for arguments and results
+- Slower startup time</p>
+<p><strong>Thread Pool Overhead:</strong>
+- Shared memory (lower memory usage)
+- GIL limitations for CPU-bound tasks
+- Faster startup time</p>
+<p><strong>Optimal Worker Count:</strong>
+- CPU-bound: <code class="docutils literal notranslate"><span class="pre">os.cpu_count()</span></code>
+- I/O-bound: <code class="docutils literal notranslate"><span class="pre">os.cpu_count()</span> <span class="pre">*</span> <span class="pre">2-4</span></code>
+- Custom: Based on your specific workload</p>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">Local Executor API</a><ul>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor"><code class="docutils literal notranslate"><span class="pre">LocalExecutor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.__init__"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.__enter__"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.__enter__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.__exit__"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.__exit__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.execute_single"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.execute_single()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.execute_parallel"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.execute_parallel()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.LocalExecutor.execute_loop_parallel"><code class="docutils literal notranslate"><span class="pre">LocalExecutor.execute_loop_parallel()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#clustrix.local_executor.choose_executor_type"><code class="docutils literal notranslate"><span class="pre">choose_executor_type()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.local_executor.create_local_executor"><code class="docutils literal notranslate"><span class="pre">create_local_executor()</span></code></a></li>
+<li><a class="reference internal" href="#usage-examples">Usage Examples</a><ul>
+<li><a class="reference internal" href="#basic-local-execution">Basic Local Execution</a></li>
+<li><a class="reference internal" href="#auto-detection-of-executor-type">Auto-Detection of Executor Type</a></li>
+<li><a class="reference internal" href="#loop-parallelization">Loop Parallelization</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#choosing-threads-vs-processes">Choosing Threads vs Processes</a></li>
+<li><a class="reference internal" href="#performance-considerations">Performance Considerations</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="config.html"
+                          title="previous chapter">Configuration API</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../_sources/api/local_executor.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="right" >
+          <a href="config.html" title="Configuration API"
+             >previous</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../index.html">Clustrix</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">Local Executor API</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2025, Contextual Dynamics Laboratory.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.1.3.
+    </div>
+  </body>
+</html>

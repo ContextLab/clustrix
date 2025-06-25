@@ -76,6 +76,7 @@ Table of Contents
    installation
    quickstart
    configuration
+   ssh_setup
    examples
    local_parallel
 

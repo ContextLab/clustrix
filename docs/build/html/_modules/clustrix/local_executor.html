@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>clustrix.local_executor &#8212; Clustrix Documentation</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=4f649999" />
+    <link rel="stylesheet" type="text/css" href="../../_static/groundwork.css?v=fc6a0523" />
+    <link rel="stylesheet" type="text/css" href="../../_static/custom.css?v=554e4187" />
+    <script src="../../_static/documentation_options.js?v=01f34227"></script>
+    <script src="../../_static/doctools.js?v=9bcbadda"></script>
+    <script src="../../_static/sphinx_highlight.js?v=dc90522c"></script>
+    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" /> 
+  </head><body>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             accesskey="I">index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Clustrix</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" accesskey="U">Module code</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">clustrix.local_executor</a></li> 
+      </ul>
+    </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <h1>Source code for clustrix.local_executor</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;Local parallel execution using multiprocessing and threading.&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">multiprocessing</span> <span class="k">as</span> <span class="nn">mp</span>
+<span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">ProcessPoolExecutor</span><span class="p">,</span> <span class="n">ThreadPoolExecutor</span><span class="p">,</span> <span class="n">as_completed</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Union</span>
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">import</span> <span class="nn">functools</span>
+<span class="kn">import</span> <span class="nn">pickle</span>
+<span class="kn">import</span> <span class="nn">time</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="LocalExecutor">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor">[docs]</a>
+<span class="k">class</span> <span class="nc">LocalExecutor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Execute functions locally using multiprocessing or threading.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LocalExecutor.__init__">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">max_workers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">use_threads</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Initialize local executor.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            max_workers: Maximum number of worker processes/threads</span>
+<span class="sd">            use_threads: If True, use ThreadPoolExecutor, else ProcessPoolExecutor</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">max_workers</span> <span class="o">=</span> <span class="n">max_workers</span> <span class="ow">or</span> <span class="n">os</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">use_threads</span> <span class="o">=</span> <span class="n">use_threads</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span> <span class="o">=</span> <span class="kc">None</span></div>
+
+
+<div class="viewcode-block" id="LocalExecutor.__enter__">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.__enter__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__enter__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Context manager entry.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_create_executor</span><span class="p">()</span>
+        <span class="k">return</span> <span class="bp">self</span></div>
+
+
+<div class="viewcode-block" id="LocalExecutor.__exit__">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.__exit__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__exit__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc_type</span><span class="p">,</span> <span class="n">exc_val</span><span class="p">,</span> <span class="n">exc_tb</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Context manager exit.&quot;&quot;&quot;</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">_cleanup_executor</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span> <span class="nf">_create_executor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Create the appropriate executor.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">use_threads</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span> <span class="o">=</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">max_workers</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span> <span class="o">=</span> <span class="n">ProcessPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="bp">self</span><span class="o">.</span><span class="n">max_workers</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">_cleanup_executor</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Clean up the executor.&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span><span class="o">.</span><span class="n">shutdown</span><span class="p">(</span><span class="n">wait</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span> <span class="o">=</span> <span class="kc">None</span>
+
+<div class="viewcode-block" id="LocalExecutor.execute_single">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.execute_single">[docs]</a>
+    <span class="k">def</span> <span class="nf">execute_single</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Execute a single function call locally.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            func: Function to execute</span>
+<span class="sd">            args: Positional arguments</span>
+<span class="sd">            kwargs: Keyword arguments</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            Function result</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Local execution failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">raise</span></div>
+
+
+<div class="viewcode-block" id="LocalExecutor.execute_parallel">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.execute_parallel">[docs]</a>
+    <span class="k">def</span> <span class="nf">execute_parallel</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+        <span class="n">work_chunks</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]],</span>
+        <span class="n">timeout</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Execute function in parallel with different work chunks.</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            func: Function to execute</span>
+<span class="sd">            work_chunks: List of work chunks, each containing args and kwargs</span>
+<span class="sd">            timeout: Timeout for each task in seconds</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List of results in order of work_chunks</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">work_chunks</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">work_chunks</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="c1"># Single chunk, execute directly</span>
+            <span class="n">chunk</span> <span class="o">=</span> <span class="n">work_chunks</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">return</span> <span class="p">[</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">execute_single</span><span class="p">(</span>
+                    <span class="n">func</span><span class="p">,</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;args&quot;</span><span class="p">,</span> <span class="p">()),</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;kwargs&quot;</span><span class="p">,</span> <span class="p">{})</span>
+                <span class="p">)</span>
+            <span class="p">]</span>
+
+        <span class="c1"># Create executor if not in context manager</span>
+        <span class="n">cleanup_needed</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span> <span class="ow">is</span> <span class="kc">None</span>
+        <span class="k">if</span> <span class="n">cleanup_needed</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">_create_executor</span><span class="p">()</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_execute_parallel_chunks</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">work_chunks</span><span class="p">,</span> <span class="n">timeout</span><span class="p">)</span>
+        <span class="k">finally</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">cleanup_needed</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">_cleanup_executor</span><span class="p">()</span></div>
+
+
+    <span class="k">def</span> <span class="nf">_execute_parallel_chunks</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+        <span class="n">work_chunks</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]],</span>
+        <span class="n">timeout</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">float</span><span class="p">],</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Execute chunks in parallel using the executor.&quot;&quot;&quot;</span>
+        <span class="n">futures</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="kc">None</span><span class="p">]</span> <span class="o">*</span> <span class="nb">len</span><span class="p">(</span><span class="n">work_chunks</span><span class="p">)</span>
+
+        <span class="c1"># Submit all tasks</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">chunk</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">work_chunks</span><span class="p">):</span>
+            <span class="n">args</span> <span class="o">=</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;args&quot;</span><span class="p">,</span> <span class="p">())</span>
+            <span class="n">kwargs</span> <span class="o">=</span> <span class="n">chunk</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;kwargs&quot;</span><span class="p">,</span> <span class="p">{})</span>
+            <span class="n">future</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
+            <span class="n">futures</span><span class="p">[</span><span class="n">future</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+
+        <span class="c1"># Collect results with timeout</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">timeout</span><span class="p">:</span>
+                <span class="c1"># Wait for all futures with a global timeout</span>
+                <span class="n">done_futures</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="c1"># Use wait with timeout to check for completion</span>
+                    <span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">wait</span><span class="p">,</span> <span class="n">FIRST_COMPLETED</span><span class="p">,</span> <span class="n">ALL_COMPLETED</span>
+                    <span class="kn">import</span> <span class="nn">time</span>
+
+                    <span class="n">done</span><span class="p">,</span> <span class="n">not_done</span> <span class="o">=</span> <span class="n">wait</span><span class="p">(</span>
+                        <span class="n">futures</span><span class="o">.</span><span class="n">keys</span><span class="p">(),</span> <span class="n">timeout</span><span class="o">=</span><span class="n">timeout</span><span class="p">,</span> <span class="n">return_when</span><span class="o">=</span><span class="n">ALL_COMPLETED</span>
+                    <span class="p">)</span>
+
+                    <span class="k">if</span> <span class="n">not_done</span><span class="p">:</span>
+                        <span class="c1"># Some tasks didn&#39;t complete within timeout</span>
+                        <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">not_done</span><span class="p">:</span>
+                            <span class="n">future</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+                        <span class="k">raise</span> <span class="ne">TimeoutError</span><span class="p">(</span>
+                            <span class="sa">f</span><span class="s2">&quot;Execution exceeded timeout of </span><span class="si">{</span><span class="n">timeout</span><span class="si">}</span><span class="s2"> seconds&quot;</span>
+                        <span class="p">)</span>
+
+                    <span class="c1"># All tasks completed within timeout, collect results</span>
+                    <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">done</span><span class="p">:</span>
+                        <span class="n">index</span> <span class="o">=</span> <span class="n">futures</span><span class="p">[</span><span class="n">future</span><span class="p">]</span>
+                        <span class="n">results</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+
+                <span class="k">except</span> <span class="ne">TimeoutError</span><span class="p">:</span>
+                    <span class="c1"># Re-raise timeout errors</span>
+                    <span class="k">raise</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="c1"># No timeout, wait for all</span>
+                <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">as_completed</span><span class="p">(</span><span class="n">futures</span><span class="p">):</span>
+                    <span class="n">index</span> <span class="o">=</span> <span class="n">futures</span><span class="p">[</span><span class="n">future</span><span class="p">]</span>
+                    <span class="k">try</span><span class="p">:</span>
+                        <span class="n">results</span><span class="p">[</span><span class="n">index</span><span class="p">]</span> <span class="o">=</span> <span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span>
+                    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                        <span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Task </span><span class="si">{</span><span class="n">index</span><span class="si">}</span><span class="s2"> failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                        <span class="k">raise</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="c1"># Cancel remaining futures</span>
+            <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">futures</span><span class="p">:</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">future</span><span class="o">.</span><span class="n">done</span><span class="p">():</span>
+                    <span class="n">future</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+            <span class="k">raise</span>
+
+        <span class="k">return</span> <span class="n">results</span>
+
+<div class="viewcode-block" id="LocalExecutor.execute_loop_parallel">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.LocalExecutor.execute_loop_parallel">[docs]</a>
+    <span class="k">def</span> <span class="nf">execute_loop_parallel</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span>
+        <span class="n">loop_var</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">iterable</span><span class="p">:</span> <span class="n">Union</span><span class="p">[</span><span class="nb">range</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="nb">tuple</span><span class="p">],</span>
+        <span class="n">func_args</span><span class="p">:</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="p">(),</span>
+        <span class="n">func_kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="n">chunk_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">        Execute a function in parallel over an iterable using intelligent chunking.</span>
+<span class="sd">        </span>
+<span class="sd">        This method implements a sophisticated chunk-based parallelization strategy that</span>
+<span class="sd">        handles the complex challenge of distributing iterable items across multiple</span>
+<span class="sd">        workers while preserving order and handling functions that expect individual</span>
+<span class="sd">        items rather than chunks.</span>
+<span class="sd">        </span>
+<span class="sd">        **Algorithm:**</span>
+<span class="sd">        </span>
+<span class="sd">        1. **Chunking**: Splits the iterable into approximately equal chunks based on</span>
+<span class="sd">           worker count and optional chunk_size parameter.</span>
+<span class="sd">           </span>
+<span class="sd">        2. **Chunk Processing**: Creates a wrapper function that processes each chunk</span>
+<span class="sd">           by iterating over individual items and calling the original function.</span>
+<span class="sd">           </span>
+<span class="sd">        3. **Result Flattening**: Collects results from all chunks and flattens them</span>
+<span class="sd">           while preserving the original iteration order.</span>
+<span class="sd">        </span>
+<span class="sd">        **Key Innovation**: The chunk processor wrapper bridges the gap between </span>
+<span class="sd">        chunk-based parallel execution and functions that expect individual items.</span>
+<span class="sd">        </span>
+<span class="sd">        **Example Workflow**:</span>
+<span class="sd">        ```</span>
+<span class="sd">        range(5) with chunk_size=2 → chunks: [[0,1], [2,3], [4]]</span>
+<span class="sd">        Each chunk processed: func(args, loop_var=0), func(args, loop_var=1), etc.</span>
+<span class="sd">        Results flattened: [result0, result1, result2, result3, result4]</span>
+<span class="sd">        ```</span>
+
+<span class="sd">        Args:</span>
+<span class="sd">            func: Function to execute for each item. The function will be called with</span>
+<span class="sd">                  func_args + the item as the loop_var keyword argument.</span>
+<span class="sd">            loop_var: Name of the keyword argument that will receive each item from</span>
+<span class="sd">                      the iterable.</span>
+<span class="sd">            iterable: Iterable to process in parallel (range, list, tuple, etc.).</span>
+<span class="sd">            func_args: Additional positional arguments passed to func for each call.</span>
+<span class="sd">            func_kwargs: Additional keyword arguments passed to func for each call.</span>
+<span class="sd">                        Note: loop_var will be added/overridden in these kwargs.</span>
+<span class="sd">            chunk_size: Optional size of each work chunk. If None, automatically</span>
+<span class="sd">                       calculated as len(items) // max_workers.</span>
+
+<span class="sd">        Returns:</span>
+<span class="sd">            List[Any]: Results from function execution in the same order as the</span>
+<span class="sd">                      original iterable. Each element corresponds to func() called</span>
+<span class="sd">                      with the respective item from the iterable.</span>
+
+<span class="sd">        Examples:</span>
+<span class="sd">            &gt;&gt;&gt; executor = LocalExecutor(max_workers=4)</span>
+<span class="sd">            &gt;&gt;&gt; def square(x):</span>
+<span class="sd">            ...     return x ** 2</span>
+<span class="sd">            &gt;&gt;&gt; </span>
+<span class="sd">            &gt;&gt;&gt; # Parallel computation over range</span>
+<span class="sd">            &gt;&gt;&gt; results = executor.execute_loop_parallel(</span>
+<span class="sd">            ...     square, &#39;x&#39;, range(10), chunk_size=3</span>
+<span class="sd">            ... )</span>
+<span class="sd">            &gt;&gt;&gt; # Results: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]</span>
+<span class="sd">            </span>
+<span class="sd">            &gt;&gt;&gt; # With additional arguments</span>
+<span class="sd">            &gt;&gt;&gt; def power(base, x, exp=2):</span>
+<span class="sd">            ...     return (base + x) ** exp</span>
+<span class="sd">            &gt;&gt;&gt; results = executor.execute_loop_parallel(</span>
+<span class="sd">            ...     power, &#39;x&#39;, [1, 2, 3], func_args=(10,), func_kwargs={&#39;exp&#39;: 3}</span>
+<span class="sd">            ... )</span>
+<span class="sd">            &gt;&gt;&gt; # Results: [11^3, 12^3, 13^3] = [1331, 1728, 2197]</span>
+
+<span class="sd">        Raises:</span>
+<span class="sd">            Exception: Any exception raised by the function during execution.</span>
+<span class="sd">            </span>
+<span class="sd">        Note:</span>
+<span class="sd">            - Empty iterables return empty lists immediately</span>
+<span class="sd">            - Single-item iterables are executed directly (no parallelization overhead)</span>
+<span class="sd">            - Chunk size is automatically bounded by the number of available workers</span>
+<span class="sd">            - The method preserves the original order of results</span>
+<span class="sd">        &quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">func_kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">func_kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="c1"># Convert iterable to list if needed</span>
+        <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">iterable</span><span class="p">,</span> <span class="nb">range</span><span class="p">):</span>
+            <span class="n">items</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">iterable</span><span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">items</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">iterable</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">items</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">[]</span>
+
+        <span class="c1"># Determine chunk size</span>
+        <span class="k">if</span> <span class="n">chunk_size</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+            <span class="n">chunk_size</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">items</span><span class="p">)</span> <span class="o">//</span> <span class="bp">self</span><span class="o">.</span><span class="n">max_workers</span><span class="p">)</span>
+
+        <span class="c1"># Create a wrapper function that processes chunks</span>
+        <span class="k">def</span> <span class="nf">chunk_processor</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
+            <span class="c1"># Extract the chunk of items from kwargs</span>
+            <span class="n">chunk_items</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">pop</span><span class="p">(</span><span class="n">loop_var</span><span class="p">)</span>
+            <span class="n">chunk_results</span> <span class="o">=</span> <span class="p">[]</span>
+
+            <span class="c1"># Process each item in the chunk individually</span>
+            <span class="k">for</span> <span class="n">item</span> <span class="ow">in</span> <span class="n">chunk_items</span><span class="p">:</span>
+                <span class="n">item_kwargs</span> <span class="o">=</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+                <span class="n">item_kwargs</span><span class="p">[</span><span class="n">loop_var</span><span class="p">]</span> <span class="o">=</span> <span class="n">item</span>
+                <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">item_kwargs</span><span class="p">)</span>
+                <span class="n">chunk_results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">result</span><span class="p">)</span>
+
+            <span class="k">return</span> <span class="n">chunk_results</span>
+
+        <span class="c1"># Create work chunks</span>
+        <span class="n">work_chunks</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">items</span><span class="p">),</span> <span class="n">chunk_size</span><span class="p">):</span>
+            <span class="n">chunk_items</span> <span class="o">=</span> <span class="n">items</span><span class="p">[</span><span class="n">i</span> <span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="n">chunk_size</span><span class="p">]</span>
+            <span class="n">chunk_kwargs</span> <span class="o">=</span> <span class="n">func_kwargs</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+            <span class="n">chunk_kwargs</span><span class="p">[</span><span class="n">loop_var</span><span class="p">]</span> <span class="o">=</span> <span class="n">chunk_items</span>
+
+            <span class="n">work_chunks</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">&quot;args&quot;</span><span class="p">:</span> <span class="n">func_args</span><span class="p">,</span> <span class="s2">&quot;kwargs&quot;</span><span class="p">:</span> <span class="n">chunk_kwargs</span><span class="p">})</span>
+
+        <span class="c1"># Execute in parallel using the chunk processor</span>
+        <span class="n">chunk_results</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">execute_parallel</span><span class="p">(</span><span class="n">chunk_processor</span><span class="p">,</span> <span class="n">work_chunks</span><span class="p">)</span>
+
+        <span class="c1"># Flatten results if needed</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">chunk_result</span> <span class="ow">in</span> <span class="n">chunk_results</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">chunk_result</span><span class="p">,</span> <span class="nb">list</span><span class="p">):</span>
+                <span class="n">results</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">chunk_result</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chunk_result</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">results</span></div>
+</div>
+
+
+
+<span class="k">def</span> <span class="nf">_safe_pickle_test</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Test if an object can be safely pickled.&quot;&quot;&quot;</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">obj</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="p">(</span><span class="n">pickle</span><span class="o">.</span><span class="n">PicklingError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">,</span> <span class="ne">AttributeError</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+
+<div class="viewcode-block" id="choose_executor_type">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.choose_executor_type">[docs]</a>
+<span class="k">def</span> <span class="nf">choose_executor_type</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">:</span> <span class="nb">dict</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Intelligently choose between ThreadPoolExecutor and ProcessPoolExecutor based on function characteristics.</span>
+<span class="sd">    </span>
+<span class="sd">    This function implements a sophisticated analysis to determine the optimal execution model</span>
+<span class="sd">    for parallel function execution. The decision tree prioritizes pickling constraints first,</span>
+<span class="sd">    then analyzes function characteristics to detect I/O-bound vs CPU-bound workloads.</span>
+<span class="sd">    </span>
+<span class="sd">    **Decision Logic (in priority order):**</span>
+<span class="sd">    </span>
+<span class="sd">    1. **Pickling Check (Highest Priority)**: Functions and arguments must be picklable for </span>
+<span class="sd">       multiprocessing. If any component fails pickling, threads are used.</span>
+<span class="sd">       </span>
+<span class="sd">    2. **I/O Detection**: Source code analysis looks for common I/O patterns that benefit </span>
+<span class="sd">       from threads due to GIL release during I/O operations.</span>
+<span class="sd">       </span>
+<span class="sd">    3. **Default**: CPU-bound tasks default to processes for true parallelism.</span>
+<span class="sd">    </span>
+<span class="sd">    **Key Insight**: `inspect.getsource(lambda x: x)` succeeds but `pickle.dumps(lambda x: x)` </span>
+<span class="sd">    fails, so pickling must be checked before source analysis.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        func: Function to analyze for execution characteristics</span>
+<span class="sd">        args: Positional arguments that will be passed to the function</span>
+<span class="sd">        kwargs: Keyword arguments that will be passed to the function</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        bool: True to use ThreadPoolExecutor (for I/O-bound or unpicklable functions),</span>
+<span class="sd">              False to use ProcessPoolExecutor (for CPU-bound, picklable functions)</span>
+<span class="sd">              </span>
+<span class="sd">    Examples:</span>
+<span class="sd">        &gt;&gt;&gt; # Lambda function (unpicklable) -&gt; threads</span>
+<span class="sd">        &gt;&gt;&gt; choose_executor_type(lambda x: x*2, (5,), {})</span>
+<span class="sd">        True</span>
+<span class="sd">        </span>
+<span class="sd">        &gt;&gt;&gt; # I/O function -&gt; threads  </span>
+<span class="sd">        &gt;&gt;&gt; def io_func(filename):</span>
+<span class="sd">        ...     with open(filename, &#39;r&#39;) as f:</span>
+<span class="sd">        ...         return f.read()</span>
+<span class="sd">        &gt;&gt;&gt; choose_executor_type(io_func, (&quot;file.txt&quot;,), {})</span>
+<span class="sd">        True</span>
+<span class="sd">        </span>
+<span class="sd">        &gt;&gt;&gt; # CPU function -&gt; processes</span>
+<span class="sd">        &gt;&gt;&gt; def cpu_func(n):</span>
+<span class="sd">        ...     return sum(i**2 for i in range(n))</span>
+<span class="sd">        &gt;&gt;&gt; choose_executor_type(cpu_func, (1000,), {})</span>
+<span class="sd">        False</span>
+<span class="sd">        </span>
+<span class="sd">    Note:</span>
+<span class="sd">        This function performs static analysis and may not catch all edge cases.</span>
+<span class="sd">        The analysis is designed to be conservative - when in doubt, it defaults</span>
+<span class="sd">        to the safer option for the detected pattern.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># First check if function can be pickled (most important check)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">_safe_pickle_test</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
+        <span class="k">return</span> <span class="kc">True</span>  <span class="c1"># Use threads for unpicklable functions</span>
+
+    <span class="c1"># Check if any arguments can&#39;t be pickled</span>
+    <span class="k">for</span> <span class="n">arg</span> <span class="ow">in</span> <span class="n">args</span><span class="p">:</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_safe_pickle_test</span><span class="p">(</span><span class="n">arg</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">for</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">kwargs</span><span class="o">.</span><span class="n">values</span><span class="p">():</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">_safe_pickle_test</span><span class="p">(</span><span class="n">value</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="c1"># Check for common I/O bound indicators</span>
+    <span class="kn">import</span> <span class="nn">inspect</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">source</span> <span class="o">=</span> <span class="n">inspect</span><span class="o">.</span><span class="n">getsource</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
+        <span class="n">io_indicators</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="s2">&quot;open(&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;requests.&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;urllib.&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;http.&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;ftp.&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;sql&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;database&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;time.sleep&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;threading.&quot;</span><span class="p">,</span>
+        <span class="p">]</span>
+        <span class="k">if</span> <span class="nb">any</span><span class="p">(</span><span class="n">indicator</span> <span class="ow">in</span> <span class="n">source</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span> <span class="k">for</span> <span class="n">indicator</span> <span class="ow">in</span> <span class="n">io_indicators</span><span class="p">):</span>
+            <span class="k">return</span> <span class="kc">True</span>
+    <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="ne">TypeError</span><span class="p">):</span>
+        <span class="k">pass</span>  <span class="c1"># If we can&#39;t get source, no problem</span>
+
+    <span class="c1"># Default to processes for CPU-bound tasks</span>
+    <span class="k">return</span> <span class="kc">False</span></div>
+
+
+
+<div class="viewcode-block" id="create_local_executor">
+<a class="viewcode-back" href="../../api/local_executor.html#clustrix.local_executor.create_local_executor">[docs]</a>
+<span class="k">def</span> <span class="nf">create_local_executor</span><span class="p">(</span>
+    <span class="n">max_workers</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">use_threads</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">func</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Callable</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">args</span><span class="p">:</span> <span class="nb">tuple</span> <span class="o">=</span> <span class="p">(),</span>
+    <span class="n">kwargs</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">LocalExecutor</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a LocalExecutor with appropriate settings.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        max_workers: Maximum number of workers</span>
+<span class="sd">        use_threads: Force thread or process usage</span>
+<span class="sd">        func: Function to analyze for executor type selection</span>
+<span class="sd">        args: Function arguments for analysis</span>
+<span class="sd">        kwargs: Function keyword arguments for analysis</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        Configured LocalExecutor</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">kwargs</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">kwargs</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Auto-detect executor type if not specified</span>
+    <span class="k">if</span> <span class="n">use_threads</span> <span class="ow">is</span> <span class="kc">None</span> <span class="ow">and</span> <span class="n">func</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">use_threads</span> <span class="o">=</span> <span class="n">choose_executor_type</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">kwargs</span><span class="p">)</span>
+    <span class="k">elif</span> <span class="n">use_threads</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="n">use_threads</span> <span class="o">=</span> <span class="kc">False</span>  <span class="c1"># Default to processes</span>
+
+    <span class="k">return</span> <span class="n">LocalExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">max_workers</span><span class="p">,</span> <span class="n">use_threads</span><span class="o">=</span><span class="n">use_threads</span><span class="p">)</span></div>
+
+</pre></div>
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+<search id="searchbox" style="display: none" role="search">
+  <h3 id="searchlabel">Quick search</h3>
+    <div class="searchformwrapper">
+    <form class="search" action="../../search.html" method="get">
+      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
+      <input type="submit" value="Go" />
+    </form>
+    </div>
+</search>
+<script>document.getElementById('searchbox').style.display = "block"</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+    <div class="related" role="navigation" aria-label="Related">
+      <h3>Navigation</h3>
+      <ul>
+        <li class="right" style="margin-right: 10px">
+          <a href="../../genindex.html" title="General Index"
+             >index</a></li>
+        <li class="right" >
+          <a href="../../py-modindex.html" title="Python Module Index"
+             >modules</a> |</li>
+        <li class="nav-item nav-item-0"><a href="../../index.html">Clustrix</a> &#187;</li>
+          <li class="nav-item nav-item-1"><a href="../index.html" >Module code</a> &#187;</li>
+        <li class="nav-item nav-item-this"><a href="">clustrix.local_executor</a></li> 
+      </ul>
+    </div>
+    <div class="footer" role="contentinfo">
+    &#169; Copyright 2025, Contextual Dynamics Laboratory.
+      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.1.3.
+    </div>
+  </body>
+</html>
