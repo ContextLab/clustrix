@@ -183,18 +183,78 @@ class LocalExecutor:
         chunk_size: Optional[int] = None,
     ) -> List[Any]:
         """
-        Execute a function in parallel over an iterable.
+        Execute a function in parallel over an iterable using intelligent chunking.
+        
+        This method implements a sophisticated chunk-based parallelization strategy that
+        handles the complex challenge of distributing iterable items across multiple
+        workers while preserving order and handling functions that expect individual
+        items rather than chunks.
+        
+        **Algorithm:**
+        
+        1. **Chunking**: Splits the iterable into approximately equal chunks based on
+           worker count and optional chunk_size parameter.
+           
+        2. **Chunk Processing**: Creates a wrapper function that processes each chunk
+           by iterating over individual items and calling the original function.
+           
+        3. **Result Flattening**: Collects results from all chunks and flattens them
+           while preserving the original iteration order.
+        
+        **Key Innovation**: The chunk processor wrapper bridges the gap between 
+        chunk-based parallel execution and functions that expect individual items.
+        
+        **Example Workflow**:
+        ```
+        range(5) with chunk_size=2 → chunks: [[0,1], [2,3], [4]]
+        Each chunk processed: func(args, loop_var=0), func(args, loop_var=1), etc.
+        Results flattened: [result0, result1, result2, result3, result4]
+        ```
 
         Args:
-            func: Function to execute
-            loop_var: Name of the loop variable in the function
-            iterable: Iterable to process
-            func_args: Additional positional arguments for func
-            func_kwargs: Additional keyword arguments for func
-            chunk_size: Size of each work chunk
+            func: Function to execute for each item. The function will be called with
+                  func_args + the item as the loop_var keyword argument.
+            loop_var: Name of the keyword argument that will receive each item from
+                      the iterable.
+            iterable: Iterable to process in parallel (range, list, tuple, etc.).
+            func_args: Additional positional arguments passed to func for each call.
+            func_kwargs: Additional keyword arguments passed to func for each call.
+                        Note: loop_var will be added/overridden in these kwargs.
+            chunk_size: Optional size of each work chunk. If None, automatically
+                       calculated as len(items) // max_workers.
 
         Returns:
-            List of results
+            List[Any]: Results from function execution in the same order as the
+                      original iterable. Each element corresponds to func() called
+                      with the respective item from the iterable.
+
+        Examples:
+            >>> executor = LocalExecutor(max_workers=4)
+            >>> def square(x):
+            ...     return x ** 2
+            >>> 
+            >>> # Parallel computation over range
+            >>> results = executor.execute_loop_parallel(
+            ...     square, 'x', range(10), chunk_size=3
+            ... )
+            >>> # Results: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+            
+            >>> # With additional arguments
+            >>> def power(base, x, exp=2):
+            ...     return (base + x) ** exp
+            >>> results = executor.execute_loop_parallel(
+            ...     power, 'x', [1, 2, 3], func_args=(10,), func_kwargs={'exp': 3}
+            ... )
+            >>> # Results: [11^3, 12^3, 13^3] = [1331, 1728, 2197]
+
+        Raises:
+            Exception: Any exception raised by the function during execution.
+            
+        Note:
+            - Empty iterables return empty lists immediately
+            - Single-item iterables are executed directly (no parallelization overhead)
+            - Chunk size is automatically bounded by the number of available workers
+            - The method preserves the original order of results
         """
         if func_kwargs is None:
             func_kwargs = {}
@@ -261,15 +321,56 @@ def _safe_pickle_test(obj) -> bool:
 
 def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
     """
-    Choose whether to use threads or processes based on function characteristics.
+    Intelligently choose between ThreadPoolExecutor and ProcessPoolExecutor based on function characteristics.
+    
+    This function implements a sophisticated analysis to determine the optimal execution model
+    for parallel function execution. The decision tree prioritizes pickling constraints first,
+    then analyzes function characteristics to detect I/O-bound vs CPU-bound workloads.
+    
+    **Decision Logic (in priority order):**
+    
+    1. **Pickling Check (Highest Priority)**: Functions and arguments must be picklable for 
+       multiprocessing. If any component fails pickling, threads are used.
+       
+    2. **I/O Detection**: Source code analysis looks for common I/O patterns that benefit 
+       from threads due to GIL release during I/O operations.
+       
+    3. **Default**: CPU-bound tasks default to processes for true parallelism.
+    
+    **Key Insight**: `inspect.getsource(lambda x: x)` succeeds but `pickle.dumps(lambda x: x)` 
+    fails, so pickling must be checked before source analysis.
 
     Args:
-        func: Function to analyze
-        args: Function arguments
-        kwargs: Function keyword arguments
+        func: Function to analyze for execution characteristics
+        args: Positional arguments that will be passed to the function
+        kwargs: Keyword arguments that will be passed to the function
 
     Returns:
-        True for threads, False for processes
+        bool: True to use ThreadPoolExecutor (for I/O-bound or unpicklable functions),
+              False to use ProcessPoolExecutor (for CPU-bound, picklable functions)
+              
+    Examples:
+        >>> # Lambda function (unpicklable) -> threads
+        >>> choose_executor_type(lambda x: x*2, (5,), {})
+        True
+        
+        >>> # I/O function -> threads  
+        >>> def io_func(filename):
+        ...     with open(filename, 'r') as f:
+        ...         return f.read()
+        >>> choose_executor_type(io_func, ("file.txt",), {})
+        True
+        
+        >>> # CPU function -> processes
+        >>> def cpu_func(n):
+        ...     return sum(i**2 for i in range(n))
+        >>> choose_executor_type(cpu_func, (1000,), {})
+        False
+        
+    Note:
+        This function performs static analysis and may not catch all edge cases.
+        The analysis is designed to be conservative - when in doubt, it defaults
+        to the safer option for the detected pattern.
     """
     # First check if function can be pickled (most important check)
     if not _safe_pickle_test(func):
