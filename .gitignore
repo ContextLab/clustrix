@@ -2,6 +2,3 @@
 *.pyc
 *.DS_Store
 !*.gitkeep
-.claude*
-notes/
-CLAUDE.md
