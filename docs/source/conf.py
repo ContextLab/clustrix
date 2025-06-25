@@ -54,6 +54,18 @@ html_theme_options = {
 html_title = "Clustrix Documentation"
 html_short_title = "Clustrix"
 
+# Force ReadTheDocs rebuild
+html_last_updated_fmt = "%b %d, %Y"
+
+# Additional context for ReadTheDocs
+html_context = {
+    "display_github": True,
+    "github_user": "ContextLab",
+    "github_repo": "clustrix",
+    "github_version": "master",
+    "conf_py_path": "/docs/source/",
+}
+
 # -- Extension configuration -------------------------------------------------
 
 # Napoleon settings
