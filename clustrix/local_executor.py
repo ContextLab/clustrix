@@ -133,20 +133,24 @@ class LocalExecutor:
                     # Use wait with timeout to check for completion
                     from concurrent.futures import wait, FIRST_COMPLETED, ALL_COMPLETED
                     import time
-                    
-                    done, not_done = wait(futures.keys(), timeout=timeout, return_when=ALL_COMPLETED)
-                    
+
+                    done, not_done = wait(
+                        futures.keys(), timeout=timeout, return_when=ALL_COMPLETED
+                    )
+
                     if not_done:
                         # Some tasks didn't complete within timeout
                         for future in not_done:
                             future.cancel()
-                        raise TimeoutError(f"Execution exceeded timeout of {timeout} seconds")
-                    
+                        raise TimeoutError(
+                            f"Execution exceeded timeout of {timeout} seconds"
+                        )
+
                     # All tasks completed within timeout, collect results
                     for future in done:
                         index = futures[future]
                         results[index] = future.result()
-                        
+
                 except TimeoutError:
                     # Re-raise timeout errors
                     raise
@@ -213,14 +217,14 @@ class LocalExecutor:
             # Extract the chunk of items from kwargs
             chunk_items = kwargs.pop(loop_var)
             chunk_results = []
-            
+
             # Process each item in the chunk individually
             for item in chunk_items:
                 item_kwargs = kwargs.copy()
                 item_kwargs[loop_var] = item
                 result = func(*args, **item_kwargs)
                 chunk_results.append(result)
-            
+
             return chunk_results
 
         # Create work chunks

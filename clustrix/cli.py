@@ -25,7 +25,9 @@ def cli():
 @click.option("--memory", help="Default memory allocation (e.g., 8GB)")
 @click.option("--time", help="Default time allocation (e.g., 04:00:00)")
 @click.option("--config-file", type=click.Path(), help="Save configuration to file")
-def config(cluster_type, cluster_host, username, api_key, cores, memory, time, config_file):
+def config(
+    cluster_type, cluster_host, username, api_key, cores, memory, time, config_file
+):
     """Configure Clustrix settings."""
 
     config_updates = {}
@@ -83,16 +85,16 @@ def load(config_file):
 def status():
     """Show cluster status and active jobs."""
     current_config = get_config()
-    
+
     if not current_config.cluster_host:
         click.echo("No cluster configured")
         return
-    
+
     click.echo("Cluster Status:")
     click.echo(f"  Type: {current_config.cluster_type}")
     click.echo(f"  Host: {current_config.cluster_host}")
     click.echo(f"  User: {current_config.username}")
-    
+
     # Try to connect and get status
     try:
         executor = ClusterExecutor(current_config)

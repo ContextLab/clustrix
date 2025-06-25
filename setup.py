@@ -50,11 +50,11 @@ setup(
             "pytest-cov>=2.0",
             "coverage>=6.0",
             "pytest-xdist>=2.0",  # For parallel test execution
-            "pytest-mock>=3.0",   # For better mocking support
+            "pytest-mock>=3.0",  # For better mocking support
         ],
         "docs": [
             "sphinx>=4.0",
-            "groundwork-sphinx-theme>=1.1.1", 
+            "groundwork-sphinx-theme>=1.1.1",
             "sphinx-autodoc-typehints>=1.12",
             "nbsphinx>=0.8",
             "jupyter>=1.0",
@@ -63,7 +63,7 @@ setup(
         "all": [
             "kubernetes>=20.13.0",
             "pytest>=6.0",
-            "pytest-cov>=2.0", 
+            "pytest-cov>=2.0",
             "black>=21.0",
             "flake8>=3.8",
             "mypy>=0.812",

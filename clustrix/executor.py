@@ -47,7 +47,7 @@ class ClusterExecutor:
             connect_kwargs["username"] = self.config.username
         else:
             connect_kwargs["username"] = os.getenv("USER")
-            
+
         # Use key file for authentication (recommended)
         if self.config.key_file:
             connect_kwargs["key_filename"] = self.config.key_file
@@ -193,7 +193,7 @@ class ClusterExecutor:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via SGE."""
-        
+
         # Create remote working directory
         remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
@@ -250,19 +250,20 @@ class ClusterExecutor:
                 "kubernetes package required for Kubernetes support. "
                 "Install with: pip install kubernetes"
             )
-        
+
         # Ensure Kubernetes client is set up
-        if not hasattr(self, 'k8s_client') or self.k8s_client is None:
+        if not hasattr(self, "k8s_client") or self.k8s_client is None:
             self._setup_kubernetes()
-        
+
         # Create a unique job name
         job_name = f"clustrix-job-{int(time.time())}"
-        
+
         # Serialize function data
         func_data_serialized = cloudpickle.dumps(func_data)
         import base64
-        func_data_b64 = base64.b64encode(func_data_serialized).decode('utf-8')
-        
+
+        func_data_b64 = base64.b64encode(func_data_serialized).decode("utf-8")
+
         # Create Kubernetes Job manifest
         job_manifest = {
             "apiVersion": "batch/v1",
@@ -271,11 +272,13 @@ class ClusterExecutor:
             "spec": {
                 "template": {
                     "spec": {
-                        "containers": [{
-                            "name": "clustrix-worker",
-                            "image": "python:3.11-slim",  # Default Python image
-                            "command": ["python", "-c"],
-                            "args": [f"""
+                        "containers": [
+                            {
+                                "name": "clustrix-worker",
+                                "image": "python:3.11-slim",  # Default Python image
+                                "command": ["python", "-c"],
+                                "args": [
+                                    f"""
 import base64
 import cloudpickle
 import traceback
@@ -298,41 +301,42 @@ except Exception as e:
     print(f"CLUSTRIX_ERROR:{{str(e)}}")
     print(f"CLUSTRIX_TRACEBACK:{{traceback.format_exc()}}")
     exit(1)
-"""],
-                            "resources": {
-                                "requests": {
-                                    "cpu": str(job_config.get('cores', 1)),
-                                    "memory": job_config.get('memory', '1Gi')
+"""
+                                ],
+                                "resources": {
+                                    "requests": {
+                                        "cpu": str(job_config.get("cores", 1)),
+                                        "memory": job_config.get("memory", "1Gi"),
+                                    },
+                                    "limits": {
+                                        "cpu": str(job_config.get("cores", 1)),
+                                        "memory": job_config.get("memory", "1Gi"),
+                                    },
                                 },
-                                "limits": {
-                                    "cpu": str(job_config.get('cores', 1)),
-                                    "memory": job_config.get('memory', '1Gi')
-                                }
                             }
-                        }],
-                        "restartPolicy": "Never"
+                        ],
+                        "restartPolicy": "Never",
                     }
                 },
-                "backoffLimit": 1
-            }
+                "backoffLimit": 1,
+            },
         }
-        
+
         # Submit job to Kubernetes
         batch_api = client.BatchV1Api()
         response = batch_api.create_namespaced_job(
-            namespace="default",  # Could be configurable
-            body=job_manifest
+            namespace="default", body=job_manifest  # Could be configurable
         )
-        
+
         job_id = response.metadata.name
-        
+
         # Store job info
         self.active_jobs[job_id] = {
             "status": "submitted",
             "submit_time": time.time(),
-            "k8s_job": True
+            "k8s_job": True,
         }
-        
+
         return job_id
 
     def _submit_ssh_job(
@@ -426,7 +430,7 @@ except Exception as e:
                 # Download error logs and try to extract original exception
                 error_log = self._get_error_log(job_id)
                 original_exception = self._extract_original_exception(job_id)
-                
+
                 if original_exception:
                     # Re-raise the original exception
                     raise original_exception
@@ -494,7 +498,9 @@ except Exception as e:
                 result_exists = self._remote_file_exists(
                     f"{job_info['remote_dir']}/result.pkl"
                 )
-                error_exists = self._remote_file_exists(f"{job_info['remote_dir']}/job.err")
+                error_exists = self._remote_file_exists(
+                    f"{job_info['remote_dir']}/job.err"
+                )
 
                 if result_exists:
                     return "completed"
@@ -558,32 +564,32 @@ except Exception as e:
             return "No job info available"
 
         remote_dir = job_info["remote_dir"]
-        
+
         # First, try to get pickled error data
         error_pkl_path = f"{remote_dir}/error.pkl"
         if self._remote_file_exists(error_pkl_path):
             try:
                 with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
                     local_error_path = f.name
-                
+
                 self._download_file(error_pkl_path, local_error_path)
-                
+
                 with open(local_error_path, "rb") as f:
                     error_data = pickle.load(f)
-                
+
                 os.unlink(local_error_path)
-                
+
                 # Handle different error data formats
                 if isinstance(error_data, dict):
-                    error_msg = error_data.get('error', str(error_data))
-                    traceback_info = error_data.get('traceback', '')
+                    error_msg = error_data.get("error", str(error_data))
+                    traceback_info = error_data.get("traceback", "")
                     return f"{error_msg}\n\nTraceback:\n{traceback_info}"
                 else:
                     return str(error_data)
             except Exception as e:
                 # If error.pkl exists but can't be read, continue to text logs
                 pass
-        
+
         # Fallback to text error files
         error_files = ["job.err", "slurm-*.out", "job.e*"]
 
@@ -607,32 +613,32 @@ except Exception as e:
 
         remote_dir = job_info["remote_dir"]
         error_pkl_path = f"{remote_dir}/error.pkl"
-        
+
         if self._remote_file_exists(error_pkl_path):
             try:
                 with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
                     local_error_path = f.name
-                
+
                 self._download_file(error_pkl_path, local_error_path)
-                
+
                 with open(local_error_path, "rb") as f:
                     error_data = pickle.load(f)
-                
+
                 os.unlink(local_error_path)
-                
+
                 # Return the exception object if it is one
                 if isinstance(error_data, Exception):
                     return error_data
-                elif isinstance(error_data, dict) and 'error' in error_data:
+                elif isinstance(error_data, dict) and "error" in error_data:
                     # Try to recreate exception from dict
-                    error_str = error_data['error']
+                    error_str = error_data["error"]
                     # This is a simplified approach - in practice you'd want more sophisticated exception recreation
                     return RuntimeError(error_str)
-                    
+
             except Exception:
                 # If we can't extract the exception, return None
                 pass
-        
+
         return None
 
     def cancel_job(self, job_id: str):
@@ -651,9 +657,9 @@ except Exception as e:
             if not self.ssh_client:
                 self._setup_ssh_connection()
         elif self.config.cluster_type == "kubernetes":
-            if not hasattr(self, 'k8s_client'):
+            if not hasattr(self, "k8s_client"):
                 self._setup_kubernetes()
-            
+
     def disconnect(self):
         """Disconnect from cluster."""
         if self.sftp_client:
@@ -662,37 +668,34 @@ except Exception as e:
         if self.ssh_client:
             self.ssh_client.close()
             self.ssh_client = None
-            
+
     def _execute_command(self, command: str) -> tuple:
         """Execute command on remote cluster (alias for _execute_remote_command)."""
         if not self.ssh_client:
             raise RuntimeError("Not connected to cluster")
         return self._execute_remote_command(command)
-        
-    def _prepare_function_data(self, func, args: tuple, kwargs: dict, config: dict) -> bytes:
+
+    def _prepare_function_data(
+        self, func, args: tuple, kwargs: dict, config: dict
+    ) -> bytes:
         """Prepare function data for serialization."""
-        func_data = {
-            'func': func,
-            'args': args,
-            'kwargs': kwargs,
-            'config': config
-        }
-        
+        func_data = {"func": func, "args": args, "kwargs": kwargs, "config": config}
+
         return cloudpickle.dumps(func_data)
-        
+
     def execute(self, func, args: tuple, kwargs: dict) -> Any:
         """Execute function on cluster (simplified interface for tests)."""
-        job_config = {'cores': 4, 'memory': '8GB', 'time': '01:00:00'}
+        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
         func_data = {
-            'function': cloudpickle.dumps(func),
-            'args': pickle.dumps(args),
-            'kwargs': pickle.dumps(kwargs),
-            'requirements': {}
+            "function": cloudpickle.dumps(func),
+            "args": pickle.dumps(args),
+            "kwargs": pickle.dumps(kwargs),
+            "requirements": {},
         }
-        
+
         job_id = self.submit_job(func_data, job_config)
         return self.wait_for_result(job_id)
-        
+
     def _check_slurm_status(self, job_id: str) -> str:
         """Check SLURM job status."""
         cmd = f"squeue -j {job_id} -h -o %T"
@@ -711,7 +714,7 @@ except Exception as e:
                     return "running"
         except:
             return "unknown"
-    
+
     def _check_pbs_status(self, job_id: str) -> str:
         """Check PBS job status."""
         cmd = f"qstat -f {job_id}"
@@ -743,7 +746,7 @@ except Exception as e:
     def get_job_status(self, job_id: str) -> str:
         """Get job status (alias for _check_job_status)."""
         return self._check_job_status(job_id)
-        
+
     def get_result(self, job_id: str) -> Any:
         """Get result (alias for wait_for_result)."""
         return self.wait_for_result(job_id)

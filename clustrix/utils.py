@@ -216,12 +216,12 @@ def get_environment_info() -> str:
         result = subprocess.run(
             [sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True
         )
-        
+
         if result.returncode == 0:
             return result.stdout.strip()
     except Exception:
         pass
-    
+
     return ""
 
 
@@ -421,7 +421,7 @@ def _create_sge_script(
     job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
 ) -> str:
     """Create SGE job script."""
-    
+
     script_lines = [
         "#!/bin/bash",
         f"#$ -N clustrix",
@@ -457,7 +457,7 @@ def _create_sge_script(
         "    raise",
         '"',
     ]
-    
+
     return "\n".join(script_lines)
 
 
