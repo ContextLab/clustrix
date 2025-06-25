@@ -124,20 +124,47 @@ class LocalExecutor:
             future = self._executor.submit(func, *args, **kwargs)
             futures[future] = i
 
-        # Collect results
+        # Collect results with timeout
         try:
-            for future in as_completed(futures, timeout=timeout):
-                index = futures[future]
+            if timeout:
+                # Wait for all futures with a global timeout
+                done_futures = set()
                 try:
-                    results[index] = future.result()
-                except Exception as e:
-                    logger.error(f"Task {index} failed: {e}")
+                    # Use wait with timeout to check for completion
+                    from concurrent.futures import wait, FIRST_COMPLETED, ALL_COMPLETED
+                    import time
+                    
+                    done, not_done = wait(futures.keys(), timeout=timeout, return_when=ALL_COMPLETED)
+                    
+                    if not_done:
+                        # Some tasks didn't complete within timeout
+                        for future in not_done:
+                            future.cancel()
+                        raise TimeoutError(f"Execution exceeded timeout of {timeout} seconds")
+                    
+                    # All tasks completed within timeout, collect results
+                    for future in done:
+                        index = futures[future]
+                        results[index] = future.result()
+                        
+                except TimeoutError:
+                    # Re-raise timeout errors
                     raise
+            else:
+                # No timeout, wait for all
+                for future in as_completed(futures):
+                    index = futures[future]
+                    try:
+                        results[index] = future.result()
+                    except Exception as e:
+                        logger.error(f"Task {index} failed: {e}")
+                        raise
 
         except Exception as e:
             # Cancel remaining futures
             for future in futures:
-                future.cancel()
+                if not future.done():
+                    future.cancel()
             raise
 
         return results

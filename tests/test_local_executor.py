@@ -154,11 +154,15 @@ class TestLocalExecutor:
             time.sleep(delay)
             return delay
             
-        work_chunks = [{"args": (2.0,), "kwargs": {}}]  # 2 second delay
+        # Use multiple tasks so some don't start and can be cancelled
+        work_chunks = [
+            {"args": (2.0,), "kwargs": {}},  # 2 second delay  
+            {"args": (3.0,), "kwargs": {}},  # 3 second delay
+        ]
         
         with LocalExecutor(max_workers=1, use_threads=True) as executor:
-            # Should timeout after 0.5 seconds
-            with pytest.raises(Exception):  # TimeoutError or similar
+            # Should timeout after 0.5 seconds - first task will start but second won't
+            with pytest.raises(TimeoutError):
                 executor.execute_parallel(very_slow_func, work_chunks, timeout=0.5)
                 
     def test_execute_parallel_task_failure(self):

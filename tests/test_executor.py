@@ -435,21 +435,22 @@ class TestClusterExecutor:
         executor.ssh_client = Mock()
         executor.sftp_client = Mock()
         
-        # Mock squeue command to return empty (job completed)
+        # Mock SFTP for file download
+        mock_sftp = Mock()
+        executor.ssh_client.open_sftp.return_value = mock_sftp
+        
+        # Mock SSH command execution for cleanup
         mock_stdout = Mock()
-        mock_stdout.read.return_value = b""  # Empty output - job completed
+        mock_stdout.read.return_value = b""
         mock_stderr = Mock()
         mock_stderr.read.return_value = b""
-        
         executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
         
         # Add job to active jobs for tracking
         executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
         
-        # Mock SFTP for file existence check (result exists)
-        mock_sftp = Mock()
-        executor.ssh_client.open_sftp.return_value = mock_sftp
-        mock_sftp.stat.return_value = Mock()  # result.pkl exists
+        # Mock the status check to return completed immediately
+        executor._check_job_status = Mock(return_value="completed")
         
         # Mock temp file
         mock_file = Mock()
@@ -458,16 +459,19 @@ class TestClusterExecutor:
         
         # Mock result data
         test_result = {"value": 42}
-        with open("/tmp/test_pickle", "wb") as f:
-            pickle.dump(test_result, f)
+        
+        # Mock SFTP get to write test result when called
+        def mock_get(remote_path, local_path):
+            # Write test result to the local path when SFTP.get is called
+            with open(local_path, "wb") as f:
+                pickle.dump(test_result, f)
+                
+        mock_sftp.get.side_effect = mock_get
             
-        with patch('builtins.open', create=True) as mock_open:
-            mock_open.return_value.__enter__.return_value.read.return_value = pickle.dumps(test_result)
-            
-            result = executor.get_result("job_12345")
+        result = executor.get_result("job_12345")
             
         assert result == test_result
-        executor.sftp_client.get.assert_called_once()
+        mock_sftp.get.assert_called_once_with("/tmp/test_job/result.pkl", "/tmp/test_result")
         
     def test_cancel_job_slurm(self, executor):
         """Test canceling SLURM job."""
@@ -492,14 +496,14 @@ class TestClusterExecutor:
         error_content = "Traceback (most recent call last):\n  File test.py, line 1\n    syntax error"
         
         with patch.object(executor, '_execute_remote_command') as mock_exec:
-            mock_exec.return_value = (error_content, "", 0)
+            mock_exec.return_value = (error_content, "")
             
             error_log = executor._get_error_log("failed_job")
             assert error_log == error_content
             
         # Test when no error log found
         with patch.object(executor, '_execute_remote_command') as mock_exec:
-            mock_exec.return_value = ("", "", 0)
+            mock_exec.return_value = ("", "")
             
             error_log = executor._get_error_log("failed_job")
             assert "No error log found" in error_log
