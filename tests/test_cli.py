@@ -186,5 +186,6 @@ class TestCLI:
     def test_cli_no_command(self, runner):
         """Test CLI with no command shows help."""
         result = runner.invoke(cli, [])
-        assert result.exit_code == 2  # Click returns 2 when no command is given
+        # Click behavior varies by version: may return 0 or 2 when no command is given
+        assert result.exit_code in [0, 2]
         assert "Clustrix CLI" in result.output
