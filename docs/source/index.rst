@@ -93,6 +93,18 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Interactive Notebooks
+   
+   notebooks/complete_api_demo
+   notebooks/slurm_tutorial
+   notebooks/pbs_tutorial
+   notebooks/sge_tutorial
+   notebooks/kubernetes_tutorial
+   notebooks/ssh_tutorial
+   notebooks/basic_usage
+
+.. toctree::
+   :maxdepth: 2
    :caption: API Reference
 
    api/decorator
@@ -122,9 +134,9 @@ Supported Cluster Types
 +----------------+------------------+------------------------+
 | **SSH**        | ✅ Full Support  | Direct execution       |
 +----------------+------------------+------------------------+
-| **SGE**        | 🚧 In Progress   | Basic implementation   |
+| **SGE**        | ⚡ Nearly Ready  | Job submission works, status monitoring pending |
 +----------------+------------------+------------------------+
-| **Kubernetes** | 🚧 In Progress   | Basic implementation   |
+| **Kubernetes** | ⚡ Nearly Ready  | Job submission works, status monitoring pending |
 +----------------+------------------+------------------------+
 
 Links

@@ -27,7 +27,12 @@ extensions = [
     "sphinx.ext.intersphinx",
     "sphinx_autodoc_typehints",
     "nbsphinx",
+    "sphinx_wagtail_theme",
 ]
+
+# Add theme to HTML path
+import sphinx_wagtail_theme
+html_theme_path = [sphinx_wagtail_theme.get_html_theme_path()]
 
 templates_path = ["_templates"]
 exclude_patterns = []
@@ -35,16 +40,15 @@ exclude_patterns = []
 # -- Options for HTML output -------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#options-for-html-output
 
-html_theme = "groundwork"
+html_theme = "sphinx_wagtail_theme"
 html_static_path = ["_static"]
 
-# Groundwork theme options
+# Wagtail theme options
 html_theme_options = {
-    "sidebar_width": "240px",
-    "stickysidebar": True,
-    "contribute": True,
-    "github_fork": "ContextLab/clustrix",
-    "github_user": "ContextLab",
+    "project_name": "Clustrix",
+    "github_url": "https://github.com/ContextLab/clustrix",
+    "header_links": "Documentation|API Reference|Tutorials",
+    "footer_links": "GitHub|PyPI|Documentation",
 }
 
 html_title = "Clustrix Documentation"

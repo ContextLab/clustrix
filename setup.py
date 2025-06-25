@@ -55,7 +55,7 @@ setup(
         ],
         "docs": [
             "sphinx>=4.0",
-            "groundwork-sphinx-theme>=1.1.1",
+            "sphinx-wagtail-theme>=6.0.0",
             "sphinx-autodoc-typehints>=1.12",
             "nbsphinx>=0.8",
             "jupyter>=1.0",
@@ -69,7 +69,7 @@ setup(
             "flake8>=3.8",
             "mypy>=0.812",
             "sphinx>=4.0",
-            "groundwork-sphinx-theme>=1.1.1",
+            "sphinx-wagtail-theme>=6.0.0",
             "sphinx-autodoc-typehints>=1.12",
             "nbsphinx>=0.8",
             "jupyter>=1.0",
