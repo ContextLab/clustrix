@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>SSH Remote Execution Tutorial &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Clustrix Basic Usage Tutorial" href="basic_usage.html" />
+            <link rel="prev" title="Kubernetes Tutorial" href="kubernetes_tutorial.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">SSH Remote Execution Tutorial</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrixnotebooks/ssh_tutorial.ipynb" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/notebooks/ssh_tutorial.ipynb.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="SSH-Remote-Execution-Tutorial">
+<h1>SSH Remote Execution Tutorial<a class="headerlink" href="#SSH-Remote-Execution-Tutorial" title="Link to this heading">¶</a></h1>
+<p><a class="reference external" href="https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/notebooks/ssh_tutorial.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
+<p>This tutorial demonstrates how to use Clustrix for simple SSH-based remote execution without a job scheduler. This is perfect for executing functions on remote servers, workstations, or cloud instances.</p>
+<section id="Prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#Prerequisites" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>SSH access to a remote server</p></li>
+<li><p>SSH key-based authentication configured</p></li>
+<li><p>Python installed on the remote server</p></li>
+<li><p>Clustrix installed: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">clustrix</span></code></p></li>
+</ul>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install Clustrix (uncomment if needed)</span>
+<span class="c1"># !pip install clustrix</span>
+
+<span class="kn">import</span> <span class="nn">clustrix</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">configure</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SSH-Configuration">
+<h2>SSH Configuration<a class="headerlink" href="#SSH-Configuration" title="Link to this heading">¶</a></h2>
+<p>Configure Clustrix for SSH-based remote execution:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configure for SSH remote execution</span>
+<span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;your-server.example.com&quot;</span><span class="p">,</span>    <span class="c1"># Replace with your server</span>
+    <span class="n">username</span><span class="o">=</span><span class="s2">&quot;your-username&quot;</span><span class="p">,</span>                  <span class="c1"># Replace with your username</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/id_rsa&quot;</span><span class="p">,</span>                 <span class="c1"># Path to SSH private key</span>
+    <span class="n">port</span><span class="o">=</span><span class="mi">22</span><span class="p">,</span>                                   <span class="c1"># SSH port (default 22)</span>
+
+    <span class="c1"># Remote environment</span>
+    <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/home/your-username/clustrix&quot;</span><span class="p">,</span>  <span class="c1"># Remote working directory</span>
+    <span class="n">python_executable</span><span class="o">=</span><span class="s2">&quot;python3&quot;</span><span class="p">,</span>              <span class="c1"># Python command on remote server</span>
+
+    <span class="c1"># Execution settings</span>
+    <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                   <span class="c1"># Clean up remote files after success</span>
+    <span class="n">max_parallel_jobs</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>                       <span class="c1"># Limit concurrent executions</span>
+
+    <span class="c1"># Optional: Remote environment setup</span>
+    <span class="n">conda_env_name</span><span class="o">=</span><span class="s2">&quot;myenv&quot;</span><span class="p">,</span>                   <span class="c1"># Activate conda environment</span>
+    <span class="c1"># or</span>
+    <span class="c1"># virtualenv_path=&quot;/path/to/venv&quot;,        # Activate virtual environment</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SSH remote execution configured successfully!&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-1:-Basic-Remote-Computation">
+<h2>Example 1: Basic Remote Computation<a class="headerlink" href="#Example-1:-Basic-Remote-Computation" title="Link to this heading">¶</a></h2>
+<p>Execute a simple mathematical computation remotely:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span>
+<span class="k">def</span> <span class="nf">basic_remote_computation</span><span class="p">(</span><span class="n">n</span><span class="o">=</span><span class="mi">1000000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Simple computation executed on remote server.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">math</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+    <span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting computation on remote server at </span><span class="si">{</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Computing sum of squares for </span><span class="si">{</span><span class="n">n</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> numbers&quot;</span><span class="p">)</span>
+
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Compute sum of squares</span>
+    <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">i</span><span class="o">*</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n</span><span class="p">))</span>
+
+    <span class="c1"># Compute some mathematical functions</span>
+    <span class="n">sqrt_total</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">total</span><span class="p">)</span>
+    <span class="n">log_total</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">log</span><span class="p">(</span><span class="n">total</span><span class="p">)</span>
+
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">execution_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;n&#39;</span><span class="p">:</span> <span class="n">n</span><span class="p">,</span>
+        <span class="s1">&#39;sum_of_squares&#39;</span><span class="p">:</span> <span class="n">total</span><span class="p">,</span>
+        <span class="s1">&#39;sqrt_sum&#39;</span><span class="p">:</span> <span class="n">sqrt_total</span><span class="p">,</span>
+        <span class="s1">&#39;log_sum&#39;</span><span class="p">:</span> <span class="n">log_total</span><span class="p">,</span>
+        <span class="s1">&#39;execution_time_seconds&#39;</span><span class="p">:</span> <span class="n">execution_time</span><span class="p">,</span>
+        <span class="s1">&#39;completion_time&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Computation completed in </span><span class="si">{</span><span class="n">execution_time</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">result</span>
+
+<span class="c1"># Execute on remote server</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">basic_remote_computation</span><span class="p">(</span><span class="mi">500000</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">REMOTE COMPUTATION COMPLETE&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Numbers processed: </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;n&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Sum of squares: </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;sum_of_squares&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Square root of sum: </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;sqrt_sum&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Execution time: </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;execution_time_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-2:-Remote-Data-Processing">
+<h2>Example 2: Remote Data Processing<a class="headerlink" href="#Example-2:-Remote-Data-Processing" title="Link to this heading">¶</a></h2>
+<p>Process data files on a remote server:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span>
+<span class="k">def</span> <span class="nf">remote_data_processing</span><span class="p">(</span><span class="n">data_size</span><span class="o">=</span><span class="mi">100000</span><span class="p">,</span> <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;json&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Generate and process data on remote server.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">json</span>
+    <span class="kn">import</span> <span class="nn">csv</span>
+    <span class="kn">import</span> <span class="nn">os</span>
+    <span class="kn">import</span> <span class="nn">tempfile</span>
+    <span class="kn">import</span> <span class="nn">random</span>
+    <span class="kn">import</span> <span class="nn">statistics</span>
+    <span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span><span class="p">,</span> <span class="n">timedelta</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing </span><span class="si">{</span><span class="n">data_size</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> data points on remote server&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Generate synthetic time-series data</span>
+    <span class="k">def</span> <span class="nf">generate_synthetic_data</span><span class="p">(</span><span class="n">size</span><span class="p">):</span>
+        <span class="n">data</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">base_date</span> <span class="o">=</span> <span class="n">datetime</span><span class="p">(</span><span class="mi">2023</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+        <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">size</span><span class="p">):</span>
+            <span class="n">timestamp</span> <span class="o">=</span> <span class="n">base_date</span> <span class="o">+</span> <span class="n">timedelta</span><span class="p">(</span><span class="n">hours</span><span class="o">=</span><span class="n">i</span><span class="p">)</span>
+
+            <span class="c1"># Generate synthetic metrics</span>
+            <span class="n">base_value</span> <span class="o">=</span> <span class="mi">100</span> <span class="o">+</span> <span class="mi">20</span> <span class="o">*</span> <span class="n">random</span><span class="o">.</span><span class="n">sin</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="mf">3.14159</span> <span class="o">*</span> <span class="n">i</span> <span class="o">/</span> <span class="mi">24</span><span class="p">)</span>  <span class="c1"># Daily pattern</span>
+            <span class="n">noise</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">gauss</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">5</span><span class="p">)</span>
+            <span class="n">value</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">base_value</span> <span class="o">+</span> <span class="n">noise</span><span class="p">)</span>
+
+            <span class="n">data_point</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="n">timestamp</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+                <span class="s1">&#39;value&#39;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="n">value</span><span class="p">,</span> <span class="mi">2</span><span class="p">),</span>
+                <span class="s1">&#39;category&#39;</span><span class="p">:</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="s1">&#39;A&#39;</span><span class="p">,</span> <span class="s1">&#39;B&#39;</span><span class="p">,</span> <span class="s1">&#39;C&#39;</span><span class="p">]),</span>
+                <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="n">random</span><span class="o">.</span><span class="n">choice</span><span class="p">([</span><span class="s1">&#39;active&#39;</span><span class="p">,</span> <span class="s1">&#39;inactive&#39;</span><span class="p">])</span> <span class="k">if</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">&gt;</span> <span class="mf">0.1</span> <span class="k">else</span> <span class="s1">&#39;error&#39;</span>
+            <span class="p">}</span>
+            <span class="n">data</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">data_point</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">data</span>
+
+    <span class="c1"># Generate the dataset</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Generating synthetic dataset...&quot;</span><span class="p">)</span>
+    <span class="n">dataset</span> <span class="o">=</span> <span class="n">generate_synthetic_data</span><span class="p">(</span><span class="n">data_size</span><span class="p">)</span>
+
+    <span class="c1"># Process the data</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Processing data...&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Basic statistics</span>
+    <span class="n">values</span> <span class="o">=</span> <span class="p">[</span><span class="n">point</span><span class="p">[</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">]</span>
+
+    <span class="n">stats</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;count&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+        <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">statistics</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+        <span class="s1">&#39;median&#39;</span><span class="p">:</span> <span class="n">statistics</span><span class="o">.</span><span class="n">median</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+        <span class="s1">&#39;stdev&#39;</span><span class="p">:</span> <span class="n">statistics</span><span class="o">.</span><span class="n">stdev</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">values</span><span class="p">),</span>
+        <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="nb">max</span><span class="p">(</span><span class="n">values</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Category analysis</span>
+    <span class="n">category_counts</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="n">status_counts</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
+        <span class="n">category</span> <span class="o">=</span> <span class="n">point</span><span class="p">[</span><span class="s1">&#39;category&#39;</span><span class="p">]</span>
+        <span class="n">status</span> <span class="o">=</span> <span class="n">point</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span>
+
+        <span class="n">category_counts</span><span class="p">[</span><span class="n">category</span><span class="p">]</span> <span class="o">=</span> <span class="n">category_counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">category</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+        <span class="n">status_counts</span><span class="p">[</span><span class="n">status</span><span class="p">]</span> <span class="o">=</span> <span class="n">status_counts</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">status</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+
+    <span class="c1"># Time-based analysis</span>
+    <span class="n">hourly_averages</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">dataset</span><span class="p">:</span>
+        <span class="n">hour</span> <span class="o">=</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromisoformat</span><span class="p">(</span><span class="n">point</span><span class="p">[</span><span class="s1">&#39;timestamp&#39;</span><span class="p">])</span><span class="o">.</span><span class="n">hour</span>
+        <span class="k">if</span> <span class="n">hour</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">hourly_averages</span><span class="p">:</span>
+            <span class="n">hourly_averages</span><span class="p">[</span><span class="n">hour</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">hourly_averages</span><span class="p">[</span><span class="n">hour</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">point</span><span class="p">[</span><span class="s1">&#39;value&#39;</span><span class="p">])</span>
+
+    <span class="c1"># Calculate hourly means</span>
+    <span class="n">hourly_means</span> <span class="o">=</span> <span class="p">{</span><span class="n">hour</span><span class="p">:</span> <span class="n">statistics</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">values</span><span class="p">)</span> <span class="k">for</span> <span class="n">hour</span><span class="p">,</span> <span class="n">values</span> <span class="ow">in</span> <span class="n">hourly_averages</span><span class="o">.</span><span class="n">items</span><span class="p">()}</span>
+    <span class="n">peak_hour</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">hourly_means</span><span class="o">.</span><span class="n">keys</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">h</span><span class="p">])</span>
+    <span class="n">trough_hour</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">hourly_means</span><span class="o">.</span><span class="n">keys</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">h</span><span class="p">:</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">h</span><span class="p">])</span>
+
+    <span class="c1"># Anomaly detection (simple threshold-based)</span>
+    <span class="n">threshold</span> <span class="o">=</span> <span class="n">stats</span><span class="p">[</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">stats</span><span class="p">[</span><span class="s1">&#39;stdev&#39;</span><span class="p">]</span>
+    <span class="n">anomalies</span> <span class="o">=</span> <span class="p">[</span><span class="n">point</span> <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">dataset</span> <span class="k">if</span> <span class="n">point</span><span class="p">[</span><span class="s1">&#39;value&#39;</span><span class="p">]</span> <span class="o">&gt;</span> <span class="n">threshold</span><span class="p">]</span>
+
+    <span class="c1"># Error analysis</span>
+    <span class="n">error_points</span> <span class="o">=</span> <span class="p">[</span><span class="n">point</span> <span class="k">for</span> <span class="n">point</span> <span class="ow">in</span> <span class="n">dataset</span> <span class="k">if</span> <span class="n">point</span><span class="p">[</span><span class="s1">&#39;status&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;error&#39;</span><span class="p">]</span>
+    <span class="n">error_rate</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">error_points</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+
+    <span class="c1"># Save processed data to temporary file</span>
+    <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;.</span><span class="si">{</span><span class="n">output_format</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">delete</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+        <span class="n">output_file</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+
+        <span class="k">if</span> <span class="n">output_format</span> <span class="o">==</span> <span class="s1">&#39;json&#39;</span><span class="p">:</span>
+            <span class="n">json</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">dataset</span><span class="p">,</span> <span class="n">f</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">output_format</span> <span class="o">==</span> <span class="s1">&#39;csv&#39;</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">dataset</span><span class="p">:</span>
+                <span class="n">writer</span> <span class="o">=</span> <span class="n">csv</span><span class="o">.</span><span class="n">DictWriter</span><span class="p">(</span><span class="n">f</span><span class="p">,</span> <span class="n">fieldnames</span><span class="o">=</span><span class="n">dataset</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">keys</span><span class="p">())</span>
+                <span class="n">writer</span><span class="o">.</span><span class="n">writeheader</span><span class="p">()</span>
+                <span class="n">writer</span><span class="o">.</span><span class="n">writerows</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span>
+
+    <span class="n">file_size</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">getsize</span><span class="p">(</span><span class="n">output_file</span><span class="p">)</span>
+
+    <span class="c1"># Cleanup</span>
+    <span class="n">os</span><span class="o">.</span><span class="n">unlink</span><span class="p">(</span><span class="n">output_file</span><span class="p">)</span>
+
+    <span class="n">processing_results</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;data_info&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;total_points&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">),</span>
+            <span class="s1">&#39;output_format&#39;</span><span class="p">:</span> <span class="n">output_format</span><span class="p">,</span>
+            <span class="s1">&#39;file_size_bytes&#39;</span><span class="p">:</span> <span class="n">file_size</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;basic_statistics&#39;</span><span class="p">:</span> <span class="n">stats</span><span class="p">,</span>
+        <span class="s1">&#39;category_distribution&#39;</span><span class="p">:</span> <span class="n">category_counts</span><span class="p">,</span>
+        <span class="s1">&#39;status_distribution&#39;</span><span class="p">:</span> <span class="n">status_counts</span><span class="p">,</span>
+        <span class="s1">&#39;temporal_analysis&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;peak_hour&#39;</span><span class="p">:</span> <span class="n">peak_hour</span><span class="p">,</span>
+            <span class="s1">&#39;trough_hour&#39;</span><span class="p">:</span> <span class="n">trough_hour</span><span class="p">,</span>
+            <span class="s1">&#39;peak_average&#39;</span><span class="p">:</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">peak_hour</span><span class="p">],</span>
+            <span class="s1">&#39;trough_average&#39;</span><span class="p">:</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">trough_hour</span><span class="p">],</span>
+            <span class="s1">&#39;daily_variation&#39;</span><span class="p">:</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">peak_hour</span><span class="p">]</span> <span class="o">-</span> <span class="n">hourly_means</span><span class="p">[</span><span class="n">trough_hour</span><span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;quality_metrics&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;anomalies_detected&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">anomalies</span><span class="p">),</span>
+            <span class="s1">&#39;anomaly_rate_percent&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">anomalies</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span>
+            <span class="s1">&#39;error_rate_percent&#39;</span><span class="p">:</span> <span class="n">error_rate</span><span class="p">,</span>
+            <span class="s1">&#39;data_completeness&#39;</span><span class="p">:</span> <span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span> <span class="o">-</span> <span class="nb">len</span><span class="p">(</span><span class="n">error_points</span><span class="p">))</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">dataset</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;processing_metadata&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;processed_on&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+            <span class="s1">&#39;processing_location&#39;</span><span class="p">:</span> <span class="s1">&#39;remote_server&#39;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">processing_results</span>
+
+<span class="c1"># Process data on remote server</span>
+<span class="n">data_results</span> <span class="o">=</span> <span class="n">remote_data_processing</span><span class="p">(</span><span class="n">data_size</span><span class="o">=</span><span class="mi">50000</span><span class="p">,</span> <span class="n">output_format</span><span class="o">=</span><span class="s2">&quot;json&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">REMOTE DATA PROCESSING COMPLETE&quot;</span><span class="p">)</span>
+<span class="n">data_info</span> <span class="o">=</span> <span class="n">data_results</span><span class="p">[</span><span class="s1">&#39;data_info&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Data points processed: </span><span class="si">{</span><span class="n">data_info</span><span class="p">[</span><span class="s1">&#39;total_points&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Output format: </span><span class="si">{</span><span class="n">data_info</span><span class="p">[</span><span class="s1">&#39;output_format&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generated file size: </span><span class="si">{</span><span class="n">data_info</span><span class="p">[</span><span class="s1">&#39;file_size_bytes&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+
+<span class="n">stats</span> <span class="o">=</span> <span class="n">data_results</span><span class="p">[</span><span class="s1">&#39;basic_statistics&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Statistics:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Mean: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;mean&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Median: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;median&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Std Dev: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;stdev&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Range: </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;min&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">stats</span><span class="p">[</span><span class="s1">&#39;max&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">temporal</span> <span class="o">=</span> <span class="n">data_results</span><span class="p">[</span><span class="s1">&#39;temporal_analysis&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Temporal Analysis:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Peak hour: </span><span class="si">{</span><span class="n">temporal</span><span class="p">[</span><span class="s1">&#39;peak_hour&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:00 (avg: </span><span class="si">{</span><span class="n">temporal</span><span class="p">[</span><span class="s1">&#39;peak_average&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Trough hour: </span><span class="si">{</span><span class="n">temporal</span><span class="p">[</span><span class="s1">&#39;trough_hour&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:00 (avg: </span><span class="si">{</span><span class="n">temporal</span><span class="p">[</span><span class="s1">&#39;trough_average&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Daily variation: </span><span class="si">{</span><span class="n">temporal</span><span class="p">[</span><span class="s1">&#39;daily_variation&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">quality</span> <span class="o">=</span> <span class="n">data_results</span><span class="p">[</span><span class="s1">&#39;quality_metrics&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Data Quality:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Anomalies: </span><span class="si">{</span><span class="n">quality</span><span class="p">[</span><span class="s1">&#39;anomalies_detected&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">quality</span><span class="p">[</span><span class="s1">&#39;anomaly_rate_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Error rate: </span><span class="si">{</span><span class="n">quality</span><span class="p">[</span><span class="s1">&#39;error_rate_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Data completeness: </span><span class="si">{</span><span class="n">quality</span><span class="p">[</span><span class="s1">&#39;data_completeness&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-3:-Remote-File-System-Operations">
+<h2>Example 3: Remote File System Operations<a class="headerlink" href="#Example-3:-Remote-File-System-Operations" title="Link to this heading">¶</a></h2>
+<p>Perform file system operations on the remote server:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span>
+<span class="k">def</span> <span class="nf">remote_filesystem_analysis</span><span class="p">(</span><span class="n">directory_path</span><span class="o">=</span><span class="s2">&quot;/tmp&quot;</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Analyze file system structure on remote server.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">os</span>
+    <span class="kn">import</span> <span class="nn">stat</span>
+    <span class="kn">import</span> <span class="nn">pwd</span>
+    <span class="kn">import</span> <span class="nn">grp</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+    <span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+    <span class="kn">from</span> <span class="nn">collections</span> <span class="kn">import</span> <span class="n">defaultdict</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Analyzing directory: </span><span class="si">{</span><span class="n">directory_path</span><span class="si">}</span><span class="s2"> (max depth: </span><span class="si">{</span><span class="n">max_depth</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">get_file_info</span><span class="p">(</span><span class="n">file_path</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get detailed file information&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">stat_info</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">stat</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
+
+            <span class="c1"># Get owner and group names</span>
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">owner</span> <span class="o">=</span> <span class="n">pwd</span><span class="o">.</span><span class="n">getpwuid</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_uid</span><span class="p">)</span><span class="o">.</span><span class="n">pw_name</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="n">owner</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_uid</span><span class="p">)</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="n">group</span> <span class="o">=</span> <span class="n">grp</span><span class="o">.</span><span class="n">getgrgid</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_gid</span><span class="p">)</span><span class="o">.</span><span class="n">gr_name</span>
+            <span class="k">except</span> <span class="ne">KeyError</span><span class="p">:</span>
+                <span class="n">group</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_gid</span><span class="p">)</span>
+
+            <span class="k">return</span> <span class="p">{</span>
+                <span class="s1">&#39;size&#39;</span><span class="p">:</span> <span class="n">stat_info</span><span class="o">.</span><span class="n">st_size</span><span class="p">,</span>
+                <span class="s1">&#39;owner&#39;</span><span class="p">:</span> <span class="n">owner</span><span class="p">,</span>
+                <span class="s1">&#39;group&#39;</span><span class="p">:</span> <span class="n">group</span><span class="p">,</span>
+                <span class="s1">&#39;permissions&#39;</span><span class="p">:</span> <span class="nb">oct</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_mode</span><span class="p">)[</span><span class="o">-</span><span class="mi">3</span><span class="p">:],</span>
+                <span class="s1">&#39;modified_time&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">fromtimestamp</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_mtime</span><span class="p">)</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+                <span class="s1">&#39;is_file&#39;</span><span class="p">:</span> <span class="n">stat</span><span class="o">.</span><span class="n">S_ISREG</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_mode</span><span class="p">),</span>
+                <span class="s1">&#39;is_dir&#39;</span><span class="p">:</span> <span class="n">stat</span><span class="o">.</span><span class="n">S_ISDIR</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_mode</span><span class="p">),</span>
+                <span class="s1">&#39;is_symlink&#39;</span><span class="p">:</span> <span class="n">stat</span><span class="o">.</span><span class="n">S_ISLNK</span><span class="p">(</span><span class="n">stat_info</span><span class="o">.</span><span class="n">st_mode</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="k">except</span> <span class="p">(</span><span class="ne">OSError</span><span class="p">,</span> <span class="ne">PermissionError</span><span class="p">)</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="k">def</span> <span class="nf">analyze_directory</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">current_depth</span><span class="o">=</span><span class="mi">0</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Recursively analyze directory structure&quot;&quot;&quot;</span>
+        <span class="k">if</span> <span class="n">current_depth</span> <span class="o">&gt;</span> <span class="n">max_depth</span><span class="p">:</span>
+            <span class="k">return</span> <span class="p">{}</span>
+
+        <span class="n">analysis</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">path</span><span class="p">,</span>
+            <span class="s1">&#39;depth&#39;</span><span class="p">:</span> <span class="n">current_depth</span><span class="p">,</span>
+            <span class="s1">&#39;contents&#39;</span><span class="p">:</span> <span class="p">[],</span>
+            <span class="s1">&#39;stats&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;total_files&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                <span class="s1">&#39;total_dirs&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                <span class="s1">&#39;total_size&#39;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+                <span class="s1">&#39;file_types&#39;</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">int</span><span class="p">),</span>
+                <span class="s1">&#39;largest_files&#39;</span><span class="p">:</span> <span class="p">[],</span>
+                <span class="s1">&#39;permission_stats&#39;</span><span class="p">:</span> <span class="n">defaultdict</span><span class="p">(</span><span class="nb">int</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">entries</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">listdir</span><span class="p">(</span><span class="n">path</span><span class="p">)</span>
+            <span class="n">entries</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>  <span class="c1"># Sort for consistent output</span>
+
+            <span class="c1"># Limit entries to prevent overwhelming output</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">entries</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">100</span><span class="p">:</span>
+                <span class="n">entries</span> <span class="o">=</span> <span class="n">entries</span><span class="p">[:</span><span class="mi">100</span><span class="p">]</span>
+                <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;truncated&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="kc">True</span>
+
+            <span class="k">for</span> <span class="n">entry</span> <span class="ow">in</span> <span class="n">entries</span><span class="p">:</span>
+                <span class="n">entry_path</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="n">entry</span><span class="p">)</span>
+                <span class="n">file_info</span> <span class="o">=</span> <span class="n">get_file_info</span><span class="p">(</span><span class="n">entry_path</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="s1">&#39;error&#39;</span> <span class="ow">in</span> <span class="n">file_info</span><span class="p">:</span>
+                    <span class="k">continue</span>
+
+                <span class="n">entry_data</span> <span class="o">=</span> <span class="p">{</span>
+                    <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">entry</span><span class="p">,</span>
+                    <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">entry_path</span><span class="p">,</span>
+                    <span class="o">**</span><span class="n">file_info</span>
+                <span class="p">}</span>
+
+                <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;contents&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">entry_data</span><span class="p">)</span>
+
+                <span class="c1"># Update statistics</span>
+                <span class="k">if</span> <span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;is_file&#39;</span><span class="p">]:</span>
+                    <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_files&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+                    <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_size&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;size&#39;</span><span class="p">]</span>
+
+                    <span class="c1"># File extension analysis</span>
+                    <span class="n">_</span><span class="p">,</span> <span class="n">ext</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">path</span><span class="o">.</span><span class="n">splitext</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="n">ext</span><span class="p">:</span>
+                        <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;file_types&#39;</span><span class="p">][</span><span class="n">ext</span><span class="o">.</span><span class="n">lower</span><span class="p">()]</span> <span class="o">+=</span> <span class="mi">1</span>
+                    <span class="k">else</span><span class="p">:</span>
+                        <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;file_types&#39;</span><span class="p">][</span><span class="s1">&#39;no_extension&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+                    <span class="c1"># Track largest files</span>
+                    <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;largest_files&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                        <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="n">entry</span><span class="p">,</span>
+                        <span class="s1">&#39;size&#39;</span><span class="p">:</span> <span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;size&#39;</span><span class="p">],</span>
+                        <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">entry_path</span>
+                    <span class="p">})</span>
+
+                <span class="k">elif</span> <span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;is_dir&#39;</span><span class="p">]:</span>
+                    <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_dirs&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+                    <span class="c1"># Recurse into subdirectory</span>
+                    <span class="k">if</span> <span class="n">current_depth</span> <span class="o">&lt;</span> <span class="n">max_depth</span><span class="p">:</span>
+                        <span class="n">subdir_analysis</span> <span class="o">=</span> <span class="n">analyze_directory</span><span class="p">(</span><span class="n">entry_path</span><span class="p">,</span> <span class="n">current_depth</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">subdir_analysis</span><span class="p">:</span>
+                            <span class="c1"># Aggregate subdirectory stats</span>
+                            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_files&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">subdir_analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_files&#39;</span><span class="p">]</span>
+                            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_dirs&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">subdir_analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_dirs&#39;</span><span class="p">]</span>
+                            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_size&#39;</span><span class="p">]</span> <span class="o">+=</span> <span class="n">subdir_analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;total_size&#39;</span><span class="p">]</span>
+
+                <span class="c1"># Permission statistics</span>
+                <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;permission_stats&#39;</span><span class="p">][</span><span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;permissions&#39;</span><span class="p">]]</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="c1"># Sort largest files</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;largest_files&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s1">&#39;size&#39;</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;largest_files&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;largest_files&#39;</span><span class="p">][:</span><span class="mi">10</span><span class="p">]</span>  <span class="c1"># Top 10</span>
+
+            <span class="c1"># Convert defaultdict to regular dict for JSON serialization</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;file_types&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;file_types&#39;</span><span class="p">])</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;permission_stats&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">dict</span><span class="p">(</span><span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">][</span><span class="s1">&#39;permission_stats&#39;</span><span class="p">])</span>
+
+        <span class="k">except</span> <span class="ne">PermissionError</span><span class="p">:</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;Permission denied accessing </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">&quot;</span>
+        <span class="k">except</span> <span class="ne">OSError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">analysis</span><span class="p">[</span><span class="s1">&#39;error&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;OS error accessing </span><span class="si">{</span><span class="n">path</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+
+        <span class="k">return</span> <span class="n">analysis</span>
+
+    <span class="c1"># Get system information</span>
+    <span class="k">def</span> <span class="nf">get_system_info</span><span class="p">():</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get basic system information&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">platform</span>
+        <span class="kn">import</span> <span class="nn">shutil</span>
+
+        <span class="c1"># Disk usage for the analyzed directory</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">disk_usage</span> <span class="o">=</span> <span class="n">shutil</span><span class="o">.</span><span class="n">disk_usage</span><span class="p">(</span><span class="n">directory_path</span><span class="p">)</span>
+            <span class="n">disk_info</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;total_bytes&#39;</span><span class="p">:</span> <span class="n">disk_usage</span><span class="o">.</span><span class="n">total</span><span class="p">,</span>
+                <span class="s1">&#39;used_bytes&#39;</span><span class="p">:</span> <span class="n">disk_usage</span><span class="o">.</span><span class="n">used</span><span class="p">,</span>
+                <span class="s1">&#39;free_bytes&#39;</span><span class="p">:</span> <span class="n">disk_usage</span><span class="o">.</span><span class="n">free</span><span class="p">,</span>
+                <span class="s1">&#39;used_percent&#39;</span><span class="p">:</span> <span class="p">(</span><span class="n">disk_usage</span><span class="o">.</span><span class="n">used</span> <span class="o">/</span> <span class="n">disk_usage</span><span class="o">.</span><span class="n">total</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+            <span class="p">}</span>
+        <span class="k">except</span> <span class="ne">OSError</span><span class="p">:</span>
+            <span class="n">disk_info</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;Could not get disk usage&#39;</span><span class="p">}</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;hostname&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">node</span><span class="p">(),</span>
+            <span class="s1">&#39;system&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">(),</span>
+            <span class="s1">&#39;release&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">release</span><span class="p">(),</span>
+            <span class="s1">&#39;machine&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">machine</span><span class="p">(),</span>
+            <span class="s1">&#39;python_version&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">python_version</span><span class="p">(),</span>
+            <span class="s1">&#39;disk_usage&#39;</span><span class="p">:</span> <span class="n">disk_info</span><span class="p">,</span>
+            <span class="s1">&#39;current_user&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;USER&#39;</span><span class="p">,</span> <span class="s1">&#39;unknown&#39;</span><span class="p">),</span>
+            <span class="s1">&#39;home_directory&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HOME&#39;</span><span class="p">,</span> <span class="s1">&#39;unknown&#39;</span><span class="p">),</span>
+            <span class="s1">&#39;working_directory&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">getcwd</span><span class="p">()</span>
+        <span class="p">}</span>
+
+    <span class="c1"># Perform the analysis</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting filesystem analysis...&quot;</span><span class="p">)</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="n">directory_analysis</span> <span class="o">=</span> <span class="n">analyze_directory</span><span class="p">(</span><span class="n">directory_path</span><span class="p">)</span>
+    <span class="n">system_info</span> <span class="o">=</span> <span class="n">get_system_info</span><span class="p">()</span>
+
+    <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">analysis_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="c1"># Summary statistics</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;analysis_parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;target_directory&#39;</span><span class="p">:</span> <span class="n">directory_path</span><span class="p">,</span>
+            <span class="s1">&#39;max_depth&#39;</span><span class="p">:</span> <span class="n">max_depth</span><span class="p">,</span>
+            <span class="s1">&#39;analysis_time_seconds&#39;</span><span class="p">:</span> <span class="n">analysis_time</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;directory_summary&#39;</span><span class="p">:</span> <span class="n">directory_analysis</span><span class="p">[</span><span class="s1">&#39;stats&#39;</span><span class="p">]</span> <span class="k">if</span> <span class="s1">&#39;stats&#39;</span> <span class="ow">in</span> <span class="n">directory_analysis</span> <span class="k">else</span> <span class="p">{},</span>
+        <span class="s1">&#39;system_information&#39;</span><span class="p">:</span> <span class="n">system_info</span><span class="p">,</span>
+        <span class="s1">&#39;analysis_metadata&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;completed_at&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+            <span class="s1">&#39;analysis_location&#39;</span><span class="p">:</span> <span class="s1">&#39;remote_server&#39;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Include sample of directory contents (first 20 items)</span>
+    <span class="k">if</span> <span class="s1">&#39;contents&#39;</span> <span class="ow">in</span> <span class="n">directory_analysis</span><span class="p">:</span>
+        <span class="n">summary</span><span class="p">[</span><span class="s1">&#39;sample_contents&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">directory_analysis</span><span class="p">[</span><span class="s1">&#39;contents&#39;</span><span class="p">][:</span><span class="mi">20</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Filesystem analysis completed in </span><span class="si">{</span><span class="n">analysis_time</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">summary</span>
+
+<span class="c1"># Analyze remote filesystem</span>
+<span class="n">fs_results</span> <span class="o">=</span> <span class="n">remote_filesystem_analysis</span><span class="p">(</span><span class="n">directory_path</span><span class="o">=</span><span class="s2">&quot;/usr/local&quot;</span><span class="p">,</span> <span class="n">max_depth</span><span class="o">=</span><span class="mi">2</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">REMOTE FILESYSTEM ANALYSIS COMPLETE&quot;</span><span class="p">)</span>
+<span class="n">params</span> <span class="o">=</span> <span class="n">fs_results</span><span class="p">[</span><span class="s1">&#39;analysis_parameters&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Directory analyzed: </span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;target_directory&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Max depth: </span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;max_depth&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Analysis time: </span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s1">&#39;analysis_time_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="s1">&#39;directory_summary&#39;</span> <span class="ow">in</span> <span class="n">fs_results</span> <span class="ow">and</span> <span class="n">fs_results</span><span class="p">[</span><span class="s1">&#39;directory_summary&#39;</span><span class="p">]:</span>
+    <span class="n">summary</span> <span class="o">=</span> <span class="n">fs_results</span><span class="p">[</span><span class="s1">&#39;directory_summary&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Directory Summary:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total files: </span><span class="si">{</span><span class="n">summary</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;total_files&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total directories: </span><span class="si">{</span><span class="n">summary</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;total_dirs&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total size: </span><span class="si">{</span><span class="n">summary</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;total_size&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">0</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="s1">&#39;largest_files&#39;</span> <span class="ow">in</span> <span class="n">summary</span> <span class="ow">and</span> <span class="n">summary</span><span class="p">[</span><span class="s1">&#39;largest_files&#39;</span><span class="p">]:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Largest files:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">file_info</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;largest_files&#39;</span><span class="p">][:</span><span class="mi">5</span><span class="p">],</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">file_info</span><span class="p">[</span><span class="s1">&#39;size&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="s1">&#39;file_types&#39;</span> <span class="ow">in</span> <span class="n">summary</span> <span class="ow">and</span> <span class="n">summary</span><span class="p">[</span><span class="s1">&#39;file_types&#39;</span><span class="p">]:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">File types:&quot;</span><span class="p">)</span>
+        <span class="n">sorted_types</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;file_types&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">reverse</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">ext</span><span class="p">,</span> <span class="n">count</span> <span class="ow">in</span> <span class="n">sorted_types</span><span class="p">[:</span><span class="mi">5</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">ext</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">count</span><span class="si">}</span><span class="s2"> files&quot;</span><span class="p">)</span>
+
+<span class="n">sys_info</span> <span class="o">=</span> <span class="n">fs_results</span><span class="p">[</span><span class="s1">&#39;system_information&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">System Information:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Hostname: </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;hostname&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  OS: </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;system&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;release&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Architecture: </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;machine&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Python: </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;python_version&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Current user: </span><span class="si">{</span><span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;current_user&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="s1">&#39;disk_usage&#39;</span> <span class="ow">in</span> <span class="n">sys_info</span> <span class="ow">and</span> <span class="s1">&#39;error&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;disk_usage&#39;</span><span class="p">]:</span>
+    <span class="n">disk</span> <span class="o">=</span> <span class="n">sys_info</span><span class="p">[</span><span class="s1">&#39;disk_usage&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Disk Usage:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total: </span><span class="si">{</span><span class="n">disk</span><span class="p">[</span><span class="s1">&#39;total_bytes&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Used: </span><span class="si">{</span><span class="n">disk</span><span class="p">[</span><span class="s1">&#39;used_bytes&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes (</span><span class="si">{</span><span class="n">disk</span><span class="p">[</span><span class="s1">&#39;used_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Free: </span><span class="si">{</span><span class="n">disk</span><span class="p">[</span><span class="s1">&#39;free_bytes&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> bytes&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-4:-Remote-Environment-Testing">
+<h2>Example 4: Remote Environment Testing<a class="headerlink" href="#Example-4:-Remote-Environment-Testing" title="Link to this heading">¶</a></h2>
+<p>Test the remote Python environment and available packages:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span>
+<span class="k">def</span> <span class="nf">test_remote_environment</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Test and report on the remote Python environment.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">sys</span>
+    <span class="kn">import</span> <span class="nn">os</span>
+    <span class="kn">import</span> <span class="nn">platform</span>
+    <span class="kn">import</span> <span class="nn">subprocess</span>
+    <span class="kn">import</span> <span class="nn">importlib</span>
+    <span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Testing remote Python environment...&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Basic Python information</span>
+    <span class="n">python_info</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;version&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">version</span><span class="p">,</span>
+        <span class="s1">&#39;version_info&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;major&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="o">.</span><span class="n">major</span><span class="p">,</span>
+            <span class="s1">&#39;minor&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="o">.</span><span class="n">minor</span><span class="p">,</span>
+            <span class="s1">&#39;micro&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">version_info</span><span class="o">.</span><span class="n">micro</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;executable&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span>
+        <span class="s1">&#39;platform&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">platform</span><span class="p">,</span>
+        <span class="s1">&#39;path&#39;</span><span class="p">:</span> <span class="n">sys</span><span class="o">.</span><span class="n">path</span><span class="p">[:</span><span class="mi">5</span><span class="p">],</span>  <span class="c1"># First 5 path entries</span>
+    <span class="p">}</span>
+
+    <span class="c1"># System information</span>
+    <span class="n">system_info</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;hostname&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">node</span><span class="p">(),</span>
+        <span class="s1">&#39;system&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">system</span><span class="p">(),</span>
+        <span class="s1">&#39;release&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">release</span><span class="p">(),</span>
+        <span class="s1">&#39;version&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">version</span><span class="p">(),</span>
+        <span class="s1">&#39;machine&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">machine</span><span class="p">(),</span>
+        <span class="s1">&#39;processor&#39;</span><span class="p">:</span> <span class="n">platform</span><span class="o">.</span><span class="n">processor</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Environment variables (selected)</span>
+    <span class="n">env_vars</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;USER&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;USER&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;HOME&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;HOME&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;PATH&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PATH&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">)[:</span><span class="mi">200</span><span class="p">]</span> <span class="o">+</span> <span class="s1">&#39;...&#39;</span><span class="p">,</span>  <span class="c1"># Truncate PATH</span>
+        <span class="s1">&#39;SHELL&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;SHELL&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;LANG&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;LANG&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;PWD&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PWD&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">),</span>
+        <span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">:</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;PYTHONPATH&#39;</span><span class="p">,</span> <span class="s1">&#39;not_set&#39;</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Test common packages</span>
+    <span class="n">common_packages</span> <span class="o">=</span> <span class="p">[</span>
+        <span class="s1">&#39;numpy&#39;</span><span class="p">,</span> <span class="s1">&#39;pandas&#39;</span><span class="p">,</span> <span class="s1">&#39;scipy&#39;</span><span class="p">,</span> <span class="s1">&#39;matplotlib&#39;</span><span class="p">,</span> <span class="s1">&#39;sklearn&#39;</span><span class="p">,</span> <span class="s1">&#39;requests&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;flask&#39;</span><span class="p">,</span> <span class="s1">&#39;django&#39;</span><span class="p">,</span> <span class="s1">&#39;pytest&#39;</span><span class="p">,</span> <span class="s1">&#39;jupyter&#39;</span><span class="p">,</span> <span class="s1">&#39;ipython&#39;</span><span class="p">,</span> <span class="s1">&#39;click&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;yaml&#39;</span><span class="p">,</span> <span class="s1">&#39;json&#39;</span><span class="p">,</span> <span class="s1">&#39;csv&#39;</span><span class="p">,</span> <span class="s1">&#39;sqlite3&#39;</span><span class="p">,</span> <span class="s1">&#39;pickle&#39;</span><span class="p">,</span> <span class="s1">&#39;datetime&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;os&#39;</span><span class="p">,</span> <span class="s1">&#39;sys&#39;</span><span class="p">,</span> <span class="s1">&#39;subprocess&#39;</span><span class="p">,</span> <span class="s1">&#39;threading&#39;</span><span class="p">,</span> <span class="s1">&#39;multiprocessing&#39;</span>
+    <span class="p">]</span>
+
+    <span class="n">package_status</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="k">for</span> <span class="n">package</span> <span class="ow">in</span> <span class="n">common_packages</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">module</span> <span class="o">=</span> <span class="n">importlib</span><span class="o">.</span><span class="n">import_module</span><span class="p">(</span><span class="n">package</span><span class="p">)</span>
+            <span class="n">version</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="s1">&#39;__version__&#39;</span><span class="p">,</span> <span class="s1">&#39;unknown&#39;</span><span class="p">)</span>
+            <span class="n">package_status</span><span class="p">[</span><span class="n">package</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;available&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+                <span class="s1">&#39;version&#39;</span><span class="p">:</span> <span class="n">version</span><span class="p">,</span>
+                <span class="s1">&#39;location&#39;</span><span class="p">:</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">module</span><span class="p">,</span> <span class="s1">&#39;__file__&#39;</span><span class="p">,</span> <span class="s1">&#39;built-in&#39;</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="k">except</span> <span class="ne">ImportError</span><span class="p">:</span>
+            <span class="n">package_status</span><span class="p">[</span><span class="n">package</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;available&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="s1">&#39;Not installed&#39;</span>
+            <span class="p">}</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="n">package_status</span><span class="p">[</span><span class="n">package</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;available&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+                <span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+            <span class="p">}</span>
+
+    <span class="c1"># Get pip list (if available)</span>
+    <span class="n">pip_packages</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">(</span>
+            <span class="p">[</span><span class="n">sys</span><span class="o">.</span><span class="n">executable</span><span class="p">,</span> <span class="s1">&#39;-m&#39;</span><span class="p">,</span> <span class="s1">&#39;pip&#39;</span><span class="p">,</span> <span class="s1">&#39;list&#39;</span><span class="p">,</span> <span class="s1">&#39;--format=freeze&#39;</span><span class="p">],</span>
+            <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+            <span class="n">timeout</span><span class="o">=</span><span class="mi">30</span>
+        <span class="p">)</span>
+        <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="n">pip_packages</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)[:</span><span class="mi">20</span><span class="p">]</span>  <span class="c1"># First 20 packages</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">pip_packages</span> <span class="o">=</span> <span class="p">[</span><span class="sa">f</span><span class="s2">&quot;Error getting pip list: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">]</span>
+
+    <span class="c1"># Test basic functionality</span>
+    <span class="n">functionality_tests</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># Test file I/O</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">tempfile</span>
+        <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">delete</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="s2">&quot;test&quot;</span><span class="p">)</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">flush</span><span class="p">()</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;file_io&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;ok&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="s1">&#39;File I/O working&#39;</span><span class="p">}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;file_io&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="c1"># Test networking</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">socket</span>
+        <span class="n">socket</span><span class="o">.</span><span class="n">gethostname</span><span class="p">()</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;networking&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;ok&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="s1">&#39;Basic networking working&#39;</span><span class="p">}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;networking&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="c1"># Test multiprocessing</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">multiprocessing</span>
+        <span class="n">cpu_count</span> <span class="o">=</span> <span class="n">multiprocessing</span><span class="o">.</span><span class="n">cpu_count</span><span class="p">()</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;multiprocessing&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;ok&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;Multiprocessing available, </span><span class="si">{</span><span class="n">cpu_count</span><span class="si">}</span><span class="s1"> CPUs detected&#39;</span>
+        <span class="p">}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;multiprocessing&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="c1"># Test numerical computing</span>
+    <span class="n">numerical_test</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;ok&#39;</span><span class="p">,</span> <span class="s1">&#39;tests&#39;</span><span class="p">:</span> <span class="p">[]}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Basic math</span>
+        <span class="kn">import</span> <span class="nn">math</span>
+        <span class="n">result</span> <span class="o">=</span> <span class="n">math</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="mi">16</span><span class="p">)</span>
+        <span class="n">numerical_test</span><span class="p">[</span><span class="s1">&#39;tests&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;math.sqrt(16) = </span><span class="si">{</span><span class="n">result</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># NumPy if available</span>
+        <span class="k">if</span> <span class="n">package_status</span><span class="p">[</span><span class="s1">&#39;numpy&#39;</span><span class="p">][</span><span class="s1">&#39;available&#39;</span><span class="p">]:</span>
+            <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+            <span class="n">arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">([</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">5</span><span class="p">])</span>
+            <span class="n">mean_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">arr</span><span class="p">)</span>
+            <span class="n">numerical_test</span><span class="p">[</span><span class="s1">&#39;tests&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;numpy.mean([1,2,3,4,5]) = </span><span class="si">{</span><span class="n">mean_val</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;numerical_computing&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">numerical_test</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">functionality_tests</span><span class="p">[</span><span class="s1">&#39;numerical_computing&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;status&#39;</span><span class="p">:</span> <span class="s1">&#39;error&#39;</span><span class="p">,</span> <span class="s1">&#39;message&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="c1"># Performance test</span>
+    <span class="n">performance_test</span> <span class="o">=</span> <span class="p">{}</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+        <span class="c1"># Simple computation benchmark</span>
+        <span class="n">total</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">i</span><span class="o">*</span><span class="n">i</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100000</span><span class="p">))</span>
+
+        <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">computation_time</span> <span class="o">=</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span>
+
+        <span class="n">performance_test</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;computation_time_seconds&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
+            <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">total</span><span class="p">,</span>
+            <span class="s1">&#39;operations_per_second&#39;</span><span class="p">:</span> <span class="mi">100000</span> <span class="o">/</span> <span class="n">computation_time</span> <span class="k">if</span> <span class="n">computation_time</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="p">}</span>
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="n">performance_test</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;error&#39;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
+
+    <span class="n">environment_report</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;test_metadata&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;test_timestamp&#39;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+            <span class="s1">&#39;test_location&#39;</span><span class="p">:</span> <span class="s1">&#39;remote_server&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;python_information&#39;</span><span class="p">:</span> <span class="n">python_info</span><span class="p">,</span>
+        <span class="s1">&#39;system_information&#39;</span><span class="p">:</span> <span class="n">system_info</span><span class="p">,</span>
+        <span class="s1">&#39;environment_variables&#39;</span><span class="p">:</span> <span class="n">env_vars</span><span class="p">,</span>
+        <span class="s1">&#39;package_availability&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;total_tested&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">common_packages</span><span class="p">),</span>
+            <span class="s1">&#39;available&#39;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">pkg</span> <span class="ow">in</span> <span class="n">package_status</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="n">pkg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;available&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)),</span>
+            <span class="s1">&#39;unavailable&#39;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">pkg</span> <span class="ow">in</span> <span class="n">package_status</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">pkg</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;available&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)),</span>
+            <span class="s1">&#39;details&#39;</span><span class="p">:</span> <span class="n">package_status</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;installed_packages_sample&#39;</span><span class="p">:</span> <span class="n">pip_packages</span><span class="p">,</span>
+        <span class="s1">&#39;functionality_tests&#39;</span><span class="p">:</span> <span class="n">functionality_tests</span><span class="p">,</span>
+        <span class="s1">&#39;performance_benchmark&#39;</span><span class="p">:</span> <span class="n">performance_test</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Remote environment testing completed&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">environment_report</span>
+
+<span class="c1"># Test remote environment</span>
+<span class="n">env_results</span> <span class="o">=</span> <span class="n">test_remote_environment</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">REMOTE ENVIRONMENT TEST COMPLETE&quot;</span><span class="p">)</span>
+<span class="n">python_info</span> <span class="o">=</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;python_information&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Python version: </span><span class="si">{</span><span class="n">python_info</span><span class="p">[</span><span class="s1">&#39;version_info&#39;</span><span class="p">][</span><span class="s1">&#39;major&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">python_info</span><span class="p">[</span><span class="s1">&#39;version_info&#39;</span><span class="p">][</span><span class="s1">&#39;minor&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.</span><span class="si">{</span><span class="n">python_info</span><span class="p">[</span><span class="s1">&#39;version_info&#39;</span><span class="p">][</span><span class="s1">&#39;micro&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Python executable: </span><span class="si">{</span><span class="n">python_info</span><span class="p">[</span><span class="s1">&#39;executable&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">system_info</span> <span class="o">=</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;system_information&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">System: </span><span class="si">{</span><span class="n">system_info</span><span class="p">[</span><span class="s1">&#39;system&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">system_info</span><span class="p">[</span><span class="s1">&#39;release&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Hostname: </span><span class="si">{</span><span class="n">system_info</span><span class="p">[</span><span class="s1">&#39;hostname&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Architecture: </span><span class="si">{</span><span class="n">system_info</span><span class="p">[</span><span class="s1">&#39;machine&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">pkg_info</span> <span class="o">=</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;package_availability&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Package Availability:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Available: </span><span class="si">{</span><span class="n">pkg_info</span><span class="p">[</span><span class="s1">&#39;available&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">pkg_info</span><span class="p">[</span><span class="s1">&#39;total_tested&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Unavailable: </span><span class="si">{</span><span class="n">pkg_info</span><span class="p">[</span><span class="s1">&#39;unavailable&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">pkg_info</span><span class="p">[</span><span class="s1">&#39;total_tested&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Show some available packages</span>
+<span class="n">available_packages</span> <span class="o">=</span> <span class="p">[</span><span class="n">name</span> <span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">pkg_info</span><span class="p">[</span><span class="s1">&#39;details&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">info</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;available&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Key packages available: </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">available_packages</span><span class="p">[:</span><span class="mi">10</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">func_tests</span> <span class="o">=</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;functionality_tests&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Functionality Tests:&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">test_name</span><span class="p">,</span> <span class="n">test_result</span> <span class="ow">in</span> <span class="n">func_tests</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="n">status</span> <span class="o">=</span> <span class="n">test_result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;status&#39;</span><span class="p">,</span> <span class="s1">&#39;unknown&#39;</span><span class="p">)</span>
+    <span class="n">message</span> <span class="o">=</span> <span class="n">test_result</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;message&#39;</span><span class="p">,</span> <span class="s1">&#39;No message&#39;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">test_name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">status</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2"> - </span><span class="si">{</span><span class="n">message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="s1">&#39;error&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;performance_benchmark&#39;</span><span class="p">]:</span>
+    <span class="n">perf</span> <span class="o">=</span> <span class="n">env_results</span><span class="p">[</span><span class="s1">&#39;performance_benchmark&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Performance Benchmark:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Computation time: </span><span class="si">{</span><span class="n">perf</span><span class="p">[</span><span class="s1">&#39;computation_time_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Operations per second: </span><span class="si">{</span><span class="n">perf</span><span class="p">[</span><span class="s1">&#39;operations_per_second&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,.0f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SSH-Configuration-Management">
+<h2>SSH Configuration Management<a class="headerlink" href="#SSH-Configuration-Management" title="Link to this heading">¶</a></h2>
+<p>Best practices for SSH configuration with Clustrix:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">ssh_configuration_examples</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Examples of different SSH configuration patterns.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">configurations</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;basic_ssh&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Basic SSH connection with key authentication&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;server.example.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;user&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/id_rsa&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;port&#39;</span><span class="p">:</span> <span class="mi">22</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Single remote server or workstation&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;custom_port&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH connection with custom port&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;secure-server.example.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;admin&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/admin_key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;port&#39;</span><span class="p">:</span> <span class="mi">2222</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Servers with non-standard SSH ports&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;password_auth&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with password authentication (less secure)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;legacy-server.example.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;olduser&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;password&#39;</span><span class="p">:</span> <span class="s1">&#39;your-password&#39;</span>  <span class="c1"># Not recommended for production</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Legacy systems without key-based auth&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;conda_environment&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with conda environment activation&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;ml-server.example.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;researcher&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/research_key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;conda_env_name&#39;</span><span class="p">:</span> <span class="s1">&#39;pytorch&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;python_executable&#39;</span><span class="p">:</span> <span class="s1">&#39;python&#39;</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Servers with conda environments for specific packages&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;virtual_environment&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with Python virtual environment&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;dev-server.example.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;developer&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/dev_key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;virtualenv_path&#39;</span><span class="p">:</span> <span class="s1">&#39;/home/developer/venv/myproject&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;python_executable&#39;</span><span class="p">:</span> <span class="s1">&#39;python3&#39;</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Development servers with project-specific environments&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;cloud_instance&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Cloud instance with specific configuration&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;ec2-12-34-56-78.compute-1.amazonaws.com&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;ubuntu&#39;</span><span class="p">,</span>  <span class="c1"># Common for Ubuntu AMIs</span>
+                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/aws-keypair.pem&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;remote_work_dir&#39;</span><span class="p">:</span> <span class="s1">&#39;/tmp/clustrix&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;cleanup_on_success&#39;</span><span class="p">:</span> <span class="kc">True</span>
+            <span class="p">},</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;AWS, GCP, or Azure cloud instances&#39;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SSH Configuration Examples:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">50</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">config_name</span><span class="p">,</span> <span class="n">config_info</span> <span class="ow">in</span> <span class="n">configurations</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">config_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Description: </span><span class="si">{</span><span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Use case: </span><span class="si">{</span><span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;use_case&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Configuration:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;config&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">configurations</span>
+
+<span class="k">def</span> <span class="nf">ssh_security_best_practices</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    SSH security best practices for Clustrix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">practices</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;key_management&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH Key Management&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Use strong, unique SSH keys for each server/project&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Prefer Ed25519 keys: ssh-keygen -t ed25519 -f ~/.ssh/clustrix_key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use RSA 4096-bit keys if Ed25519 not supported: ssh-keygen -t rsa -b 4096&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Protect private keys with strong passphrases&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Set proper permissions: chmod 600 ~/.ssh/private_key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Regularly rotate keys (every 6-12 months)&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;connection_security&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Connection Security&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Always use key-based authentication, avoid passwords&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Disable SSH agent forwarding unless necessary&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use SSH config files for consistent settings&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Enable SSH connection multiplexing for efficiency&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Set reasonable connection timeouts&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use non-standard SSH ports when possible&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;server_hardening&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Server-Side Security&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Disable SSH password authentication&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Disable SSH root login&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use fail2ban or similar intrusion prevention&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Regularly update SSH server software&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Monitor SSH access logs&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use firewall rules to restrict SSH access&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;clustrix_specific&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Clustrix-Specific Security&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Use dedicated SSH keys for Clustrix operations&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Restrict remote work directories to user-specific paths&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Enable cleanup_on_success to remove temporary files&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Limit max_parallel_jobs to prevent resource exhaustion&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Monitor remote execution logs for anomalies&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use isolated Python environments for execution&#39;</span>
+            <span class="p">]</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">SSH Security Best Practices:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">category</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">practices</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">practice</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;practices&#39;</span><span class="p">],</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">practice</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">practices</span>
+
+<span class="k">def</span> <span class="nf">ssh_troubleshooting_guide</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Common SSH issues and solutions.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">issues</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;connection_refused&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Connection refused or timeout&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Check if SSH service is running on remote server&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Verify correct hostname/IP address&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Check if firewall is blocking SSH port&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Confirm SSH port number (default 22)&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Test connection with: ssh -v user@hostname&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;permission_denied&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Permission denied (publickey)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Verify SSH key is added to remote ~/.ssh/authorized_keys&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Check SSH key permissions (600 for private key)&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Ensure correct username for the server&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Verify key file path in Clustrix configuration&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Test key with: ssh -i ~/.ssh/key_file user@hostname&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;host_key_verification&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Host key verification failed&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Add host to known_hosts: ssh-keyscan hostname &gt;&gt; ~/.ssh/known_hosts&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Remove old host key: ssh-keygen -R hostname&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Connect manually first to accept host key&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Check if hostname/IP changed&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Verify server authenticity before accepting&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;python_not_found&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Python executable not found on remote server&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Specify correct python_executable in configuration&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Check if Python is installed: which python3&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Add Python to PATH on remote server&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use full path: /usr/bin/python3&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Install Python if missing&#39;</span>
+            <span class="p">]</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;environment_issues&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Python environment or package issues&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s1">&#39;Verify conda/virtualenv paths are correct&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Check environment activation commands&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Install missing packages in remote environment&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Use pip install --user for user-level packages&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;Test environment manually: ssh user@host &quot;source env/bin/activate &amp;&amp; python&quot;&#39;</span>
+            <span class="p">]</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">SSH Troubleshooting Guide:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">30</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">issue_name</span><span class="p">,</span> <span class="n">issue_info</span> <span class="ow">in</span> <span class="n">issues</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">issue_info</span><span class="p">[</span><span class="s1">&#39;problem&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">solution</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">issue_info</span><span class="p">[</span><span class="s1">&#39;solutions&#39;</span><span class="p">],</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">solution</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">issues</span>
+
+<span class="c1"># Display all SSH guidance</span>
+<span class="n">ssh_configs</span> <span class="o">=</span> <span class="n">ssh_configuration_examples</span><span class="p">()</span>
+<span class="n">security_practices</span> <span class="o">=</span> <span class="n">ssh_security_best_practices</span><span class="p">()</span>
+<span class="n">troubleshooting</span> <span class="o">=</span> <span class="n">ssh_troubleshooting_guide</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SSH-Connection-Testing">
+<h2>SSH Connection Testing<a class="headerlink" href="#SSH-Connection-Testing" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">test_ssh_connection</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Test SSH connection and basic functionality.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">ClusterExecutor</span>
+
+    <span class="k">try</span><span class="p">:</span>
+        <span class="c1"># Get current configuration</span>
+        <span class="n">config</span> <span class="o">=</span> <span class="n">clustrix</span><span class="o">.</span><span class="n">get_config</span><span class="p">()</span>
+
+        <span class="k">if</span> <span class="n">config</span><span class="o">.</span><span class="n">cluster_type</span> <span class="o">!=</span> <span class="s1">&#39;ssh&#39;</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Current configuration is not for SSH. Please configure for SSH first.&quot;</span><span class="p">)</span>
+            <span class="k">return</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Testing SSH connection...&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Host: </span><span class="si">{</span><span class="n">config</span><span class="o">.</span><span class="n">cluster_host</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Username: </span><span class="si">{</span><span class="n">config</span><span class="o">.</span><span class="n">username</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Port: </span><span class="si">{</span><span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;port&#39;</span><span class="p">,</span><span class="w"> </span><span class="mi">22</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Create executor and test connection</span>
+        <span class="n">executor</span> <span class="o">=</span> <span class="n">ClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">1. Testing SSH connection...&quot;</span><span class="p">)</span>
+        <span class="n">executor</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   ✓ SSH connection successful&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. Testing basic commands...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test hostname</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;hostname&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Remote hostname: </span><span class="si">{</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test whoami</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;whoami&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Remote user: </span><span class="si">{</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test pwd</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;pwd&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Remote working directory: </span><span class="si">{</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3. Testing Python availability...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test Python</span>
+        <span class="n">python_cmd</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s1">&#39;python_executable&#39;</span><span class="p">,</span> <span class="s1">&#39;python3&#39;</span><span class="p">)</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">python_cmd</span><span class="si">}</span><span class="s2"> --version&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Python version: </span><span class="si">{</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">elif</span> <span class="n">stderr</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Python version: </span><span class="si">{</span><span class="n">stderr</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test Python path</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;which </span><span class="si">{</span><span class="n">python_cmd</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Python executable: </span><span class="si">{</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">4. Testing remote work directory...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test work directory creation</span>
+        <span class="n">work_dir</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s1">&#39;remote_work_dir&#39;</span><span class="p">,</span> <span class="s1">&#39;/tmp/clustrix&#39;</span><span class="p">)</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;mkdir -p </span><span class="si">{</span><span class="n">work_dir</span><span class="si">}</span><span class="s2"> &amp;&amp; echo &#39;Directory created&#39;&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;Directory created&quot;</span> <span class="ow">in</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Work directory accessible: </span><span class="si">{</span><span class="n">work_dir</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Test write permissions</span>
+        <span class="n">test_file</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">work_dir</span><span class="si">}</span><span class="s2">/test_file.txt&quot;</span>
+        <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;echo &#39;test&#39; &gt; </span><span class="si">{</span><span class="n">test_file</span><span class="si">}</span><span class="s2"> &amp;&amp; cat </span><span class="si">{</span><span class="n">test_file</span><span class="si">}</span><span class="s2"> &amp;&amp; rm </span><span class="si">{</span><span class="n">test_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="s2">&quot;test&quot;</span> <span class="ow">in</span> <span class="n">stdout</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Write permissions confirmed&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">5. Testing environment activation...&quot;</span><span class="p">)</span>
+
+        <span class="n">conda_env</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s1">&#39;conda_env_name&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+        <span class="n">venv_path</span> <span class="o">=</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s1">&#39;virtualenv_path&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">conda_env</span><span class="p">:</span>
+            <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;conda activate </span><span class="si">{</span><span class="n">conda_env</span><span class="si">}</span><span class="s2"> &amp;&amp; echo &#39;Conda environment activated&#39;&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="s2">&quot;activated&quot;</span> <span class="ow">in</span> <span class="n">stdout</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Conda environment &#39;</span><span class="si">{</span><span class="n">conda_env</span><span class="si">}</span><span class="s2">&#39; activated&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ⚠ Conda environment &#39;</span><span class="si">{</span><span class="n">conda_env</span><span class="si">}</span><span class="s2">&#39; activation failed&quot;</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="n">venv_path</span><span class="p">:</span>
+            <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;source </span><span class="si">{</span><span class="n">venv_path</span><span class="si">}</span><span class="s2">/bin/activate &amp;&amp; echo &#39;Virtual environment activated&#39;&quot;</span><span class="p">)</span>
+            <span class="k">if</span> <span class="s2">&quot;activated&quot;</span> <span class="ow">in</span> <span class="n">stdout</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Virtual environment &#39;</span><span class="si">{</span><span class="n">venv_path</span><span class="si">}</span><span class="s2">&#39; activated&quot;</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ⚠ Virtual environment &#39;</span><span class="si">{</span><span class="n">venv_path</span><span class="si">}</span><span class="s2">&#39; activation failed&quot;</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   - No environment activation configured&quot;</span><span class="p">)</span>
+
+        <span class="n">executor</span><span class="o">.</span><span class="n">disconnect</span><span class="p">()</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✓ All SSH tests completed successfully!&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Your SSH configuration is working correctly with Clustrix.&quot;</span><span class="p">)</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✗ SSH connection test failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Troubleshooting suggestions:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1. Check your SSH configuration&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2. Verify SSH key authentication&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;3. Test manual SSH connection: ssh user@hostname&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;4. Check firewall and network connectivity&quot;</span><span class="p">)</span>
+
+<span class="c1"># Test SSH connection</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SSH Connection Test:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">25</span><span class="p">)</span>
+<span class="n">test_ssh_connection</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Summary">
+<h2>Summary<a class="headerlink" href="#Summary" title="Link to this heading">¶</a></h2>
+<p>This tutorial covered SSH-based remote execution with Clustrix:</p>
+<ol class="arabic simple">
+<li><p><strong>SSH Configuration</strong> - Setting up Clustrix for direct SSH connections</p></li>
+<li><p><strong>Basic Remote Computation</strong> - Simple mathematical operations on remote servers</p></li>
+<li><p><strong>Data Processing</strong> - Generating and analyzing data remotely</p></li>
+<li><p><strong>File System Operations</strong> - Remote directory analysis and system information</p></li>
+<li><p><strong>Environment Testing</strong> - Validating remote Python environments</p></li>
+<li><p><strong>Configuration Management</strong> - Best practices and security guidelines</p></li>
+<li><p><strong>Connection Testing</strong> - Troubleshooting and verification tools</p></li>
+</ol>
+<section id="Key-SSH-Advantages:">
+<h3>Key SSH Advantages:<a class="headerlink" href="#Key-SSH-Advantages:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Simplicity</strong>: No job scheduler complexity, direct execution</p></li>
+<li><p><strong>Flexibility</strong>: Works with any SSH-accessible server or workstation</p></li>
+<li><p><strong>Speed</strong>: Immediate execution without queue waiting times</p></li>
+<li><p><strong>Control</strong>: Direct access to remote file system and environment</p></li>
+<li><p><strong>Debugging</strong>: Easy to test and troubleshoot connection issues</p></li>
+<li><p><strong>Cost-Effective</strong>: Utilize existing servers without additional infrastructure</p></li>
+</ul>
+</section>
+<section id="Best-Practices:">
+<h3>Best Practices:<a class="headerlink" href="#Best-Practices:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Security</strong>: Always use SSH key authentication, never passwords in production</p></li>
+<li><p><strong>Key Management</strong>: Use unique, strong SSH keys with proper permissions</p></li>
+<li><p><strong>Environment Isolation</strong>: Use conda or virtual environments for package management</p></li>
+<li><p><strong>Resource Limits</strong>: Set max_parallel_jobs to prevent overwhelming the server</p></li>
+<li><p><strong>Cleanup</strong>: Enable cleanup_on_success to maintain clean remote directories</p></li>
+<li><p><strong>Monitoring</strong>: Regular checks of remote resource usage and access logs</p></li>
+</ul>
+</section>
+<section id="Use-Cases:">
+<h3>Use Cases:<a class="headerlink" href="#Use-Cases:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Development</strong>: Testing code on different environments</p></li>
+<li><p><strong>Workstations</strong>: Utilizing powerful desktop machines remotely</p></li>
+<li><p><strong>Cloud Instances</strong>: Running computations on cloud VMs</p></li>
+<li><p><strong>Legacy Systems</strong>: Accessing older servers without modern schedulers</p></li>
+<li><p><strong>Personal Computing</strong>: Home lab and personal server utilization</p></li>
+<li><p><strong>Prototyping</strong>: Quick testing before moving to larger cluster systems</p></li>
+</ul>
+</section>
+<section id="When-to-Use-SSH-vs.-Other-Cluster-Types:">
+<h3>When to Use SSH vs. Other Cluster Types:<a class="headerlink" href="#When-to-Use-SSH-vs.-Other-Cluster-Types:" title="Link to this heading">¶</a></h3>
+<p><strong>Choose SSH when</strong>:</p>
+<ul class="simple">
+<li><p>Working with single servers or small clusters</p></li>
+<li><p>Need immediate execution without queuing</p></li>
+<li><p>Prototyping or development work</p></li>
+<li><p>Working with cloud instances or workstations</p></li>
+</ul>
+<p><strong>Choose schedulers (SLURM/PBS/SGE) when</strong>:</p>
+<ul class="simple">
+<li><p>Working with large HPC clusters</p></li>
+<li><p>Need resource management and fair sharing</p></li>
+<li><p>Running production workloads with resource constraints</p></li>
+<li><p>Require advanced scheduling features</p></li>
+</ul>
+<p><strong>Choose Kubernetes when</strong>:</p>
+<ul class="simple">
+<li><p>Need containerized execution environments</p></li>
+<li><p>Require auto-scaling and fault tolerance</p></li>
+<li><p>Working with microservices or cloud-native applications</p></li>
+<li><p>Need orchestration across multiple nodes</p></li>
+</ul>
+</section>
+<section id="Next-Steps:">
+<h3>Next Steps:<a class="headerlink" href="#Next-Steps:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Compare with <a class="reference internal" href="slurm_tutorial.html"><span class="doc">SLURM Tutorial</span></a> for HPC cluster computing</p></li>
+<li><p>Explore <a class="reference internal" href="kubernetes_tutorial.html"><span class="doc">Kubernetes Tutorial</span></a> for containerized execution</p></li>
+<li><p>Review <a class="reference internal" href="../ssh_setup.html"><span class="doc">SSH Setup Guide</span></a> for detailed security configuration</p></li>
+<li><p>Check the <a class="reference internal" href="../api/decorator.html"><span class="doc">API Documentation</span></a> for advanced decorator options</p></li>
+</ul>
+<p>For more information, visit the <a class="reference external" href="https://clustrix.readthedocs.io">Clustrix Documentation</a>.</p>
+</section>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="kubernetes_tutorial.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Kubernetes Tutorial
+    </a>
+    <a class="float-right" href="basic_usage.html" title="Next">
+        Clustrix Basic Usage Tutorial <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">SSH Remote Execution Tutorial</a><ul>
+<li><a class="reference internal" href="#Prerequisites">Prerequisites</a></li>
+<li><a class="reference internal" href="#SSH-Configuration">SSH Configuration</a></li>
+<li><a class="reference internal" href="#Example-1:-Basic-Remote-Computation">Example 1: Basic Remote Computation</a></li>
+<li><a class="reference internal" href="#Example-2:-Remote-Data-Processing">Example 2: Remote Data Processing</a></li>
+<li><a class="reference internal" href="#Example-3:-Remote-File-System-Operations">Example 3: Remote File System Operations</a></li>
+<li><a class="reference internal" href="#Example-4:-Remote-Environment-Testing">Example 4: Remote Environment Testing</a></li>
+<li><a class="reference internal" href="#SSH-Configuration-Management">SSH Configuration Management</a></li>
+<li><a class="reference internal" href="#SSH-Connection-Testing">SSH Connection Testing</a></li>
+<li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Key-SSH-Advantages:">Key SSH Advantages:</a></li>
+<li><a class="reference internal" href="#Best-Practices:">Best Practices:</a></li>
+<li><a class="reference internal" href="#Use-Cases:">Use Cases:</a></li>
+<li><a class="reference internal" href="#When-to-Use-SSH-vs.-Other-Cluster-Types:">When to Use SSH vs. Other Cluster Types:</a></li>
+<li><a class="reference internal" href="#Next-Steps:">Next Steps:</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

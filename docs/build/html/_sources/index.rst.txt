@@ -93,6 +93,18 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Interactive Notebooks
+   
+   notebooks/complete_api_demo
+   notebooks/slurm_tutorial
+   notebooks/pbs_tutorial
+   notebooks/sge_tutorial
+   notebooks/kubernetes_tutorial
+   notebooks/ssh_tutorial
+   notebooks/basic_usage
+
+.. toctree::
+   :maxdepth: 2
    :caption: API Reference
 
    api/decorator
@@ -113,19 +125,19 @@ Table of Contents
 Supported Cluster Types
 -----------------------
 
-+----------------+------------------+------------------------+
-| Cluster Type   | Status           | Notes                  |
-+================+==================+========================+
-| **SLURM**      | ✅ Full Support  | Production ready       |
-+----------------+------------------+------------------------+
-| **PBS/Torque** | ✅ Full Support  | Production ready       |
-+----------------+------------------+------------------------+
-| **SSH**        | ✅ Full Support  | Direct execution       |
-+----------------+------------------+------------------------+
-| **SGE**        | 🚧 In Progress   | Basic implementation   |
-+----------------+------------------+------------------------+
-| **Kubernetes** | 🚧 In Progress   | Basic implementation   |
-+----------------+------------------+------------------------+
++----------------+------------------+----------------------------------+
+| Cluster Type   | Status           | Notes                            |
++================+==================+==================================+
+| **SLURM**      | ✅ Full Support  | Production ready                 |
++----------------+------------------+----------------------------------+
+| **PBS/Torque** | ✅ Full Support  | Production ready                 |
++----------------+------------------+----------------------------------+
+| **SSH**        | ✅ Full Support  | Direct execution                 |
++----------------+------------------+----------------------------------+
+| **SGE**        | ⚡ Nearly Ready  | Job submit works, status pending |
++----------------+------------------+----------------------------------+
+| **Kubernetes** | ⚡ Nearly Ready  | Job submit works, status pending |
++----------------+------------------+----------------------------------+
 
 Links
 -----

@@ -1,45 +1,141 @@
 <!DOCTYPE html>
-
-<html lang="en" data-content_root="./">
-  <head>
+<html class="no-js" lang="en" data-content_root="./">
+<head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <title>Clustrix Documentation &#8212; Clustrix Documentation</title>
-    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=4f649999" />
-    <link rel="stylesheet" type="text/css" href="_static/groundwork.css?v=fc6a0523" />
-    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=554e4187" />
-    <script src="_static/documentation_options.js?v=01f34227"></script>
-    <script src="_static/doctools.js?v=9bcbadda"></script>
-    <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
-    <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
-    <link rel="index" title="Index" href="genindex.html" />
-    <link rel="search" title="Search" href="search.html" />
-    <link rel="next" title="Installation" href="installation.html" /> 
-  </head><body>
-    <div class="related" role="navigation" aria-label="Related">
-      <h3>Navigation</h3>
-      <ul>
-        <li class="right" style="margin-right: 10px">
-          <a href="genindex.html" title="General Index"
-             accesskey="I">index</a></li>
-        <li class="right" >
-          <a href="py-modindex.html" title="Python Module Index"
-             >modules</a> |</li>
-        <li class="right" >
-          <a href="installation.html" title="Installation"
-             accesskey="N">next</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">Clustrix</a> &#187;</li>
-        <li class="nav-item nav-item-this"><a href="">Clustrix Documentation</a></li> 
-      </ul>
-    </div>  
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>Clustrix Documentation &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="genindex.html" />
+            <link rel="search" title="Search" href="search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Installation" href="installation.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="#"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/local_executor.html">Local Executor API</a></li>
+</ul>
 
-    <div class="document">
-      <div class="documentwrapper">
-        <div class="bodywrapper">
-          <div class="body" role="main">
-            
-  <section id="clustrix-documentation">
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="#">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Clustrix Documentation</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrixindex.rst" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="_sources/index.rst.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="clustrix-documentation">
 <h1>Clustrix Documentation<a class="headerlink" href="#clustrix-documentation" title="Link to this heading">¶</a></h1>
 <p>Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.</p>
 <a class="reference external image-reference" href="https://pypi.org/project/clustrix/"><img alt="PyPI version" src="https://img.shields.io/pypi/v/clustrix.svg" />
@@ -125,6 +221,138 @@
 </ul>
 </div>
 <div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#basic-slurm-configuration">Basic SLURM Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#simple-job-execution">Simple Job Execution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#resource-specification">Resource Specification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#parallel-processing-examples">Parallel Processing Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#job-management">Job Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#best-practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#debugging-and-troubleshooting">Debugging and Troubleshooting</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/slurm_tutorial.html#complete-example">Complete Example</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#basic-pbs-configuration">Basic PBS Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#pbs-resource-specification">PBS Resource Specification</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#advanced-pbs-configuration">Advanced PBS Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#pbs-job-examples">PBS Job Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#pbs-job-management">PBS Job Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#error-handling-and-debugging">Error Handling and Debugging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#best-practices-for-pbs">Best Practices for PBS</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/pbs_tutorial.html#complete-pbs-example">Complete PBS Example</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#kubernetes-setup">Kubernetes Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#kubernetes-specific-features">Kubernetes-specific Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#advanced-configuration">Advanced Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#kubernetes-native-examples">Kubernetes-Native Examples</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#cloud-native-best-practices">Cloud-Native Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#monitoring-and-logging">Monitoring and Logging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="tutorials/kubernetes_tutorial.html#complete-kubernetes-example">Complete Kubernetes Example</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Table-of-Contents">Table of Contents</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Installation-and-Setup">Installation and Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Configuration-Functions">Configuration Functions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Cluster-Decorator">Cluster Decorator</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Local-Execution">Local Execution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Remote-Cluster-Execution">Remote Cluster Execution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Advanced-Features">Advanced Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Monitoring-and-Debugging">Monitoring and Debugging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Best-Practices">Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/complete_api_demo.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Installation-and-Setup">Installation and Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Basic-SLURM-Configuration">Basic SLURM Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Example-1:-Simple-Mathematical-Computation">Example 1: Simple Mathematical Computation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Example-2:-Machine-Learning-Model-Training">Example 2: Machine Learning Model Training</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Example-3:-Parallel-Data-Processing-with-Automatic-Loop-Distribution">Example 3: Parallel Data Processing with Automatic Loop Distribution</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Example-4:-Scientific-Computing---Numerical-Integration">Example 4: Scientific Computing - Numerical Integration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Example-5:-Bioinformatics---Sequence-Analysis">Example 5: Bioinformatics - Sequence Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Advanced-SLURM-Features">Advanced SLURM Features</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Monitoring-and-Debugging">Monitoring and Debugging</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Configuration-Best-Practices">Configuration Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/slurm_tutorial.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Installation-and-Setup">Installation and Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#PBS-Cluster-Configuration">PBS Cluster Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Example-1:-Bioinformatics---DNA-Sequence-Analysis">Example 1: Bioinformatics - DNA Sequence Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Example-2:-Materials-Science---Molecular-Dynamics-Simulation">Example 2: Materials Science - Molecular Dynamics Simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Example-3:-Environmental-Science---Climate-Data-Analysis">Example 3: Environmental Science - Climate Data Analysis</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#PBS-Queue-Management-and-Resource-Selection">PBS Queue Management and Resource Selection</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#PBS-Job-Arrays-for-Parameter-Studies">PBS Job Arrays for Parameter Studies</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Monitoring-PBS-Jobs">Monitoring PBS Jobs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#PBS-Configuration-Best-Practices">PBS Configuration Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/pbs_tutorial.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#Prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#SGE-Configuration">SGE Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#Example-1:-Mathematical-Optimization">Example 1: Mathematical Optimization</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#Example-2:-Engineering-Simulation">Example 2: Engineering Simulation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#Example-3:-Multi-Objective-Engineering-Design">Example 3: Multi-Objective Engineering Design</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#SGE-Parallel-Environments-and-Resource-Management">SGE Parallel Environments and Resource Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#SGE-Job-Monitoring-and-Management">SGE Job Monitoring and Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/sge_tutorial.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Kubernetes-Configuration">Kubernetes Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Example-1:-Containerized-Machine-Learning">Example 1: Containerized Machine Learning</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Example-2:-Distributed-Data-Processing">Example 2: Distributed Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Example-3:-Fault-Tolerant-Scientific-Computing">Example 3: Fault-Tolerant Scientific Computing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Kubernetes-Resource-Management-and-Best-Practices">Kubernetes Resource Management and Best Practices</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Kubernetes-Cluster-Monitoring">Kubernetes Cluster Monitoring</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/kubernetes_tutorial.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Prerequisites">Prerequisites</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#SSH-Configuration">SSH Configuration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Example-1:-Basic-Remote-Computation">Example 1: Basic Remote Computation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Example-2:-Remote-Data-Processing">Example 2: Remote Data Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Example-3:-Remote-File-System-Operations">Example 3: Remote File System Operations</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Example-4:-Remote-Environment-Testing">Example 4: Remote Environment Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#SSH-Configuration-Management">SSH Configuration Management</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#SSH-Connection-Testing">SSH Connection Testing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/ssh_tutorial.html#Summary">Summary</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Installation">Installation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Basic-Setup">Basic Setup</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Simple-Function-Decoration">Simple Function Decoration</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#CPU-Intensive-Computation">CPU-Intensive Computation</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Array-Processing">Array Processing</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Data-Processing-Pipeline">Data Processing Pipeline</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Performance-Comparison">Performance Comparison</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Configuration-Options">Configuration Options</a></li>
+<li class="toctree-l2"><a class="reference internal" href="notebooks/basic_usage.html#Next-Steps">Next Steps</a></li>
+</ul>
+</li>
+</ul>
 </div>
 <div class="toctree-wrapper compound">
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
@@ -181,12 +409,12 @@
 <td><p>Direct execution</p></td>
 </tr>
 <tr class="row-odd"><td><p><strong>SGE</strong></p></td>
-<td><p>🚧 In Progress</p></td>
-<td><p>Basic implementation</p></td>
+<td><p>⚡ Nearly Ready</p></td>
+<td><p>Job submit works, status pending</p></td>
 </tr>
 <tr class="row-even"><td><p><strong>Kubernetes</strong></p></td>
-<td><p>🚧 In Progress</p></td>
-<td><p>Basic implementation</p></td>
+<td><p>⚡ Nearly Ready</p></td>
+<td><p>Job submit works, status pending</p></td>
 </tr>
 </tbody>
 </table>
@@ -210,16 +438,18 @@
 </ul>
 </section>
 
-
-            <div class="clearer"></div>
-          </div>
-        </div>
-      </div>
-      <div class="sphinxsidebar" role="navigation" aria-label="Main">
-        <div class="sphinxsidebarwrapper">
-  <div>
-    <h3><a href="#">Table of Contents</a></h3>
-    <ul>
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-right" href="installation.html" title="Next">
+        Installation <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
 <li><a class="reference internal" href="#">Clustrix Documentation</a><ul>
 <li><a class="reference internal" href="#features">Features</a></li>
 <li><a class="reference internal" href="#quick-start">Quick Start</a><ul>
@@ -237,52 +467,62 @@
 <li><a class="reference internal" href="#indices-and-tables">Indices and tables</a></li>
 </ul>
 
-  </div>
-  <div>
-    <h4>Next topic</h4>
-    <p class="topless"><a href="installation.html"
-                          title="next chapter">Installation</a></p>
-  </div>
-  <div role="note" aria-label="source link">
-    <h3>This Page</h3>
-    <ul class="this-page-menu">
-      <li><a href="_sources/index.rst.txt"
-            rel="nofollow">Show Source</a></li>
-    </ul>
-   </div>
-<search id="searchbox" style="display: none" role="search">
-  <h3 id="searchlabel">Quick search</h3>
-    <div class="searchformwrapper">
-    <form class="search" action="search.html" method="get">
-      <input type="text" name="q" aria-labelledby="searchlabel" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"/>
-      <input type="submit" value="Go" />
-    </form>
-    </div>
-</search>
-<script>document.getElementById('searchbox').style.display = "block"</script>
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
         </div>
-      </div>
-      <div class="clearer"></div>
     </div>
-    <div class="related" role="navigation" aria-label="Related">
-      <h3>Navigation</h3>
-      <ul>
-        <li class="right" style="margin-right: 10px">
-          <a href="genindex.html" title="General Index"
-             >index</a></li>
-        <li class="right" >
-          <a href="py-modindex.html" title="Python Module Index"
-             >modules</a> |</li>
-        <li class="right" >
-          <a href="installation.html" title="Installation"
-             >next</a> |</li>
-        <li class="nav-item nav-item-0"><a href="#">Clustrix</a> &#187;</li>
-        <li class="nav-item nav-item-this"><a href="">Clustrix Documentation</a></li> 
-      </ul>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
     </div>
-    <div class="footer" role="contentinfo">
-    &#169; Copyright 2025, Contextual Dynamics Laboratory.
-      Created using <a href="https://www.sphinx-doc.org/">Sphinx</a> 8.1.3.
-    </div>
-  </body>
+        </div>
+    </footer>
+        <script src="_static/documentation_options.js?v=01f34227"></script>
+        <script src="_static/doctools.js?v=9bcbadda"></script>
+        <script src="_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="_static/dist/theme.js"></script>
+        <script type="text/javascript" src="_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="_static/searchtools.js"></script>
+        <script type="text/javascript" src="_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
 </html>
