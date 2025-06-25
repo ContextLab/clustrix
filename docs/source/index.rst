@@ -125,19 +125,19 @@ Table of Contents
 Supported Cluster Types
 -----------------------
 
-+----------------+------------------+------------------------+
-| Cluster Type   | Status           | Notes                  |
-+================+==================+========================+
-| **SLURM**      | ✅ Full Support  | Production ready       |
-+----------------+------------------+------------------------+
-| **PBS/Torque** | ✅ Full Support  | Production ready       |
-+----------------+------------------+------------------------+
-| **SSH**        | ✅ Full Support  | Direct execution       |
-+----------------+------------------+------------------------+
-| **SGE**        | ⚡ Nearly Ready  | Job submission works, status monitoring pending |
-+----------------+------------------+------------------------+
-| **Kubernetes** | ⚡ Nearly Ready  | Job submission works, status monitoring pending |
-+----------------+------------------+------------------------+
++----------------+------------------+----------------------------------+
+| Cluster Type   | Status           | Notes                            |
++================+==================+==================================+
+| **SLURM**      | ✅ Full Support  | Production ready                 |
++----------------+------------------+----------------------------------+
+| **PBS/Torque** | ✅ Full Support  | Production ready                 |
++----------------+------------------+----------------------------------+
+| **SSH**        | ✅ Full Support  | Direct execution                 |
++----------------+------------------+----------------------------------+
+| **SGE**        | ⚡ Nearly Ready  | Job submit works, status pending |
++----------------+------------------+----------------------------------+
+| **Kubernetes** | ⚡ Nearly Ready  | Job submit works, status pending |
++----------------+------------------+----------------------------------+
 
 Links
 -----
