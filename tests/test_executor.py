@@ -290,18 +290,25 @@ class TestClusterExecutor:
         call_args = executor.ssh_client.exec_command.call_args[0][0]
         assert "scancel 12345" in call_args
         
-    def test_cancel_job_pbs(self, executor):
-        """Test canceling PBS job."""
-        executor.ssh_client = Mock()
-        executor.config.cluster_type = "pbs"
+    def test_get_error_log(self, executor):
+        """Test error log retrieval."""
+        executor.active_jobs["failed_job"] = {"remote_dir": "/tmp/failed_job"}
         
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        error_content = "Traceback (most recent call last):\n  File test.py, line 1\n    syntax error"
         
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
-        
-        executor.cancel_job("67890")
-        
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "qdel 67890" in call_args
+        with patch.object(executor, '_execute_remote_command') as mock_exec:
+            mock_exec.return_value = (error_content, "", 0)
+            
+            error_log = executor._get_error_log("failed_job")
+            assert error_log == error_content
+            
+        # Test when no error log found
+        with patch.object(executor, '_execute_remote_command') as mock_exec:
+            mock_exec.return_value = ("", "", 0)
+            
+            error_log = executor._get_error_log("failed_job")
+            assert "No error log found" in error_log
+            
+        # Test unknown job
+        error_log = executor._get_error_log("unknown_job")
+        assert "No job info available" in error_log

@@ -45,6 +45,13 @@ setup(
             "flake8>=3.8",
             "mypy>=0.812",
         ],
+        "test": [
+            "pytest>=6.0",
+            "pytest-cov>=2.0",
+            "coverage>=6.0",
+            "pytest-xdist>=2.0",  # For parallel test execution
+            "pytest-mock>=3.0",   # For better mocking support
+        ],
         "docs": [
             "sphinx>=4.0",
             "groundwork-sphinx-theme>=1.1.1", 

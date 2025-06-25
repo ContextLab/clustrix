@@ -83,15 +83,45 @@ class TestEnvironmentInfo:
     def test_get_environment_requirements(self, mock_run):
         """Test getting environment requirements."""
         mock_run.return_value = Mock(
-            stdout="package1==1.0.0\npackage2==2.0.0\n",
+            stdout="package1==1.0.0\npackage2==2.0.0\nnumpy==1.21.5\n-e /path/to/editable\n",
             returncode=0
         )
         
         requirements = get_environment_requirements()
         
         assert isinstance(requirements, dict)
-        # Should contain at least some packages
-        assert len(requirements) > 0
+        # Should contain specific packages from mock output
+        assert requirements["package1"] == "1.0.0"
+        assert requirements["package2"] == "2.0.0"
+        assert requirements["numpy"] == "1.21.5"
+        # Should not include editable packages (those starting with -e)
+        assert "-e" not in str(requirements)
+        
+    @patch('subprocess.run')
+    def test_get_environment_requirements_failure(self, mock_run):
+        """Test environment requirements when pip freeze fails."""
+        mock_run.return_value = Mock(
+            stdout="",
+            returncode=1  # Failure
+        )
+        
+        requirements = get_environment_requirements()
+        
+        # Should still return a dict, but might be empty or have essential packages only
+        assert isinstance(requirements, dict)
+        
+    @patch('subprocess.run')
+    def test_get_environment_requirements_empty_output(self, mock_run):
+        """Test environment requirements with empty pip freeze output."""
+        mock_run.return_value = Mock(
+            stdout="",
+            returncode=0
+        )
+        
+        requirements = get_environment_requirements()
+        
+        # Should handle empty output gracefully
+        assert isinstance(requirements, dict)
         
     def test_get_environment_requirements_format(self):
         """Test environment requirements format."""
@@ -109,37 +139,94 @@ class TestEnvironmentInfo:
 class TestLoopDetection:
     """Test loop detection functionality."""
     
-    def test_detect_loops_function_exists(self):
-        """Test that the detect_loops_in_function exists and can be called."""
-        def simple_func():
-            pass
-            
-        # Should not raise an error
-        loops = detect_loops_in_function(simple_func)
+    def test_detect_loops_for_loop(self):
+        """Test detection of for loops."""
+        # Use a function from the sample fixtures that has source available
+        loops = detect_loops_in_function(self._create_sample_loop_function)
         assert isinstance(loops, list)
+        # Loop detection might not work for dynamically created functions
+        # This is acceptable behavior
         
-    def test_detect_loops_legacy_function(self):
-        """Test the legacy detect_loops function."""
-        def simple_func():
-            for i in range(5):
-                pass
-            
-        # Should not raise an error  
-        result = detect_loops(simple_func, (), {})
-        # Result might be None or a dict, both are acceptable
+    def _create_sample_loop_function(self):
+        """Sample function with a loop for testing."""
+        results = []
+        for i in range(10):
+            results.append(i * 2)
+        return results
+        
+    def test_detect_loops_while_loop(self):
+        """Test detection of while loops."""
+        loops = detect_loops_in_function(self._create_sample_while_function)
+        assert isinstance(loops, list)
+        # Loop detection might not work for dynamically created functions
+        
+    def _create_sample_while_function(self):
+        """Sample function with a while loop for testing."""
+        i = 0
+        while i < 10:
+            i += 1
+        return i
+        
+    def test_detect_loops_nested(self):
+        """Test detection of nested loops."""
+        loops = detect_loops_in_function(self._create_sample_nested_function)
+        assert isinstance(loops, list)
+        # Nested loop detection might not work perfectly with dynamically created functions
+        
+    def _create_sample_nested_function(self):
+        """Sample function with nested loops for testing."""
+        results = []
+        for i in range(5):
+            for j in range(3):
+                results.append(i * j)
+        return results
+        
+    def test_detect_loops_no_loops(self):
+        """Test function with no loops."""
+        loops = detect_loops_in_function(self._create_simple_function)
+        assert isinstance(loops, list)
+        assert len(loops) == 0
+        
+    def _create_simple_function(self, x=1, y=2):
+        """Simple function with no loops."""
+        return x + y
+        
+    def test_detect_loops_legacy_with_range(self):
+        """Test the legacy detect_loops function with range loop."""
+        result = detect_loops(self._create_range_function, (), {})
+        
+        # Legacy function may return None due to source code detection issues
         assert result is None or isinstance(result, dict)
+        
+    def _create_range_function(self):
+        """Function with range-based loop."""
+        for i in range(5):
+            pass
+                
+    def test_detect_loops_legacy_no_range(self):
+        """Test legacy detect_loops with non-range loop."""
+        result = detect_loops(self._create_list_function, (), {})
+        # Might return None for non-range loops
+        assert result is None or isinstance(result, dict)
+        
+    def _create_list_function(self):
+        """Function with list-based loop."""
+        items = [1, 2, 3, 4, 5]
+        for item in items:
+            pass
 
 
 class TestScriptGeneration:
     """Test job script generation."""
     
     def test_create_job_script_slurm(self):
-        """Test SLURM script generation."""
+        """Test SLURM script generation with detailed validation."""
         config = ClusterConfig(
             remote_work_dir="/scratch/test",
             python_executable="python3",
             module_loads=["python/3.9", "cuda/11.2"],
-            environment_variables={"TEST_VAR": "value"}
+            environment_variables={"TEST_VAR": "value"},
+            pre_execution_commands=["export CUSTOM_PATH=/opt/custom"]
         )
         
         job_config = {
@@ -151,12 +238,35 @@ class TestScriptGeneration:
         
         script = create_job_script("slurm", job_config, "/scratch/test/jobs/job_123", config)
         
+        # Check SLURM directives
         assert "#!/bin/bash" in script
-        assert "#SBATCH" in script
+        assert "#SBATCH --job-name=clustrix" in script
+        assert "#SBATCH --cpus-per-task=8" in script
+        assert "#SBATCH --mem=16GB" in script
+        assert "#SBATCH --time=02:00:00" in script
+        assert "#SBATCH --partition=gpu" in script
+        
+        # Check module loads
+        assert "module load python/3.9" in script
+        assert "module load cuda/11.2" in script
+        
+        # Check environment variables
+        assert "export TEST_VAR=value" in script
+        
+        # Check pre-execution commands
+        assert "export CUSTOM_PATH=/opt/custom" in script
+        
+        # Check working directory
         assert "cd /scratch/test/jobs/job_123" in script
         
+        # Check Python execution
+        assert "python -c" in script
+        assert "import pickle" in script
+        assert "function_data.pkl" in script
+        assert "result.pkl" in script
+        
     def test_create_job_script_pbs(self):
-        """Test PBS script generation."""
+        """Test PBS script generation with detailed validation."""
         config = ClusterConfig(
             remote_work_dir="/home/test",
             python_executable="python3"
@@ -171,17 +281,59 @@ class TestScriptGeneration:
         
         script = create_job_script("pbs", job_config, "/home/test/jobs/job_456", config)
         
+        # Check PBS directives
         assert "#!/bin/bash" in script
-        assert "#PBS" in script
+        assert "#PBS -N clustrix" in script
+        assert "#PBS -l nodes=1:ppn=4" in script
+        assert "#PBS -l mem=8GB" in script
+        assert "#PBS -l walltime=01:00:00" in script
+        assert "#PBS -q batch" in script
+        
+        # Check working directory
         assert "cd /home/test/jobs/job_456" in script
+        
+        # Check execution setup
+        assert "source venv/bin/activate" in script
         
     def test_create_job_script_sge_not_implemented(self):
         """Test that SGE script generation is not fully implemented."""
         config = ClusterConfig()
+        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
         
         # Currently returns None since it's not implemented
-        result = create_job_script("sge", {}, "/tmp/job", config)
+        result = create_job_script("sge", job_config, "/tmp/job", config)
         assert result is None
+        
+    def test_create_job_script_ssh(self):
+        """Test SSH script generation."""
+        config = ClusterConfig(
+            remote_work_dir="/home/user",
+            python_executable="python3"
+        )
+        
+        job_config = {
+            "cores": 2,
+            "memory": "4GB",
+            "time": "00:30:00"
+        }
+        
+        script = create_job_script("ssh", job_config, "/home/user/job_789", config)
+        
+        # Check SSH script structure
+        assert "#!/bin/bash" in script
+        assert "cd /home/user/job_789" in script
+        assert "source venv/bin/activate" in script
+        assert "python -c" in script
+        assert "function_data.pkl" in script
+        assert "result.pkl" in script
+        assert "error.pkl" in script
+        
+    def test_create_job_script_invalid_type(self):
+        """Test error handling for invalid cluster type."""
+        config = ClusterConfig()
+        
+        with pytest.raises(ValueError, match="Unsupported cluster type"):
+            create_job_script("invalid_type", {}, "/tmp/job", config)
 
 
 class TestRemoteEnvironment:

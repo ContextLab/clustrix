@@ -163,3 +163,93 @@ class TestClusterDecorator:
         configure(cluster_host=None)
         result = test_func(5)
         assert result == 12  # (5 + 1) * 2
+        
+    def test_decorator_order_matters(self):
+        """Test that decorator order affects execution."""
+        def multiply_decorator(factor):
+            def decorator(func):
+                def wrapper(*args, **kwargs):
+                    return func(*args, **kwargs) * factor
+                return wrapper
+            return decorator
+            
+        # cluster decorator inside
+        @multiply_decorator(3)
+        @cluster(cores=2)
+        def func1(x):
+            return x + 5
+            
+        # cluster decorator outside
+        @cluster(cores=2)
+        @multiply_decorator(3)
+        def func2(x):
+            return x + 5
+            
+        configure(cluster_host=None)
+        
+        result1 = func1(10)
+        result2 = func2(10)
+        
+        assert result1 == 45  # (10 + 5) * 3
+        assert result2 == 45  # (10 + 5) * 3 - both should be same for local execution
+        
+    def test_resource_parameter_validation(self):
+        """Test validation of resource parameters."""
+        # Test valid parameters
+        @cluster(cores=8, memory="16GB", time="02:00:00")
+        def valid_func():
+            return "test"
+            
+        config = valid_func._cluster_config
+        assert config['cores'] == 8
+        assert config['memory'] == "16GB"
+        assert config['time'] == "02:00:00"
+        
+    def test_job_config_inheritance(self):
+        """Test job config inheritance from global config."""
+        configure(
+            default_cores=16,
+            default_memory="32GB",
+            default_time="04:00:00",
+            default_partition="gpu"
+        )
+        
+        # Test decorator without parameters inherits defaults
+        @cluster()
+        def default_func():
+            return "test"
+            
+        # Test decorator with partial override
+        @cluster(cores=8, memory="64GB")
+        def override_func():
+            return "test"
+            
+        configure(cluster_host=None)  # Local execution for testing
+        
+        # The config should be stored but actual values come from get_config() during execution
+        assert 'cores' not in default_func._cluster_config
+        assert override_func._cluster_config['cores'] == 8
+        assert override_func._cluster_config['memory'] == "64GB"
+        
+    def test_execution_mode_selection(self):
+        """Test execution mode selection logic."""
+        from clustrix.decorator import _choose_execution_mode
+        from clustrix.config import ClusterConfig
+        
+        # Test local mode when no cluster host
+        config_no_host = ClusterConfig(cluster_host=None)
+        mode = _choose_execution_mode(config_no_host, lambda: None, (), {})
+        assert mode == "local"
+        
+        # Test remote mode when cluster host is set
+        config_with_host = ClusterConfig(cluster_host="test.cluster.com")
+        mode = _choose_execution_mode(config_with_host, lambda: None, (), {})
+        assert mode == "remote"
+        
+        # Test local mode when prefer_local_parallel is set
+        config_prefer_local = ClusterConfig(
+            cluster_host="test.cluster.com",
+            prefer_local_parallel=True
+        )
+        mode = _choose_execution_mode(config_prefer_local, lambda: None, (), {})
+        assert mode == "local"

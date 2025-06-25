@@ -7,7 +7,7 @@ from .config import configure, load_config, save_config, get_config
 
 @click.group()
 def cli():
-    """ClusterPy - Distributed computing for Python functions."""
+    """Clustrix - Distributed computing for Python functions."""
     pass
 
 
@@ -24,7 +24,7 @@ def cli():
 @click.option("--memory", help="Default memory allocation (e.g., 8GB)")
 @click.option("--config-file", type=click.Path(), help="Save configuration to file")
 def config(cluster_type, cluster_host, username, api_key, cores, memory, config_file):
-    """Configure ClusterPy settings."""
+    """Configure Clustrix settings."""
 
     config_updates = {}
 
