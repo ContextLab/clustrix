@@ -19,8 +19,13 @@ class TestIntegration:
             mock_ssh_class.return_value = mock_ssh
             
             # Mock SFTP
-            mock_sftp = Mock()
+            mock_sftp = MagicMock()
             mock_ssh.open_sftp.return_value = mock_sftp
+            
+            # Mock SFTP file operations for context manager support
+            mock_file = MagicMock()
+            mock_sftp.open.return_value.__enter__.return_value = mock_file
+            mock_sftp.open.return_value.__exit__.return_value = None
             
             # Mock successful command execution
             mock_stdout = Mock()
@@ -218,6 +223,9 @@ class TestIntegration:
         def data_processing():
             import numpy as np
             return np.array([1, 2, 3]).sum()
+            
+        # Call the function to trigger environment replication
+        result = data_processing()
             
         # Verify environment info is captured
         mock_env_info.assert_called()

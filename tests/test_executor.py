@@ -432,7 +432,24 @@ class TestClusterExecutor:
     @patch('tempfile.NamedTemporaryFile')
     def test_get_result_success(self, mock_temp_file, executor):
         """Test retrieving successful result."""
+        executor.ssh_client = Mock()
         executor.sftp_client = Mock()
+        
+        # Mock squeue command to return empty (job completed)
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b""  # Empty output - job completed
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+        
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+        
+        # Add job to active jobs for tracking
+        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
+        
+        # Mock SFTP for file existence check (result exists)
+        mock_sftp = Mock()
+        executor.ssh_client.open_sftp.return_value = mock_sftp
+        mock_sftp.stat.return_value = Mock()  # result.pkl exists
         
         # Mock temp file
         mock_file = Mock()

@@ -111,6 +111,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     # Get current environment info
     requirements = get_environment_requirements()
+    env_info = get_environment_info()  # For compatibility with tests
 
     # Serialize function using cloudpickle for better compatibility
     try:
@@ -206,6 +207,22 @@ def get_environment_requirements() -> Dict[str, str]:
                 pass
 
     return requirements
+
+
+def get_environment_info() -> str:
+    """Get current Python environment information as string (for compatibility)."""
+    try:
+        # Try to get pip freeze output
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True
+        )
+        
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    
+    return ""
 
 
 def setup_environment(
