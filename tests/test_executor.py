@@ -465,7 +465,11 @@ class TestClusterExecutor:
         mock_sftp.get.assert_called_once()
         call_args = mock_sftp.get.call_args[0]
         assert call_args[0] == "/tmp/test_job/result.pkl"  # remote path
-        assert call_args[1].endswith("tmp") or "/tmp" in call_args[1]  # local temp path
+        # Verify local path is a temporary file (cross-platform)
+        import tempfile
+
+        temp_dir = tempfile.gettempdir()
+        assert call_args[1].startswith(temp_dir)  # local temp path
 
     def test_cancel_job_slurm(self, executor):
         """Test canceling SLURM job."""
