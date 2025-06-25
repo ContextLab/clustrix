@@ -37,8 +37,7 @@ class TestClusterExecutor:
             hostname="test.cluster.com",
             port=22,
             username="testuser",
-            key_filename="~/.ssh/test_key",
-            password=None
+            key_filename="~/.ssh/test_key"
         )
         assert executor.ssh_client == mock_ssh
         assert executor.sftp_client == mock_sftp
@@ -62,19 +61,20 @@ class TestClusterExecutor:
             hostname="test.cluster.com",
             port=22,
             username="testuser",
-            key_filename=None,
             password="testpass"
         )
         
     def test_disconnect(self, executor):
         """Test SSH disconnection."""
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
+        mock_ssh = Mock()
+        mock_sftp = Mock()
+        executor.ssh_client = mock_ssh
+        executor.sftp_client = mock_sftp
         
         executor.disconnect()
         
-        executor.sftp_client.close.assert_called_once()
-        executor.ssh_client.close.assert_called_once()
+        mock_sftp.close.assert_called_once()
+        mock_ssh.close.assert_called_once()
         assert executor.ssh_client is None
         assert executor.sftp_client is None
         
@@ -95,11 +95,10 @@ class TestClusterExecutor:
         
         mock_ssh.exec_command.return_value = (None, mock_stdout, mock_stderr)
         
-        stdout, stderr, exit_code = executor._execute_command("echo test")
+        stdout, stderr = executor._execute_command("echo test")
         
         assert stdout == "command output"
         assert stderr == ""
-        assert exit_code == 0
         mock_ssh.exec_command.assert_called_once_with("echo test")
         
     def test_execute_command_not_connected(self, executor):
@@ -132,10 +131,23 @@ class TestClusterExecutor:
         assert call_args['kwargs'] == {}
         assert call_args['config'] == {"cores": 4}
         
-    def test_submit_slurm_job(self, executor):
+    @patch('pickle.dump')
+    @patch('os.unlink')
+    @patch('clustrix.utils.setup_remote_environment')
+    @patch('clustrix.utils.create_job_script')
+    @patch('tempfile.NamedTemporaryFile')
+    def test_submit_slurm_job(self, mock_tempfile, mock_create_script, mock_setup_env, mock_unlink, mock_pickle, executor):
         """Test SLURM job submission."""
         executor.ssh_client = Mock()
         executor.sftp_client = Mock()
+        
+        # Mock tempfile
+        mock_file = Mock()
+        mock_file.name = "/tmp/test_file"
+        mock_tempfile.return_value.__enter__.return_value = mock_file
+        
+        # Mock script creation
+        mock_create_script.return_value = "#!/bin/bash\necho test"
         
         # Mock command execution
         mock_stdout = Mock()
@@ -144,7 +156,21 @@ class TestClusterExecutor:
         
         executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
         
-        job_id = executor._submit_slurm_job("job_12345", {"cores": 4})
+        def simple_func():
+            return "test"
+            
+        func_data = {
+            "func": simple_func,
+            "args": (),
+            "kwargs": {},
+            "requirements": []
+        }
+        job_config = {
+            "cores": 4,
+            "memory": "8GB", 
+            "time": "01:00:00"
+        }
+        job_id = executor._submit_slurm_job(func_data, job_config)
         
         assert job_id == "12345"
         

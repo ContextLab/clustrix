@@ -26,11 +26,7 @@ class ClusterExecutor:
         self.sftp_client = None
         self.active_jobs = {}
 
-        # Initialize connection based on cluster type
-        if config.cluster_type in ["slurm", "pbs", "sge", "ssh"]:
-            self._setup_ssh_connection()
-        elif config.cluster_type == "kubernetes":
-            self._setup_kubernetes()
+        # Connection will be established on-demand
 
     def _setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
@@ -46,15 +42,19 @@ class ClusterExecutor:
             "port": self.config.cluster_port,
         }
 
+        # Always include username if available
+        if self.config.username:
+            connect_kwargs["username"] = self.config.username
+        else:
+            connect_kwargs["username"] = os.getenv("USER")
+            
+        # Use key file for authentication (recommended)
         if self.config.key_file:
             connect_kwargs["key_filename"] = self.config.key_file
-        elif self.config.username and self.config.password:
-            connect_kwargs.update(
-                {"username": self.config.username, "password": self.config.password}
-            )
-        else:
-            # Try to use SSH agent or default keys
-            connect_kwargs["username"] = self.config.username or os.getenv("USER")
+        elif self.config.password:
+            # Fallback to password authentication (not recommended)
+            connect_kwargs["password"] = self.config.password
+        # Otherwise, fall back to SSH agent or default keys
 
         self.ssh_client.connect(**connect_kwargs)
         self.sftp_client = self.ssh_client.open_sftp()
@@ -82,6 +82,8 @@ class ClusterExecutor:
         Returns:
             Job ID for tracking
         """
+        # Ensure connection is established
+        self.connect()
 
         if self.config.cluster_type == "slurm":
             return self._submit_slurm_job(func_data, job_config)
@@ -434,9 +436,11 @@ class ClusterExecutor:
     def connect(self):
         """Establish connection to cluster (for manual connection)."""
         if self.config.cluster_type in ["slurm", "pbs", "sge", "ssh"]:
-            self._setup_ssh_connection()
+            if not self.ssh_client:
+                self._setup_ssh_connection()
         elif self.config.cluster_type == "kubernetes":
-            self._setup_kubernetes()
+            if not hasattr(self, 'k8s_client'):
+                self._setup_kubernetes()
             
     def disconnect(self):
         """Disconnect from cluster."""
