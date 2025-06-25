@@ -16,7 +16,7 @@ help:
 
 # Install documentation dependencies
 install-deps:
-	pip install -e ".[docs]"
+	pip install -e "../[docs]"
 
 # Build HTML documentation
 html: install-deps
