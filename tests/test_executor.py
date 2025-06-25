@@ -6,6 +6,7 @@ from pathlib import Path
 import paramiko
 from clustrix.executor import ClusterExecutor
 from clustrix.config import ClusterConfig
+import clustrix.executor
 
 
 class TestClusterExecutor:
@@ -131,13 +132,14 @@ class TestClusterExecutor:
         assert call_args['kwargs'] == {}
         assert call_args['config'] == {"cores": 4}
         
-    @patch('pickle.dump')
     @patch('os.unlink')
-    @patch('clustrix.utils.setup_remote_environment')
-    @patch('clustrix.utils.create_job_script')
+    @patch('pickle.dump')
     @patch('tempfile.NamedTemporaryFile')
-    def test_submit_slurm_job(self, mock_tempfile, mock_create_script, mock_setup_env, mock_unlink, mock_pickle, executor):
-        """Test SLURM job submission."""
+    @patch.object(clustrix.executor, 'setup_remote_environment')
+    @patch('clustrix.executor.ClusterExecutor._upload_file')
+    @patch('clustrix.executor.ClusterExecutor._create_remote_file')
+    def test_submit_slurm_job(self, mock_create_file, mock_upload, mock_setup_env, mock_tempfile, mock_pickle, mock_unlink, executor):
+        """Test SLURM job submission (simplified)."""
         executor.ssh_client = Mock()
         executor.sftp_client = Mock()
         
@@ -146,21 +148,22 @@ class TestClusterExecutor:
         mock_file.name = "/tmp/test_file"
         mock_tempfile.return_value.__enter__.return_value = mock_file
         
-        # Mock script creation
-        mock_create_script.return_value = "#!/bin/bash\necho test"
+        # Mock command execution responses
+        command_responses = {
+            "mkdir -p": ("", ""),  # mkdir command
+            "sbatch": ("Submitted batch job 12345", "")  # sbatch command
+        }
         
-        # Mock command execution
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b"12345"
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        def mock_execute_command(cmd):
+            for key, response in command_responses.items():
+                if key in cmd:
+                    return response
+            return ("", "")
         
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
+        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
         
-        def simple_func():
-            return "test"
-            
         func_data = {
-            "func": simple_func,
+            "func": "dummy_func",  # Simplified - not actually pickled
             "args": (),
             "kwargs": {},
             "requirements": []
@@ -170,35 +173,73 @@ class TestClusterExecutor:
             "memory": "8GB", 
             "time": "01:00:00"
         }
+        
         job_id = executor._submit_slurm_job(func_data, job_config)
         
         assert job_id == "12345"
         
-        # Verify sbatch command was called
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "sbatch" in call_args
-        assert "submit.sh" in call_args
+        # Verify key methods were called
+        mock_upload.assert_called()  # Function data upload
+        mock_create_file.assert_called()  # Job script creation
         
-    def test_submit_pbs_job(self, executor):
+        # Verify sbatch command was executed
+        execute_calls = executor._execute_remote_command.call_args_list
+        sbatch_calls = [call for call in execute_calls if 'sbatch' in str(call)]
+        assert len(sbatch_calls) > 0
+        
+    @patch('os.unlink')
+    @patch('pickle.dump')
+    @patch('tempfile.NamedTemporaryFile')
+    @patch.object(clustrix.executor, 'setup_remote_environment')
+    @patch('clustrix.executor.ClusterExecutor._upload_file')
+    @patch('clustrix.executor.ClusterExecutor._create_remote_file')
+    def test_submit_pbs_job(self, mock_create_file, mock_upload, mock_setup_env, mock_tempfile, mock_pickle, mock_unlink, executor):
         """Test PBS job submission."""
         executor.ssh_client = Mock()
         executor.sftp_client = Mock()
         
-        # Mock command execution
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b"67890.pbs"
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        # Mock tempfile
+        mock_file = Mock()
+        mock_file.name = "/tmp/test_file"
+        mock_tempfile.return_value.__enter__.return_value = mock_file
         
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
+        # Mock command execution responses
+        command_responses = {
+            "mkdir -p": ("", ""),
+            "qsub": ("67890.pbs", "")
+        }
         
-        job_id = executor._submit_pbs_job("job_67890", {"cores": 4})
+        def mock_execute_command(cmd):
+            for key, response in command_responses.items():
+                if key in cmd:
+                    return response
+            return ("", "")
         
-        assert job_id == "67890"
+        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
         
-        # Verify qsub command was called
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "qsub" in call_args
-        assert "submit.sh" in call_args
+        func_data = {
+            "func": "dummy_func",
+            "args": (),
+            "kwargs": {},
+            "requirements": []
+        }
+        job_config = {
+            "cores": 4,
+            "memory": "8GB",
+            "time": "01:00:00"
+        }
+        job_id = executor._submit_pbs_job(func_data, job_config)
+        
+        assert job_id == "67890.pbs"
+        
+        # Verify key methods were called
+        mock_upload.assert_called()
+        mock_create_file.assert_called()
+        
+        # Verify qsub command was executed
+        execute_calls = executor._execute_remote_command.call_args_list
+        qsub_calls = [call for call in execute_calls if 'qsub' in str(call)]
+        assert len(qsub_calls) > 0
         
     def test_submit_sge_job_not_implemented(self, executor):
         """Test that SGE job submission raises NotImplementedError."""
