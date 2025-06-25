@@ -68,7 +68,16 @@ class TestIntegration:
                 status_mock.read.return_value = b"COMPLETED"
                 status_mock.channel.recv_exit_status.return_value = 0
                 return (None, status_mock, Mock())
-            return (None, mock_stdout, Mock())
+            else:
+                # For other commands (environment setup, etc.), return successful execution
+                cmd_stdout = Mock()
+                cmd_stdout.read.return_value = b"Success"
+                cmd_stdout.channel.recv_exit_status.return_value = 0
+                
+                cmd_stderr = Mock()
+                cmd_stderr.read.return_value = b""
+                
+                return (None, cmd_stdout, cmd_stderr)
             
         mock_ssh.exec_command.side_effect = exec_side_effect
         
