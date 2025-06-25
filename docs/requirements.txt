@@ -1,0 +1,6 @@
+sphinx>=4.0
+sphinx-wagtail-theme>=6.0.0
+sphinx-autodoc-typehints>=1.12
+nbsphinx>=0.8
+jupyter>=1.0
+ipython>=7.0

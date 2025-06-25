@@ -46,9 +46,10 @@ html_static_path = ["_static"]
 # Wagtail theme options
 html_theme_options = {
     "project_name": "Clustrix",
-    "github_url": "https://github.com/ContextLab/clustrix",
+    "github_url": "https://github.com/ContextLab/clustrix/blob/master/docs/source/",
     "footer_links": "GitHub|PyPI",
 }
+
 
 html_title = "Clustrix Documentation"
 html_short_title = "Clustrix"
