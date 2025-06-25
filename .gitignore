@@ -1,9 +1,7 @@
 .idea/*
 *.pyc
 *.DS_Store
-configs/
 !*.gitkeep
-notebooks/
 .claude*
 notes/
 CLAUDE.md

@@ -23,7 +23,7 @@ class TestCLI:
         assert "load" in result.output
         assert "status" in result.output
         
-    @patch('clustrix.config.get_config')
+    @patch('clustrix.cli.get_config')
     def test_config_show(self, mock_get_config, runner):
         """Test showing current configuration."""
         mock_config = ClusterConfig(
@@ -43,8 +43,8 @@ class TestCLI:
         assert "username: testuser" in result.output
         assert "default_cores: 8" in result.output
         
-    @patch('clustrix.config.configure')
-    @patch('clustrix.config.get_config')
+    @patch('clustrix.cli.configure')
+    @patch('clustrix.cli.get_config')
     def test_config_set_values(self, mock_get_config, mock_configure, runner):
         """Test setting configuration values."""
         mock_config = ClusterConfig()
@@ -73,7 +73,7 @@ class TestCLI:
             default_time='04:00:00'
         )
         
-    @patch('clustrix.config.configure')
+    @patch('clustrix.cli.configure')
     def test_config_invalid_cluster_type(self, mock_configure, runner):
         """Test setting invalid cluster type."""
         result = runner.invoke(cli, [
@@ -84,19 +84,18 @@ class TestCLI:
         assert result.exit_code == 2
         assert "Invalid value for '--cluster-type'" in result.output
         
-    @patch('clustrix.config.load_config')
-    def test_load_config_success(self, mock_load_config, runner, temp_dir):
+    @patch('clustrix.cli.load_config')
+    def test_load_config_success(self, mock_load_config, runner):
         """Test loading configuration from file."""
-        config_file = Path(temp_dir) / "test_config.yml"
-        config_file.write_text("cluster_type: slurm\n")
+        config_file = "test_config.yml"
         
-        result = runner.invoke(cli, ['load', str(config_file)])
+        result = runner.invoke(cli, ['load', config_file])
         
         assert result.exit_code == 0
         assert f"Configuration loaded from {config_file}" in result.output
-        mock_load_config.assert_called_once_with(str(config_file))
+        mock_load_config.assert_called_once_with(config_file)
         
-    @patch('clustrix.config.load_config')
+    @patch('clustrix.cli.load_config')
     def test_load_config_file_not_found(self, mock_load_config, runner):
         """Test loading non-existent configuration file."""
         mock_load_config.side_effect = FileNotFoundError("File not found")
@@ -106,7 +105,7 @@ class TestCLI:
         assert result.exit_code == 1
         assert "Error: File not found" in result.output
         
-    @patch('clustrix.config.load_config')
+    @patch('clustrix.cli.load_config')
     def test_load_config_invalid_format(self, mock_load_config, runner):
         """Test loading invalid configuration file."""
         mock_load_config.side_effect = Exception("Invalid YAML")
@@ -116,8 +115,8 @@ class TestCLI:
         assert result.exit_code == 1
         assert "Error loading configuration: Invalid YAML" in result.output
         
-    @patch('clustrix.config.get_config')
-    @patch('clustrix.executor.ClusterExecutor')
+    @patch('clustrix.cli.get_config')
+    @patch('clustrix.cli.ClusterExecutor')
     def test_status_no_cluster_configured(self, mock_executor_class, mock_get_config, runner):
         """Test status when no cluster is configured."""
         mock_config = ClusterConfig(cluster_host=None)
@@ -129,8 +128,8 @@ class TestCLI:
         assert "No cluster configured" in result.output
         mock_executor_class.assert_not_called()
         
-    @patch('clustrix.config.get_config')
-    @patch('clustrix.executor.ClusterExecutor')
+    @patch('clustrix.cli.get_config')
+    @patch('clustrix.cli.ClusterExecutor')
     def test_status_with_cluster(self, mock_executor_class, mock_get_config, runner):
         """Test status with cluster configured."""
         mock_config = ClusterConfig(
@@ -156,8 +155,8 @@ class TestCLI:
         mock_executor.connect.assert_called_once()
         mock_executor.disconnect.assert_called_once()
         
-    @patch('clustrix.config.get_config')
-    @patch('clustrix.executor.ClusterExecutor')
+    @patch('clustrix.cli.get_config')
+    @patch('clustrix.cli.ClusterExecutor')
     def test_status_connection_failed(self, mock_executor_class, mock_get_config, runner):
         """Test status when connection fails."""
         mock_config = ClusterConfig(
@@ -180,5 +179,5 @@ class TestCLI:
     def test_cli_no_command(self, runner):
         """Test CLI with no command shows help."""
         result = runner.invoke(cli, [])
-        assert result.exit_code == 0
+        assert result.exit_code == 2  # Click returns 2 when no command is given
         assert "Clustrix CLI" in result.output
