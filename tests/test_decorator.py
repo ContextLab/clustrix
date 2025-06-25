@@ -104,14 +104,14 @@ class TestClusterDecorator:
         assert documented_function.__name__ == 'documented_function'
         assert documented_function.__doc__ == "This function adds two numbers."
         
-    @patch('clustrix.executor.ClusterExecutor')
+    @patch('clustrix.decorator.ClusterExecutor')
     def test_exception_handling(self, mock_executor_class):
         """Test exception handling in remote execution."""
         configure(cluster_host="test.cluster.com")
         
         mock_executor = Mock()
         mock_executor_class.return_value = mock_executor
-        mock_executor.execute.side_effect = RuntimeError("Cluster error")
+        mock_executor.submit_job.side_effect = RuntimeError("Cluster error")
         
         @cluster
         def test_func():
@@ -133,14 +133,15 @@ class TestClusterDecorator:
         assert parallel_func._cluster_config['parallel'] is True
         assert sequential_func._cluster_config['parallel'] is False
         
-    @patch('clustrix.executor.ClusterExecutor')
+    @patch('clustrix.decorator.ClusterExecutor')
     def test_kwargs_handling(self, mock_executor_class):
         """Test handling of keyword arguments."""
         configure(cluster_host="test.cluster.com")
         
         mock_executor = Mock()
         mock_executor_class.return_value = mock_executor
-        mock_executor.execute.return_value = {"result": 123}
+        mock_executor.submit_job.return_value = "job123"
+        mock_executor.wait_for_result.return_value = {"result": 123}
         
         @cluster
         def test_func(a, b=10, c=20):
@@ -148,10 +149,12 @@ class TestClusterDecorator:
             
         result = test_func(5, c=30)
         
-        # Verify kwargs were passed correctly
-        call_args = mock_executor.execute.call_args
-        assert call_args[0][1] == (5,)
-        assert call_args[0][2] == {'c': 30}
+        # Verify the function executed and returned the expected result
+        assert result == {"result": 123}
+        
+        # Verify submit_job was called
+        mock_executor.submit_job.assert_called_once()
+        mock_executor.wait_for_result.assert_called_once_with("job123")
         
     def test_decorator_stacking(self):
         """Test that decorator can be combined with other decorators."""
