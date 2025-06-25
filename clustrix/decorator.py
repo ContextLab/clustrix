@@ -13,6 +13,8 @@ from .utils import detect_loops, setup_environment, serialize_function
 
 
 def cluster(
+    _func: Optional[Callable] = None,
+    *,
     cores: Optional[int] = None,
     memory: Optional[str] = None,
     time: Optional[str] = None,
@@ -55,18 +57,6 @@ def cluster(
                 "environment": environment or config.conda_env_name,
             }
 
-            # Store cluster config for access
-            wrapper._cluster_config = {
-                "cores": cores,
-                "memory": memory,
-                "time": time,
-                "partition": partition,
-                "queue": queue,
-                "parallel": parallel,
-                "environment": environment,
-            }
-            wrapper._cluster_config.update(kwargs)
-
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
 
@@ -95,9 +85,27 @@ def cluster(
                 # Execute normally on cluster
                 return _execute_single(executor, func, args, func_kwargs, job_config)
 
+        # Store cluster config for access outside execution
+        wrapper._cluster_config = {
+            "cores": cores,
+            "memory": memory,
+            "time": time,
+            "partition": partition,
+            "queue": queue,
+            "parallel": parallel,
+            "environment": environment,
+        }
+        wrapper._cluster_config.update(kwargs)
+
         return wrapper
 
-    return decorator
+    # Handle both @cluster and @cluster() usage
+    if _func is None:
+        # Called as @cluster() or @cluster(args...)
+        return decorator
+    else:
+        # Called as @cluster (without parentheses)
+        return decorator(_func)
 
 
 def _execute_single(

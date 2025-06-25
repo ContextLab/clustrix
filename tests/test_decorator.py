@@ -26,7 +26,13 @@ class TestClusterDecorator:
             
         assert hasattr(test_func, '__wrapped__')
         assert hasattr(test_func, '_cluster_config')
-        assert test_func._cluster_config == {}
+        # All parameters should be None when not specified
+        expected_config = {
+            'cores': None, 'memory': None, 'time': None, 
+            'partition': None, 'queue': None, 'parallel': None, 
+            'environment': None
+        }
+        assert test_func._cluster_config == expected_config
         
     def test_decorator_with_all_params(self):
         """Test decorator with all possible parameters."""
@@ -62,15 +68,14 @@ class TestClusterDecorator:
         assert result == 5
         mock_executor.assert_not_called()
         
-    @patch('clustrix.executor.ClusterExecutor')
-    def test_remote_execution(self, mock_executor_class):
+    @patch('clustrix.decorator.ClusterExecutor')
+    @patch('clustrix.decorator._execute_single')
+    def test_remote_execution(self, mock_execute_single, mock_executor_class):
         """Test remote execution with cluster configured."""
         configure(cluster_host="test.cluster.com", username="testuser")
         
-        # Setup mock
-        mock_executor = Mock()
-        mock_executor_class.return_value = mock_executor
-        mock_executor.execute.return_value = 42
+        # Setup mock return value
+        mock_execute_single.return_value = 42
         
         @cluster(cores=8)
         def test_func(x, y):
@@ -79,14 +84,15 @@ class TestClusterDecorator:
         result = test_func(6, 7)
         
         assert result == 42
-        mock_executor_class.assert_called_once()
-        mock_executor.execute.assert_called_once()
+        mock_execute_single.assert_called_once()
         
-        # Check that function and args were passed correctly
-        call_args = mock_executor.execute.call_args
-        assert call_args[0][0].__name__ == 'test_func'
-        assert call_args[0][1] == (6, 7)
-        assert call_args[0][2] == {}
+        # Verify arguments passed to _execute_single
+        call_args = mock_execute_single.call_args[0]
+        executor, func, args, kwargs, job_config = call_args
+        assert func.__name__ == 'test_func'
+        assert args == (6, 7)
+        assert kwargs == {}
+        assert job_config['cores'] == 8
         
     def test_function_metadata_preserved(self):
         """Test that function metadata is preserved."""
@@ -227,7 +233,8 @@ class TestClusterDecorator:
         configure(cluster_host=None)  # Local execution for testing
         
         # The config should be stored but actual values come from get_config() during execution
-        assert 'cores' not in default_func._cluster_config
+        # For @cluster() without parameters, cores should be None (not specified)
+        assert default_func._cluster_config['cores'] is None
         assert override_func._cluster_config['cores'] == 8
         assert override_func._cluster_config['memory'] == "64GB"
         

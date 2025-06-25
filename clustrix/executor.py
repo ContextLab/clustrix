@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 import paramiko
 import json
+import cloudpickle
 
 from .config import ClusterConfig
 from .utils import create_job_script, setup_remote_environment
@@ -22,6 +23,7 @@ class ClusterExecutor:
     def __init__(self, config: ClusterConfig):
         self.config = config
         self.ssh_client = None
+        self.sftp_client = None
         self.active_jobs = {}
 
         # Initialize connection based on cluster type
@@ -55,6 +57,7 @@ class ClusterExecutor:
             connect_kwargs["username"] = self.config.username or os.getenv("USER")
 
         self.ssh_client.connect(**connect_kwargs)
+        self.sftp_client = self.ssh_client.open_sftp()
 
     def _setup_kubernetes(self):
         """Setup Kubernetes client."""
@@ -189,14 +192,14 @@ class ClusterExecutor:
     ) -> str:
         """Submit job via SGE."""
         # Similar implementation for Sun Grid Engine
-        pass
+        raise NotImplementedError("SGE support not yet implemented")
 
     def _submit_k8s_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via Kubernetes."""
         # Kubernetes job implementation
-        pass
+        raise NotImplementedError("Kubernetes support not yet implemented")
 
     def _submit_ssh_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
@@ -428,7 +431,60 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             del self.active_jobs[job_id]
 
-    def __del__(self):
-        """Cleanup resources."""
+    def connect(self):
+        """Establish connection to cluster (for manual connection)."""
+        if self.config.cluster_type in ["slurm", "pbs", "sge", "ssh"]:
+            self._setup_ssh_connection()
+        elif self.config.cluster_type == "kubernetes":
+            self._setup_kubernetes()
+            
+    def disconnect(self):
+        """Disconnect from cluster."""
+        if self.sftp_client:
+            self.sftp_client.close()
+            self.sftp_client = None
         if self.ssh_client:
             self.ssh_client.close()
+            self.ssh_client = None
+            
+    def _execute_command(self, command: str) -> tuple:
+        """Execute command on remote cluster (alias for _execute_remote_command)."""
+        if not self.ssh_client:
+            raise RuntimeError("Not connected to cluster")
+        return self._execute_remote_command(command)
+        
+    def _prepare_function_data(self, func, args: tuple, kwargs: dict, config: dict) -> bytes:
+        """Prepare function data for serialization."""
+        func_data = {
+            'func': func,
+            'args': args,
+            'kwargs': kwargs,
+            'config': config
+        }
+        
+        return cloudpickle.dumps(func_data)
+        
+    def execute(self, func, args: tuple, kwargs: dict) -> Any:
+        """Execute function on cluster (simplified interface for tests)."""
+        job_config = {'cores': 4, 'memory': '8GB', 'time': '01:00:00'}
+        func_data = {
+            'function': cloudpickle.dumps(func),
+            'args': pickle.dumps(args),
+            'kwargs': pickle.dumps(kwargs),
+            'requirements': {}
+        }
+        
+        job_id = self.submit_job(func_data, job_config)
+        return self.wait_for_result(job_id)
+        
+    def get_job_status(self, job_id: str) -> str:
+        """Get job status (alias for _check_job_status)."""
+        return self._check_job_status(job_id)
+        
+    def get_result(self, job_id: str) -> Any:
+        """Get result (alias for wait_for_result)."""
+        return self.wait_for_result(job_id)
+
+    def __del__(self):
+        """Cleanup resources."""
+        self.disconnect()
