@@ -34,6 +34,12 @@ Requires-Dist: pytest-cov>=2.0; extra == "dev"
 Requires-Dist: black>=21.0; extra == "dev"
 Requires-Dist: flake8>=3.8; extra == "dev"
 Requires-Dist: mypy>=0.812; extra == "dev"
+Provides-Extra: test
+Requires-Dist: pytest>=6.0; extra == "test"
+Requires-Dist: pytest-cov>=2.0; extra == "test"
+Requires-Dist: coverage>=6.0; extra == "test"
+Requires-Dist: pytest-xdist>=2.0; extra == "test"
+Requires-Dist: pytest-mock>=3.0; extra == "test"
 Provides-Extra: docs
 Requires-Dist: sphinx>=4.0; extra == "docs"
 Requires-Dist: groundwork-sphinx-theme>=1.1.1; extra == "docs"
@@ -56,6 +62,11 @@ Requires-Dist: jupyter>=1.0; extra == "all"
 Requires-Dist: ipython>=7.0; extra == "all"
 
 # Clustrix
+
+[![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
+[![Coverage](https://raw.githubusercontent.com/ContextLab/clustrix/master/coverage.svg)](https://github.com/ContextLab/clustrix/actions/workflows/coverage-badge.yml)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.
 

@@ -35,3 +35,10 @@ ipython>=7.0
 
 [kubernetes]
 kubernetes>=20.13.0
+
+[test]
+pytest>=6.0
+pytest-cov>=2.0
+coverage>=6.0
+pytest-xdist>=2.0
+pytest-mock>=3.0

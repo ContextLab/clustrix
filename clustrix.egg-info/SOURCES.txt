@@ -23,4 +23,5 @@ tests/test_config.py
 tests/test_decorator.py
 tests/test_executor.py
 tests/test_integration.py
+tests/test_local_executor.py
 tests/test_utils.py

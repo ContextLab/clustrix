@@ -84,6 +84,9 @@ Table of Contents
    :maxdepth: 2
    :caption: Tutorials
    
+   tutorials/slurm_tutorial
+   tutorials/pbs_tutorial
+   tutorials/kubernetes_tutorial
    tutorials/basic_usage
    tutorials/machine_learning
    tutorials/scientific_computing
