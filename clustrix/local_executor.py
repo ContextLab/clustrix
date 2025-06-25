@@ -208,6 +208,21 @@ class LocalExecutor:
         if chunk_size is None:
             chunk_size = max(1, len(items) // self.max_workers)
 
+        # Create a wrapper function that processes chunks
+        def chunk_processor(*args, **kwargs):
+            # Extract the chunk of items from kwargs
+            chunk_items = kwargs.pop(loop_var)
+            chunk_results = []
+            
+            # Process each item in the chunk individually
+            for item in chunk_items:
+                item_kwargs = kwargs.copy()
+                item_kwargs[loop_var] = item
+                result = func(*args, **item_kwargs)
+                chunk_results.append(result)
+            
+            return chunk_results
+
         # Create work chunks
         work_chunks = []
         for i in range(0, len(items), chunk_size):
@@ -217,8 +232,8 @@ class LocalExecutor:
 
             work_chunks.append({"args": func_args, "kwargs": chunk_kwargs})
 
-        # Execute in parallel
-        chunk_results = self.execute_parallel(func, work_chunks)
+        # Execute in parallel using the chunk processor
+        chunk_results = self.execute_parallel(chunk_processor, work_chunks)
 
         # Flatten results if needed
         results = []
@@ -252,7 +267,20 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
     Returns:
         True for threads, False for processes
     """
-    # Check for common I/O bound indicators first
+    # First check if function can be pickled (most important check)
+    if not _safe_pickle_test(func):
+        return True  # Use threads for unpicklable functions
+
+    # Check if any arguments can't be pickled
+    for arg in args:
+        if not _safe_pickle_test(arg):
+            return True
+
+    for value in kwargs.values():
+        if not _safe_pickle_test(value):
+            return True
+
+    # Check for common I/O bound indicators
     import inspect
 
     try:
@@ -271,19 +299,7 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
         if any(indicator in source.lower() for indicator in io_indicators):
             return True
     except (OSError, TypeError):
-        # If we can't get source code, check if function can be pickled
-        # If it can't be pickled (e.g., local functions), use threads
-        if not _safe_pickle_test(func):
-            return True
-
-    # Check if any arguments can't be pickled
-    for arg in args:
-        if not _safe_pickle_test(arg):
-            return True
-
-    for value in kwargs.values():
-        if not _safe_pickle_test(value):
-            return True
+        pass  # If we can't get source, no problem
 
     # Default to processes for CPU-bound tasks
     return False

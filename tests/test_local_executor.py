@@ -250,10 +250,8 @@ class TestExecutorTypeSelection:
     
     def test_safe_pickle_test_success(self):
         """Test successful pickle test."""
-        def simple_func():
-            return "test"
-            
-        assert _safe_pickle_test(simple_func) is True
+        # Use module-level function that can be pickled
+        assert _safe_pickle_test(cpu_bound_function) is True
         assert _safe_pickle_test([1, 2, 3]) is True
         assert _safe_pickle_test({"key": "value"}) is True
         
