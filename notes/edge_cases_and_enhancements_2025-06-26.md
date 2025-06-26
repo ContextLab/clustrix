@@ -47,8 +47,8 @@ This session focuses on implementing several key enhancements to Clustrix:
 - **Usage**: Set `package_manager="uv"` or `package_manager="auto"` in configuration
 
 ### Task 4: Cloud Platform Tutorials
-- 🔄 **Status**: IN PROGRESS (2/5 completed)
-- **Platforms**: ✅ AWS, ✅ Azure, ⏳ GCP, ⏳ HuggingFace Spaces, ⏳ Lambda Cloud
+- 🔄 **Status**: IN PROGRESS (3/5 completed)
+- **Platforms**: ✅ AWS, ✅ Azure, ✅ GCP, ⏳ HuggingFace Spaces, ⏳ Lambda Cloud
 - **Content**: Setup configurations, authentication, resource management
 - **AWS Tutorial Completed**:
   - Comprehensive notebook covering EC2, Batch, ParallelCluster integration
@@ -62,6 +62,12 @@ This session focuses on implementing several key enhancements to Clustrix:
   - Security best practices and cost optimization strategies
   - Resource cleanup and monitoring guidance
   - File: `docs/notebooks/azure_cloud_tutorial.ipynb`
+- **GCP Tutorial Completed**:
+  - Comprehensive notebook covering Compute Engine, GKE, Cloud Batch, Vertex AI integration
+  - Google Cloud Storage data management and scientific computing examples
+  - Preemptible VMs for cost optimization (up to 80% savings)
+  - Security best practices and resource cleanup guidance  
+  - File: `docs/notebooks/gcp_cloud_tutorial.ipynb`
 
 ### Task 5: Remote Kubernetes Support
 - ⏳ **Status**: PENDING
@@ -93,6 +99,7 @@ This session focuses on implementing several key enhancements to Clustrix:
 
 - **58d2820**: Improve dependency handling to capture conda-installed packages
 - **e7b952c**: Add uv package manager support for faster installations
+- **50937eb**: Add comprehensive Microsoft Azure cloud tutorial
 
 ## Next Steps
 
