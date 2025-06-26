@@ -1,6 +1,6 @@
 Metadata-Version: 2.1
 Name: clustrix
-Version: 0.1.0
+Version: 0.1.1
 Summary: Seamless distributed computing for Python functions
 Home-page: https://github.com/ContextLab/clustrix
 Author: Contextual Dynamics Laboratory
@@ -336,4 +336,3 @@ Clustrix is released under the MIT License. See [LICENSE](LICENSE) for details.
 
 - Documentation: [https://clustrix.readthedocs.io](https://clustrix.readthedocs.io)
 - Issues: [https://github.com/ContextLab/clustrix/issues](https://github.com/ContextLab/clustrix/issues)
-- Discussions: [https://github.com/ContextLab/clustrix/discussions](https://github.com/ContextLab/clustrix/discussions)

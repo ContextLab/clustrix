@@ -47,8 +47,8 @@ This session focuses on implementing several key enhancements to Clustrix:
 - **Usage**: Set `package_manager="uv"` or `package_manager="auto"` in configuration
 
 ### Task 4: Cloud Platform Tutorials
-- 🔄 **Status**: IN PROGRESS (4/5 completed)
-- **Platforms**: ✅ AWS, ✅ Azure, ✅ GCP, ✅ HuggingFace Spaces, ⏳ Lambda Cloud
+- ✅ **Status**: COMPLETED (5/5 completed)
+- **Platforms**: ✅ AWS, ✅ Azure, ✅ GCP, ✅ HuggingFace Spaces, ✅ Lambda Cloud
 - **Content**: Setup configurations, authentication, resource management
 - **AWS Tutorial Completed**:
   - Comprehensive notebook covering EC2, Batch, ParallelCluster integration
@@ -75,6 +75,13 @@ This session focuses on implementing several key enhancements to Clustrix:
   - Deployment best practices and hardware selection guide
   - Interactive ML demos and community sharing capabilities
   - File: `docs/notebooks/huggingface_spaces_tutorial.ipynb`
+- **Lambda Cloud Tutorial Completed**:
+  - Comprehensive notebook covering GPU computing platform setup
+  - Deep learning training with PyTorch and HuggingFace integration
+  - Transformer fine-tuning and computer vision examples
+  - Multi-GPU training guides and performance optimization
+  - Cost-effective GPU computing strategies and instance management
+  - File: `docs/notebooks/lambda_cloud_tutorial.ipynb`
 
 ### Task 5: Remote Kubernetes Support
 - ⏳ **Status**: PENDING
@@ -107,6 +114,9 @@ This session focuses on implementing several key enhancements to Clustrix:
 - **58d2820**: Improve dependency handling to capture conda-installed packages
 - **e7b952c**: Add uv package manager support for faster installations
 - **50937eb**: Add comprehensive Microsoft Azure cloud tutorial
+- **5c0ed0c**: Add comprehensive Google Cloud Platform tutorial
+- **993d86c**: Add comprehensive HuggingFace Spaces tutorial
+- **31b265c**: Add comprehensive Lambda Cloud tutorial
 
 ## Next Steps
 

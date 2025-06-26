@@ -39,6 +39,28 @@ setup(
     ],
     extras_require={
         "kubernetes": ["kubernetes>=20.13.0"],
+        "aws": [
+            "boto3>=1.26.0",
+            "kubernetes>=20.13.0",
+        ],
+        "azure": [
+            "azure-identity>=1.12.0",
+            "azure-mgmt-containerservice>=20.0.0",
+            "kubernetes>=20.13.0",
+        ],
+        "gcp": [
+            "google-cloud-container>=2.15.0",
+            "google-auth>=2.15.0",
+            "kubernetes>=20.13.0",
+        ],
+        "cloud": [
+            "boto3>=1.26.0",
+            "azure-identity>=1.12.0",
+            "azure-mgmt-containerservice>=20.0.0",
+            "google-cloud-container>=2.15.0",
+            "google-auth>=2.15.0",
+            "kubernetes>=20.13.0",
+        ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
@@ -63,6 +85,11 @@ setup(
         ],
         "all": [
             "kubernetes>=20.13.0",
+            "boto3>=1.26.0",
+            "azure-identity>=1.12.0",
+            "azure-mgmt-containerservice>=20.0.0",
+            "google-cloud-container>=2.15.0",
+            "google-auth>=2.15.0",
             "pytest>=6.0",
             "pytest-cov>=2.0",
             "black>=21.0",
