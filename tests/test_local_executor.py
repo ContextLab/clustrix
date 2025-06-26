@@ -2,7 +2,7 @@ import pytest
 import time
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
-from unittest.mock import Mock, patch, MagicMock
+# Removed unused unittest.mock imports
 
 from clustrix.local_executor import (
     LocalExecutor,
@@ -258,8 +258,15 @@ class TestExecutorTypeSelection:
     def test_safe_pickle_test_failure(self):
         """Test pickle test with unpicklable objects."""
         # Lambda functions are not picklable
-        lambda_func = lambda x: x
-        assert _safe_pickle_test(lambda_func) is False
+        def lambda_func(x):
+            return x
+
+        # Make it unpicklable by adding a closure
+        y = 1
+
+        def unpicklable_func(x):
+            return x + y
+        assert _safe_pickle_test(unpicklable_func) is False
 
         # File objects are not picklable
         with open(__file__, "r") as f:
@@ -267,8 +274,12 @@ class TestExecutorTypeSelection:
 
     def test_choose_executor_type_unpicklable_function(self):
         """Test executor type choice with unpicklable function."""
-        lambda_func = lambda x: x
-        result = choose_executor_type(lambda_func, (), {})
+        # Create an unpicklable function with closure
+        y = 1
+
+        def unpicklable_func(x):
+            return x + y
+        result = choose_executor_type(unpicklable_func, (), {})
         assert result is True  # Should use threads
 
     def test_choose_executor_type_unpicklable_args(self):
@@ -368,9 +379,13 @@ class TestCreateLocalExecutor:
 
     def test_create_with_unpicklable_function(self):
         """Test creating executor for unpicklable function."""
-        lambda_func = lambda x: x * 2
+        # Create an unpicklable function with closure
+        multiplier = 2
 
-        executor = create_local_executor(func=lambda_func, args=(5,), kwargs={})
+        def unpicklable_func(x):
+            return x * multiplier
+
+        executor = create_local_executor(func=unpicklable_func, args=(5,), kwargs={})
         assert executor.use_threads is True  # Should use threads for unpicklable
 
 

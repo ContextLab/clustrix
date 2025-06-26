@@ -1,7 +1,6 @@
 import pytest
 from click.testing import CliRunner
 from unittest.mock import patch, Mock
-from pathlib import Path
 from clustrix.cli import cli
 from clustrix.config import ClusterConfig
 

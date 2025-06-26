@@ -1,6 +1,4 @@
 import pytest
-import ast
-import pickle
 from unittest.mock import patch, Mock
 from clustrix.utils import (
     serialize_function,

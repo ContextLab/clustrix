@@ -1,7 +1,6 @@
 """Tests for loop analysis functionality."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+# Removed unused pytest import
 from clustrix.loop_analysis import (
     LoopInfo,
     find_parallelizable_loops,
@@ -142,8 +141,12 @@ class TestLoopDetection:
     def test_detect_loops_source_unavailable(self):
         """Test loop detection when source code is unavailable."""
         # Lambda functions don't have accessible source code
-        lambda_func = lambda: sum(range(10))
-        loops = detect_loops_in_function(lambda_func)
+        def no_source_func():
+            return sum(range(10))
+
+        # Remove source code to simulate lambda-like behavior
+        no_source_func.__code__ = compile("lambda: sum(range(10))", "<lambda>", "eval")
+        loops = detect_loops_in_function(no_source_func)
         assert loops == []
 
 

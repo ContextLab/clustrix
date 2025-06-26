@@ -1,9 +1,8 @@
 import pytest
 import tempfile
 import shutil
-from pathlib import Path
 from unittest.mock import Mock, patch
-from clustrix.config import ClusterConfig, configure, get_config
+from clustrix.config import ClusterConfig, configure
 
 
 @pytest.fixture

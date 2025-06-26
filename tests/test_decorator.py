@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from clustrix.decorator import cluster
 from clustrix.config import configure
 

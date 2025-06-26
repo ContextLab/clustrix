@@ -1,14 +1,11 @@
 """Comprehensive tests for Kubernetes integration and cloud provider features."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
-import base64
+from unittest.mock import Mock, patch
 import time
-import sys
 
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
-from clustrix.cloud_providers import CloudProviderManager, CloudProviderError
 
 
 class TestKubernetesJobSubmission:
@@ -418,7 +415,7 @@ class TestKubernetesErrorHandling:
         """Test handling of missing kubernetes package."""
         config = ClusterConfig(cluster_type="kubernetes")
 
-        with patch.dict('sys.modules', {'kubernetes': None}):
+        with patch.dict("sys.modules", {"kubernetes": None}):
             executor = ClusterExecutor(config)
 
             with pytest.raises(ImportError, match="kubernetes package required"):

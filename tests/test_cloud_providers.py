@@ -1,7 +1,7 @@
 """Tests for cloud provider integration."""
 
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import subprocess
 import os
 

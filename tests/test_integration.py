@@ -1,11 +1,8 @@
 import pytest
-import tempfile
 import pickle
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
 from clustrix import cluster, configure, get_config
-from clustrix.executor import ClusterExecutor
-from clustrix.config import ClusterConfig
 
 
 class TestIntegration:
