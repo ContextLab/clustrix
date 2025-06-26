@@ -2,7 +2,11 @@
 
 import os
 import multiprocessing as mp
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from typing import Any, List, Callable, Dict, Optional, Union
 import logging
 import functools
@@ -15,7 +19,9 @@ logger = logging.getLogger(__name__)
 class LocalExecutor:
     """Execute functions locally using multiprocessing or threading."""
 
-    def __init__(self, max_workers: Optional[int] = None, use_threads: bool = False):
+    def __init__(
+        self, max_workers: Optional[int] = None, use_threads: bool = False
+    ):
         """
         Initialize local executor.
 
@@ -131,11 +137,17 @@ class LocalExecutor:
                 done_futures = set()
                 try:
                     # Use wait with timeout to check for completion
-                    from concurrent.futures import wait, FIRST_COMPLETED, ALL_COMPLETED
+                    from concurrent.futures import (
+                        wait,
+                        FIRST_COMPLETED,
+                        ALL_COMPLETED,
+                    )
                     import time
 
                     done, not_done = wait(
-                        futures.keys(), timeout=timeout, return_when=ALL_COMPLETED
+                        futures.keys(),
+                        timeout=timeout,
+                        return_when=ALL_COMPLETED,
                     )
 
                     if not_done:
@@ -290,7 +302,7 @@ class LocalExecutor:
         # Create work chunks
         work_chunks = []
         for i in range(0, len(items), chunk_size):
-            chunk_items = items[i : i + chunk_size]
+            chunk_items = items[i:i + chunk_size]
             chunk_kwargs = func_kwargs.copy()
             chunk_kwargs[loop_var] = chunk_items
 

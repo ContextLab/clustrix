@@ -1,13 +1,10 @@
 import os
 import time
-import subprocess
 import tempfile
 import pickle
 import logging
-from pathlib import Path
 from typing import Any, Dict, Optional
 import paramiko
-import json
 import cloudpickle
 
 from .config import ClusterConfig
@@ -30,7 +27,9 @@ class ClusterExecutor:
     def _setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
         if not self.config.cluster_host:
-            raise ValueError("cluster_host must be specified for SSH-based clusters")
+            raise ValueError(
+                "cluster_host must be specified for SSH-based clusters"
+            )
 
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -64,21 +63,33 @@ class ClusterExecutor:
             from kubernetes import client, config
 
             # Try cloud provider auto-configuration if enabled
-            if self.config.cloud_auto_configure and self.config.cluster_type == "kubernetes":
+            if (
+                self.config.cloud_auto_configure
+                and self.config.cluster_type == "kubernetes"
+            ):
                 try:
                     from .cloud_providers import CloudProviderManager
+
                     cloud_manager = CloudProviderManager(self.config)
                     result = cloud_manager.auto_configure()
-                    
-                    if result.get('auto_configured'):
-                        logger.info(f"Auto-configured {result.get('provider')} cluster: {result.get('cluster_name')}")
+
+                    if result.get("auto_configured"):
+                        logger.info(
+                            f"Auto-configured {result.get('provider')} cluster: {result.get('cluster_name')}"
+                        )
                     else:
-                        logger.info(f"Cloud auto-configuration skipped: {result.get('reason', 'Unknown')}")
-                        if 'error' in result:
-                            logger.warning(f"Auto-configuration error: {result['error']}")
-                
+                        logger.info(
+                            f"Cloud auto-configuration skipped: {result.get('reason', 'Unknown')}"
+                        )
+                        if "error" in result:
+                            logger.warning(
+                                f"Auto-configuration error: {result['error']}"
+                            )
+
                 except Exception as e:
-                    logger.warning(f"Cloud provider auto-configuration failed: {e}")
+                    logger.warning(
+                        f"Cloud provider auto-configuration failed: {e}"
+                    )
                     # Continue with manual configuration
 
             config.load_kube_config()
@@ -88,7 +99,9 @@ class ClusterExecutor:
                 "kubernetes package required for Kubernetes cluster support"
             )
 
-    def submit_job(self, func_data: Dict[str, Any], job_config: Dict[str, Any]) -> str:
+    def submit_job(
+        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
+    ) -> str:
         """
         Submit a job to the cluster.
 
@@ -113,7 +126,9 @@ class ClusterExecutor:
         elif self.config.cluster_type == "ssh":
             return self._submit_ssh_job(func_data, job_config)
         else:
-            raise ValueError(f"Unsupported cluster type: {self.config.cluster_type}")
+            raise ValueError(
+                f"Unsupported cluster type: {self.config.cluster_type}"
+            )
 
     def _submit_slurm_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
@@ -121,7 +136,9 @@ class ClusterExecutor:
         """Submit job via SLURM."""
 
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        remote_job_dir = (
+            f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        )
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -129,12 +146,17 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
+        self._upload_file(
+            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+        )
         os.unlink(local_pickle_path)
 
         # Setup environment
         setup_remote_environment(
-            self.ssh_client, remote_job_dir, func_data["requirements"], self.config
+            self.ssh_client,
+            remote_job_dir,
+            func_data["requirements"],
+            self.config,
         )
 
         # Create job script
@@ -170,7 +192,9 @@ class ClusterExecutor:
     ) -> str:
         """Submit job via PBS."""
         # Similar to SLURM but with PBS commands
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        remote_job_dir = (
+            f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        )
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -178,7 +202,9 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
+        self._upload_file(
+            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+        )
         os.unlink(local_pickle_path)
 
         # Create PBS script
@@ -212,7 +238,9 @@ class ClusterExecutor:
         """Submit job via SGE."""
 
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        remote_job_dir = (
+            f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        )
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -220,12 +248,17 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
+        self._upload_file(
+            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+        )
         os.unlink(local_pickle_path)
 
         # Setup environment
         setup_remote_environment(
-            self.ssh_client, remote_job_dir, func_data["requirements"], self.config
+            self.ssh_client,
+            remote_job_dir,
+            func_data["requirements"],
+            self.config,
         )
 
         # Create job script
@@ -245,7 +278,11 @@ class ClusterExecutor:
         stdout, stderr = self._execute_remote_command(cmd)
 
         # Extract job ID from qsub output (SGE format: "Your job 123456 ...")
-        job_id = stdout.strip().split()[2] if "Your job" in stdout else stdout.strip()
+        job_id = (
+            stdout.strip().split()[2]
+            if "Your job" in stdout
+            else stdout.strip()
+        )
 
         # Store job info
         self.active_jobs[job_id] = {
@@ -340,7 +377,7 @@ class ClusterExecutor:
             - Results are captured via stdout parsing (CLUSTRIX_RESULT: prefix)
         """
         try:
-            from kubernetes import client, config as k8s_config
+            from kubernetes import client
         except ImportError:
             raise ImportError(
                 "kubernetes package required for Kubernetes support. "
@@ -384,15 +421,15 @@ try:
     func_data_b64 = "{func_data_b64}"
     func_data_bytes = base64.b64decode(func_data_b64)
     func_data = cloudpickle.loads(func_data_bytes)
-    
+
     # Execute function
     func = func_data['func']
     args = func_data['args']
     kwargs = func_data['kwargs']
-    
+
     result = func(*args, **kwargs)
     print(f"CLUSTRIX_RESULT:{{result}}")
-    
+
 except Exception as e:
     print(f"CLUSTRIX_ERROR:{{str(e)}}")
     print(f"CLUSTRIX_TRACEBACK:{{traceback.format_exc()}}")
@@ -402,11 +439,15 @@ except Exception as e:
                                 "resources": {
                                     "requests": {
                                         "cpu": str(job_config.get("cores", 1)),
-                                        "memory": job_config.get("memory", "1Gi"),
+                                        "memory": job_config.get(
+                                            "memory", "1Gi"
+                                        ),
                                     },
                                     "limits": {
                                         "cpu": str(job_config.get("cores", 1)),
-                                        "memory": job_config.get("memory", "1Gi"),
+                                        "memory": job_config.get(
+                                            "memory", "1Gi"
+                                        ),
                                     },
                                 },
                             }
@@ -440,7 +481,9 @@ except Exception as e:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via direct SSH (no scheduler)."""
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        remote_job_dir = (
+            f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        )
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -448,7 +491,9 @@ except Exception as e:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
+        self._upload_file(
+            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+        )
         os.unlink(local_pickle_path)
 
         # Create execution script
@@ -494,7 +539,7 @@ except Exception as e:
 
         # Check if this is a Kubernetes job
         is_k8s_job = job_info.get("k8s_job", False)
-        
+
         if not is_k8s_job:
             remote_dir = job_info["remote_dir"]
 
@@ -506,18 +551,20 @@ except Exception as e:
                 if is_k8s_job:
                     # For Kubernetes jobs, get result from pod logs
                     result = self._get_k8s_result(job_id)
-                    
+
                     # Cleanup
                     if self.config.cleanup_on_success:
                         self._cleanup_k8s_job(job_id)
-                    
+
                     del self.active_jobs[job_id]
                     return result
                 else:
                     # SSH-based job result collection
                     result_path = f"{remote_dir}/result.pkl"
 
-                    with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
+                    with tempfile.NamedTemporaryFile(
+                        mode="wb", delete=False
+                    ) as f:
                         local_result_path = f.name
 
                     try:
@@ -528,7 +575,9 @@ except Exception as e:
 
                         # Cleanup
                         if self.config.cleanup_on_success:
-                            self._execute_remote_command(f"rm -rf {remote_dir}")
+                            self._execute_remote_command(
+                                f"rm -rf {remote_dir}"
+                            )
 
                         del self.active_jobs[job_id]
 
@@ -543,22 +592,28 @@ except Exception as e:
                     # For Kubernetes jobs, get error from pod logs
                     error_log = self._get_k8s_error_log(job_id)
                     original_exception = self._extract_k8s_exception(job_id)
-                    
+
                     if original_exception:
                         raise original_exception
                     else:
-                        raise RuntimeError(f"Kubernetes job {job_id} failed. Error log:\n{error_log}")
+                        raise RuntimeError(
+                            f"Kubernetes job {job_id} failed. Error log:\n{error_log}"
+                        )
                 else:
                     # SSH-based error handling
                     error_log = self._get_error_log(job_id)
-                    original_exception = self._extract_original_exception(job_id)
+                    original_exception = self._extract_original_exception(
+                        job_id
+                    )
 
                     if original_exception:
                         # Re-raise the original exception
                         raise original_exception
                     else:
                         # Fallback to RuntimeError with log
-                        raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
+                        raise RuntimeError(
+                            f"Job {job_id} failed. Error log:\n{error_log}"
+                        )
 
             # Wait before next poll
             time.sleep(self.config.job_poll_interval)
@@ -642,7 +697,7 @@ except Exception as e:
                         return "failed"
                     else:
                         return "running"
-            except:
+            except Exception:
                 return "unknown"
 
         elif self.config.cluster_type == "pbs":
@@ -655,7 +710,7 @@ except Exception as e:
                     return "running"
                 else:
                     return "failed"
-            except:
+            except Exception:
                 # Job might be completed and removed from queue
                 if job_id in self.active_jobs:
                     job_info = self.active_jobs[job_id]
@@ -688,7 +743,7 @@ except Exception as e:
                         line_count = int(stdout.strip().split()[0])
                         if line_count > 0:
                             return "failed"
-                    except:
+                    except Exception:
                         pass
                     return "running"
                 else:
@@ -700,15 +755,14 @@ except Exception as e:
             # For Kubernetes jobs, check job status via API
             try:
                 from kubernetes import client
-                
+
                 batch_api = client.BatchV1Api()
-                
+
                 # Get job status
                 job = batch_api.read_namespaced_job(
-                    name=job_id, 
-                    namespace=self.config.k8s_namespace
+                    name=job_id, namespace=self.config.k8s_namespace
                 )
-                
+
                 # Check job conditions
                 if job.status.succeeded:
                     return "completed"
@@ -718,7 +772,7 @@ except Exception as e:
                     return "running"
                 else:
                     return "pending"
-                    
+
             except Exception as e:
                 # Job might have been deleted or not found
                 if job_id in self.active_jobs:
@@ -760,7 +814,7 @@ except Exception as e:
             sftp.stat(remote_path)
             sftp.close()
             return True
-        except:
+        except Exception:
             return False
 
     def _get_error_log(self, job_id: str) -> str:
@@ -859,7 +913,7 @@ except Exception as e:
                 )
                 if stdout.strip():
                     return stdout
-            except:
+            except Exception:
                 continue
 
         return "No error log found"
@@ -989,7 +1043,12 @@ except Exception as e:
         self, func, args: tuple, kwargs: dict, config: dict
     ) -> bytes:
         """Prepare function data for serialization."""
-        func_data = {"func": func, "args": args, "kwargs": kwargs, "config": config}
+        func_data = {
+            "func": func,
+            "args": args,
+            "kwargs": kwargs,
+            "config": config,
+        }
 
         return cloudpickle.dumps(func_data)
 
@@ -1022,7 +1081,7 @@ except Exception as e:
                     return "failed"
                 else:
                     return "running"
-        except:
+        except Exception:
             return "unknown"
 
     def _check_pbs_status(self, job_id: str) -> str:
@@ -1050,47 +1109,48 @@ except Exception as e:
                 return "failed"
             else:
                 return "unknown"
-        except:
+        except Exception:
             return "unknown"
 
     def _get_k8s_result(self, job_id: str) -> Any:
         """Get result from Kubernetes job logs."""
         try:
             from kubernetes import client
-            
+
             core_api = client.CoreV1Api()
-            
+
             # Get pods for this job
             pods = core_api.list_namespaced_pod(
                 namespace=self.config.k8s_namespace,
-                label_selector=f"job-name={job_id}"
+                label_selector=f"job-name={job_id}",
             )
-            
+
             for pod in pods.items:
                 if pod.status.phase == "Succeeded":
                     # Get pod logs
                     logs = core_api.read_namespaced_pod_log(
                         name=pod.metadata.name,
-                        namespace=pod.metadata.namespace
+                        namespace=pod.metadata.namespace,
                     )
-                    
+
                     # Parse result from logs
-                    for line in logs.split('\n'):
-                        if line.startswith('CLUSTRIX_RESULT:'):
-                            result_str = line[len('CLUSTRIX_RESULT:'):]
+                    for line in logs.split("\n"):
+                        if line.startswith("CLUSTRIX_RESULT:"):
+                            result_str = line[len("CLUSTRIX_RESULT:"):]
                             # Try to evaluate the result
                             try:
                                 import ast
+
                                 return ast.literal_eval(result_str)
-                            except:
+                            except Exception:
                                 # If literal_eval fails, return as string
                                 return result_str
-                    
+
                     # If no CLUSTRIX_RESULT found, return logs
                     return logs
-            
+
             raise RuntimeError(f"No successful pod found for job {job_id}")
-            
+
         except Exception as e:
             raise RuntimeError(f"Failed to get Kubernetes job result: {e}")
 
@@ -1098,29 +1158,35 @@ except Exception as e:
         """Get error log from Kubernetes job."""
         try:
             from kubernetes import client
-            
+
             core_api = client.CoreV1Api()
-            
+
             # Get pods for this job
             pods = core_api.list_namespaced_pod(
                 namespace=self.config.k8s_namespace,
-                label_selector=f"job-name={job_id}"
+                label_selector=f"job-name={job_id}",
             )
-            
+
             error_logs = []
             for pod in pods.items:
                 # Get pod logs regardless of status
                 try:
                     logs = core_api.read_namespaced_pod_log(
                         name=pod.metadata.name,
-                        namespace=pod.metadata.namespace
+                        namespace=pod.metadata.namespace,
                     )
                     error_logs.append(f"Pod {pod.metadata.name}:\n{logs}")
                 except Exception as e:
-                    error_logs.append(f"Pod {pod.metadata.name}: Failed to get logs - {e}")
-            
-            return "\n\n".join(error_logs) if error_logs else "No error logs available"
-            
+                    error_logs.append(
+                        f"Pod {pod.metadata.name}: Failed to get logs - {e}"
+                    )
+
+            return (
+                "\n\n".join(error_logs)
+                if error_logs
+                else "No error logs available"
+            )
+
         except Exception as e:
             return f"Failed to get Kubernetes error logs: {e}"
 
@@ -1128,25 +1194,25 @@ except Exception as e:
         """Extract original exception from Kubernetes job logs."""
         try:
             error_log = self._get_k8s_error_log(job_id)
-            
+
             # Look for CLUSTRIX_ERROR and CLUSTRIX_TRACEBACK in logs
-            lines = error_log.split('\n')
+            lines = error_log.split("\n")
             error_msg = None
             traceback_found = False
-            
+
             for line in lines:
-                if line.startswith('CLUSTRIX_ERROR:'):
-                    error_msg = line[len('CLUSTRIX_ERROR:'):]
-                elif line.startswith('CLUSTRIX_TRACEBACK:'):
+                if line.startswith("CLUSTRIX_ERROR:"):
+                    error_msg = line[len("CLUSTRIX_ERROR:"):]
+                elif line.startswith("CLUSTRIX_TRACEBACK:"):
                     traceback_found = True
                     break
-            
+
             if error_msg:
                 # Try to recreate the original exception
                 return RuntimeError(error_msg)
-            
+
             return None
-            
+
         except Exception:
             return None
 
@@ -1154,20 +1220,21 @@ except Exception as e:
         """Clean up Kubernetes job resources."""
         try:
             from kubernetes import client
-            
+
             batch_api = client.BatchV1Api()
             core_api = client.CoreV1Api()
-            
+
             # Delete the job (this will also delete associated pods)
             batch_api.delete_namespaced_job(
                 name=job_id,
                 namespace=self.config.k8s_namespace,
-                body=client.V1DeleteOptions(propagation_policy="Foreground")
+                body=client.V1DeleteOptions(propagation_policy="Foreground"),
             )
-            
+
         except Exception as e:
             # Log warning but don't fail
             import logging
+
             logging.warning(f"Failed to cleanup Kubernetes job {job_id}: {e}")
 
     def get_job_status(self, job_id: str) -> str:

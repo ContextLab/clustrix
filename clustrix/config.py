@@ -19,7 +19,7 @@ class ClusterConfig:
     cluster_type: str = "slurm"  # slurm, pbs, sge, kubernetes, ssh
     cluster_host: Optional[str] = None
     cluster_port: int = 22
-    
+
     # Kubernetes-specific settings
     k8s_namespace: str = "default"
     k8s_image: str = "python:3.11-slim"
@@ -27,24 +27,24 @@ class ClusterConfig:
     k8s_pull_policy: str = "IfNotPresent"
     k8s_job_ttl_seconds: int = 3600
     k8s_backoff_limit: int = 3
-    
+
     # Cloud provider settings for remote Kubernetes
     cloud_provider: str = "manual"  # manual, aws, azure, gcp
     cloud_region: Optional[str] = None
     cloud_auto_configure: bool = False
-    
+
     # AWS-specific settings
     aws_profile: Optional[str] = None
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     eks_cluster_name: Optional[str] = None
-    
+
     # Azure-specific settings
     azure_subscription_id: Optional[str] = None
     azure_resource_group: Optional[str] = None
     azure_tenant_id: Optional[str] = None
     aks_cluster_name: Optional[str] = None
-    
+
     # GCP-specific settings
     gcp_project_id: Optional[str] = None
     gcp_zone: Optional[str] = None
@@ -98,7 +98,7 @@ def configure(**kwargs) -> None:
     Args:
         **kwargs: Configuration parameters matching ClusterConfig fields
     """
-    global _config
+    global _config  # noqa: F824
 
     # Update configuration with provided kwargs
     for key, value in kwargs.items():

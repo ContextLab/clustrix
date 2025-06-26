@@ -5,16 +5,16 @@ import pickle
 import inspect
 import importlib
 import subprocess
-import tempfile
-from typing import Any, Dict, List, Optional, Callable
-from pathlib import Path
+from typing import Any, Dict, Optional, Callable
 import dill
 import cloudpickle
 
 from .config import ClusterConfig
 
 
-def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
+def detect_loops(
+    func: Callable, args: tuple, kwargs: dict
+) -> Optional[Dict[str, Any]]:
     """
     Analyze function to detect parallelizable loops.
 
@@ -55,7 +55,9 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
                 loop_info = {
                     "type": "while",
                     "condition": (
-                        ast.unparse(node.test) if hasattr(ast, "unparse") else "unknown"
+                        ast.unparse(node.test)
+                        if hasattr(ast, "unparse")
+                        else "unknown"
                     ),
                 }
                 self.loops.append(loop_info)
@@ -75,7 +77,7 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
                     range_str = loop["iterable"]
                     if "range(" in range_str:
                         range_part = range_str[
-                            range_str.find("range(") : range_str.find(
+                            range_str.find("range("):range_str.find(
                                 ")", range_str.find("range(")
                             )
                             + 1
@@ -84,7 +86,7 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
                             range_part
                         )  # Dangerous in practice, needs safer evaluation
                         loop["range"] = range_obj
-                except:
+                except Exception:
                     loop["range"] = range(10)  # Default fallback
 
                 return loop
@@ -96,7 +98,9 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
         return None
 
 
-def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
+def serialize_function(
+    func: Callable, args: tuple, kwargs: dict
+) -> Dict[str, Any]:
     """
     Serialize function and all its dependencies.
 
@@ -111,12 +115,13 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     # Get current environment info
     requirements = get_environment_requirements()
-    env_info = get_environment_info()  # For compatibility with tests
+    # Get environment info (not used here but needed for compatibility)
+    _ = get_environment_info()  # For compatibility with tests
 
     # Serialize function using cloudpickle for better compatibility
     try:
         func_bytes = cloudpickle.dumps(func)
-    except:
+    except Exception:
         # Fallback to dill
         func_bytes = dill.dumps(func)
 
@@ -134,7 +139,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     try:
         func_info["source"] = inspect.getsource(func)
-    except:
+    except Exception:
         pass
 
     return {
@@ -165,7 +170,7 @@ def deserialize_function(func_data: bytes) -> tuple:
         # Dictionary format from serialize_function
         try:
             func = cloudpickle.loads(func_data["function"])
-        except:
+        except Exception:
             func = dill.loads(func_data["function"])
 
         args = pickle.loads(func_data["args"])
@@ -184,7 +189,9 @@ def get_environment_requirements() -> Dict[str, str]:
     try:
         # Use pip list --format=freeze to capture all packages including conda-installed ones
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "list", "--format=freeze"], capture_output=True, text=True
+            [sys.executable, "-m", "pip", "list", "--format=freeze"],
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -214,7 +221,9 @@ def get_environment_info() -> str:
     try:
         # Use pip list --format=freeze to capture all packages including conda-installed ones
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "list", "--format=freeze"], capture_output=True, text=True
+            [sys.executable, "-m", "pip", "list", "--format=freeze"],
+            capture_output=True,
+            text=True,
         )
 
         if result.returncode == 0:
@@ -239,10 +248,10 @@ def is_uv_available() -> bool:
 def get_package_manager_command(config: ClusterConfig) -> str:
     """
     Get the appropriate package manager command based on configuration.
-    
+
     Args:
         config: Cluster configuration
-        
+
     Returns:
         Package manager command (pip or uv)
     """
@@ -289,7 +298,7 @@ def setup_environment(
         req_content = "\n".join(
             [f"{pkg}=={version}" for pkg, version in requirements.items()]
         )
-        
+
         # Get appropriate package manager
         pkg_manager = get_package_manager_command(config)
 
@@ -304,14 +313,20 @@ def setup_environment(
     return f"{venv_path}/bin/python"
 
 
-def setup_remote_environment(ssh_client, work_dir: str, requirements: Dict[str, str], config: ClusterConfig = None):
+def setup_remote_environment(
+    ssh_client,
+    work_dir: str,
+    requirements: Dict[str, str],
+    config: ClusterConfig = None,
+):
     """Setup environment on remote cluster via SSH."""
-    
+
     # Get appropriate package manager
     if config is None:
         from .config import get_config
+
         config = get_config()
-    
+
     pkg_manager = get_package_manager_command(config)
 
     # Create virtual environment
@@ -373,7 +388,7 @@ def _create_slurm_script(
 
     script_lines = [
         "#!/bin/bash",
-        f"#SBATCH --job-name=clustrix",
+        "#SBATCH --job-name=clustrix",
         f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
         f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
         f"#SBATCH --cpus-per-task={job_config['cores']}",
@@ -399,7 +414,7 @@ def _create_slurm_script(
         [
             f"cd {remote_job_dir}",
             "source venv/bin/activate",
-            f'python -c "',
+            'python -c "',
             "import pickle",
             "import sys",
             "import traceback",
@@ -435,7 +450,7 @@ def _create_pbs_script(
 
     script_lines = [
         "#!/bin/bash",
-        f"#PBS -N clustrix",
+        "#PBS -N clustrix",
         f"#PBS -o {remote_job_dir}/job.out",
         f"#PBS -e {remote_job_dir}/job.err",
         f"#PBS -l nodes=1:ppn={job_config['cores']}",
@@ -465,13 +480,13 @@ def _create_sge_script(
 
     script_lines = [
         "#!/bin/bash",
-        f"#$ -N clustrix",
+        "#$ -N clustrix",
         f"#$ -o {remote_job_dir}/job.out",
         f"#$ -e {remote_job_dir}/job.err",
         f"#$ -pe smp {job_config['cores']}",
         f"#$ -l h_vmem={job_config['memory']}",
         f"#$ -l h_rt={job_config['time']}",
-        f"#$ -cwd",
+        "#$ -cwd",
         "",
         f"cd {remote_job_dir}",
         "source venv/bin/activate",

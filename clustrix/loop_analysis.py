@@ -2,7 +2,7 @@
 
 import ast
 import inspect
-from typing import Any, Dict, List, Optional, Callable, Union, Set
+from typing import Any, Dict, List, Optional, Callable, Set
 import logging
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,9 @@ class LoopInfo:
         self.iterable = iterable  # string representation of iterable
         self.range_info = range_info  # {start, stop, step} for range loops
         self.nested_level = nested_level  # nesting depth
-        self.dependencies = dependencies or set()  # variables this loop depends on
+        self.dependencies = (
+            dependencies or set()
+        )  # variables this loop depends on
         self.is_parallelizable = self._assess_parallelizability()
 
     def _assess_parallelizability(self) -> bool:
@@ -94,9 +96,17 @@ class SafeRangeEvaluator(ast.NodeVisitor):
                 if len(args) == 1:
                     self.result = {"start": 0, "stop": args[0], "step": 1}
                 elif len(args) == 2:
-                    self.result = {"start": args[0], "stop": args[1], "step": 1}
+                    self.result = {
+                        "start": args[0],
+                        "stop": args[1],
+                        "step": 1,
+                    }
                 elif len(args) == 3:
-                    self.result = {"start": args[0], "stop": args[1], "step": args[2]}
+                    self.result = {
+                        "start": args[0],
+                        "stop": args[1],
+                        "step": args[2],
+                    }
                 else:
                     self.safe = False
 
@@ -231,7 +241,7 @@ class LoopDetector(ast.NodeVisitor):
                 else:
                     # Fallback for older Python versions
                     iterable_str = _ast_to_string(node.iter)
-            except:
+            except Exception:
                 iterable_str = "unknown"
 
             # Analyze dependencies
@@ -270,7 +280,7 @@ class LoopDetector(ast.NodeVisitor):
                     condition_str = ast.unparse(node.test)
                 else:
                     condition_str = _ast_to_string(node.test)
-            except:
+            except Exception:
                 condition_str = "unknown"
 
             # Analyze dependencies
@@ -320,7 +330,7 @@ def detect_loops_in_function(
             bound_args = sig.bind_partial(*args, **kwargs)
             bound_args.apply_defaults()
             local_vars.update(bound_args.arguments)
-        except:
+        except Exception:
             pass
 
         detector = LoopDetector(local_vars)
@@ -343,7 +353,10 @@ def detect_loops_in_function(
 
 
 def find_parallelizable_loops(
-    func: Callable, args: tuple = (), kwargs: dict = None, max_nesting_level: int = 1
+    func: Callable,
+    args: tuple = (),
+    kwargs: dict = None,
+    max_nesting_level: int = 1,
 ) -> List[LoopInfo]:
     """
     Find loops that can be parallelized.
@@ -398,7 +411,9 @@ def estimate_work_size(loop_info: LoopInfo) -> int:
 
 
 # Backward compatibility
-def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
+def detect_loops(
+    func: Callable, args: tuple, kwargs: dict
+) -> Optional[Dict[str, Any]]:
     """
     Legacy function for backward compatibility.
 
@@ -420,7 +435,9 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
                 if loop.range_info:
                     range_info = loop.range_info
                     loop_dict["range"] = range(
-                        range_info["start"], range_info["stop"], range_info["step"]
+                        range_info["start"],
+                        range_info["stop"],
+                        range_info["step"],
                     )
                 return loop_dict
 
