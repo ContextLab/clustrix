@@ -87,7 +87,7 @@ def cluster(
                 return _execute_single(executor, func, args, func_kwargs, job_config)
 
         # Store cluster config for access outside execution
-        wrapper._cluster_config = {
+        cluster_config = {
             "cores": cores,
             "memory": memory,
             "time": time,
@@ -96,7 +96,8 @@ def cluster(
             "parallel": parallel,
             "environment": environment,
         }
-        wrapper._cluster_config.update(kwargs)
+        cluster_config.update(kwargs)
+        setattr(wrapper, "_cluster_config", cluster_config)
 
         return wrapper
 

@@ -747,23 +747,39 @@ except Exception as e:
 
     def _execute_remote_command(self, command: str) -> tuple:
         """Execute command on remote cluster."""
+        if self.ssh_client is None:
+            raise RuntimeError(
+                "SSH client not connected. Call _setup_ssh_connection() first."
+            )
         stdin, stdout, stderr = self.ssh_client.exec_command(command)
         return stdout.read().decode(), stderr.read().decode()
 
     def _upload_file(self, local_path: str, remote_path: str):
         """Upload file to remote cluster."""
+        if self.ssh_client is None:
+            raise RuntimeError(
+                "SSH client not connected. Call _setup_ssh_connection() first."
+            )
         sftp = self.ssh_client.open_sftp()
         sftp.put(local_path, remote_path)
         sftp.close()
 
     def _download_file(self, remote_path: str, local_path: str):
         """Download file from remote cluster."""
+        if self.ssh_client is None:
+            raise RuntimeError(
+                "SSH client not connected. Call _setup_ssh_connection() first."
+            )
         sftp = self.ssh_client.open_sftp()
         sftp.get(remote_path, local_path)
         sftp.close()
 
     def _create_remote_file(self, remote_path: str, content: str):
         """Create file with content on remote cluster."""
+        if self.ssh_client is None:
+            raise RuntimeError(
+                "SSH client not connected. Call _setup_ssh_connection() first."
+            )
         sftp = self.ssh_client.open_sftp()
         with sftp.open(remote_path, "w") as f:
             f.write(content)
@@ -771,6 +787,8 @@ except Exception as e:
 
     def _remote_file_exists(self, remote_path: str) -> bool:
         """Check if file exists on remote cluster."""
+        if self.ssh_client is None:
+            return False
         try:
             sftp = self.ssh_client.open_sftp()
             sftp.stat(remote_path)
