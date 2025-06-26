@@ -1,7 +1,7 @@
 # Clustrix
 
 [![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
-[![PyPI version](https://badge.fury.io/py/clustrix.svg)](https://badge.fury.io/py/clustrix)
+[![PyPI version](https://img.shields.io/pypi/v/clustrix.svg)](https://pypi.org/project/clustrix/)
 [![Documentation](https://readthedocs.org/projects/clustrix/badge/?version=latest)](https://clustrix.readthedocs.io/en/latest/?badge=latest)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
