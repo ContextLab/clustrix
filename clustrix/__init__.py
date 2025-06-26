@@ -35,3 +35,16 @@ __all__ = [
     "CostEstimate",
     "CostReport",
 ]
+
+# Auto-register IPython magic command if in notebook environment
+try:
+    from IPython import get_ipython
+
+    ipython = get_ipython()
+    if ipython is not None:
+        from .notebook_magic import load_ipython_extension
+
+        load_ipython_extension(ipython)
+except (ImportError, AttributeError):
+    # Not in IPython/Jupyter environment
+    pass

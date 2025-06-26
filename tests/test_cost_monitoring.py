@@ -4,11 +4,9 @@ Unit tests for cost monitoring functionality.
 
 import pytest
 import unittest.mock as mock
-from datetime import datetime, timedelta
-from dataclasses import asdict
+from datetime import datetime
 
 from clustrix.cost_monitoring import (
-    BaseCostMonitor,
     ResourceUsage,
     CostEstimate,
     CostReport,
