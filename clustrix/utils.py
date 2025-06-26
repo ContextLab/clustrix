@@ -225,6 +225,37 @@ def get_environment_info() -> str:
     return ""
 
 
+def is_uv_available() -> bool:
+    """Check if uv package manager is available."""
+    try:
+        result = subprocess.run(
+            ["uv", "--version"], capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
+def get_package_manager_command(config: ClusterConfig) -> str:
+    """
+    Get the appropriate package manager command based on configuration.
+    
+    Args:
+        config: Cluster configuration
+        
+    Returns:
+        Package manager command (pip or uv)
+    """
+    if config.package_manager == "uv":
+        return "uv pip"
+    elif config.package_manager == "auto":
+        # Auto-detect: prefer uv if available, fallback to pip
+        return "uv pip" if is_uv_available() else "pip"
+    else:
+        # Default to pip
+        return "pip"
+
+
 def setup_environment(
     work_dir: str, requirements: Dict[str, str], config: ClusterConfig
 ) -> str:
@@ -258,20 +289,30 @@ def setup_environment(
         req_content = "\n".join(
             [f"{pkg}=={version}" for pkg, version in requirements.items()]
         )
+        
+        # Get appropriate package manager
+        pkg_manager = get_package_manager_command(config)
 
         # This would need to be written to remote file
         setup_commands.extend(
             [
                 f"echo '{req_content}' > {req_file}",
-                f"{venv_path}/bin/pip install -r {req_file}",
+                f"{venv_path}/bin/{pkg_manager} install -r {req_file}",
             ]
         )
 
     return f"{venv_path}/bin/python"
 
 
-def setup_remote_environment(ssh_client, work_dir: str, requirements: Dict[str, str]):
+def setup_remote_environment(ssh_client, work_dir: str, requirements: Dict[str, str], config: ClusterConfig = None):
     """Setup environment on remote cluster via SSH."""
+    
+    # Get appropriate package manager
+    if config is None:
+        from .config import get_config
+        config = get_config()
+    
+    pkg_manager = get_package_manager_command(config)
 
     # Create virtual environment
     commands = [
@@ -292,7 +333,7 @@ def setup_remote_environment(ssh_client, work_dir: str, requirements: Dict[str, 
             f.write(req_content)
         sftp.close()
 
-        commands.append("pip install -r requirements.txt")
+        commands.append(f"{pkg_manager} install -r requirements.txt")
 
     # Execute setup commands
     full_command = " && ".join(commands)

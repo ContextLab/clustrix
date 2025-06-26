@@ -29,9 +29,22 @@ This session focuses on implementing several key enhancements to Clustrix:
 - **Impact**: Remote environments will now have much more complete dependency matching
 
 ### Task 3: Add uv Support
-- ⏳ **Status**: PENDING
+- ✅ **Status**: COMPLETED
 - **Goal**: Integrate uv as faster alternative to pip/conda
 - **Benefits**: Significantly improved package installation performance
+- **Implementation**:
+  - Added `package_manager` config option ("pip", "uv", "auto")
+  - Added `is_uv_available()` function to detect uv installation
+  - Added `get_package_manager_command()` for smart selection
+  - Updated `setup_environment()` and `setup_remote_environment()` functions
+  - Updated `executor.py` to pass config to environment setup
+- **Files Modified**:
+  - `clustrix/config.py`: Added package_manager configuration field
+  - `clustrix/utils.py`: Added uv detection and selection logic
+  - `clustrix/executor.py`: Updated calls to pass config parameter
+  - `tests/test_utils.py`: Added comprehensive tests for uv functionality
+- **Testing**: All 126 tests pass, manual test confirms uv detection and selection works
+- **Usage**: Set `package_manager="uv"` or `package_manager="auto"` in configuration
 
 ### Task 4: Cloud Platform Tutorials
 - ⏳ **Status**: PENDING
@@ -66,7 +79,7 @@ This session focuses on implementing several key enhancements to Clustrix:
 
 ## Commit References
 
-*Will be updated as commits are made*
+- **58d2820**: Improve dependency handling to capture conda-installed packages
 
 ## Next Steps
 

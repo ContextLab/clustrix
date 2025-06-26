@@ -32,6 +32,7 @@ class ClusterConfig:
     local_cache_dir: str = "~/.clustrix/cache"
     conda_env_name: Optional[str] = None
     python_executable: str = "python"
+    package_manager: str = "pip"  # pip, uv, or auto
 
     # Execution preferences
     auto_parallel: bool = True

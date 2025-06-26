@@ -117,7 +117,7 @@ class ClusterExecutor:
 
         # Setup environment
         setup_remote_environment(
-            self.ssh_client, remote_job_dir, func_data["requirements"]
+            self.ssh_client, remote_job_dir, func_data["requirements"], self.config
         )
 
         # Create job script
@@ -208,7 +208,7 @@ class ClusterExecutor:
 
         # Setup environment
         setup_remote_environment(
-            self.ssh_client, remote_job_dir, func_data["requirements"]
+            self.ssh_client, remote_job_dir, func_data["requirements"], self.config
         )
 
         # Create job script
