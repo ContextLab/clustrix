@@ -81,6 +81,14 @@
 <li class="toctree-l1"><a class="reference internal" href="ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
 </ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+</ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
@@ -1140,201 +1148,226 @@
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">kubernetes_resource_guidelines</span><span class="p">():</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example Kubernetes resource configurations</span>
+<span class="k">def</span> <span class="nf">get_kubernetes_resource_examples</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Guidelines for Kubernetes resource management with Clustrix.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">resource_patterns</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s1">&#39;cpu_intensive&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Mathematical computations, simulations, optimization&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;resource_ratio&#39;</span><span class="p">:</span> <span class="s1">&#39;cores ≈ cpu_limit, memory moderate&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;example&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
-                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;16Gi&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
-                <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;20Gi&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_cases&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Monte Carlo simulations&#39;</span><span class="p">,</span> <span class="s1">&#39;Genetic algorithms&#39;</span><span class="p">,</span> <span class="s1">&#39;Scientific computing&#39;</span><span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;memory_intensive&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Large dataset processing, in-memory analytics&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;resource_ratio&#39;</span><span class="p">:</span> <span class="s1">&#39;memory &gt;&gt; cores, higher memory limits&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;example&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
-                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;32Gi&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
-                <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;40Gi&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_cases&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Big data processing&#39;</span><span class="p">,</span> <span class="s1">&#39;Large ML models&#39;</span><span class="p">,</span> <span class="s1">&#39;Genomics analysis&#39;</span><span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;io_intensive&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;File processing, database operations, network I/O&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;resource_ratio&#39;</span><span class="p">:</span> <span class="s1">&#39;moderate cores and memory, focus on concurrency&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;example&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
-                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;8Gi&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
-                <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;12Gi&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_cases&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Data ingestion&#39;</span><span class="p">,</span> <span class="s1">&#39;ETL pipelines&#39;</span><span class="p">,</span> <span class="s1">&#39;Web scraping&#39;</span><span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;ml_training&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Machine learning model training&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;resource_ratio&#39;</span><span class="p">:</span> <span class="s1">&#39;balanced cores and memory, burst capacity&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;example&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
-                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;24Gi&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
-                <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;32Gi&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_cases&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Deep learning&#39;</span><span class="p">,</span> <span class="s1">&#39;Model hyperparameter tuning&#39;</span><span class="p">,</span> <span class="s1">&#39;Feature engineering&#39;</span><span class="p">]</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Kubernetes Resource Management Guidelines:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
-
-    <span class="k">for</span> <span class="n">pattern_name</span><span class="p">,</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">resource_patterns</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">pattern_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Description: </span><span class="si">{</span><span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Resource ratio: </span><span class="si">{</span><span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;resource_ratio&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Example configuration:&quot;</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;example&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Use cases: </span><span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;use_cases&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="k">return</span> <span class="n">resource_patterns</span>
-
-<span class="k">def</span> <span class="nf">kubernetes_job_patterns</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Common Kubernetes job patterns for different workloads.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">job_patterns</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s1">&#39;single_job&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Single pod, run-to-completion&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;completions&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
-                <span class="s1">&#39;parallelism&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
-                <span class="s1">&#39;backoff_limit&#39;</span><span class="p">:</span> <span class="mi">3</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;best_for&#39;</span><span class="p">:</span> <span class="s1">&#39;One-off computations, small datasets&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;parallel_job&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Multiple pods running simultaneously&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;completions&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span>
-                <span class="s1">&#39;parallelism&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span>
-                <span class="s1">&#39;backoff_limit&#39;</span><span class="p">:</span> <span class="mi">2</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;best_for&#39;</span><span class="p">:</span> <span class="s1">&#39;Independent parallel tasks, embarrassingly parallel problems&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;queue_job&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Work queue pattern with multiple workers&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;completions&#39;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># No fixed completion count</span>
-                <span class="s1">&#39;parallelism&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">,</span>
-                <span class="s1">&#39;backoff_limit&#39;</span><span class="p">:</span> <span class="mi">5</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;best_for&#39;</span><span class="p">:</span> <span class="s1">&#39;Dynamic workloads, task queues, streaming data&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;indexed_job&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Jobs with completion index for task assignment&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;completion_mode&#39;</span><span class="p">:</span> <span class="s1">&#39;Indexed&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;completions&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span>
-                <span class="s1">&#39;parallelism&#39;</span><span class="p">:</span> <span class="mi">4</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;best_for&#39;</span><span class="p">:</span> <span class="s1">&#39;Parameter sweeps, data partitioning, batch processing&#39;</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Kubernetes Job Patterns:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
-
-    <span class="k">for</span> <span class="n">pattern_name</span><span class="p">,</span> <span class="n">pattern</span> <span class="ow">in</span> <span class="n">job_patterns</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">pattern_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Description: </span><span class="si">{</span><span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Best for: </span><span class="si">{</span><span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;best_for&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Parameters:&quot;</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">pattern</span><span class="p">[</span><span class="s1">&#39;parameters&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="k">return</span> <span class="n">job_patterns</span>
-
-<span class="k">def</span> <span class="nf">clustrix_kubernetes_examples</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Specific Clustrix configuration examples for Kubernetes.</span>
+<span class="sd">    Examples of resource configurations for different workload types.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="n">examples</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s1">&#39;basic_computation&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;clustrix_decorator&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;&#39;</span>
-<span class="s1">@cluster(</span>
-<span class="s1">    cores=2,</span>
-<span class="s1">    memory=&quot;4Gi&quot;,</span>
-<span class="s1">    cpu_limit=3,</span>
-<span class="s1">    memory_limit=&quot;6Gi&quot;,</span>
-<span class="s1">    container_image=&quot;python:3.11-slim&quot;</span>
-<span class="s1">)&#39;&#39;&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Simple mathematical computations&#39;</span>
+        <span class="s1">&#39;cpu_intensive&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+            <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;16Gi&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+            <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;20Gi&#39;</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;memory_intensive&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+            <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;32Gi&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
+            <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;40Gi&#39;</span>
         <span class="p">},</span>
         <span class="s1">&#39;ml_training&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;clustrix_decorator&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;&#39;</span>
-<span class="s1">@cluster(</span>
-<span class="s1">    cores=8,</span>
-<span class="s1">    memory=&quot;32Gi&quot;,</span>
-<span class="s1">    cpu_limit=12,</span>
-<span class="s1">    memory_limit=&quot;40Gi&quot;,</span>
-<span class="s1">    container_image=&quot;python:3.11&quot;,</span>
-<span class="s1">    job_name=&quot;ml-training&quot;,</span>
-<span class="s1">    backoff_limit=3</span>
-<span class="s1">)&#39;&#39;&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Machine learning model training with fault tolerance&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;parallel_processing&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;clustrix_decorator&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;&#39;</span>
-<span class="s1">@cluster(</span>
-<span class="s1">    cores=4,</span>
-<span class="s1">    memory=&quot;16Gi&quot;,</span>
-<span class="s1">    parallel=True,</span>
-<span class="s1">    parallelism=5,</span>
-<span class="s1">    completions=20,</span>
-<span class="s1">    job_name=&quot;parallel-processing&quot;</span>
-<span class="s1">)&#39;&#39;&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Embarrassingly parallel data processing&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;fault_tolerant&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;clustrix_decorator&#39;</span><span class="p">:</span> <span class="s1">&#39;&#39;&#39;</span>
-<span class="s1">@cluster(</span>
-<span class="s1">    cores=6,</span>
-<span class="s1">    memory=&quot;24Gi&quot;,</span>
-<span class="s1">    backoff_limit=5,</span>
-<span class="s1">    restart_policy=&quot;OnFailure&quot;,</span>
-<span class="s1">    job_ttl_seconds=7200,</span>
-<span class="s1">    active_deadline_seconds=3600</span>
-<span class="s1">)&#39;&#39;&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Long-running computations with automatic retry&#39;</span>
+            <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
+            <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;24Gi&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;cpu_limit&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+            <span class="s1">&#39;memory_limit&#39;</span><span class="p">:</span> <span class="s1">&#39;32Gi&#39;</span>
         <span class="p">}</span>
     <span class="p">}</span>
 
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Clustrix Kubernetes Configuration Examples:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">50</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">examples</span>
 
-    <span class="k">for</span> <span class="n">example_name</span><span class="p">,</span> <span class="n">example</span> <span class="ow">in</span> <span class="n">examples</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">example_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Use case: </span><span class="si">{</span><span class="n">example</span><span class="p">[</span><span class="s1">&#39;use_case&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Configuration:&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="n">example</span><span class="p">[</span><span class="s1">&#39;clustrix_decorator&#39;</span><span class="p">])</span>
-
-<span class="c1"># Display all guidelines</span>
-<span class="n">resource_patterns</span> <span class="o">=</span> <span class="n">kubernetes_resource_guidelines</span><span class="p">()</span>
-<span class="n">job_patterns</span> <span class="o">=</span> <span class="n">kubernetes_job_patterns</span><span class="p">()</span>
-<span class="n">clustrix_kubernetes_examples</span><span class="p">()</span>
+<span class="c1"># Example usage:</span>
+<span class="c1"># resources = get_kubernetes_resource_examples()</span>
+<span class="c1"># print(f&quot;Available resource patterns: {list(resources.keys())}&quot;)</span>
 </pre></div>
 </div>
 </div>
+</section>
+<section id="Clustrix-Kubernetes-Configuration-Examples">
+<h2>Clustrix Kubernetes Configuration Examples<a class="headerlink" href="#Clustrix-Kubernetes-Configuration-Examples" title="Link to this heading">¶</a></h2>
+<section id="Basic-Computation">
+<h3>Basic Computation<a class="headerlink" href="#Basic-Computation" title="Link to this heading">¶</a></h3>
+<p><strong>Use case</strong>: Simple mathematical computations</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4Gi&quot;</span><span class="p">,</span>
+    <span class="n">cpu_limit</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+    <span class="n">memory_limit</span><span class="o">=</span><span class="s2">&quot;6Gi&quot;</span><span class="p">,</span>
+    <span class="n">container_image</span><span class="o">=</span><span class="s2">&quot;python:3.11-slim&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="ML-Training">
+<h3>ML Training<a class="headerlink" href="#ML-Training" title="Link to this heading">¶</a></h3>
+<p><strong>Use case</strong>: Machine learning model training with fault tolerance</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;32Gi&quot;</span><span class="p">,</span>
+    <span class="n">cpu_limit</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+    <span class="n">memory_limit</span><span class="o">=</span><span class="s2">&quot;40Gi&quot;</span><span class="p">,</span>
+    <span class="n">container_image</span><span class="o">=</span><span class="s2">&quot;python:3.11&quot;</span><span class="p">,</span>
+    <span class="n">job_name</span><span class="o">=</span><span class="s2">&quot;ml-training&quot;</span><span class="p">,</span>
+    <span class="n">backoff_limit</span><span class="o">=</span><span class="mi">3</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="Parallel-Processing">
+<h3>Parallel Processing<a class="headerlink" href="#Parallel-Processing" title="Link to this heading">¶</a></h3>
+<p><strong>Use case</strong>: Embarrassingly parallel data processing</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;16Gi&quot;</span><span class="p">,</span>
+    <span class="n">parallel</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">parallelism</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+    <span class="n">completions</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+    <span class="n">job_name</span><span class="o">=</span><span class="s2">&quot;parallel-processing&quot;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="Fault-Tolerant">
+<h3>Fault Tolerant<a class="headerlink" href="#Fault-Tolerant" title="Link to this heading">¶</a></h3>
+<p><strong>Use case</strong>: Long-running computations with automatic retry</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;24Gi&quot;</span><span class="p">,</span>
+    <span class="n">backoff_limit</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+    <span class="n">restart_policy</span><span class="o">=</span><span class="s2">&quot;OnFailure&quot;</span><span class="p">,</span>
+    <span class="n">job_ttl_seconds</span><span class="o">=</span><span class="mi">7200</span><span class="p">,</span>
+    <span class="n">active_deadline_seconds</span><span class="o">=</span><span class="mi">3600</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="Kubernetes-Job-Patterns">
+<h2>Kubernetes Job Patterns<a class="headerlink" href="#Kubernetes-Job-Patterns" title="Link to this heading">¶</a></h2>
+<section id="Single-Job">
+<h3>Single Job<a class="headerlink" href="#Single-Job" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Single pod, run-to-completion</p></li>
+<li><p><strong>Best for</strong>: One-off computations, small datasets</p></li>
+<li><p><strong>Parameters</strong>:</p>
+<ul>
+<li><p>completions: 1</p></li>
+<li><p>parallelism: 1</p></li>
+<li><p>backoff_limit: 3</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="Parallel-Job">
+<h3>Parallel Job<a class="headerlink" href="#Parallel-Job" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Multiple pods running simultaneously</p></li>
+<li><p><strong>Best for</strong>: Independent parallel tasks, embarrassingly parallel problems</p></li>
+<li><p><strong>Parameters</strong>:</p>
+<ul>
+<li><p>completions: 10</p></li>
+<li><p>parallelism: 5</p></li>
+<li><p>backoff_limit: 2</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="Queue-Job">
+<h3>Queue Job<a class="headerlink" href="#Queue-Job" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Work queue pattern with multiple workers</p></li>
+<li><p><strong>Best for</strong>: Dynamic workloads, task queues, streaming data</p></li>
+<li><p><strong>Parameters</strong>:</p>
+<ul>
+<li><p>completions: None (no fixed completion count)</p></li>
+<li><p>parallelism: 3</p></li>
+<li><p>backoff_limit: 5</p></li>
+</ul>
+</li>
+</ul>
+</section>
+<section id="Indexed-Job">
+<h3>Indexed Job<a class="headerlink" href="#Indexed-Job" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Jobs with completion index for task assignment</p></li>
+<li><p><strong>Best for</strong>: Parameter sweeps, data partitioning, batch processing</p></li>
+<li><p><strong>Parameters</strong>:</p>
+<ul>
+<li><p>completion_mode: Indexed</p></li>
+<li><p>completions: 20</p></li>
+<li><p>parallelism: 4</p></li>
+</ul>
+</li>
+</ul>
+</section>
+</section>
+<section id="Kubernetes-Resource-Management-Guidelines">
+<h2>Kubernetes Resource Management Guidelines<a class="headerlink" href="#Kubernetes-Resource-Management-Guidelines" title="Link to this heading">¶</a></h2>
+<section id="CPU-Intensive-Workloads">
+<h3>CPU Intensive Workloads<a class="headerlink" href="#CPU-Intensive-Workloads" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Mathematical computations, simulations, optimization</p></li>
+<li><p><strong>Resource ratio</strong>: cores ≈ cpu_limit, memory moderate</p></li>
+<li><p><strong>Example configuration</strong>:</p>
+<ul>
+<li><p>cores: 8</p></li>
+<li><p>memory: 16Gi</p></li>
+<li><p>cpu_limit: 8</p></li>
+<li><p>memory_limit: 20Gi</p></li>
+</ul>
+</li>
+<li><p><strong>Use cases</strong>: Monte Carlo simulations, Genetic algorithms, Scientific computing</p></li>
+</ul>
+</section>
+<section id="Memory-Intensive-Workloads">
+<h3>Memory Intensive Workloads<a class="headerlink" href="#Memory-Intensive-Workloads" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Large dataset processing, in-memory analytics</p></li>
+<li><p><strong>Resource ratio</strong>: memory &gt;&gt; cores, higher memory limits</p></li>
+<li><p><strong>Example configuration</strong>:</p>
+<ul>
+<li><p>cores: 4</p></li>
+<li><p>memory: 32Gi</p></li>
+<li><p>cpu_limit: 6</p></li>
+<li><p>memory_limit: 40Gi</p></li>
+</ul>
+</li>
+<li><p><strong>Use cases</strong>: Big data processing, Large ML models, Genomics analysis</p></li>
+</ul>
+</section>
+<section id="I/O-Intensive-Workloads">
+<h3>I/O Intensive Workloads<a class="headerlink" href="#I/O-Intensive-Workloads" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: File processing, database operations, network I/O</p></li>
+<li><p><strong>Resource ratio</strong>: moderate cores and memory, focus on concurrency</p></li>
+<li><p><strong>Example configuration</strong>:</p>
+<ul>
+<li><p>cores: 2</p></li>
+<li><p>memory: 8Gi</p></li>
+<li><p>cpu_limit: 4</p></li>
+<li><p>memory_limit: 12Gi</p></li>
+</ul>
+</li>
+<li><p><strong>Use cases</strong>: Data ingestion, ETL pipelines, Web scraping</p></li>
+</ul>
+</section>
+<section id="ML-Training-Workloads">
+<h3>ML Training Workloads<a class="headerlink" href="#ML-Training-Workloads" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Description</strong>: Machine learning model training</p></li>
+<li><p><strong>Resource ratio</strong>: balanced cores and memory, burst capacity</p></li>
+<li><p><strong>Example configuration</strong>:</p>
+<ul>
+<li><p>cores: 6</p></li>
+<li><p>memory: 24Gi</p></li>
+<li><p>cpu_limit: 8</p></li>
+<li><p>memory_limit: 32Gi</p></li>
+</ul>
+</li>
+<li><p><strong>Use cases</strong>: Deep learning, Model hyperparameter tuning, Feature engineering</p></li>
+</ul>
+</section>
 </section>
 <section id="Kubernetes-Cluster-Monitoring">
 <h2>Kubernetes Cluster Monitoring<a class="headerlink" href="#Kubernetes-Cluster-Monitoring" title="Link to this heading">¶</a></h2>
@@ -1535,6 +1568,27 @@
 <li><a class="reference internal" href="#Example-2:-Distributed-Data-Processing">Example 2: Distributed Data Processing</a></li>
 <li><a class="reference internal" href="#Example-3:-Fault-Tolerant-Scientific-Computing">Example 3: Fault-Tolerant Scientific Computing</a></li>
 <li><a class="reference internal" href="#Kubernetes-Resource-Management-and-Best-Practices">Kubernetes Resource Management and Best Practices</a></li>
+<li><a class="reference internal" href="#Clustrix-Kubernetes-Configuration-Examples">Clustrix Kubernetes Configuration Examples</a><ul>
+<li><a class="reference internal" href="#Basic-Computation">Basic Computation</a></li>
+<li><a class="reference internal" href="#ML-Training">ML Training</a></li>
+<li><a class="reference internal" href="#Parallel-Processing">Parallel Processing</a></li>
+<li><a class="reference internal" href="#Fault-Tolerant">Fault Tolerant</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Kubernetes-Job-Patterns">Kubernetes Job Patterns</a><ul>
+<li><a class="reference internal" href="#Single-Job">Single Job</a></li>
+<li><a class="reference internal" href="#Parallel-Job">Parallel Job</a></li>
+<li><a class="reference internal" href="#Queue-Job">Queue Job</a></li>
+<li><a class="reference internal" href="#Indexed-Job">Indexed Job</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Kubernetes-Resource-Management-Guidelines">Kubernetes Resource Management Guidelines</a><ul>
+<li><a class="reference internal" href="#CPU-Intensive-Workloads">CPU Intensive Workloads</a></li>
+<li><a class="reference internal" href="#Memory-Intensive-Workloads">Memory Intensive Workloads</a></li>
+<li><a class="reference internal" href="#I/O-Intensive-Workloads">I/O Intensive Workloads</a></li>
+<li><a class="reference internal" href="#ML-Training-Workloads">ML Training Workloads</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#Kubernetes-Cluster-Monitoring">Kubernetes Cluster Monitoring</a></li>
 <li><a class="reference internal" href="#Summary">Summary</a><ul>
 <li><a class="reference internal" href="#Key-Kubernetes-Advantages:">Key Kubernetes Advantages:</a></li>
@@ -1573,7 +1627,7 @@
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 25, 2025</small>
+                <small>Last updated: Jun 26, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

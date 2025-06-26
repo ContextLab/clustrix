@@ -81,6 +81,14 @@
 <li class="toctree-l1 current"><a class="current reference internal" href="#">SSH Remote Execution Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
 </ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+</ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
@@ -915,7 +923,8 @@
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">ssh_configuration_examples</span><span class="p">():</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># SSH configuration examples for different use cases</span>
+<span class="k">def</span> <span class="nf">get_ssh_configuration_examples</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Examples of different SSH configuration patterns.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
@@ -943,40 +952,6 @@
             <span class="p">},</span>
             <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Servers with non-standard SSH ports&#39;</span>
         <span class="p">},</span>
-        <span class="s1">&#39;password_auth&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with password authentication (less secure)&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;legacy-server.example.com&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;olduser&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;password&#39;</span><span class="p">:</span> <span class="s1">&#39;your-password&#39;</span>  <span class="c1"># Not recommended for production</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Legacy systems without key-based auth&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;conda_environment&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with conda environment activation&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;ml-server.example.com&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;researcher&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/research_key&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;conda_env_name&#39;</span><span class="p">:</span> <span class="s1">&#39;pytorch&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;python_executable&#39;</span><span class="p">:</span> <span class="s1">&#39;python&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Servers with conda environments for specific packages&#39;</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;virtual_environment&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH with Python virtual environment&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
-                <span class="s1">&#39;cluster_type&#39;</span><span class="p">:</span> <span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;cluster_host&#39;</span><span class="p">:</span> <span class="s1">&#39;dev-server.example.com&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;username&#39;</span><span class="p">:</span> <span class="s1">&#39;developer&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;key_file&#39;</span><span class="p">:</span> <span class="s1">&#39;~/.ssh/dev_key&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;virtualenv_path&#39;</span><span class="p">:</span> <span class="s1">&#39;/home/developer/venv/myproject&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;python_executable&#39;</span><span class="p">:</span> <span class="s1">&#39;python3&#39;</span>
-            <span class="p">},</span>
-            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Development servers with project-specific environments&#39;</span>
-        <span class="p">},</span>
         <span class="s1">&#39;cloud_instance&#39;</span><span class="p">:</span> <span class="p">{</span>
             <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Cloud instance with specific configuration&#39;</span><span class="p">,</span>
             <span class="s1">&#39;config&#39;</span><span class="p">:</span> <span class="p">{</span>
@@ -991,156 +966,227 @@
         <span class="p">}</span>
     <span class="p">}</span>
 
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SSH Configuration Examples:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">50</span><span class="p">)</span>
-
-    <span class="k">for</span> <span class="n">config_name</span><span class="p">,</span> <span class="n">config_info</span> <span class="ow">in</span> <span class="n">configurations</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">config_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;_&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39; &#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Description: </span><span class="si">{</span><span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Use case: </span><span class="si">{</span><span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;use_case&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Configuration:&quot;</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">config_info</span><span class="p">[</span><span class="s1">&#39;config&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
     <span class="k">return</span> <span class="n">configurations</span>
 
-<span class="k">def</span> <span class="nf">ssh_security_best_practices</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    SSH security best practices for Clustrix.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">practices</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s1">&#39;key_management&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;SSH Key Management&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Use strong, unique SSH keys for each server/project&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Prefer Ed25519 keys: ssh-keygen -t ed25519 -f ~/.ssh/clustrix_key&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use RSA 4096-bit keys if Ed25519 not supported: ssh-keygen -t rsa -b 4096&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Protect private keys with strong passphrases&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Set proper permissions: chmod 600 ~/.ssh/private_key&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Regularly rotate keys (every 6-12 months)&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;connection_security&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Connection Security&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Always use key-based authentication, avoid passwords&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Disable SSH agent forwarding unless necessary&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use SSH config files for consistent settings&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Enable SSH connection multiplexing for efficiency&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Set reasonable connection timeouts&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use non-standard SSH ports when possible&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;server_hardening&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Server-Side Security&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Disable SSH password authentication&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Disable SSH root login&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use fail2ban or similar intrusion prevention&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Regularly update SSH server software&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Monitor SSH access logs&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use firewall rules to restrict SSH access&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;clustrix_specific&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;title&#39;</span><span class="p">:</span> <span class="s1">&#39;Clustrix-Specific Security&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;practices&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Use dedicated SSH keys for Clustrix operations&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Restrict remote work directories to user-specific paths&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Enable cleanup_on_success to remove temporary files&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Limit max_parallel_jobs to prevent resource exhaustion&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Monitor remote execution logs for anomalies&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use isolated Python environments for execution&#39;</span>
-            <span class="p">]</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">SSH Security Best Practices:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
-
-    <span class="k">for</span> <span class="n">category</span><span class="p">,</span> <span class="n">info</span> <span class="ow">in</span> <span class="n">practices</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;title&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">practice</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">info</span><span class="p">[</span><span class="s1">&#39;practices&#39;</span><span class="p">],</span> <span class="mi">1</span><span class="p">):</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">practice</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="k">return</span> <span class="n">practices</span>
-
-<span class="k">def</span> <span class="nf">ssh_troubleshooting_guide</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Common SSH issues and solutions.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">issues</span> <span class="o">=</span> <span class="p">{</span>
-        <span class="s1">&#39;connection_refused&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Connection refused or timeout&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Check if SSH service is running on remote server&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Verify correct hostname/IP address&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Check if firewall is blocking SSH port&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Confirm SSH port number (default 22)&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Test connection with: ssh -v user@hostname&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;permission_denied&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Permission denied (publickey)&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Verify SSH key is added to remote ~/.ssh/authorized_keys&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Check SSH key permissions (600 for private key)&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Ensure correct username for the server&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Verify key file path in Clustrix configuration&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Test key with: ssh -i ~/.ssh/key_file user@hostname&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;host_key_verification&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Host key verification failed&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Add host to known_hosts: ssh-keyscan hostname &gt;&gt; ~/.ssh/known_hosts&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Remove old host key: ssh-keygen -R hostname&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Connect manually first to accept host key&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Check if hostname/IP changed&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Verify server authenticity before accepting&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;python_not_found&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Python executable not found on remote server&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Specify correct python_executable in configuration&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Check if Python is installed: which python3&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Add Python to PATH on remote server&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use full path: /usr/bin/python3&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Install Python if missing&#39;</span>
-            <span class="p">]</span>
-        <span class="p">},</span>
-        <span class="s1">&#39;environment_issues&#39;</span><span class="p">:</span> <span class="p">{</span>
-            <span class="s1">&#39;problem&#39;</span><span class="p">:</span> <span class="s1">&#39;Python environment or package issues&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;solutions&#39;</span><span class="p">:</span> <span class="p">[</span>
-                <span class="s1">&#39;Verify conda/virtualenv paths are correct&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Check environment activation commands&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Install missing packages in remote environment&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Use pip install --user for user-level packages&#39;</span><span class="p">,</span>
-                <span class="s1">&#39;Test environment manually: ssh user@host &quot;source env/bin/activate &amp;&amp; python&quot;&#39;</span>
-            <span class="p">]</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">SSH Troubleshooting Guide:&quot;</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">30</span><span class="p">)</span>
-
-    <span class="k">for</span> <span class="n">issue_name</span><span class="p">,</span> <span class="n">issue_info</span> <span class="ow">in</span> <span class="n">issues</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">issue_info</span><span class="p">[</span><span class="s1">&#39;problem&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
-        <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">solution</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">issue_info</span><span class="p">[</span><span class="s1">&#39;solutions&#39;</span><span class="p">],</span> <span class="mi">1</span><span class="p">):</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">solution</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-
-    <span class="k">return</span> <span class="n">issues</span>
-
-<span class="c1"># Display all SSH guidance</span>
-<span class="n">ssh_configs</span> <span class="o">=</span> <span class="n">ssh_configuration_examples</span><span class="p">()</span>
-<span class="n">security_practices</span> <span class="o">=</span> <span class="n">ssh_security_best_practices</span><span class="p">()</span>
-<span class="n">troubleshooting</span> <span class="o">=</span> <span class="n">ssh_troubleshooting_guide</span><span class="p">()</span>
+<span class="c1"># Example usage:</span>
+<span class="c1"># ssh_configs = get_ssh_configuration_examples()</span>
+<span class="c1"># print(f&quot;Available configurations: {list(ssh_configs.keys())}&quot;)</span>
 </pre></div>
 </div>
 </div>
+</section>
+<section id="SSH-Troubleshooting-Guide">
+<h2>SSH Troubleshooting Guide<a class="headerlink" href="#SSH-Troubleshooting-Guide" title="Link to this heading">¶</a></h2>
+<section id="Connection-refused-or-timeout">
+<h3>Connection refused or timeout<a class="headerlink" href="#Connection-refused-or-timeout" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Check if SSH service is running</strong> on remote server</p></li>
+<li><p><strong>Verify correct hostname/IP address</strong></p></li>
+<li><p><strong>Check if firewall is blocking</strong> SSH port</p></li>
+<li><p><strong>Confirm SSH port number</strong> (default 22)</p></li>
+<li><p><strong>Test connection</strong> with: <code class="docutils literal notranslate"><span class="pre">ssh</span> <span class="pre">-v</span> <span class="pre">user&#64;hostname</span></code></p></li>
+</ol>
+</section>
+<section id="Permission-denied-(publickey)">
+<h3>Permission denied (publickey)<a class="headerlink" href="#Permission-denied-(publickey)" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Verify SSH key is added</strong> to remote <code class="docutils literal notranslate"><span class="pre">~/.ssh/authorized_keys</span></code></p></li>
+<li><p><strong>Check SSH key permissions</strong> (600 for private key)</p></li>
+<li><p><strong>Ensure correct username</strong> for the server</p></li>
+<li><p><strong>Verify key file path</strong> in Clustrix configuration</p></li>
+<li><p><strong>Test key</strong> with: <code class="docutils literal notranslate"><span class="pre">ssh</span> <span class="pre">-i</span> <span class="pre">~/.ssh/key_file</span> <span class="pre">user&#64;hostname</span></code></p></li>
+</ol>
+</section>
+<section id="Host-key-verification-failed">
+<h3>Host key verification failed<a class="headerlink" href="#Host-key-verification-failed" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Add host to known_hosts</strong>: <code class="docutils literal notranslate"><span class="pre">ssh-keyscan</span> <span class="pre">hostname</span> <span class="pre">&gt;&gt;</span> <span class="pre">~/.ssh/known_hosts</span></code></p></li>
+<li><p><strong>Remove old host key</strong>: <code class="docutils literal notranslate"><span class="pre">ssh-keygen</span> <span class="pre">-R</span> <span class="pre">hostname</span></code></p></li>
+<li><p><strong>Connect manually first</strong> to accept host key</p></li>
+<li><p><strong>Check if hostname/IP changed</strong></p></li>
+<li><p><strong>Verify server authenticity</strong> before accepting</p></li>
+</ol>
+</section>
+<section id="Python-executable-not-found-on-remote-server">
+<h3>Python executable not found on remote server<a class="headerlink" href="#Python-executable-not-found-on-remote-server" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Specify correct python_executable</strong> in configuration</p></li>
+<li><p><strong>Check if Python is installed</strong>: <code class="docutils literal notranslate"><span class="pre">which</span> <span class="pre">python3</span></code></p></li>
+<li><p><strong>Add Python to PATH</strong> on remote server</p></li>
+<li><p><strong>Use full path</strong>: <code class="docutils literal notranslate"><span class="pre">/usr/bin/python3</span></code></p></li>
+<li><p><strong>Install Python if missing</strong></p></li>
+</ol>
+</section>
+<section id="Python-environment-or-package-issues">
+<h3>Python environment or package issues<a class="headerlink" href="#Python-environment-or-package-issues" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Verify conda/virtualenv paths</strong> are correct</p></li>
+<li><p><strong>Check environment activation commands</strong></p></li>
+<li><p><strong>Install missing packages</strong> in remote environment</p></li>
+<li><p><strong>Use pip install –user</strong> for user-level packages</p></li>
+<li><p><strong>Test environment manually</strong>: <code class="docutils literal notranslate"><span class="pre">ssh</span> <span class="pre">user&#64;host</span> <span class="pre">&quot;source</span> <span class="pre">env/bin/activate</span> <span class="pre">&amp;&amp;</span> <span class="pre">python&quot;</span></code></p></li>
+</ol>
+</section>
+</section>
+<section id="SSH-Security-Best-Practices">
+<h2>SSH Security Best Practices<a class="headerlink" href="#SSH-Security-Best-Practices" title="Link to this heading">¶</a></h2>
+<section id="SSH-Key-Management">
+<h3>SSH Key Management<a class="headerlink" href="#SSH-Key-Management" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Use strong, unique SSH keys</strong> for each server/project</p></li>
+<li><p><strong>Prefer Ed25519 keys</strong>: <code class="docutils literal notranslate"><span class="pre">ssh-keygen</span> <span class="pre">-t</span> <span class="pre">ed25519</span> <span class="pre">-f</span> <span class="pre">~/.ssh/clustrix_key</span></code></p></li>
+<li><p><strong>Use RSA 4096-bit keys</strong> if Ed25519 not supported: <code class="docutils literal notranslate"><span class="pre">ssh-keygen</span> <span class="pre">-t</span> <span class="pre">rsa</span> <span class="pre">-b</span> <span class="pre">4096</span></code></p></li>
+<li><p><strong>Protect private keys</strong> with strong passphrases</p></li>
+<li><p><strong>Set proper permissions</strong>: <code class="docutils literal notranslate"><span class="pre">chmod</span> <span class="pre">600</span> <span class="pre">~/.ssh/private_key</span></code></p></li>
+<li><p><strong>Regularly rotate keys</strong> (every 6-12 months)</p></li>
+</ol>
+</section>
+<section id="Connection-Security">
+<h3>Connection Security<a class="headerlink" href="#Connection-Security" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Always use key-based authentication</strong>, avoid passwords</p></li>
+<li><p><strong>Disable SSH agent forwarding</strong> unless necessary</p></li>
+<li><p><strong>Use SSH config files</strong> for consistent settings</p></li>
+<li><p><strong>Enable SSH connection multiplexing</strong> for efficiency</p></li>
+<li><p><strong>Set reasonable connection timeouts</strong></p></li>
+<li><p><strong>Use non-standard SSH ports</strong> when possible</p></li>
+</ol>
+</section>
+<section id="Server-Side-Security">
+<h3>Server-Side Security<a class="headerlink" href="#Server-Side-Security" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Disable SSH password authentication</strong></p></li>
+<li><p><strong>Disable SSH root login</strong></p></li>
+<li><p><strong>Use fail2ban</strong> or similar intrusion prevention</p></li>
+<li><p><strong>Regularly update</strong> SSH server software</p></li>
+<li><p><strong>Monitor SSH access logs</strong></p></li>
+<li><p><strong>Use firewall rules</strong> to restrict SSH access</p></li>
+</ol>
+</section>
+<section id="Clustrix-Specific-Security">
+<h3>Clustrix-Specific Security<a class="headerlink" href="#Clustrix-Specific-Security" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Use dedicated SSH keys</strong> for Clustrix operations</p></li>
+<li><p><strong>Restrict remote work directories</strong> to user-specific paths</p></li>
+<li><p><strong>Enable cleanup_on_success</strong> to remove temporary files</p></li>
+<li><p><strong>Limit max_parallel_jobs</strong> to prevent resource exhaustion</p></li>
+<li><p><strong>Monitor remote execution logs</strong> for anomalies</p></li>
+<li><p><strong>Use isolated Python environments</strong> for execution</p></li>
+</ol>
+</section>
+</section>
+<section id="SSH-Configuration-Examples">
+<h2>SSH Configuration Examples<a class="headerlink" href="#SSH-Configuration-Examples" title="Link to this heading">¶</a></h2>
+<section id="Basic-SSH-Connection">
+<h3>Basic SSH Connection<a class="headerlink" href="#Basic-SSH-Connection" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: Basic SSH connection with key authentication</p></li>
+<li><p><strong>Use case</strong>: Single remote server or workstation</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;server.example.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;user&#39;</span><span class="p">,</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s1">&#39;~/.ssh/id_rsa&#39;</span><span class="p">,</span>
+    <span class="n">port</span><span class="o">=</span><span class="mi">22</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="Custom-Port-SSH">
+<h3>Custom Port SSH<a class="headerlink" href="#Custom-Port-SSH" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: SSH connection with custom port</p></li>
+<li><p><strong>Use case</strong>: Servers with non-standard SSH ports</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;secure-server.example.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;admin&#39;</span><span class="p">,</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s1">&#39;~/.ssh/admin_key&#39;</span><span class="p">,</span>
+    <span class="n">port</span><span class="o">=</span><span class="mi">2222</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="Password-Authentication">
+<h3>Password Authentication<a class="headerlink" href="#Password-Authentication" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: SSH with password authentication (less secure)</p></li>
+<li><p><strong>Use case</strong>: Legacy systems without key-based auth</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;legacy-server.example.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;olduser&#39;</span><span class="p">,</span>
+    <span class="n">password</span><span class="o">=</span><span class="s1">&#39;your-password&#39;</span>  <span class="c1"># Not recommended for production</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="Conda-Environment">
+<h3>Conda Environment<a class="headerlink" href="#Conda-Environment" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: SSH with conda environment activation</p></li>
+<li><p><strong>Use case</strong>: Servers with conda environments for specific packages</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;ml-server.example.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;researcher&#39;</span><span class="p">,</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s1">&#39;~/.ssh/research_key&#39;</span><span class="p">,</span>
+    <span class="n">conda_env_name</span><span class="o">=</span><span class="s1">&#39;pytorch&#39;</span><span class="p">,</span>
+    <span class="n">python_executable</span><span class="o">=</span><span class="s1">&#39;python&#39;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="Virtual-Environment">
+<h3>Virtual Environment<a class="headerlink" href="#Virtual-Environment" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: SSH with Python virtual environment</p></li>
+<li><p><strong>Use case</strong>: Development servers with project-specific environments</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;dev-server.example.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;developer&#39;</span><span class="p">,</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s1">&#39;~/.ssh/dev_key&#39;</span><span class="p">,</span>
+    <span class="n">virtualenv_path</span><span class="o">=</span><span class="s1">&#39;/home/developer/venv/myproject&#39;</span><span class="p">,</span>
+    <span class="n">python_executable</span><span class="o">=</span><span class="s1">&#39;python3&#39;</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
+<section id="Cloud-Instance">
+<h3>Cloud Instance<a class="headerlink" href="#Cloud-Instance" title="Link to this heading">¶</a></h3>
+<ul>
+<li><p><strong>Description</strong>: Cloud instance with specific configuration</p></li>
+<li><p><strong>Use case</strong>: AWS, GCP, or Azure cloud instances</p></li>
+<li><p><strong>Configuration</strong>:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s1">&#39;ssh&#39;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s1">&#39;ec2-12-34-56-78.compute-1.amazonaws.com&#39;</span><span class="p">,</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;ubuntu&#39;</span><span class="p">,</span>  <span class="c1"># Common for Ubuntu AMIs</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s1">&#39;~/.ssh/aws-keypair.pem&#39;</span><span class="p">,</span>
+    <span class="n">remote_work_dir</span><span class="o">=</span><span class="s1">&#39;/tmp/clustrix&#39;</span><span class="p">,</span>
+    <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+</li>
+</ul>
+</section>
 </section>
 <section id="SSH-Connection-Testing">
 <h2>SSH Connection Testing<a class="headerlink" href="#SSH-Connection-Testing" title="Link to this heading">¶</a></h2>
@@ -1367,6 +1413,30 @@
 <li><a class="reference internal" href="#Example-3:-Remote-File-System-Operations">Example 3: Remote File System Operations</a></li>
 <li><a class="reference internal" href="#Example-4:-Remote-Environment-Testing">Example 4: Remote Environment Testing</a></li>
 <li><a class="reference internal" href="#SSH-Configuration-Management">SSH Configuration Management</a></li>
+<li><a class="reference internal" href="#SSH-Troubleshooting-Guide">SSH Troubleshooting Guide</a><ul>
+<li><a class="reference internal" href="#Connection-refused-or-timeout">Connection refused or timeout</a></li>
+<li><a class="reference internal" href="#Permission-denied-(publickey)">Permission denied (publickey)</a></li>
+<li><a class="reference internal" href="#Host-key-verification-failed">Host key verification failed</a></li>
+<li><a class="reference internal" href="#Python-executable-not-found-on-remote-server">Python executable not found on remote server</a></li>
+<li><a class="reference internal" href="#Python-environment-or-package-issues">Python environment or package issues</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#SSH-Security-Best-Practices">SSH Security Best Practices</a><ul>
+<li><a class="reference internal" href="#SSH-Key-Management">SSH Key Management</a></li>
+<li><a class="reference internal" href="#Connection-Security">Connection Security</a></li>
+<li><a class="reference internal" href="#Server-Side-Security">Server-Side Security</a></li>
+<li><a class="reference internal" href="#Clustrix-Specific-Security">Clustrix-Specific Security</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#SSH-Configuration-Examples">SSH Configuration Examples</a><ul>
+<li><a class="reference internal" href="#Basic-SSH-Connection">Basic SSH Connection</a></li>
+<li><a class="reference internal" href="#Custom-Port-SSH">Custom Port SSH</a></li>
+<li><a class="reference internal" href="#Password-Authentication">Password Authentication</a></li>
+<li><a class="reference internal" href="#Conda-Environment">Conda Environment</a></li>
+<li><a class="reference internal" href="#Virtual-Environment">Virtual Environment</a></li>
+<li><a class="reference internal" href="#Cloud-Instance">Cloud Instance</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#SSH-Connection-Testing">SSH Connection Testing</a></li>
 <li><a class="reference internal" href="#Summary">Summary</a><ul>
 <li><a class="reference internal" href="#Key-SSH-Advantages:">Key SSH Advantages:</a></li>
@@ -1406,7 +1476,7 @@
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 25, 2025</small>
+                <small>Last updated: Jun 26, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
