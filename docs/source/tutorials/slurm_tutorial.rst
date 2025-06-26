@@ -10,10 +10,26 @@ Prerequisites
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
 
-Basic SLURM Configuration
--------------------------
+Configuration Options
+--------------------
 
-Configure Clustrix for your SLURM cluster:
+**Option 1: Interactive Widget (Recommended for Jupyter)**
+
+For Jupyter notebook users, use the interactive configuration widget:
+
+.. code-block:: python
+
+   import clustrix  # Auto-loads the magic command
+   
+   # Use the magic command to open the configuration widget
+   %%clusterfy
+   # Interactive widget appears with SLURM templates and GUI configuration
+
+The widget includes pre-built SLURM templates and allows you to save configurations for reuse.
+
+**Option 2: Programmatic Configuration**
+
+Configure Clustrix programmatically for your SLURM cluster:
 
 .. code-block:: python
 

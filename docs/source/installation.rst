@@ -26,6 +26,19 @@ For development or to get the latest features:
 Optional Dependencies
 --------------------
 
+Jupyter Notebook Support
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+For Jupyter notebook integration with interactive widgets:
+
+.. code-block:: bash
+
+   pip install clustrix[notebook]
+   # or
+   pip install clustrix ipywidgets pyyaml
+
+This enables the ``%%clusterfy`` magic command for interactive configuration.
+
 Kubernetes Support
 ~~~~~~~~~~~~~~~~~
 
@@ -85,3 +98,17 @@ Verify your installation:
    
    result = test_function()
    print(result)  # Should print: "Clustrix is working!"
+
+Verify Jupyter Integration
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you installed notebook support, test the magic command in Jupyter:
+
+.. code-block:: python
+
+   import clustrix
+   # Magic command should be auto-registered
+   
+   # In a Jupyter cell:
+   %%clusterfy
+   # Interactive widget should appear

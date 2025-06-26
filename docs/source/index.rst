@@ -19,11 +19,13 @@ Features
 --------
 
 - **Simple Decorator Interface**: Just add ``@cluster`` to any function
-- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH
+- **Interactive Jupyter Widget**: ``%%clusterfy`` magic command with GUI configuration manager
+- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH  
+- **Native Cost Monitoring**: Built-in cost tracking for AWS, GCP, Azure, and Lambda Cloud
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment  
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
 - **Local Parallelization**: Multi-core execution for development and testing
-- **Flexible Configuration**: Easy setup with config files or environment variables
+- **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
 Quick Start
@@ -66,6 +68,26 @@ Basic Usage
    result = expensive_computation(data, iterations=10000)
    print(f"Result: {result}")
 
+Jupyter Notebook Integration
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For Jupyter notebook users, Clustrix provides an interactive configuration widget:
+
+.. code-block:: python
+
+   import clustrix  # Auto-loads the magic command
+
+.. code-block:: jupyter
+
+   %%clusterfy
+   # Interactive widget appears with:
+   # - Dropdown to select configurations  
+   # - Forms to create/edit cluster setups
+   # - One-click configuration application
+   # - Save/load configurations to files
+
+The widget includes templates for AWS, Google Cloud, Azure, SLURM, and Kubernetes.
+
 Table of Contents
 -----------------
 
@@ -95,6 +117,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Interactive Notebooks
    
+   notebooks/cluster_config_example
    notebooks/complete_api_demo
    notebooks/slurm_tutorial
    notebooks/pbs_tutorial
@@ -119,6 +142,8 @@ Table of Contents
 
    api/decorator
    api/config
+   api/notebook_magic
+   api/cost_monitoring
    api/executor
    api/local_executor
    api/loop_analysis

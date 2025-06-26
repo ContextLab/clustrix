@@ -11,10 +11,12 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 ## Features
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
+- **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
+- **Native Cost Monitoring**: Built-in cost tracking for all major cloud providers
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
-- **Flexible Configuration**: Easy setup with config files or environment variables
+- **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
 ## Quick Start
@@ -59,6 +61,33 @@ result = expensive_computation(data, iterations=10000)
 print(f"Result: {result}")
 ```
 
+### Jupyter Notebook Integration
+
+Clustrix provides seamless integration with Jupyter notebooks through an interactive widget:
+
+```python
+import clustrix  # Auto-loads the magic command
+
+# Use the %%clusterfy magic command to open the configuration widget
+```
+
+```jupyter
+%%clusterfy
+# Interactive widget appears with:
+# - Dropdown to select configurations
+# - Forms to create/edit cluster setups  
+# - One-click configuration application
+# - Save/load configurations to files
+```
+
+The widget includes pre-built templates for:
+- **Local Development**: Run jobs on your local machine
+- **AWS GPU Instances**: p3.2xlarge, p3.8xlarge templates
+- **Google Cloud**: CPU and GPU instance configurations
+- **Azure**: Virtual machine templates with GPU support
+- **SLURM HPC**: University cluster configurations
+- **Kubernetes**: Container-based execution
+
 ### Configuration File
 
 Create a `clustrix.yml` file in your project directory:
@@ -90,6 +119,32 @@ environment_variables:
 ```
 
 ## Advanced Usage
+
+### Cost Monitoring
+
+Clustrix includes built-in cost monitoring for cloud providers:
+
+```python
+from clustrix import cost_tracking_decorator, get_cost_monitor
+
+# Automatic cost tracking with decorator
+@cost_tracking_decorator('aws', 'p3.2xlarge')  
+@cluster(cores=8, memory='60GB')
+def expensive_training():
+    # Your training code here
+    pass
+
+# Manual cost monitoring
+monitor = get_cost_monitor('gcp')
+cost_estimate = monitor.estimate_cost('n2-standard-4', hours_used=2.0)
+print(f"Estimated cost: ${cost_estimate.estimated_cost:.2f}")
+
+# Get pricing information
+pricing = monitor.get_pricing_info()
+recommendations = monitor.get_cost_optimization_recommendations()
+```
+
+Supported cloud providers: **AWS**, **Google Cloud**, **Azure**, **Lambda Cloud**
 
 ### Custom Resource Requirements
 
