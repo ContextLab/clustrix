@@ -105,6 +105,16 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Cloud Platform Tutorials
+   
+   notebooks/aws_cloud_tutorial
+   notebooks/azure_cloud_tutorial
+   notebooks/gcp_cloud_tutorial
+   notebooks/huggingface_spaces_tutorial
+   notebooks/lambda_cloud_tutorial
+
+.. toctree::
+   :maxdepth: 2
    :caption: API Reference
 
    api/decorator

@@ -132,17 +132,13 @@
                         <main role="main" id="main">
     <h1>Source code for clustrix.decorator</h1><div class="highlight"><pre>
 <span></span><span class="kn">import</span> <span class="nn">functools</span>
-<span class="kn">import</span> <span class="nn">inspect</span>
-<span class="kn">import</span> <span class="nn">pickle</span>
-<span class="kn">import</span> <span class="nn">asyncio</span>
 <span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Callable</span><span class="p">,</span> <span class="n">Optional</span><span class="p">,</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span>
-<span class="kn">from</span> <span class="nn">concurrent.futures</span> <span class="kn">import</span> <span class="n">ThreadPoolExecutor</span><span class="p">,</span> <span class="n">as_completed</span>
 
 <span class="kn">from</span> <span class="nn">.config</span> <span class="kn">import</span> <span class="n">get_config</span>
 <span class="kn">from</span> <span class="nn">.executor</span> <span class="kn">import</span> <span class="n">ClusterExecutor</span>
 <span class="kn">from</span> <span class="nn">.local_executor</span> <span class="kn">import</span> <span class="n">create_local_executor</span>
-<span class="kn">from</span> <span class="nn">.loop_analysis</span> <span class="kn">import</span> <span class="n">detect_loops_in_function</span><span class="p">,</span> <span class="n">find_parallelizable_loops</span>
-<span class="kn">from</span> <span class="nn">.utils</span> <span class="kn">import</span> <span class="n">detect_loops</span><span class="p">,</span> <span class="n">setup_environment</span><span class="p">,</span> <span class="n">serialize_function</span>
+<span class="kn">from</span> <span class="nn">.loop_analysis</span> <span class="kn">import</span> <span class="n">find_parallelizable_loops</span>
+<span class="kn">from</span> <span class="nn">.utils</span> <span class="kn">import</span> <span class="n">detect_loops</span><span class="p">,</span> <span class="n">serialize_function</span>
 
 
 <div class="viewcode-block" id="cluster">
@@ -214,7 +210,12 @@
                     <span class="n">loop_info</span> <span class="o">=</span> <span class="n">detect_loops</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">)</span>
                     <span class="k">if</span> <span class="n">loop_info</span><span class="p">:</span>
                         <span class="k">return</span> <span class="n">_execute_parallel</span><span class="p">(</span>
-                            <span class="n">executor</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span><span class="p">,</span> <span class="n">loop_info</span>
+                            <span class="n">executor</span><span class="p">,</span>
+                            <span class="n">func</span><span class="p">,</span>
+                            <span class="n">args</span><span class="p">,</span>
+                            <span class="n">func_kwargs</span><span class="p">,</span>
+                            <span class="n">job_config</span><span class="p">,</span>
+                            <span class="n">loop_info</span><span class="p">,</span>
                         <span class="p">)</span>
 
                 <span class="c1"># Execute normally on cluster</span>

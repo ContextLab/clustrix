@@ -3,6 +3,7 @@ README.md
 setup.py
 clustrix/__init__.py
 clustrix/cli.py
+clustrix/cloud_providers.py
 clustrix/config.py
 clustrix/decorator.py
 clustrix/executor.py
@@ -19,9 +20,13 @@ clustrix.egg-info/top_level.txt
 tests/__init__.py
 tests/conftest.py
 tests/test_cli.py
+tests/test_cloud_providers.py
 tests/test_config.py
 tests/test_decorator.py
+tests/test_enhanced_features.py
 tests/test_executor.py
 tests/test_integration.py
+tests/test_kubernetes_integration.py
 tests/test_local_executor.py
+tests/test_loop_analysis.py
 tests/test_utils.py
