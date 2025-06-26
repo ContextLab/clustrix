@@ -2,6 +2,7 @@ import pytest
 import time
 import multiprocessing as mp
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
 # Removed unused unittest.mock imports
 
 from clustrix.local_executor import (
@@ -257,6 +258,7 @@ class TestExecutorTypeSelection:
 
     def test_safe_pickle_test_failure(self):
         """Test pickle test with unpicklable objects."""
+
         # Lambda functions are not picklable
         def lambda_func(x):
             return x
@@ -266,6 +268,7 @@ class TestExecutorTypeSelection:
 
         def unpicklable_func(x):
             return x + y
+
         assert _safe_pickle_test(unpicklable_func) is False
 
         # File objects are not picklable
@@ -279,6 +282,7 @@ class TestExecutorTypeSelection:
 
         def unpicklable_func(x):
             return x + y
+
         result = choose_executor_type(unpicklable_func, (), {})
         assert result is True  # Should use threads
 

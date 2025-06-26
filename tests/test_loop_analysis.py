@@ -140,6 +140,7 @@ class TestLoopDetection:
 
     def test_detect_loops_source_unavailable(self):
         """Test loop detection when source code is unavailable."""
+
         # Lambda functions don't have accessible source code
         def no_source_func():
             return sum(range(10))

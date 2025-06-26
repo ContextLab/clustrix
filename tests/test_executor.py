@@ -180,7 +180,9 @@ class TestClusterExecutor:
 
         # Verify sbatch command was executed
         execute_calls = executor._execute_remote_command.call_args_list
-        sbatch_calls = [call_obj for call_obj in execute_calls if "sbatch" in str(call_obj)]
+        sbatch_calls = [
+            call_obj for call_obj in execute_calls if "sbatch" in str(call_obj)
+        ]
         assert len(sbatch_calls) > 0
 
     @patch("os.unlink")
@@ -463,6 +465,7 @@ class TestClusterExecutor:
         assert call_args[0] == "/tmp/test_job/result.pkl"  # remote path
         # Verify local path is a temporary file (cross-platform)
         import tempfile
+
         temp_dir = tempfile.gettempdir()
         assert call_args[1].startswith(temp_dir)  # local temp path
 
