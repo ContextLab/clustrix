@@ -88,11 +88,11 @@ class ClusterConfig:
 
     def save_to_file(self, config_path: str) -> None:
         """Save this configuration instance to a file."""
-        config_path = Path(config_path)
+        config_path_obj = Path(config_path)
         config_data = asdict(self)
 
-        with open(config_path, "w") as f:
-            if config_path.suffix.lower() in [".yml", ".yaml"]:
+        with open(config_path_obj, "w") as f:
+            if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
                 yaml.dump(config_data, f, default_flow_style=False)
             else:
                 json.dump(config_data, f, indent=2)
@@ -100,12 +100,12 @@ class ClusterConfig:
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
         """Load configuration from a file and return a new instance."""
-        config_path = Path(config_path)
-        if not config_path.exists():
+        config_path_obj = Path(config_path)
+        if not config_path_obj.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-        with open(config_path, "r") as f:
-            if config_path.suffix.lower() in [".yml", ".yaml"]:
+        with open(config_path_obj, "r") as f:
+            if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
                 config_data = yaml.safe_load(f)
             else:
                 config_data = json.load(f)
@@ -143,12 +143,12 @@ def load_config(config_path: str) -> None:
     """
     global _config
 
-    config_path = Path(config_path)
-    if not config_path.exists():
+    config_path_obj = Path(config_path)
+    if not config_path_obj.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with open(config_path, "r") as f:
-        if config_path.suffix.lower() in [".yml", ".yaml"]:
+    with open(config_path_obj, "r") as f:
+        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
             config_data = yaml.safe_load(f)
         else:
             config_data = json.load(f)
@@ -163,11 +163,11 @@ def save_config(config_path: str) -> None:
     Args:
         config_path: Path where to save configuration
     """
-    config_path = Path(config_path)
+    config_path_obj = Path(config_path)
     config_data = asdict(_config)
 
-    with open(config_path, "w") as f:
-        if config_path.suffix.lower() in [".yml", ".yaml"]:
+    with open(config_path_obj, "w") as f:
+        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
             yaml.dump(config_data, f, default_flow_style=False)
         else:
             json.dump(config_data, f, indent=2)

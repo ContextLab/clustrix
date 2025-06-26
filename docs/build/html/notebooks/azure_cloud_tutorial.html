@@ -1,0 +1,1546 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>Microsoft Azure Cloud Tutorial &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Google Cloud Platform (GCP) Tutorial" href="gcp_cloud_tutorial.html" />
+            <link rel="prev" title="Amazon Web Services (AWS) Cloud Tutorial" href="aws_cloud_tutorial.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Microsoft Azure Cloud Tutorial</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/notebooks/azure_cloud_tutorial.ipynb" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/notebooks/azure_cloud_tutorial.ipynb.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="Microsoft-Azure-Cloud-Tutorial">
+<h1>Microsoft Azure Cloud Tutorial<a class="headerlink" href="#Microsoft-Azure-Cloud-Tutorial" title="Link to this heading">¶</a></h1>
+<p>This tutorial demonstrates how to use Clustrix with Microsoft Azure cloud infrastructure for scalable distributed computing.</p>
+<p><a class="reference external" href="https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/source/notebooks/azure_cloud_tutorial.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
+<section id="Overview">
+<h2>Overview<a class="headerlink" href="#Overview" title="Link to this heading">¶</a></h2>
+<p>Azure provides several services that integrate well with Clustrix:</p>
+<ul class="simple">
+<li><p><strong>Azure Virtual Machines</strong>: Scalable compute instances</p></li>
+<li><p><strong>Azure Batch</strong>: Managed job scheduling service</p></li>
+<li><p><strong>Azure CycleCloud</strong>: HPC cluster orchestration</p></li>
+<li><p><strong>Azure Machine Learning Compute</strong>: ML-optimized infrastructure</p></li>
+<li><p><strong>Azure Container Instances</strong>: Serverless containers</p></li>
+<li><p><strong>Azure Blob Storage</strong>: Object storage for data and results</p></li>
+<li><p><strong>Azure Virtual Network</strong>: Network isolation and security</p></li>
+</ul>
+</section>
+<section id="Prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#Prerequisites" title="Link to this heading">¶</a></h2>
+<section id="Required-Azure-Setup">
+<h3>Required Azure Setup<a class="headerlink" href="#Required-Azure-Setup" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Azure Account</strong>: Active Azure subscription with appropriate permissions</p></li>
+<li><p><strong>Azure CLI</strong>: Installed and configured on your local machine</p></li>
+<li><p><strong>SSH Key Pair</strong>: For secure VM access</p></li>
+<li><p><strong>Resource Quotas</strong>: Sufficient compute quotas in your preferred region</p></li>
+<li><p><strong>Billing Setup</strong>: Credit card or other payment method configured</p></li>
+</ol>
+</section>
+<section id="Local-Environment-Setup">
+<h3>Local Environment Setup<a class="headerlink" href="#Local-Environment-Setup" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Python Environment</strong>: Python 3.8+ with pip</p></li>
+<li><p><strong>SSH Client</strong>: OpenSSH or equivalent</p></li>
+<li><p><strong>Git</strong>: For version control (optional but recommended)</p></li>
+<li><p><strong>Code Editor</strong>: VS Code, PyCharm, or your preferred editor</p></li>
+</ol>
+</section>
+</section>
+<section id="Step-by-Step-Setup-Guide">
+<h2>Step-by-Step Setup Guide<a class="headerlink" href="#Step-by-Step-Setup-Guide" title="Link to this heading">¶</a></h2>
+<section id="Step-1:-Install-Azure-CLI">
+<h3>Step 1: Install Azure CLI<a class="headerlink" href="#Step-1:-Install-Azure-CLI" title="Link to this heading">¶</a></h3>
+<p>First, install the Azure CLI on your local machine:</p>
+<p><strong>Windows (PowerShell):</strong></p>
+<div class="highlight-powershell notranslate"><div class="highlight"><pre><span></span><span class="nb">Invoke-WebRequest</span> <span class="n">-Uri</span> <span class="n">https</span><span class="p">://</span><span class="n">aka</span><span class="p">.</span><span class="n">ms</span><span class="p">/</span><span class="n">installazurecliwindows</span> <span class="n">-OutFile</span> <span class="p">.\</span><span class="n">AzureCLI</span><span class="p">.</span><span class="n">msi</span><span class="p">;</span> <span class="nb">Start-Process</span> <span class="n">msiexec</span><span class="p">.</span><span class="n">exe</span> <span class="n">-Wait</span> <span class="n">-ArgumentList</span> <span class="s1">&#39;/I AzureCLI.msi /quiet&#39;</span><span class="p">;</span> <span class="nb">rm </span><span class="p">.\</span><span class="n">AzureCLI</span><span class="p">.</span><span class="n">msi</span>
+</pre></div>
+</div>
+<p><strong>macOS (Homebrew):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>brew<span class="w"> </span>update<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>brew<span class="w"> </span>install<span class="w"> </span>azure-cli
+</pre></div>
+</div>
+<p><strong>Linux (Ubuntu/Debian):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>curl<span class="w"> </span>-sL<span class="w"> </span>https://aka.ms/InstallAzureCLIDeb<span class="w"> </span><span class="p">|</span><span class="w"> </span>sudo<span class="w"> </span>bash
+</pre></div>
+</div>
+</section>
+<section id="Step-2:-Create-Azure-Account-and-Subscription">
+<h3>Step 2: Create Azure Account and Subscription<a class="headerlink" href="#Step-2:-Create-Azure-Account-and-Subscription" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Go to <a class="reference external" href="https://portal.azure.com">Azure Portal</a></p></li>
+<li><p>Sign up for a free account (includes $200 credit)</p></li>
+<li><p>Complete account verification</p></li>
+<li><p>Note your Subscription ID from the Azure Portal</p></li>
+</ol>
+</section>
+<section id="Step-3:-Install-Clustrix-with-Azure-Dependencies">
+<h3>Step 3: Install Clustrix with Azure Dependencies<a class="headerlink" href="#Step-3:-Install-Clustrix-with-Azure-Dependencies" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install Clustrix with Azure support</span>
+<span class="o">!</span>pip<span class="w"> </span>install<span class="w"> </span>clustrix<span class="w"> </span>azure-identity<span class="w"> </span>azure-mgmt-compute<span class="w"> </span>azure-mgmt-network<span class="w"> </span>azure-storage-blob
+
+<span class="c1"># Import required libraries</span>
+<span class="kn">import</span> <span class="nn">clustrix</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">configure</span>
+<span class="kn">from</span> <span class="nn">azure.identity</span> <span class="kn">import</span> <span class="n">DefaultAzureCredential</span>
+<span class="kn">from</span> <span class="nn">azure.mgmt.compute</span> <span class="kn">import</span> <span class="n">ComputeManagementClient</span>
+<span class="kn">from</span> <span class="nn">azure.mgmt.network</span> <span class="kn">import</span> <span class="n">NetworkManagementClient</span>
+<span class="kn">from</span> <span class="nn">azure.storage.blob</span> <span class="kn">import</span> <span class="n">BlobServiceClient</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">json</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Step-4:-Azure-Authentication-Setup">
+<h2>Step 4: Azure Authentication Setup<a class="headerlink" href="#Step-4:-Azure-Authentication-Setup" title="Link to this heading">¶</a></h2>
+<p>Configure your Azure credentials. You can do this in several ways:</p>
+<section id="Option-1:-Azure-CLI-Authentication-(Recommended-for-Development)">
+<h3>Option 1: Azure CLI Authentication (Recommended for Development)<a class="headerlink" href="#Option-1:-Azure-CLI-Authentication-(Recommended-for-Development)" title="Link to this heading">¶</a></h3>
+<p>This is the simplest method for getting started:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Login with Azure CLI (run this in terminal)</span>
+<span class="c1"># az login</span>
+
+<span class="c1"># Set your subscription (replace with your actual subscription ID)</span>
+<span class="c1"># az account set --subscription &quot;12345678-1234-1234-1234-123456789012&quot;</span>
+
+<span class="c1"># Verify authentication</span>
+<span class="o">!</span>az<span class="w"> </span>account<span class="w"> </span>show<span class="w"> </span>--output<span class="w"> </span>table
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Option-2:-Service-Principal-Authentication-(Recommended-for-Production)">
+<h3>Option 2: Service Principal Authentication (Recommended for Production)<a class="headerlink" href="#Option-2:-Service-Principal-Authentication-(Recommended-for-Production)" title="Link to this heading">¶</a></h3>
+<p>For production environments, create a service principal with limited permissions:</p>
+<p><strong>Create Service Principal (run in terminal):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create service principal</span>
+az<span class="w"> </span>ad<span class="w"> </span>sp<span class="w"> </span>create-for-rbac<span class="w"> </span>--name<span class="w"> </span><span class="s2">&quot;clustrix-service-principal&quot;</span><span class="w"> </span>--role<span class="w"> </span>contributor
+
+<span class="c1"># The output will include:</span>
+<span class="c1"># - appId (client ID)</span>
+<span class="c1"># - password (client secret)</span>
+<span class="c1"># - tenant (tenant ID)</span>
+</pre></div>
+</div>
+<p><strong>Set Environment Variables:</strong></p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set Azure credentials as environment variables (replace with your actual values)</span>
+<span class="c1"># os.environ[&#39;AZURE_CLIENT_ID&#39;] = &#39;your-client-id-from-service-principal&#39;</span>
+<span class="c1"># os.environ[&#39;AZURE_CLIENT_SECRET&#39;] = &#39;your-client-secret-from-service-principal&#39;</span>
+<span class="c1"># os.environ[&#39;AZURE_TENANT_ID&#39;] = &#39;your-tenant-id-from-service-principal&#39;</span>
+
+<span class="c1"># Test Azure connection</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">credential</span> <span class="o">=</span> <span class="n">DefaultAzureCredential</span><span class="p">()</span>
+    <span class="n">subscription_id</span> <span class="o">=</span> <span class="s1">&#39;your-subscription-id&#39;</span>  <span class="c1"># Replace with actual ID</span>
+
+    <span class="n">compute_client</span> <span class="o">=</span> <span class="n">ComputeManagementClient</span><span class="p">(</span><span class="n">credential</span><span class="p">,</span> <span class="n">subscription_id</span><span class="p">)</span>
+    <span class="c1"># Test by listing VM sizes in East US</span>
+    <span class="n">vm_sizes</span> <span class="o">=</span> <span class="nb">list</span><span class="p">(</span><span class="n">compute_client</span><span class="o">.</span><span class="n">virtual_machine_sizes</span><span class="o">.</span><span class="n">list</span><span class="p">(</span><span class="s1">&#39;eastus&#39;</span><span class="p">))</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Successfully connected to Azure. Available VM sizes: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">vm_sizes</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Azure connection failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Make sure you have:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1. Run &#39;az login&#39; or set service principal environment variables&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2. Set the correct subscription ID&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;3. Have appropriate permissions in your Azure subscription&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Step-5:-Generate-SSH-Key-Pair">
+<h3>Step 5: Generate SSH Key Pair<a class="headerlink" href="#Step-5:-Generate-SSH-Key-Pair" title="Link to this heading">¶</a></h3>
+<p>Clustrix requires SSH access to remote VMs. Generate an SSH key pair if you don’t have one:</p>
+<p><strong>Generate SSH Key (run in terminal):</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Generate SSH key pair (press Enter for default location)</span>
+ssh-keygen<span class="w"> </span>-t<span class="w"> </span>rsa<span class="w"> </span>-b<span class="w"> </span><span class="m">4096</span><span class="w"> </span>-C<span class="w"> </span><span class="s2">&quot;your-email@example.com&quot;</span>
+
+<span class="c1"># Add key to SSH agent</span>
+ssh-add<span class="w"> </span>~/.ssh/id_rsa
+
+<span class="c1"># Display public key (you&#39;ll need this for VM creation)</span>
+cat<span class="w"> </span>~/.ssh/id_rsa.pub
+</pre></div>
+</div>
+<p><strong>Important Notes:</strong></p>
+<ul class="simple">
+<li><p>Keep your private key (<code class="docutils literal notranslate"><span class="pre">~/.ssh/id_rsa</span></code>) secure and never share it</p></li>
+<li><p>You’ll use the public key (<code class="docutils literal notranslate"><span class="pre">~/.ssh/id_rsa.pub</span></code>) when creating Azure VMs</p></li>
+<li><p>Make sure you have set up authentication and have the correct subscription ID</p></li>
+</ul>
+</section>
+</section>
+<section id="Method-1:-Azure-Virtual-Machines-Configuration">
+<h2>Method 1: Azure Virtual Machines Configuration<a class="headerlink" href="#Method-1:-Azure-Virtual-Machines-Configuration" title="Link to this heading">¶</a></h2>
+<section id="Step-6:-Create-Resource-Group-and-Azure-VM-for-Clustrix">
+<h3>Step 6: Create Resource Group and Azure VM for Clustrix<a class="headerlink" href="#Step-6:-Create-Resource-Group-and-Azure-VM-for-Clustrix" title="Link to this heading">¶</a></h3>
+<p>First, create a resource group to organize your Azure resources:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">create_clustrix_vm</span><span class="p">(</span><span class="n">resource_group</span><span class="p">,</span> <span class="n">vm_name</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="s1">&#39;eastus&#39;</span><span class="p">,</span> <span class="n">vm_size</span><span class="o">=</span><span class="s1">&#39;Standard_D4s_v3&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create an Azure VM configured for Clustrix.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        resource_group: Azure resource group name</span>
+<span class="sd">        vm_name: Name for the VM</span>
+<span class="sd">        location: Azure region</span>
+<span class="sd">        vm_size: VM size (CPU/memory configuration)</span>
+
+<span class="sd">    Returns:</span>
+<span class="sd">        VM details including public IP</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="c1"># Cloud-init script for VM setup</span>
+    <span class="n">cloud_init_script</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">#cloud-config</span>
+<span class="s1">package_update: true</span>
+<span class="s1">packages:</span>
+<span class="s1">  - python3</span>
+<span class="s1">  - python3-pip</span>
+<span class="s1">  - git</span>
+<span class="s1">  - htop</span>
+
+<span class="s1">runcmd:</span>
+<span class="s1">  # Install clustrix and common packages</span>
+<span class="s1">  - pip3 install clustrix numpy scipy pandas scikit-learn</span>
+
+<span class="s1">  # Install uv for faster package management</span>
+<span class="s1">  - curl -LsSf https://astral.sh/uv/install.sh | sh</span>
+
+<span class="s1">  # Create clustrix user</span>
+<span class="s1">  - useradd -m -s /bin/bash clustrix</span>
+<span class="s1">  - usermod -aG sudo clustrix</span>
+<span class="s1">  - echo &quot;clustrix ALL=(ALL) NOPASSWD:ALL&quot; &gt;&gt; /etc/sudoers</span>
+
+<span class="s1">  # Setup SSH for clustrix user</span>
+<span class="s1">  - mkdir -p /home/clustrix/.ssh</span>
+<span class="s1">  - cp /home/azureuser/.ssh/authorized_keys /home/clustrix/.ssh/</span>
+<span class="s1">  - chown -R clustrix:clustrix /home/clustrix/.ssh</span>
+<span class="s1">  - chmod 700 /home/clustrix/.ssh</span>
+<span class="s1">  - chmod 600 /home/clustrix/.ssh/authorized_keys</span>
+
+<span class="s1">  # Create working directory</span>
+<span class="s1">  - mkdir -p /tmp/clustrix</span>
+<span class="s1">  - chown clustrix:clustrix /tmp/clustrix</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="c1"># Azure CLI commands for VM creation</span>
+    <span class="n">azure_commands</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Create resource group</span>
+<span class="s2">az group create --name </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span>
+
+<span class="s2"># Create VM with cloud-init</span>
+<span class="s2">az vm create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name </span><span class="si">{</span><span class="n">vm_name</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --image Ubuntu2204 </span><span class="se">\\</span>
+<span class="s2">  --size </span><span class="si">{</span><span class="n">vm_size</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --admin-username azureuser </span><span class="se">\\</span>
+<span class="s2">  --generate-ssh-keys </span><span class="se">\\</span>
+<span class="s2">  --custom-data cloud-init.txt </span><span class="se">\\</span>
+<span class="s2">  --public-ip-sku Standard </span><span class="se">\\</span>
+<span class="s2">  --tags Purpose=Clustrix Environment=Tutorial</span>
+
+<span class="s2"># Get public IP</span>
+<span class="s2">az vm show </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name </span><span class="si">{</span><span class="n">vm_name</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --show-details </span><span class="se">\\</span>
+<span class="s2">  --query publicIps </span><span class="se">\\</span>
+<span class="s2">  --output tsv</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="n">resource_group</span><span class="p">,</span>
+        <span class="s1">&#39;vm_name&#39;</span><span class="p">:</span> <span class="n">vm_name</span><span class="p">,</span>
+        <span class="s1">&#39;location&#39;</span><span class="p">:</span> <span class="n">location</span><span class="p">,</span>
+        <span class="s1">&#39;vm_size&#39;</span><span class="p">:</span> <span class="n">vm_size</span><span class="p">,</span>
+        <span class="s1">&#39;commands&#39;</span><span class="p">:</span> <span class="n">azure_commands</span><span class="p">,</span>
+        <span class="s1">&#39;cloud_init&#39;</span><span class="p">:</span> <span class="n">cloud_init_script</span>
+    <span class="p">}</span>
+
+<span class="c1"># Example VM configuration</span>
+<span class="n">vm_config</span> <span class="o">=</span> <span class="n">create_clustrix_vm</span><span class="p">(</span>
+    <span class="n">resource_group</span><span class="o">=</span><span class="s1">&#39;clustrix-tutorial-rg&#39;</span><span class="p">,</span>
+    <span class="n">vm_name</span><span class="o">=</span><span class="s1">&#39;clustrix-vm-01&#39;</span><span class="p">,</span>
+    <span class="n">location</span><span class="o">=</span><span class="s1">&#39;eastus&#39;</span><span class="p">,</span>
+    <span class="n">vm_size</span><span class="o">=</span><span class="s1">&#39;Standard_D4s_v3&#39;</span>  <span class="c1"># 4 vCPUs, 16 GB RAM</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Save the cloud-init script to a file called &#39;cloud-init.txt&#39; in your current directory&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Then execute these Azure CLI commands to create your VM:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vm_config</span><span class="p">[</span><span class="s1">&#39;commands&#39;</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Cloud-Init-Script">
+<h3>Cloud-Init Script<a class="headerlink" href="#Cloud-Init-Script" title="Link to this heading">¶</a></h3>
+<p>Save this cloud-init script to a file named <code class="docutils literal notranslate"><span class="pre">cloud-init.txt</span></code> in your current directory:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Display the cloud-init script content</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">vm_config</span><span class="p">[</span><span class="s1">&#39;cloud_init&#39;</span><span class="p">])</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Step-7:-Configure-Clustrix-for-Azure-VM">
+<h3>Step 7: Configure Clustrix for Azure VM<a class="headerlink" href="#Step-7:-Configure-Clustrix-for-Azure-VM" title="Link to this heading">¶</a></h3>
+<p>After your VM is created and you have the public IP address, configure Clustrix to use it:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configure Clustrix to use your Azure VM</span>
+<span class="c1"># Replace &#39;your-vm-public-ip&#39; with the actual IP from: az vm show --resource-group clustrix-tutorial-rg --name clustrix-vm-01 --show-details --query publicIps --output tsv</span>
+
+<span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;your-vm-public-ip&quot;</span><span class="p">,</span>  <span class="c1"># Replace with actual IP</span>
+    <span class="n">username</span><span class="o">=</span><span class="s2">&quot;clustrix&quot;</span><span class="p">,</span>  <span class="c1"># or &quot;azureuser&quot; if using default user</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/id_rsa&quot;</span><span class="p">,</span>  <span class="c1"># Azure CLI generated key</span>
+    <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/clustrix&quot;</span><span class="p">,</span>
+    <span class="n">package_manager</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>  <span class="c1"># Will use uv if available</span>
+    <span class="n">default_cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+    <span class="n">default_memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">,</span>
+    <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;01:00:00&quot;</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Clustrix configured for Azure VM&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Make sure to replace &#39;your-vm-public-ip&#39; with your actual VM&#39;s public IP address&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Testing-Your-Azure-VM-Connection">
+<h3>Testing Your Azure VM Connection<a class="headerlink" href="#Testing-Your-Azure-VM-Connection" title="Link to this heading">¶</a></h3>
+<p>Before running Clustrix jobs, test your SSH connection to the VM:</p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Test SSH connection (replace with your actual IP)</span>
+ssh<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_rsa<span class="w"> </span>clustrix@your-vm-public-ip
+
+<span class="c1"># Or if using default azureuser:</span>
+ssh<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_rsa<span class="w"> </span>azureuser@your-vm-public-ip
+</pre></div>
+</div>
+<p><strong>Troubleshooting Connection Issues:</strong></p>
+<ul class="simple">
+<li><p>Ensure your VM is running: <code class="docutils literal notranslate"><span class="pre">az</span> <span class="pre">vm</span> <span class="pre">show</span> <span class="pre">--resource-group</span> <span class="pre">clustrix-tutorial-rg</span> <span class="pre">--name</span> <span class="pre">clustrix-vm-01</span> <span class="pre">--show-details</span> <span class="pre">--query</span> <span class="pre">powerState</span></code></p></li>
+<li><p>Check Network Security Group rules allow SSH (port 22)</p></li>
+<li><p>Verify your SSH key is correct and has proper permissions (<code class="docutils literal notranslate"><span class="pre">chmod</span> <span class="pre">600</span> <span class="pre">~/.ssh/id_rsa</span></code>)</p></li>
+</ul>
+</section>
+<section id="Example:-Remote-Computation-on-Azure-VM">
+<h3>Example: Remote Computation on Azure VM<a class="headerlink" href="#Example:-Remote-Computation-on-Azure-VM" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">azure_numerical_analysis</span><span class="p">(</span><span class="n">matrix_size</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">iterations</span><span class="o">=</span><span class="mi">10</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Perform numerical analysis on Azure VM.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">iterations</span><span class="p">):</span>
+        <span class="c1"># Generate random matrix</span>
+        <span class="n">matrix</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">matrix_size</span><span class="p">,</span> <span class="n">matrix_size</span><span class="p">)</span>
+
+        <span class="c1"># Perform eigenvalue decomposition</span>
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+        <span class="n">eigenvalues</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">eigvals</span><span class="p">(</span><span class="n">matrix</span><span class="p">)</span>
+        <span class="n">computation_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+            <span class="s1">&#39;iteration&#39;</span><span class="p">:</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+            <span class="s1">&#39;max_eigenvalue&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">eigenvalues</span><span class="o">.</span><span class="n">real</span><span class="p">)),</span>
+            <span class="s1">&#39;min_eigenvalue&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">eigenvalues</span><span class="o">.</span><span class="n">real</span><span class="p">)),</span>
+            <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span>
+        <span class="p">})</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;matrix_size&#39;</span><span class="p">:</span> <span class="n">matrix_size</span><span class="p">,</span>
+        <span class="s1">&#39;total_iterations&#39;</span><span class="p">:</span> <span class="n">iterations</span><span class="p">,</span>
+        <span class="s1">&#39;average_time&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;computation_time&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]),</span>
+        <span class="s1">&#39;results&#39;</span><span class="p">:</span> <span class="n">results</span>
+    <span class="p">}</span>
+
+<span class="c1"># Run computation on Azure VM (uncomment after configuring your VM)</span>
+<span class="c1"># result = azure_numerical_analysis(matrix_size=500, iterations=5)</span>
+<span class="c1"># print(f&quot;Completed {result[&#39;total_iterations&#39;]} iterations&quot;)</span>
+<span class="c1"># print(f&quot;Average computation time: {result[&#39;average_time&#39;]:.3f} seconds&quot;)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Example function defined. Configure your VM IP address and uncomment the lines above to run.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Method-2:-Azure-Batch-Configuration">
+<h2>Method 2: Azure Batch Configuration<a class="headerlink" href="#Method-2:-Azure-Batch-Configuration" title="Link to this heading">¶</a></h2>
+<p>Azure Batch provides managed job scheduling for large-scale parallel workloads:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">setup_azure_batch_environment</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Template for setting up Azure Batch environment.</span>
+<span class="sd">    This requires manual setup through Azure portal or CLI.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">batch_setup_commands</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Create Azure Batch account</span>
+<span class="s2">az batch account create </span><span class="se">\\</span>
+<span class="s2">  --name clustrixbatch </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg </span><span class="se">\\</span>
+<span class="s2">  --location eastus</span>
+
+<span class="s2"># Create storage account for Batch</span>
+<span class="s2">az storage account create </span><span class="se">\\</span>
+<span class="s2">  --name clustrixstorage </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg </span><span class="se">\\</span>
+<span class="s2">  --location eastus </span><span class="se">\\</span>
+<span class="s2">  --sku Standard_LRS</span>
+
+<span class="s2"># Link storage to Batch account</span>
+<span class="s2">az batch account set </span><span class="se">\\</span>
+<span class="s2">  --name clustrixbatch </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg </span><span class="se">\\</span>
+<span class="s2">  --storage-account clustrixstorage</span>
+
+<span class="s2"># Create Batch pool</span>
+<span class="s2">az batch pool create </span><span class="se">\\</span>
+<span class="s2">  --id clustrix-pool </span><span class="se">\\</span>
+<span class="s2">  --vm-size Standard_D2s_v3 </span><span class="se">\\</span>
+<span class="s2">  --target-dedicated-nodes 2 </span><span class="se">\\</span>
+<span class="s2">  --image canonical:0001-com-ubuntu-server-jammy:22_04-lts </span><span class="se">\\</span>
+<span class="s2">  --node-agent-sku-id &quot;batch.node.ubuntu 22.04&quot;</span>
+
+<span class="s2"># Create Batch job</span>
+<span class="s2">az batch job create </span><span class="se">\\</span>
+<span class="s2">  --id clustrix-job </span><span class="se">\\</span>
+<span class="s2">  --pool-id clustrix-pool</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="n">batch_config</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;account_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrixbatch&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;account_url&#39;</span><span class="p">:</span> <span class="s1">&#39;https://clustrixbatch.eastus.batch.azure.com&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-tutorial-rg&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;pool_id&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-pool&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;job_id&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-job&#39;</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">batch_config</span><span class="p">,</span> <span class="n">batch_setup_commands</span>
+
+<span class="n">batch_config</span><span class="p">,</span> <span class="n">batch_commands</span> <span class="o">=</span> <span class="n">setup_azure_batch_environment</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Batch Configuration:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">batch_config</span><span class="p">,</span> <span class="n">indent</span><span class="o">=</span><span class="mi">2</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">To set up Azure Batch, run these commands:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">50</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">batch_commands</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p><strong>Important Notes for Azure Batch:</strong></p>
+<ul class="simple">
+<li><p>Azure Batch integration with Clustrix requires custom implementation</p></li>
+<li><p>Consider using Azure CycleCloud for HPC workloads instead</p></li>
+<li><p>Batch is better suited for managed job scheduling at scale</p></li>
+</ul>
+</section>
+<section id="Method-3:-Azure-CycleCloud-Integration">
+<h2>Method 3: Azure CycleCloud Integration<a class="headerlink" href="#Method-3:-Azure-CycleCloud-Integration" title="Link to this heading">¶</a></h2>
+<p>Azure CycleCloud is designed for HPC workloads and provides SLURM integration:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Azure CycleCloud cluster template for Clustrix</span>
+<span class="n">cyclecloud_template</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># CycleCloud SLURM cluster template</span>
+<span class="s2"># Save as clustrix-slurm.txt and import into CycleCloud</span>
+
+<span class="s2">[cluster clustrix-slurm]</span>
+<span class="s2">FormLayout = selectionpanel</span>
+<span class="s2">Category = Schedulers</span>
+<span class="s2">IconUrl = static/cloud/cluster/ui/ClusterIcon/slurm.png</span>
+
+<span class="s2">    [[node defaults]]</span>
+<span class="s2">    UsePublicNetwork = false</span>
+<span class="s2">    Credentials = $Credentials</span>
+<span class="s2">    SubnetId = $SubnetId</span>
+<span class="s2">    Region = $Region</span>
+<span class="s2">    KeyPairLocation = ~/.ssh/cyclecloud.pem</span>
+
+<span class="s2">    # Install clustrix on all nodes</span>
+<span class="s2">    [[[configuration]]]</span>
+<span class="s2">    clustrix.version = latest</span>
+
+<span class="s2">    [[[cluster-init clustrix:default:1.0.0]]]</span>
+
+<span class="s2">    [[node master]]</span>
+<span class="s2">    MachineType = $MasterMachineType</span>
+<span class="s2">    IsReturnProxy = $ReturnProxy</span>
+<span class="s2">    AdditionalClusterInitSpecs = $MasterClusterInitSpecs</span>
+
+<span class="s2">        [[[configuration]]]</span>
+<span class="s2">        slurm.version = $configuration_slurm_version</span>
+
+<span class="s2">        [[[cluster-init slurm:master:2.7.2]]]</span>
+
+<span class="s2">        [[[network-interface eth0]]]</span>
+<span class="s2">        AssociatePublicIpAddress = $UsePublicNetwork</span>
+
+<span class="s2">    [[nodearray execute]]</span>
+<span class="s2">    MachineType = $ExecuteMachineType</span>
+<span class="s2">    MaxCoreCount = $MaxExecuteCoreCount</span>
+<span class="s2">    Interruptible = $UseLowPrio</span>
+<span class="s2">    AdditionalClusterInitSpecs = $ExecuteClusterInitSpecs</span>
+
+<span class="s2">        [[[configuration]]]</span>
+<span class="s2">        slurm.version = $configuration_slurm_version</span>
+
+<span class="s2">        [[[cluster-init slurm:execute:2.7.2]]]</span>
+
+<span class="s2">        [[[network-interface eth0]]]</span>
+<span class="s2">        AssociatePublicIpAddress = false</span>
+
+<span class="s2">[parameters About]</span>
+<span class="s2">Order = 1</span>
+
+<span class="s2">    [[parameters About Clustrix]]</span>
+
+<span class="s2">        [[[parameter clustrix]]]</span>
+<span class="s2">        HideLabel = true</span>
+<span class="s2">        Config.Plugin = pico.widget.HtmlTemplateWidget</span>
+<span class="s2">        Config.Template = &quot;Clustrix-enabled SLURM cluster for distributed computing&quot;</span>
+
+<span class="s2">[parameters Required Settings]</span>
+<span class="s2">Order = 10</span>
+
+<span class="s2">    [[parameters Virtual Machines]]</span>
+<span class="s2">    Description = &quot;Configure the VM types and sizes&quot;</span>
+<span class="s2">    Order = 20</span>
+
+<span class="s2">        [[[parameter Region]]]</span>
+<span class="s2">        Label = Region</span>
+<span class="s2">        Description = Deployment Location</span>
+<span class="s2">        ParameterType = Cloud.Region</span>
+<span class="s2">        DefaultValue = eastus</span>
+
+<span class="s2">        [[[parameter MasterMachineType]]]</span>
+<span class="s2">        Label = Master VM Type</span>
+<span class="s2">        Description = Master node VM type</span>
+<span class="s2">        ParameterType = Cloud.MachineType</span>
+<span class="s2">        DefaultValue = Standard_D4s_v3</span>
+
+<span class="s2">        [[[parameter ExecuteMachineType]]]</span>
+<span class="s2">        Label = Execute VM Type</span>
+<span class="s2">        Description = Execute node VM type</span>
+<span class="s2">        ParameterType = Cloud.MachineType</span>
+<span class="s2">        DefaultValue = Standard_H16r</span>
+
+<span class="s2">&quot;&quot;&quot;</span>
+
+<span class="k">def</span> <span class="nf">configure_for_cyclecloud</span><span class="p">(</span><span class="n">master_ip</span><span class="p">,</span> <span class="n">cluster_name</span><span class="o">=</span><span class="s2">&quot;clustrix-slurm&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configure Clustrix to use Azure CycleCloud SLURM cluster.&quot;&quot;&quot;</span>
+    <span class="n">configure</span><span class="p">(</span>
+        <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;slurm&quot;</span><span class="p">,</span>
+        <span class="n">cluster_host</span><span class="o">=</span><span class="n">master_ip</span><span class="p">,</span>
+        <span class="n">username</span><span class="o">=</span><span class="s2">&quot;cyclecloud&quot;</span><span class="p">,</span>  <span class="c1"># Default CycleCloud user</span>
+        <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/cyclecloud.pem&quot;</span><span class="p">,</span>
+        <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/shared/clustrix&quot;</span><span class="p">,</span>  <span class="c1"># Use shared storage</span>
+        <span class="n">package_manager</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
+        <span class="n">module_loads</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;python3&quot;</span><span class="p">],</span>
+        <span class="n">environment_variables</span><span class="o">=</span><span class="p">{</span>
+            <span class="s2">&quot;CLUSTRIX_CLUSTER&quot;</span><span class="p">:</span> <span class="n">cluster_name</span>
+        <span class="p">},</span>
+        <span class="n">default_cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+        <span class="n">default_memory</span><span class="o">=</span><span class="s2">&quot;16GB&quot;</span><span class="p">,</span>
+        <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;02:00:00&quot;</span><span class="p">,</span>
+        <span class="n">default_partition</span><span class="o">=</span><span class="s2">&quot;hpc&quot;</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Configured Clustrix for CycleCloud cluster: </span><span class="si">{</span><span class="n">cluster_name</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;CycleCloud Template (save as clustrix-slurm.txt):&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">cyclecloud_template</span><span class="p">)</span>
+
+<span class="c1"># Example configuration (uncomment and modify as needed)</span>
+<span class="c1"># config_message = configure_for_cyclecloud(&quot;10.1.0.4&quot;, &quot;my-clustrix-cluster&quot;)</span>
+<span class="c1"># print(config_message)</span>
+</pre></div>
+</div>
+</div>
+<p><strong>Azure CycleCloud Benefits:</strong></p>
+<ul class="simple">
+<li><p>Best-in-class HPC cluster management for Azure</p></li>
+<li><p>Native SLURM integration works seamlessly with Clustrix</p></li>
+<li><p>Automatic scaling and cost optimization</p></li>
+<li><p>Enterprise-grade security and compliance</p></li>
+<li><p>Hybrid cloud capabilities for on-premises integration</p></li>
+</ul>
+</section>
+<section id="Data-Management-with-Azure-Blob-Storage">
+<h2>Data Management with Azure Blob Storage<a class="headerlink" href="#Data-Management-with-Azure-Blob-Storage" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">process_blob_data</span><span class="p">(</span><span class="n">storage_account</span><span class="p">,</span> <span class="n">container_name</span><span class="p">,</span> <span class="n">input_blob</span><span class="p">,</span> <span class="n">output_blob</span><span class="p">,</span> <span class="n">storage_key</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Process data from Azure Blob Storage and save results back.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">azure.storage.blob</span> <span class="kn">import</span> <span class="n">BlobServiceClient</span>
+    <span class="kn">from</span> <span class="nn">azure.identity</span> <span class="kn">import</span> <span class="n">DefaultAzureCredential</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">pickle</span>
+    <span class="kn">import</span> <span class="nn">io</span>
+
+    <span class="c1"># Initialize Blob Service Client</span>
+    <span class="k">if</span> <span class="n">storage_key</span><span class="p">:</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">storage_key</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Use managed identity or Azure CLI authentication</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">credential</span> <span class="o">=</span> <span class="n">DefaultAzureCredential</span><span class="p">()</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">credential</span><span class="p">)</span>
+
+    <span class="c1"># Download data from blob storage</span>
+    <span class="n">blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span><span class="n">container</span><span class="o">=</span><span class="n">container_name</span><span class="p">,</span> <span class="n">blob</span><span class="o">=</span><span class="n">input_blob</span><span class="p">)</span>
+    <span class="n">blob_data</span> <span class="o">=</span> <span class="n">blob_client</span><span class="o">.</span><span class="n">download_blob</span><span class="p">()</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">blob_data</span><span class="o">.</span><span class="n">readall</span><span class="p">())</span>
+
+    <span class="c1"># Process the data</span>
+    <span class="n">processed_data</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;original_shape&#39;</span><span class="p">:</span> <span class="n">data</span><span class="o">.</span><span class="n">shape</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s1">&#39;shape&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">len</span><span class="p">(</span><span class="n">data</span><span class="p">),</span>
+        <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">data</span><span class="p">))</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="p">),</span>
+        <span class="s1">&#39;std&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">data</span><span class="p">))</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="mf">0.0</span><span class="p">,</span>
+        <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">data</span><span class="p">))</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="p">),</span>
+        <span class="s1">&#39;min&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">data</span><span class="p">))</span> <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="s1">&#39;__iter__&#39;</span><span class="p">)</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="n">data</span><span class="p">),</span>
+        <span class="s1">&#39;processing_timestamp&#39;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">(),</span>
+        <span class="s1">&#39;processed_on&#39;</span><span class="p">:</span> <span class="s1">&#39;azure-vm&#39;</span>
+    <span class="p">}</span>
+
+    <span class="c1"># Upload results to blob storage</span>
+    <span class="n">output_buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+    <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">processed_data</span><span class="p">,</span> <span class="n">output_buffer</span><span class="p">)</span>
+    <span class="n">output_buffer</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">output_blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span><span class="n">container</span><span class="o">=</span><span class="n">container_name</span><span class="p">,</span> <span class="n">blob</span><span class="o">=</span><span class="n">output_blob</span><span class="p">)</span>
+    <span class="n">output_blob_client</span><span class="o">.</span><span class="n">upload_blob</span><span class="p">(</span><span class="n">output_buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Processed data saved to blob: </span><span class="si">{</span><span class="n">output_blob</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="c1"># Utility functions for Azure Blob Storage</span>
+<span class="k">def</span> <span class="nf">upload_to_blob</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">storage_account</span><span class="p">,</span> <span class="n">container_name</span><span class="p">,</span> <span class="n">blob_name</span><span class="p">,</span> <span class="n">storage_key</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Upload data to Azure Blob Storage.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">storage_key</span><span class="p">:</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">storage_key</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">credential</span> <span class="o">=</span> <span class="n">DefaultAzureCredential</span><span class="p">()</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">credential</span><span class="p">)</span>
+
+    <span class="n">buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+    <span class="n">pickle</span><span class="o">.</span><span class="n">dump</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">buffer</span><span class="p">)</span>
+    <span class="n">buffer</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="n">blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span><span class="n">container</span><span class="o">=</span><span class="n">container_name</span><span class="p">,</span> <span class="n">blob</span><span class="o">=</span><span class="n">blob_name</span><span class="p">)</span>
+    <span class="n">blob_client</span><span class="o">.</span><span class="n">upload_blob</span><span class="p">(</span><span class="n">buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Data uploaded to blob: </span><span class="si">{</span><span class="n">blob_name</span><span class="si">}</span><span class="s2">&quot;</span>
+
+<span class="k">def</span> <span class="nf">download_from_blob</span><span class="p">(</span><span class="n">storage_account</span><span class="p">,</span> <span class="n">container_name</span><span class="p">,</span> <span class="n">blob_name</span><span class="p">,</span> <span class="n">storage_key</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Download data from Azure Blob Storage.&quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">storage_key</span><span class="p">:</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">storage_key</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_account</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+        <span class="n">credential</span> <span class="o">=</span> <span class="n">DefaultAzureCredential</span><span class="p">()</span>
+        <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">credential</span><span class="p">)</span>
+
+    <span class="n">blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span><span class="n">container</span><span class="o">=</span><span class="n">container_name</span><span class="p">,</span> <span class="n">blob</span><span class="o">=</span><span class="n">blob_name</span><span class="p">)</span>
+    <span class="n">blob_data</span> <span class="o">=</span> <span class="n">blob_client</span><span class="o">.</span><span class="n">download_blob</span><span class="p">()</span>
+    <span class="k">return</span> <span class="n">pickle</span><span class="o">.</span><span class="n">loads</span><span class="p">(</span><span class="n">blob_data</span><span class="o">.</span><span class="n">readall</span><span class="p">())</span>
+
+<span class="c1"># Example usage (uncomment and modify as needed):</span>
+<span class="c1"># sample_data = np.random.rand(1000, 50)</span>
+<span class="c1"># upload_result = upload_to_blob(sample_data, &#39;yourstorageaccount&#39;, &#39;data&#39;, &#39;input/sample.pkl&#39;)</span>
+<span class="c1"># print(upload_result)</span>
+<span class="c1">#</span>
+<span class="c1"># process_result = process_blob_data(&#39;yourstorageaccount&#39;, &#39;data&#39;, &#39;input/sample.pkl&#39;, &#39;output/results.pkl&#39;)</span>
+<span class="c1"># print(process_result)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Blob Storage integration functions defined.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Azure-Machine-Learning-Compute-Integration">
+<h2>Azure Machine Learning Compute Integration<a class="headerlink" href="#Azure-Machine-Learning-Compute-Integration" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">setup_azure_ml_compute</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Template for setting up Azure ML compute clusters.</span>
+<span class="sd">    These can be used with Clustrix for ML workloads.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">aml_setup_commands</span> <span class="o">=</span> <span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Create Azure ML workspace</span>
+<span class="s2">az ml workspace create </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-ml-workspace </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg </span><span class="se">\\</span>
+<span class="s2">  --location eastus</span>
+
+<span class="s2"># Create compute cluster</span>
+<span class="s2">az ml compute create </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-compute </span><span class="se">\\</span>
+<span class="s2">  --type amlcompute </span><span class="se">\\</span>
+<span class="s2">  --min-instances 0 </span><span class="se">\\</span>
+<span class="s2">  --max-instances 4 </span><span class="se">\\</span>
+<span class="s2">  --size Standard_DS3_v2 </span><span class="se">\\</span>
+<span class="s2">  --workspace-name clustrix-ml-workspace </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg</span>
+
+<span class="s2"># Create compute instance for development</span>
+<span class="s2">az ml compute create </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-dev-instance </span><span class="se">\\</span>
+<span class="s2">  --type computeinstance </span><span class="se">\\</span>
+<span class="s2">  --size Standard_DS3_v2 </span><span class="se">\\</span>
+<span class="s2">  --workspace-name clustrix-ml-workspace </span><span class="se">\\</span>
+<span class="s2">  --resource-group clustrix-tutorial-rg</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;workspace&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-ml-workspace&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;compute_cluster&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-compute&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;compute_instance&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-dev-instance&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;commands&#39;</span><span class="p">:</span> <span class="n">aml_setup_commands</span>
+    <span class="p">}</span>
+
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">azure_ml_training_job</span><span class="p">(</span><span class="n">dataset_params</span><span class="p">,</span> <span class="n">model_params</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example ML training job that could run on Azure ML compute.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">from</span> <span class="nn">sklearn.ensemble</span> <span class="kn">import</span> <span class="n">RandomForestClassifier</span>
+    <span class="kn">from</span> <span class="nn">sklearn.metrics</span> <span class="kn">import</span> <span class="n">accuracy_score</span><span class="p">,</span> <span class="n">classification_report</span>
+    <span class="kn">from</span> <span class="nn">sklearn.model_selection</span> <span class="kn">import</span> <span class="n">train_test_split</span>
+    <span class="kn">from</span> <span class="nn">sklearn.datasets</span> <span class="kn">import</span> <span class="n">make_classification</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="c1"># Generate synthetic dataset (in real scenario, load from Azure ML datasets)</span>
+    <span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span>
+        <span class="n">n_samples</span><span class="o">=</span><span class="n">dataset_params</span><span class="p">[</span><span class="s1">&#39;n_samples&#39;</span><span class="p">],</span>
+        <span class="n">n_features</span><span class="o">=</span><span class="n">dataset_params</span><span class="p">[</span><span class="s1">&#39;n_features&#39;</span><span class="p">],</span>
+        <span class="n">n_classes</span><span class="o">=</span><span class="n">dataset_params</span><span class="p">[</span><span class="s1">&#39;n_classes&#39;</span><span class="p">],</span>
+        <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span>
+    <span class="p">)</span>
+
+    <span class="n">X_train</span><span class="p">,</span> <span class="n">X_test</span><span class="p">,</span> <span class="n">y_train</span><span class="p">,</span> <span class="n">y_test</span> <span class="o">=</span> <span class="n">train_test_split</span><span class="p">(</span>
+        <span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">test_size</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span>
+    <span class="p">)</span>
+
+    <span class="c1"># Train model</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="o">**</span><span class="n">model_params</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+    <span class="n">training_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="c1"># Evaluate</span>
+    <span class="n">y_pred</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X_test</span><span class="p">)</span>
+    <span class="n">accuracy</span> <span class="o">=</span> <span class="n">accuracy_score</span><span class="p">(</span><span class="n">y_test</span><span class="p">,</span> <span class="n">y_pred</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">,</span>
+        <span class="s1">&#39;training_time&#39;</span><span class="p">:</span> <span class="n">training_time</span><span class="p">,</span>
+        <span class="s1">&#39;training_samples&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">X_train</span><span class="p">),</span>
+        <span class="s1">&#39;test_samples&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">X_test</span><span class="p">),</span>
+        <span class="s1">&#39;feature_importance&#39;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">feature_importances_</span><span class="o">.</span><span class="n">tolist</span><span class="p">()[:</span><span class="mi">10</span><span class="p">],</span>  <span class="c1"># Top 10</span>
+        <span class="s1">&#39;model_params&#39;</span><span class="p">:</span> <span class="n">model_params</span><span class="p">,</span>
+        <span class="s1">&#39;dataset_params&#39;</span><span class="p">:</span> <span class="n">dataset_params</span>
+    <span class="p">}</span>
+
+<span class="n">aml_config</span> <span class="o">=</span> <span class="n">setup_azure_ml_compute</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure ML Setup Commands:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">aml_config</span><span class="p">[</span><span class="s1">&#39;commands&#39;</span><span class="p">])</span>
+
+<span class="c1"># Example usage (uncomment to run after setting up Azure ML):</span>
+<span class="c1"># dataset_config = {&#39;n_samples&#39;: 10000, &#39;n_features&#39;: 20, &#39;n_classes&#39;: 3}</span>
+<span class="c1"># model_config = {&#39;n_estimators&#39;: 100, &#39;max_depth&#39;: 10, &#39;random_state&#39;: 42, &#39;n_jobs&#39;: -1}</span>
+<span class="c1"># result = azure_ml_training_job(dataset_config, model_config)</span>
+<span class="c1"># print(f&quot;Model trained with accuracy: {result[&#39;accuracy&#39;]:.4f}&quot;)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure ML integration example defined.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Security-Best-Practices">
+<h2>Security Best Practices<a class="headerlink" href="#Security-Best-Practices" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">setup_azure_security_for_clustrix</span><span class="p">(</span><span class="n">resource_group</span><span class="o">=</span><span class="s1">&#39;clustrix-tutorial-rg&#39;</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="s1">&#39;eastus&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Security configuration for Azure + Clustrix deployment.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">security_commands</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Create virtual network with private subnets</span>
+<span class="s2">az network vnet create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-vnet </span><span class="se">\\</span>
+<span class="s2">  --address-prefix 10.1.0.0/16 </span><span class="se">\\</span>
+<span class="s2">  --subnet-name clustrix-subnet </span><span class="se">\\</span>
+<span class="s2">  --subnet-prefix 10.1.0.0/24 </span><span class="se">\\</span>
+<span class="s2">  --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span>
+
+<span class="s2"># Create Network Security Group with restrictive rules</span>
+<span class="s2">az network nsg create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-nsg </span><span class="se">\\</span>
+<span class="s2">  --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span>
+
+<span class="s2"># Allow SSH only from your IP (replace with your actual IP)</span>
+<span class="s2">az network nsg rule create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --nsg-name clustrix-nsg </span><span class="se">\\</span>
+<span class="s2">  --name AllowSSHFromMyIP </span><span class="se">\\</span>
+<span class="s2">  --protocol tcp </span><span class="se">\\</span>
+<span class="s2">  --priority 1000 </span><span class="se">\\</span>
+<span class="s2">  --destination-port-range 22 </span><span class="se">\\</span>
+<span class="s2">  --source-address-prefixes YOUR_IP_ADDRESS/32 </span><span class="se">\\</span>
+<span class="s2">  --access allow</span>
+
+<span class="s2"># Allow internal communication</span>
+<span class="s2">az network nsg rule create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --nsg-name clustrix-nsg </span><span class="se">\\</span>
+<span class="s2">  --name AllowVnetInbound </span><span class="se">\\</span>
+<span class="s2">  --protocol &#39;*&#39; </span><span class="se">\\</span>
+<span class="s2">  --priority 1001 </span><span class="se">\\</span>
+<span class="s2">  --source-address-prefixes 10.1.0.0/16 </span><span class="se">\\</span>
+<span class="s2">  --destination-address-prefixes 10.1.0.0/16 </span><span class="se">\\</span>
+<span class="s2">  --access allow</span>
+
+<span class="s2"># Create Key Vault for secrets management</span>
+<span class="s2">az keyvault create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-keyvault-$(uuidgen | tr &#39;[:upper:]&#39; &#39;[:lower:]&#39; | cut -c1-8) </span><span class="se">\\</span>
+<span class="s2">  --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --enable-disk-encryption </span><span class="se">\\</span>
+<span class="s2">  --sku standard</span>
+
+<span class="s2"># Create managed identity for VMs</span>
+<span class="s2">az identity create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name clustrix-identity </span><span class="se">\\</span>
+<span class="s2">  --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span>
+
+<span class="s2"># Create storage account with private endpoint</span>
+<span class="s2">az storage account create </span><span class="se">\\</span>
+<span class="s2">  --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --name clustrixstorage$(uuidgen | tr &#39;[:upper:]&#39; &#39;[:lower:]&#39; | cut -c1-8) </span><span class="se">\\</span>
+<span class="s2">  --location </span><span class="si">{</span><span class="n">location</span><span class="si">}</span><span class="s2"> </span><span class="se">\\</span>
+<span class="s2">  --sku Standard_LRS </span><span class="se">\\</span>
+<span class="s2">  --allow-blob-public-access false </span><span class="se">\\</span>
+<span class="s2">  --https-only true </span><span class="se">\\</span>
+<span class="s2">  --min-tls-version TLS1_2</span>
+
+<span class="s2"># Enable Azure Security Center</span>
+<span class="s2">az security auto-provisioning-setting update </span><span class="se">\\</span>
+<span class="s2">  --name default </span><span class="se">\\</span>
+<span class="s2">  --auto-provision on</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="n">resource_group</span><span class="p">,</span>
+        <span class="s1">&#39;location&#39;</span><span class="p">:</span> <span class="n">location</span><span class="p">,</span>
+        <span class="s1">&#39;vnet_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-vnet&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;subnet_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-subnet&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;nsg_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-nsg&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;security_commands&#39;</span><span class="p">:</span> <span class="n">security_commands</span>
+    <span class="p">}</span>
+
+<span class="n">security_config</span> <span class="o">=</span> <span class="n">setup_azure_security_for_clustrix</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Security Setup Commands:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">security_config</span><span class="p">[</span><span class="s1">&#39;security_commands&#39;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">IMPORTANT: Replace &#39;YOUR_IP_ADDRESS&#39; with your actual public IP address!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Find your IP with: curl ifconfig.me&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<section id="Azure-Security-Checklist-for-Clustrix">
+<h3>Azure Security Checklist for Clustrix<a class="headerlink" href="#Azure-Security-Checklist-for-Clustrix" title="Link to this heading">¶</a></h3>
+<p>✓ <strong>Authentication and Access</strong></p>
+<ul class="simple">
+<li><p>Use Azure Active Directory for authentication</p></li>
+<li><p>Enable managed identities instead of service principals when possible</p></li>
+<li><p>Restrict Network Security Groups to your IP address only</p></li>
+<li><p>Use private endpoints for storage accounts</p></li>
+</ul>
+<p>✓ <strong>Infrastructure Security</strong></p>
+<ul class="simple">
+<li><p>Enable disk encryption for all VMs</p></li>
+<li><p>Use Azure Key Vault for secrets and certificates</p></li>
+<li><p>Enable Azure Security Center recommendations</p></li>
+<li><p>Use Azure Private Link for service connectivity</p></li>
+</ul>
+<p>✓ <strong>Monitoring and Compliance</strong></p>
+<ul class="simple">
+<li><p>Enable diagnostic logging and monitoring</p></li>
+<li><p>Implement Azure Policy for compliance</p></li>
+<li><p>Use Azure Defender for cloud workload protection</p></li>
+<li><p>Regularly rotate access keys and certificates</p></li>
+</ul>
+<p>✓ <strong>Cost and Resource Management</strong></p>
+<ul class="simple">
+<li><p>Set up cost alerts and spending limits</p></li>
+<li><p>Tag all resources for governance and cost tracking</p></li>
+</ul>
+</section>
+</section>
+<section id="Cost-Management-and-Optimization">
+<h2>Cost Management and Optimization<a class="headerlink" href="#Cost-Management-and-Optimization" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example Spot VM configuration for cost savings</span>
+<span class="k">def</span> <span class="nf">configure_spot_vm</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example configuration for using Azure Spot VMs.&quot;&quot;&quot;</span>
+    <span class="n">configure</span><span class="p">(</span>
+        <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+        <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;your-spot-vm-ip&quot;</span><span class="p">,</span>
+        <span class="n">username</span><span class="o">=</span><span class="s2">&quot;azureuser&quot;</span><span class="p">,</span>
+        <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/id_rsa&quot;</span><span class="p">,</span>
+        <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/clustrix&quot;</span><span class="p">,</span>
+        <span class="c1"># Spot VMs can be evicted, so use shorter timeouts</span>
+        <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;00:30:00&quot;</span><span class="p">,</span>
+        <span class="n">job_poll_interval</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>  <span class="c1"># Check more frequently</span>
+        <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Clean up quickly</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="s2">&quot;Configured for Azure Spot VMs with appropriate timeouts.&quot;</span>
+
+<span class="c1"># Example spot VM configuration (uncomment to use)</span>
+<span class="c1"># spot_config = configure_spot_vm()</span>
+<span class="c1"># print(f&quot;Configuration result: {spot_config}&quot;)</span>
+</pre></div>
+</div>
+</div>
+<section id="Azure-Cost-Optimization-for-Clustrix">
+<h3>Azure Cost Optimization for Clustrix<a class="headerlink" href="#Azure-Cost-Optimization-for-Clustrix" title="Link to this heading">¶</a></h3>
+<section id="Cost-Monitoring-Commands">
+<h4>Cost Monitoring Commands<a class="headerlink" href="#Cost-Monitoring-Commands" title="Link to this heading">¶</a></h4>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span><span class="c1"># Set up budget alerts</span>
+az<span class="w"> </span>consumption<span class="w"> </span>budget<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--budget-name<span class="w"> </span>clustrix-monthly-budget<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--amount<span class="w"> </span><span class="m">100</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--time-grain<span class="w"> </span>Monthly<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--time-period-start<span class="w"> </span><span class="m">2025</span>-01-01<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--time-period-end<span class="w"> </span><span class="m">2025</span>-12-31
+
+<span class="c1"># Get current costs</span>
+az<span class="w"> </span>consumption<span class="w"> </span>usage<span class="w"> </span>list<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--start-date<span class="w"> </span><span class="m">2025</span>-01-01<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--end-date<span class="w"> </span><span class="m">2025</span>-01-31
+
+<span class="c1"># List resource costs by resource group</span>
+az<span class="w"> </span>costmanagement<span class="w"> </span>query<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--type<span class="w"> </span>Usage<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-aggregation<span class="w"> </span><span class="s1">&#39;{&quot;totalCost&quot;:{&quot;name&quot;:&quot;PreTaxCost&quot;,&quot;function&quot;:&quot;Sum&quot;}}&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--dataset-grouping<span class="w"> </span><span class="nv">name</span><span class="o">=</span>ResourceGroup<span class="w"> </span><span class="nv">type</span><span class="o">=</span>Dimension
+
+<span class="c1"># Set up auto-shutdown for VMs</span>
+az<span class="w"> </span>vm<span class="w"> </span>auto-shutdown<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--resource-group<span class="w"> </span>clustrix-tutorial-rg<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>clustrix-vm-01<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--time<span class="w"> </span><span class="m">1900</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--email<span class="w"> </span>your-email@example.com
+</pre></div>
+</div>
+</section>
+<section id="Cost-Optimization-Recommendations">
+<h4>Cost Optimization Recommendations<a class="headerlink" href="#Cost-Optimization-Recommendations" title="Link to this heading">¶</a></h4>
+<ol class="arabic simple">
+<li><p><strong>Use Spot VMs</strong> for batch processing (up to 90% savings)</p></li>
+<li><p><strong>Enable auto-shutdown</strong> for dev resources</p></li>
+<li><p><strong>Implement lifecycle policies</strong> for blob storage</p></li>
+<li><p><strong>Set up budget alerts</strong> and spending limits</p></li>
+<li><p><strong>Regular cost reviews</strong> and resource optimization</p></li>
+<li><p><strong>Use reserved instances</strong> for predictable workloads</p></li>
+<li><p><strong>Choose appropriate VM sizes</strong> based on actual usage</p></li>
+</ol>
+</section>
+</section>
+<section id="id1">
+<h3>Azure Cost Optimization for Clustrix<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h3>
+<section id="1.-Compute-Optimization">
+<h4>1. Compute Optimization<a class="headerlink" href="#1.-Compute-Optimization" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>Use Azure Spot VMs</strong> for non-critical workloads (up to 90% savings)</p></li>
+<li><p><strong>Choose B-series burstable VMs</strong> for variable workloads</p></li>
+<li><p><strong>Use reserved instances</strong> for predictable workloads (1-3 year terms)</p></li>
+<li><p><strong>Enable auto-shutdown</strong> for dev/test VMs</p></li>
+<li><p><strong>Right-size VMs</strong> based on actual usage</p></li>
+</ul>
+</section>
+<section id="2.-Storage-Optimization">
+<h4>2. Storage Optimization<a class="headerlink" href="#2.-Storage-Optimization" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>Use appropriate storage tiers</strong> (Hot, Cool, Archive)</p></li>
+<li><p><strong>Enable lifecycle management</strong> for blob storage</p></li>
+<li><p><strong>Use managed disks</strong> with appropriate performance tiers</p></li>
+<li><p><strong>Implement data deduplication</strong> and compression</p></li>
+</ul>
+</section>
+<section id="3.-Network-Optimization">
+<h4>3. Network Optimization<a class="headerlink" href="#3.-Network-Optimization" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>Minimize data transfer</strong> between regions</p></li>
+<li><p><strong>Use Azure CDN</strong> for static content</p></li>
+<li><p><strong>Optimize data transfer</strong> patterns</p></li>
+</ul>
+</section>
+<section id="4.-Monitoring-and-Management">
+<h4>4. Monitoring and Management<a class="headerlink" href="#4.-Monitoring-and-Management" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>Set up budget alerts</strong> and spending limits</p></li>
+<li><p><strong>Use Azure Cost Management + Billing</strong></p></li>
+<li><p><strong>Implement proper resource tagging</strong></p></li>
+<li><p><strong>Regular cost reviews</strong> and optimizations</p></li>
+</ul>
+</section>
+<section id="5.-Service-Specific">
+<h4>5. Service-Specific<a class="headerlink" href="#5.-Service-Specific" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>Use Azure Functions</strong> for small, event-driven tasks</p></li>
+<li><p><strong>Consider Azure Container Instances</strong> for short-running jobs</p></li>
+<li><p><strong>Use Azure Batch</strong> for large-scale parallel processing</p></li>
+</ul>
+</section>
+</section>
+</section>
+<section id="Resource-Cleanup">
+<h2>Resource Cleanup<a class="headerlink" href="#Resource-Cleanup" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">cleanup_azure_resources</span><span class="p">(</span><span class="n">resource_group</span><span class="o">=</span><span class="s1">&#39;clustrix-tutorial-rg&#39;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Clean up Azure resources to avoid ongoing charges.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        resource_group: Name of the resource group to clean up</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">cleanup_commands</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># List all resources in the resource group</span>
+<span class="s2">az resource list --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --output table</span>
+
+<span class="s2"># Stop all VMs first (to gracefully shut down)</span>
+<span class="s2">az vm deallocate --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --name clustrix-vm-01</span>
+
+<span class="s2"># Delete specific resources individually (optional - more granular control)</span>
+<span class="s2"># az vm delete --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --name clustrix-vm-01 --yes</span>
+<span class="s2"># az disk delete --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --name clustrix-vm-01_disk1_* --yes</span>
+<span class="s2"># az network public-ip delete --resource-group </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --name clustrix-vm-01PublicIP</span>
+
+<span class="s2"># WARNING: Delete the entire resource group (removes ALL resources)</span>
+<span class="s2">az group delete --name </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span><span class="s2"> --yes --no-wait</span>
+
+<span class="s2"># Verify deletion</span>
+<span class="s2">az group list --output table | grep </span><span class="si">{</span><span class="n">resource_group</span><span class="si">}</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;resource_group&#39;</span><span class="p">:</span> <span class="n">resource_group</span><span class="p">,</span>
+        <span class="s1">&#39;cleanup_commands&#39;</span><span class="p">:</span> <span class="n">cleanup_commands</span>
+    <span class="p">}</span>
+
+<span class="n">cleanup_info</span> <span class="o">=</span> <span class="n">cleanup_azure_resources</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Azure Resource Cleanup Commands for Resource Group: </span><span class="si">{</span><span class="n">cleanup_info</span><span class="p">[</span><span class="s1">&#39;resource_group&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">cleanup_info</span><span class="p">[</span><span class="s1">&#39;cleanup_commands&#39;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span> <span class="o">+</span> <span class="s2">&quot;⚠️ &quot;</span> <span class="o">*</span> <span class="mi">10</span> <span class="o">+</span> <span class="s2">&quot; IMPORTANT WARNINGS &quot;</span> <span class="o">+</span> <span class="s2">&quot;⚠️ &quot;</span> <span class="o">*</span> <span class="mi">10</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;1. The &#39;az group delete&#39; command will permanently delete ALL resources in the group!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;2. Review the resources first with &#39;az resource list&#39; before proceeding&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;3. Make sure to backup any important data before deletion&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;4. Consider stopping VMs instead of deleting if you plan to use them again&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;5. Deleted resources cannot be recovered - this action is irreversible!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">70</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Advanced-Example:-Distributed-Image-Processing">
+<h2>Advanced Example: Distributed Image Processing<a class="headerlink" href="#Advanced-Example:-Distributed-Image-Processing" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="s2">&quot;00:45:00&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">azure_image_processing_pipeline</span><span class="p">(</span><span class="n">storage_config</span><span class="p">,</span> <span class="n">processing_params</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Distributed image processing pipeline using Azure Blob Storage.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">azure.storage.blob</span> <span class="kn">import</span> <span class="n">BlobServiceClient</span>
+    <span class="kn">from</span> <span class="nn">azure.identity</span> <span class="kn">import</span> <span class="n">DefaultAzureCredential</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">from</span> <span class="nn">PIL</span> <span class="kn">import</span> <span class="n">Image</span>
+    <span class="kn">import</span> <span class="nn">io</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="c1"># Connect to Azure Blob Storage</span>
+    <span class="n">account_url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://</span><span class="si">{</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;account_name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">.blob.core.windows.net&quot;</span>
+    <span class="n">credential</span> <span class="o">=</span> <span class="n">DefaultAzureCredential</span><span class="p">()</span>
+    <span class="n">blob_service_client</span> <span class="o">=</span> <span class="n">BlobServiceClient</span><span class="p">(</span><span class="n">account_url</span><span class="o">=</span><span class="n">account_url</span><span class="p">,</span> <span class="n">credential</span><span class="o">=</span><span class="n">credential</span><span class="p">)</span>
+
+    <span class="n">container_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_container_client</span><span class="p">(</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;container&#39;</span><span class="p">])</span>
+
+    <span class="n">processed_images</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">processing_stats</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># List images to process</span>
+    <span class="n">blob_list</span> <span class="o">=</span> <span class="n">container_client</span><span class="o">.</span><span class="n">list_blobs</span><span class="p">(</span><span class="n">name_starts_with</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;input_prefix&#39;</span><span class="p">])</span>
+
+    <span class="k">for</span> <span class="n">blob</span> <span class="ow">in</span> <span class="n">blob_list</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">blob</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">endswith</span><span class="p">((</span><span class="s1">&#39;.png&#39;</span><span class="p">,</span> <span class="s1">&#39;.jpg&#39;</span><span class="p">,</span> <span class="s1">&#39;.jpeg&#39;</span><span class="p">)):</span>
+            <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Download image</span>
+                <span class="n">blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span>
+                    <span class="n">container</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;container&#39;</span><span class="p">],</span> <span class="n">blob</span><span class="o">=</span><span class="n">blob</span><span class="o">.</span><span class="n">name</span>
+                <span class="p">)</span>
+                <span class="n">image_data</span> <span class="o">=</span> <span class="n">blob_client</span><span class="o">.</span><span class="n">download_blob</span><span class="p">()</span><span class="o">.</span><span class="n">readall</span><span class="p">()</span>
+
+                <span class="c1"># Process image</span>
+                <span class="n">image</span> <span class="o">=</span> <span class="n">Image</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">(</span><span class="n">image_data</span><span class="p">))</span>
+
+                <span class="c1"># Apply processing operations</span>
+                <span class="k">if</span> <span class="n">processing_params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;resize&#39;</span><span class="p">):</span>
+                    <span class="n">image</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">resize</span><span class="p">(</span><span class="n">processing_params</span><span class="p">[</span><span class="s1">&#39;resize&#39;</span><span class="p">])</span>
+
+                <span class="k">if</span> <span class="n">processing_params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;grayscale&#39;</span><span class="p">):</span>
+                    <span class="n">image</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">convert</span><span class="p">(</span><span class="s1">&#39;L&#39;</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">processing_params</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;rotate&#39;</span><span class="p">):</span>
+                    <span class="n">image</span> <span class="o">=</span> <span class="n">image</span><span class="o">.</span><span class="n">rotate</span><span class="p">(</span><span class="n">processing_params</span><span class="p">[</span><span class="s1">&#39;rotate&#39;</span><span class="p">])</span>
+
+                <span class="c1"># Convert back to bytes</span>
+                <span class="n">output_buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+                <span class="n">image</span><span class="o">.</span><span class="n">save</span><span class="p">(</span><span class="n">output_buffer</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;PNG&#39;</span><span class="p">)</span>
+                <span class="n">output_buffer</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+                <span class="c1"># Upload processed image</span>
+                <span class="n">output_blob_name</span> <span class="o">=</span> <span class="n">blob</span><span class="o">.</span><span class="n">name</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span>
+                    <span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;input_prefix&#39;</span><span class="p">],</span>
+                    <span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;output_prefix&#39;</span><span class="p">]</span>
+                <span class="p">)</span>
+
+                <span class="n">output_blob_client</span> <span class="o">=</span> <span class="n">blob_service_client</span><span class="o">.</span><span class="n">get_blob_client</span><span class="p">(</span>
+                    <span class="n">container</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;container&#39;</span><span class="p">],</span> <span class="n">blob</span><span class="o">=</span><span class="n">output_blob_name</span>
+                <span class="p">)</span>
+                <span class="n">output_blob_client</span><span class="o">.</span><span class="n">upload_blob</span><span class="p">(</span><span class="n">output_buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">overwrite</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+                <span class="n">processing_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+                <span class="n">processed_images</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">output_blob_name</span><span class="p">)</span>
+                <span class="n">processing_stats</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
+                    <span class="s1">&#39;input_blob&#39;</span><span class="p">:</span> <span class="n">blob</span><span class="o">.</span><span class="n">name</span><span class="p">,</span>
+                    <span class="s1">&#39;output_blob&#39;</span><span class="p">:</span> <span class="n">output_blob_name</span><span class="p">,</span>
+                    <span class="s1">&#39;processing_time&#39;</span><span class="p">:</span> <span class="n">processing_time</span><span class="p">,</span>
+                    <span class="s1">&#39;original_size&#39;</span><span class="p">:</span> <span class="n">image</span><span class="o">.</span><span class="n">size</span><span class="p">,</span>
+                    <span class="s1">&#39;processed_size&#39;</span><span class="p">:</span> <span class="n">image</span><span class="o">.</span><span class="n">size</span>
+                <span class="p">})</span>
+
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing </span><span class="si">{</span><span class="n">blob</span><span class="o">.</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;processed_count&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">processed_images</span><span class="p">),</span>
+        <span class="s1">&#39;total_processing_time&#39;</span><span class="p">:</span> <span class="nb">sum</span><span class="p">(</span><span class="n">stat</span><span class="p">[</span><span class="s1">&#39;processing_time&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">stat</span> <span class="ow">in</span> <span class="n">processing_stats</span><span class="p">),</span>
+        <span class="s1">&#39;average_processing_time&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">stat</span><span class="p">[</span><span class="s1">&#39;processing_time&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">stat</span> <span class="ow">in</span> <span class="n">processing_stats</span><span class="p">])</span> <span class="k">if</span> <span class="n">processing_stats</span> <span class="k">else</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="s1">&#39;processed_images&#39;</span><span class="p">:</span> <span class="n">processed_images</span><span class="p">[:</span><span class="mi">10</span><span class="p">],</span>  <span class="c1"># First 10 for brevity</span>
+        <span class="s1">&#39;processing_stats&#39;</span><span class="p">:</span> <span class="n">processing_stats</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span>  <span class="c1"># First 5 for brevity</span>
+    <span class="p">}</span>
+
+<span class="c1"># Example usage (uncomment and modify as needed):</span>
+<span class="c1"># storage_config = {</span>
+<span class="c1">#     &#39;account_name&#39;: &#39;yourstorageaccount&#39;,</span>
+<span class="c1">#     &#39;container&#39;: &#39;images&#39;,</span>
+<span class="c1">#     &#39;input_prefix&#39;: &#39;raw/&#39;,</span>
+<span class="c1">#     &#39;output_prefix&#39;: &#39;processed/&#39;</span>
+<span class="c1"># }</span>
+<span class="c1">#</span>
+<span class="c1"># processing_config = {</span>
+<span class="c1">#     &#39;resize&#39;: (800, 600),</span>
+<span class="c1">#     &#39;grayscale&#39;: True,</span>
+<span class="c1">#     &#39;rotate&#39;: 0</span>
+<span class="c1"># }</span>
+<span class="c1">#</span>
+<span class="c1"># result = azure_image_processing_pipeline(storage_config, processing_config)</span>
+<span class="c1"># print(f&quot;Processed {result[&#39;processed_count&#39;]} images in {result[&#39;total_processing_time&#39;]:.2f} seconds&quot;)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Advanced image processing pipeline example defined.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Summary">
+<h2>Summary<a class="headerlink" href="#Summary" title="Link to this heading">¶</a></h2>
+<p>This tutorial covered:</p>
+<ol class="arabic simple">
+<li><p><strong>Setup</strong>: Azure authentication and Clustrix installation</p></li>
+<li><p><strong>VM Integration</strong>: Direct Azure VM configuration</p></li>
+<li><p><strong>Azure Batch</strong>: Managed job scheduling</p></li>
+<li><p><strong>CycleCloud</strong>: HPC-optimized clusters with SLURM</p></li>
+<li><p><strong>Blob Storage</strong>: Data storage and retrieval</p></li>
+<li><p><strong>Azure ML</strong>: Machine learning compute integration</p></li>
+<li><p><strong>Security</strong>: Best practices for safe deployment</p></li>
+<li><p><strong>Cost Management</strong>: Strategies to minimize expenses</p></li>
+<li><p><strong>Resource Management</strong>: Proper cleanup procedures</p></li>
+</ol>
+<section id="Next-Steps">
+<h3>Next Steps<a class="headerlink" href="#Next-Steps" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Set up your Azure credentials and test the basic configuration</p></li>
+<li><p>Start with a simple VM for initial testing</p></li>
+<li><p>Consider CycleCloud for production HPC workloads</p></li>
+<li><p>Implement proper monitoring and cost controls</p></li>
+<li><p>Explore Azure Spot VMs for cost-effective batch processing</p></li>
+</ul>
+</section>
+<section id="Azure-Specific-Advantages">
+<h3>Azure-Specific Advantages<a class="headerlink" href="#Azure-Specific-Advantages" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>CycleCloud</strong>: Best-in-class HPC cluster management</p></li>
+<li><p><strong>Azure ML</strong>: Integrated machine learning platform</p></li>
+<li><p><strong>Hybrid Cloud</strong>: Seamless integration with on-premises</p></li>
+<li><p><strong>Enterprise Integration</strong>: Active Directory and enterprise tools</p></li>
+<li><p><strong>Compliance</strong>: Strong compliance and security certifications</p></li>
+</ul>
+</section>
+<section id="Resources">
+<h3>Resources<a class="headerlink" href="#Resources" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://docs.microsoft.com/en-us/azure/cyclecloud/">Azure CycleCloud Documentation</a></p></li>
+<li><p><a class="reference external" href="https://docs.microsoft.com/en-us/azure/batch/">Azure Batch Documentation</a></p></li>
+<li><p><a class="reference external" href="https://docs.microsoft.com/en-us/azure/machine-learning/">Azure Machine Learning Documentation</a></p></li>
+<li><p><a class="reference external" href="https://docs.microsoft.com/en-us/azure/architecture/topics/high-performance-computing/">Azure HPC Documentation</a></p></li>
+<li><p><a class="reference external" href="https://clustrix.readthedocs.io/">Clustrix Documentation</a></p></li>
+</ul>
+<p><strong>Remember</strong>: Always monitor your Azure costs and clean up resources when not in use!</p>
+</section>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="aws_cloud_tutorial.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Amazon Web Services (AWS) Cloud Tutorial
+    </a>
+    <a class="float-right" href="gcp_cloud_tutorial.html" title="Next">
+        Google Cloud Platform (GCP) Tutorial <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">Microsoft Azure Cloud Tutorial</a><ul>
+<li><a class="reference internal" href="#Overview">Overview</a></li>
+<li><a class="reference internal" href="#Prerequisites">Prerequisites</a><ul>
+<li><a class="reference internal" href="#Required-Azure-Setup">Required Azure Setup</a></li>
+<li><a class="reference internal" href="#Local-Environment-Setup">Local Environment Setup</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Step-by-Step-Setup-Guide">Step-by-Step Setup Guide</a><ul>
+<li><a class="reference internal" href="#Step-1:-Install-Azure-CLI">Step 1: Install Azure CLI</a></li>
+<li><a class="reference internal" href="#Step-2:-Create-Azure-Account-and-Subscription">Step 2: Create Azure Account and Subscription</a></li>
+<li><a class="reference internal" href="#Step-3:-Install-Clustrix-with-Azure-Dependencies">Step 3: Install Clustrix with Azure Dependencies</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Step-4:-Azure-Authentication-Setup">Step 4: Azure Authentication Setup</a><ul>
+<li><a class="reference internal" href="#Option-1:-Azure-CLI-Authentication-(Recommended-for-Development)">Option 1: Azure CLI Authentication (Recommended for Development)</a></li>
+<li><a class="reference internal" href="#Option-2:-Service-Principal-Authentication-(Recommended-for-Production)">Option 2: Service Principal Authentication (Recommended for Production)</a></li>
+<li><a class="reference internal" href="#Step-5:-Generate-SSH-Key-Pair">Step 5: Generate SSH Key Pair</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Method-1:-Azure-Virtual-Machines-Configuration">Method 1: Azure Virtual Machines Configuration</a><ul>
+<li><a class="reference internal" href="#Step-6:-Create-Resource-Group-and-Azure-VM-for-Clustrix">Step 6: Create Resource Group and Azure VM for Clustrix</a></li>
+<li><a class="reference internal" href="#Cloud-Init-Script">Cloud-Init Script</a></li>
+<li><a class="reference internal" href="#Step-7:-Configure-Clustrix-for-Azure-VM">Step 7: Configure Clustrix for Azure VM</a></li>
+<li><a class="reference internal" href="#Testing-Your-Azure-VM-Connection">Testing Your Azure VM Connection</a></li>
+<li><a class="reference internal" href="#Example:-Remote-Computation-on-Azure-VM">Example: Remote Computation on Azure VM</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Method-2:-Azure-Batch-Configuration">Method 2: Azure Batch Configuration</a></li>
+<li><a class="reference internal" href="#Method-3:-Azure-CycleCloud-Integration">Method 3: Azure CycleCloud Integration</a></li>
+<li><a class="reference internal" href="#Data-Management-with-Azure-Blob-Storage">Data Management with Azure Blob Storage</a></li>
+<li><a class="reference internal" href="#Azure-Machine-Learning-Compute-Integration">Azure Machine Learning Compute Integration</a></li>
+<li><a class="reference internal" href="#Security-Best-Practices">Security Best Practices</a><ul>
+<li><a class="reference internal" href="#Azure-Security-Checklist-for-Clustrix">Azure Security Checklist for Clustrix</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Cost-Management-and-Optimization">Cost Management and Optimization</a><ul>
+<li><a class="reference internal" href="#Azure-Cost-Optimization-for-Clustrix">Azure Cost Optimization for Clustrix</a><ul>
+<li><a class="reference internal" href="#Cost-Monitoring-Commands">Cost Monitoring Commands</a></li>
+<li><a class="reference internal" href="#Cost-Optimization-Recommendations">Cost Optimization Recommendations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#id1">Azure Cost Optimization for Clustrix</a><ul>
+<li><a class="reference internal" href="#1.-Compute-Optimization">1. Compute Optimization</a></li>
+<li><a class="reference internal" href="#2.-Storage-Optimization">2. Storage Optimization</a></li>
+<li><a class="reference internal" href="#3.-Network-Optimization">3. Network Optimization</a></li>
+<li><a class="reference internal" href="#4.-Monitoring-and-Management">4. Monitoring and Management</a></li>
+<li><a class="reference internal" href="#5.-Service-Specific">5. Service-Specific</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Resource-Cleanup">Resource Cleanup</a></li>
+<li><a class="reference internal" href="#Advanced-Example:-Distributed-Image-Processing">Advanced Example: Distributed Image Processing</a></li>
+<li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Next-Steps">Next Steps</a></li>
+<li><a class="reference internal" href="#Azure-Specific-Advantages">Azure-Specific Advantages</a></li>
+<li><a class="reference internal" href="#Resources">Resources</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 26, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

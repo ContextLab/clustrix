@@ -269,7 +269,7 @@ class AzureCostMonitor(BaseCostMonitor):
 
     def get_region_pricing_comparison(
         self, instance_type: str
-    ) -> Dict[str, Dict[str, float]]:
+    ) -> Dict[str, Dict[str, Any]]:
         """Compare pricing across Azure regions (simplified)."""
         # Regional pricing multipliers (approximate)
         region_multipliers = {

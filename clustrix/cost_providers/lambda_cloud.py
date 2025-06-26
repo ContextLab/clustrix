@@ -4,7 +4,7 @@ Lambda Cloud cost monitoring implementation.
 
 import logging
 from datetime import datetime
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from ..cost_monitoring import BaseCostMonitor, ResourceUsage, CostEstimate
 
@@ -128,7 +128,7 @@ class LambdaCostMonitor(BaseCostMonitor):
         return self.pricing.copy()
 
     def get_instance_recommendations(
-        self, resource_usage: ResourceUsage, current_instance: str = None
+        self, resource_usage: ResourceUsage, current_instance: Optional[str] = None
     ) -> List[str]:
         """Get instance type recommendations based on current usage."""
         recommendations = []
@@ -242,7 +242,7 @@ class LambdaCostMonitor(BaseCostMonitor):
 
     def estimate_monthly_cost(
         self, instance_type: str, hours_per_day: float = 8
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any]:
         """Estimate monthly costs for different usage patterns."""
         instance_type = instance_type.lower().replace("-", "_")
         hourly_rate = self.pricing.get(instance_type, self.pricing["default"])

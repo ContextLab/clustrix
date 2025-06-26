@@ -74,7 +74,7 @@ class LoopInfo:
 class SafeRangeEvaluator(ast.NodeVisitor):
     """Safely evaluate range expressions without using eval()."""
 
-    def __init__(self, local_vars: Dict[str, Any] = None):
+    def __init__(self, local_vars: Optional[Dict[str, Any]] = None):
         self.local_vars = local_vars or {}
         self.result = None
         self.safe = True
@@ -192,8 +192,8 @@ class DependencyAnalyzer(ast.NodeVisitor):
 class LoopDetector(ast.NodeVisitor):
     """Enhanced loop detection with dependency analysis."""
 
-    def __init__(self, local_vars: Dict[str, Any] = None):
-        self.loops = []
+    def __init__(self, local_vars: Optional[Dict[str, Any]] = None):
+        self.loops: List[LoopInfo] = []
         self.current_level = 0
         self.local_vars = local_vars or {}
 
@@ -299,7 +299,7 @@ class LoopDetector(ast.NodeVisitor):
 
 
 def detect_loops_in_function(
-    func: Callable, args: tuple = (), kwargs: dict = None
+    func: Callable, args: tuple = (), kwargs: Optional[Dict[Any, Any]] = None
 ) -> List[LoopInfo]:
     """
     Detect and analyze loops in a function.
@@ -320,7 +320,7 @@ def detect_loops_in_function(
         tree = ast.parse(source)
 
         # Build local variables context
-        local_vars = {}
+        local_vars: Dict[str, Any] = {}
 
         # Add function arguments to context
         try:
@@ -353,7 +353,7 @@ def detect_loops_in_function(
 def find_parallelizable_loops(
     func: Callable,
     args: tuple = (),
-    kwargs: dict = None,
+    kwargs: Optional[Dict[Any, Any]] = None,
     max_nesting_level: int = 1,
 ) -> List[LoopInfo]:
     """

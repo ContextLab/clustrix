@@ -22,7 +22,7 @@ except ImportError:
     IPYTHON_AVAILABLE = False
 
     # Create placeholder classes for non-notebook environments
-    class Magics:
+    class Magics:  # type: ignore
         pass
 
     def magics_class(cls):

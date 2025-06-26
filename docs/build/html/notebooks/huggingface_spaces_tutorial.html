@@ -1,0 +1,1829 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>HuggingFace Spaces Tutorial &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Lambda Cloud Tutorial" href="lambda_cloud_tutorial.html" />
+            <link rel="prev" title="Google Cloud Platform (GCP) Tutorial" href="gcp_cloud_tutorial.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">HuggingFace Spaces Tutorial</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/notebooks/huggingface_spaces_tutorial.ipynb" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/notebooks/huggingface_spaces_tutorial.ipynb.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="HuggingFace-Spaces-Tutorial">
+<h1>HuggingFace Spaces Tutorial<a class="headerlink" href="#HuggingFace-Spaces-Tutorial" title="Link to this heading">¶</a></h1>
+<p>This tutorial demonstrates how to use Clustrix with HuggingFace Spaces for ML model deployment and distributed computing.</p>
+<p><a class="reference external" href="https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/source/notebooks/huggingface_spaces_tutorial.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
+<section id="Overview">
+<h2>Overview<a class="headerlink" href="#Overview" title="Link to this heading">¶</a></h2>
+<p>HuggingFace Spaces provides a unique platform for ML applications that integrates well with Clustrix:</p>
+<ul class="simple">
+<li><p><strong>Gradio Apps</strong>: Interactive web interfaces for ML models</p></li>
+<li><p><strong>Streamlit Apps</strong>: Data science web applications</p></li>
+<li><p><strong>Static Spaces</strong>: HTML/JS applications</p></li>
+<li><p><strong>Docker Spaces</strong>: Custom containerized applications</p></li>
+<li><p><strong>GPU Support</strong>: Hardware acceleration for compute-intensive tasks</p></li>
+<li><p><strong>Persistent Storage</strong>: Data storage across sessions</p></li>
+<li><p><strong>Secrets Management</strong>: Secure credential storage</p></li>
+<li><p><strong>Community Hub</strong>: Easy sharing and collaboration</p></li>
+</ul>
+</section>
+<section id="Prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#Prerequisites" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>HuggingFace account (free)</p></li>
+<li><p>HuggingFace Hub token for authentication</p></li>
+<li><p>Basic understanding of Gradio or Streamlit</p></li>
+<li><p>Git for version control</p></li>
+</ol>
+</section>
+<section id="Installation-and-Setup">
+<h2>Installation and Setup<a class="headerlink" href="#Installation-and-Setup" title="Link to this heading">¶</a></h2>
+<p>Install Clustrix with HuggingFace dependencies:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install Clustrix with HuggingFace support</span>
+<span class="o">!</span>pip<span class="w"> </span>install<span class="w"> </span>clustrix<span class="w"> </span>huggingface_hub<span class="w"> </span>gradio<span class="w"> </span>streamlit<span class="w"> </span>transformers<span class="w"> </span>datasets
+
+<span class="c1"># Import required libraries</span>
+<span class="kn">import</span> <span class="nn">clustrix</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">configure</span>
+<span class="kn">from</span> <span class="nn">huggingface_hub</span> <span class="kn">import</span> <span class="n">HfApi</span><span class="p">,</span> <span class="n">Repository</span><span class="p">,</span> <span class="n">login</span><span class="p">,</span> <span class="n">upload_file</span>
+<span class="kn">import</span> <span class="nn">gradio</span> <span class="k">as</span> <span class="nn">gr</span>
+<span class="kn">import</span> <span class="nn">streamlit</span> <span class="k">as</span> <span class="nn">st</span>
+<span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">time</span>
+<span class="kn">import</span> <span class="nn">json</span>
+<span class="kn">import</span> <span class="nn">requests</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="HuggingFace-Authentication-Setup">
+<h2>HuggingFace Authentication Setup<a class="headerlink" href="#HuggingFace-Authentication-Setup" title="Link to this heading">¶</a></h2>
+<section id="Option-1:-Interactive-Login">
+<h3>Option 1: Interactive Login<a class="headerlink" href="#Option-1:-Interactive-Login" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Login to HuggingFace (will prompt for token)</span>
+<span class="c1"># login()</span>
+
+<span class="c1"># Or set token as environment variable</span>
+<span class="c1"># os.environ[&#39;HUGGINGFACE_HUB_TOKEN&#39;] = &#39;your-token-here&#39;</span>
+
+<span class="c1"># Test authentication</span>
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">api</span> <span class="o">=</span> <span class="n">HfApi</span><span class="p">()</span>
+    <span class="n">user_info</span> <span class="o">=</span> <span class="n">api</span><span class="o">.</span><span class="n">whoami</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Successfully authenticated as: </span><span class="si">{</span><span class="n">user_info</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Authentication failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+<p><strong>Get your token from</strong> <a class="reference external" href="https://huggingface.co/settings/tokens">https://huggingface.co/settings/tokens</a></p>
+</section>
+</section>
+<section id="Method-1:-Gradio-Space-with-Clustrix-Backend">
+<h2>Method 1: Gradio Space with Clustrix Backend<a class="headerlink" href="#Method-1:-Gradio-Space-with-Clustrix-Backend" title="Link to this heading">¶</a></h2>
+<section id="Create-a-Gradio-App-with-Distributed-Computing">
+<h3>Create a Gradio App with Distributed Computing<a class="headerlink" href="#Create-a-Gradio-App-with-Distributed-Computing" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">create_gradio_clustrix_app</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Gradio app that uses Clustrix for backend computations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># This would typically be configured to point to your cluster</span>
+    <span class="c1"># For demo purposes, we&#39;ll use local execution</span>
+    <span class="n">configure</span><span class="p">(</span>
+        <span class="n">cluster_host</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span>  <span class="c1"># Local execution for demo</span>
+        <span class="n">package_manager</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span>
+    <span class="p">)</span>
+
+    <span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">distributed_model_training</span><span class="p">(</span><span class="n">dataset_size</span><span class="p">,</span> <span class="n">model_type</span><span class="p">,</span> <span class="n">n_estimators</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Train ML model using distributed computing.&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+        <span class="kn">from</span> <span class="nn">sklearn.ensemble</span> <span class="kn">import</span> <span class="n">RandomForestClassifier</span><span class="p">,</span> <span class="n">GradientBoostingClassifier</span>
+        <span class="kn">from</span> <span class="nn">sklearn.datasets</span> <span class="kn">import</span> <span class="n">make_classification</span>
+        <span class="kn">from</span> <span class="nn">sklearn.model_selection</span> <span class="kn">import</span> <span class="n">train_test_split</span><span class="p">,</span> <span class="n">cross_val_score</span>
+        <span class="kn">from</span> <span class="nn">sklearn.metrics</span> <span class="kn">import</span> <span class="n">accuracy_score</span><span class="p">,</span> <span class="n">classification_report</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+
+        <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+        <span class="c1"># Generate synthetic dataset</span>
+        <span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span>
+            <span class="n">n_samples</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">dataset_size</span><span class="p">),</span>
+            <span class="n">n_features</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span>
+            <span class="n">n_classes</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span>
+            <span class="n">n_informative</span><span class="o">=</span><span class="mi">15</span><span class="p">,</span>
+            <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span>
+        <span class="p">)</span>
+
+        <span class="n">X_train</span><span class="p">,</span> <span class="n">X_test</span><span class="p">,</span> <span class="n">y_train</span><span class="p">,</span> <span class="n">y_test</span> <span class="o">=</span> <span class="n">train_test_split</span><span class="p">(</span>
+            <span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">test_size</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Select model</span>
+        <span class="k">if</span> <span class="n">model_type</span> <span class="o">==</span> <span class="s2">&quot;Random Forest&quot;</span><span class="p">:</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span>
+                <span class="n">n_estimators</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">n_estimators</span><span class="p">),</span>
+                <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span>
+                <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span>
+            <span class="p">)</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># Gradient Boosting</span>
+            <span class="n">model</span> <span class="o">=</span> <span class="n">GradientBoostingClassifier</span><span class="p">(</span>
+                <span class="n">n_estimators</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">n_estimators</span><span class="p">),</span>
+                <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span>
+            <span class="p">)</span>
+
+        <span class="c1"># Train model</span>
+        <span class="n">model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+
+        <span class="c1"># Evaluate</span>
+        <span class="n">y_pred</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">predict</span><span class="p">(</span><span class="n">X_test</span><span class="p">)</span>
+        <span class="n">accuracy</span> <span class="o">=</span> <span class="n">accuracy_score</span><span class="p">(</span><span class="n">y_test</span><span class="p">,</span> <span class="n">y_pred</span><span class="p">)</span>
+
+        <span class="c1"># Cross-validation</span>
+        <span class="n">cv_scores</span> <span class="o">=</span> <span class="n">cross_val_score</span><span class="p">(</span><span class="n">model</span><span class="p">,</span> <span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">,</span> <span class="n">cv</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+
+        <span class="n">training_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">,</span>
+            <span class="s1">&#39;cv_mean&#39;</span><span class="p">:</span> <span class="n">cv_scores</span><span class="o">.</span><span class="n">mean</span><span class="p">(),</span>
+            <span class="s1">&#39;cv_std&#39;</span><span class="p">:</span> <span class="n">cv_scores</span><span class="o">.</span><span class="n">std</span><span class="p">(),</span>
+            <span class="s1">&#39;training_time&#39;</span><span class="p">:</span> <span class="n">training_time</span><span class="p">,</span>
+            <span class="s1">&#39;model_type&#39;</span><span class="p">:</span> <span class="n">model_type</span><span class="p">,</span>
+            <span class="s1">&#39;n_estimators&#39;</span><span class="p">:</span> <span class="n">n_estimators</span><span class="p">,</span>
+            <span class="s1">&#39;dataset_size&#39;</span><span class="p">:</span> <span class="n">dataset_size</span><span class="p">,</span>
+            <span class="s1">&#39;feature_importance&#39;</span><span class="p">:</span> <span class="n">model</span><span class="o">.</span><span class="n">feature_importances_</span><span class="p">[:</span><span class="mi">5</span><span class="p">]</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">train_model_interface</span><span class="p">(</span><span class="n">dataset_size</span><span class="p">,</span> <span class="n">model_type</span><span class="p">,</span> <span class="n">n_estimators</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Gradio interface function.&quot;&quot;&quot;</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># Run distributed training</span>
+            <span class="n">result</span> <span class="o">=</span> <span class="n">distributed_model_training</span><span class="p">(</span><span class="n">dataset_size</span><span class="p">,</span> <span class="n">model_type</span><span class="p">,</span> <span class="n">n_estimators</span><span class="p">)</span>
+
+            <span class="c1"># Format results for display</span>
+            <span class="n">output</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">**Training Results:**</span>
+
+<span class="s2">- **Model Type:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;model_type&#39;</span><span class="p">]</span><span class="si">}</span>
+<span class="s2">- **Dataset Size:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;dataset_size&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> samples</span>
+<span class="s2">- **Number of Estimators:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;n_estimators&#39;</span><span class="p">]</span><span class="si">}</span>
+<span class="s2">- **Test Accuracy:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;accuracy&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span>
+<span class="s2">- **CV Mean Score:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cv_mean&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> ± </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cv_std&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span>
+<span class="s2">- **Training Time:** </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;training_time&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds</span>
+
+<span class="s2">**Top 5 Feature Importances:**</span>
+<span class="si">{</span><span class="s1">&#39;, &#39;</span><span class="o">.</span><span class="n">join</span><span class="p">([</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">imp</span><span class="si">:</span><span class="s1">.4f</span><span class="si">}</span><span class="s1">&#39;</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">imp</span><span class="w"> </span><span class="ow">in</span><span class="w"> </span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;feature_importance&#39;</span><span class="p">]])</span><span class="si">}</span>
+
+<span class="s2">*Computation completed using Clustrix distributed computing.*</span>
+<span class="s2">&quot;&quot;&quot;</span>
+            <span class="k">return</span> <span class="n">output</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="k">return</span> <span class="sa">f</span><span class="s2">&quot;Error during training: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+
+    <span class="c1"># Create Gradio interface</span>
+    <span class="n">interface</span> <span class="o">=</span> <span class="n">gr</span><span class="o">.</span><span class="n">Interface</span><span class="p">(</span>
+        <span class="n">fn</span><span class="o">=</span><span class="n">train_model_interface</span><span class="p">,</span>
+        <span class="n">inputs</span><span class="o">=</span><span class="p">[</span>
+            <span class="n">gr</span><span class="o">.</span><span class="n">Slider</span><span class="p">(</span>
+                <span class="n">minimum</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+                <span class="n">maximum</span><span class="o">=</span><span class="mi">50000</span><span class="p">,</span>
+                <span class="n">value</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span>
+                <span class="n">step</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span>
+                <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Dataset Size&quot;</span>
+            <span class="p">),</span>
+            <span class="n">gr</span><span class="o">.</span><span class="n">Radio</span><span class="p">(</span>
+                <span class="n">choices</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;Random Forest&quot;</span><span class="p">,</span> <span class="s2">&quot;Gradient Boosting&quot;</span><span class="p">],</span>
+                <span class="n">value</span><span class="o">=</span><span class="s2">&quot;Random Forest&quot;</span><span class="p">,</span>
+                <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Model Type&quot;</span>
+            <span class="p">),</span>
+            <span class="n">gr</span><span class="o">.</span><span class="n">Slider</span><span class="p">(</span>
+                <span class="n">minimum</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+                <span class="n">maximum</span><span class="o">=</span><span class="mi">200</span><span class="p">,</span>
+                <span class="n">value</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+                <span class="n">step</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
+                <span class="n">label</span><span class="o">=</span><span class="s2">&quot;Number of Estimators&quot;</span>
+            <span class="p">)</span>
+        <span class="p">],</span>
+        <span class="n">outputs</span><span class="o">=</span><span class="n">gr</span><span class="o">.</span><span class="n">Markdown</span><span class="p">(</span><span class="n">label</span><span class="o">=</span><span class="s2">&quot;Training Results&quot;</span><span class="p">),</span>
+        <span class="n">title</span><span class="o">=</span><span class="s2">&quot;Clustrix Distributed ML Training&quot;</span><span class="p">,</span>
+        <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Train machine learning models using Clustrix distributed computing backend.&quot;</span><span class="p">,</span>
+        <span class="n">article</span><span class="o">=</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2">        ### About This Demo</span>
+
+<span class="s2">        This Gradio app demonstrates how to integrate Clustrix with HuggingFace Spaces</span>
+<span class="s2">        for distributed machine learning. The backend uses Clustrix to:</span>
+
+<span class="s2">        - Distribute model training across multiple cores</span>
+<span class="s2">        - Perform cross-validation in parallel</span>
+<span class="s2">        - Handle large datasets efficiently</span>
+
+<span class="s2">        **Note:** In a production deployment, Clustrix would be configured to use</span>
+<span class="s2">        remote compute clusters (AWS, Azure, GCP, etc.) for true distributed computing.</span>
+<span class="s2">        &quot;&quot;&quot;</span><span class="p">,</span>
+        <span class="n">theme</span><span class="o">=</span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+        <span class="n">examples</span><span class="o">=</span><span class="p">[</span>
+            <span class="p">[</span><span class="mi">5000</span><span class="p">,</span> <span class="s2">&quot;Random Forest&quot;</span><span class="p">,</span> <span class="mi">50</span><span class="p">],</span>
+            <span class="p">[</span><span class="mi">20000</span><span class="p">,</span> <span class="s2">&quot;Gradient Boosting&quot;</span><span class="p">,</span> <span class="mi">100</span><span class="p">],</span>
+            <span class="p">[</span><span class="mi">10000</span><span class="p">,</span> <span class="s2">&quot;Random Forest&quot;</span><span class="p">,</span> <span class="mi">150</span><span class="p">]</span>
+        <span class="p">]</span>
+    <span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">interface</span>
+
+<span class="c1"># Create the Gradio app</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">create_gradio_clustrix_app</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+<p><strong>Use ``app.launch()`` to run the Gradio app locally.</strong></p>
+</section>
+<section id="Create-Space-Files-Structure">
+<h3>Create Space Files Structure<a class="headerlink" href="#Create-Space-Files-Structure" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">create_huggingface_space_files</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create the necessary files for a HuggingFace Space.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># app.py - Main Gradio application</span>
+    <span class="n">app_py_content</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">import gradio as gr</span>
+<span class="s1">import numpy as np</span>
+<span class="s1">from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier</span>
+<span class="s1">from sklearn.datasets import make_classification</span>
+<span class="s1">from sklearn.model_selection import train_test_split, cross_val_score</span>
+<span class="s1">from sklearn.metrics import accuracy_score</span>
+<span class="s1">import time</span>
+<span class="s1">import os</span>
+
+<span class="s1"># Import clustrix if available, otherwise use local computation</span>
+<span class="s1">try:</span>
+<span class="s1">    from clustrix import cluster, configure</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = True</span>
+
+<span class="s1">    # Configure clustrix (would normally point to remote cluster)</span>
+<span class="s1">    configure(</span>
+<span class="s1">        cluster_host=None,  # Local execution in HF Spaces</span>
+<span class="s1">        package_manager=&quot;pip&quot;</span>
+<span class="s1">    )</span>
+
+<span class="s1">    @cluster(cores=2, memory=&quot;4GB&quot;)</span>
+<span class="s1">    def train_model_distributed(dataset_size, model_type, n_estimators):</span>
+<span class="s1">        return train_model_local(dataset_size, model_type, n_estimators)</span>
+
+<span class="s1">except ImportError:</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = False</span>
+<span class="s1">    def train_model_distributed(dataset_size, model_type, n_estimators):</span>
+<span class="s1">        return train_model_local(dataset_size, model_type, n_estimators)</span>
+
+<span class="s1">def train_model_local(dataset_size, model_type, n_estimators):</span>
+<span class="s1">    &quot;&quot;&quot;Local model training function.&quot;&quot;&quot;</span>
+<span class="s1">    start_time = time.time()</span>
+
+<span class="s1">    # Generate synthetic dataset</span>
+<span class="s1">    X, y = make_classification(</span>
+<span class="s1">        n_samples=int(dataset_size),</span>
+<span class="s1">        n_features=20,</span>
+<span class="s1">        n_classes=3,</span>
+<span class="s1">        n_informative=15,</span>
+<span class="s1">        random_state=42</span>
+<span class="s1">    )</span>
+
+<span class="s1">    X_train, X_test, y_train, y_test = train_test_split(</span>
+<span class="s1">        X, y, test_size=0.2, random_state=42</span>
+<span class="s1">    )</span>
+
+<span class="s1">    # Select model</span>
+<span class="s1">    if model_type == &quot;Random Forest&quot;:</span>
+<span class="s1">        model = RandomForestClassifier(</span>
+<span class="s1">            n_estimators=int(n_estimators),</span>
+<span class="s1">            random_state=42,</span>
+<span class="s1">            n_jobs=-1</span>
+<span class="s1">        )</span>
+<span class="s1">    else:  # Gradient Boosting</span>
+<span class="s1">        model = GradientBoostingClassifier(</span>
+<span class="s1">            n_estimators=int(n_estimators),</span>
+<span class="s1">            random_state=42</span>
+<span class="s1">        )</span>
+
+<span class="s1">    # Train model</span>
+<span class="s1">    model.fit(X_train, y_train)</span>
+
+<span class="s1">    # Evaluate</span>
+<span class="s1">    y_pred = model.predict(X_test)</span>
+<span class="s1">    accuracy = accuracy_score(y_test, y_pred)</span>
+
+<span class="s1">    # Cross-validation (simplified for HF Spaces)</span>
+<span class="s1">    cv_scores = cross_val_score(model, X_train, y_train, cv=3)  # Reduced CV folds</span>
+
+<span class="s1">    training_time = time.time() - start_time</span>
+
+<span class="s1">    return {</span>
+<span class="s1">        &#39;accuracy&#39;: accuracy,</span>
+<span class="s1">        &#39;cv_mean&#39;: cv_scores.mean(),</span>
+<span class="s1">        &#39;cv_std&#39;: cv_scores.std(),</span>
+<span class="s1">        &#39;training_time&#39;: training_time,</span>
+<span class="s1">        &#39;model_type&#39;: model_type,</span>
+<span class="s1">        &#39;n_estimators&#39;: n_estimators,</span>
+<span class="s1">        &#39;dataset_size&#39;: dataset_size,</span>
+<span class="s1">        &#39;feature_importance&#39;: model.feature_importances_[:5].tolist()</span>
+<span class="s1">    }</span>
+
+<span class="s1">def train_model_interface(dataset_size, model_type, n_estimators):</span>
+<span class="s1">    &quot;&quot;&quot;Gradio interface function.&quot;&quot;&quot;</span>
+<span class="s1">    try:</span>
+<span class="s1">        # Run training (distributed if clustrix available, local otherwise)</span>
+<span class="s1">        result = train_model_distributed(dataset_size, model_type, n_estimators)</span>
+
+<span class="s1">        # Format results for display</span>
+<span class="s1">        backend_info = &quot;Clustrix Distributed&quot; if CLUSTRIX_AVAILABLE else &quot;Local Computation&quot;</span>
+
+<span class="s1">        output = f&quot;&quot;&quot;</span>
+<span class="s1">**Training Results** (</span><span class="si">{backend_info}</span><span class="s1">):</span>
+
+<span class="s1">- **Model Type:** </span><span class="si">{result[&#39;model_type&#39;]}</span>
+<span class="s1">- **Dataset Size:** </span><span class="si">{result[&#39;dataset_size&#39;]:,}</span><span class="s1"> samples</span>
+<span class="s1">- **Number of Estimators:** </span><span class="si">{result[&#39;n_estimators&#39;]}</span>
+<span class="s1">- **Test Accuracy:** </span><span class="si">{result[&#39;accuracy&#39;]:.4f}</span>
+<span class="s1">- **CV Mean Score:** </span><span class="si">{result[&#39;cv_mean&#39;]:.4f}</span><span class="s1"> ± </span><span class="si">{result[&#39;cv_std&#39;]:.4f}</span>
+<span class="s1">- **Training Time:** </span><span class="si">{result[&#39;training_time&#39;]:.2f}</span><span class="s1"> seconds</span>
+
+<span class="s1">**Top 5 Feature Importances:**</span>
+<span class="s1">{&#39;, &#39;.join([f&#39;</span><span class="si">{imp:.4f}</span><span class="s1">&#39; for imp in result[&#39;feature_importance&#39;]])}</span>
+
+<span class="s1">*Backend: </span><span class="si">{backend_info}</span><span class="s1">*</span>
+<span class="s1">&quot;&quot;&quot;</span>
+<span class="s1">        return output</span>
+
+<span class="s1">    except Exception as e:</span>
+<span class="s1">        return f&quot;Error during training: {str(e)}&quot;</span>
+
+<span class="s1"># Create Gradio interface</span>
+<span class="s1">demo = gr.Interface(</span>
+<span class="s1">    fn=train_model_interface,</span>
+<span class="s1">    inputs=[</span>
+<span class="s1">        gr.Slider(</span>
+<span class="s1">            minimum=1000,</span>
+<span class="s1">            maximum=20000,  # Reduced for HF Spaces limits</span>
+<span class="s1">            value=5000,</span>
+<span class="s1">            step=1000,</span>
+<span class="s1">            label=&quot;Dataset Size&quot;</span>
+<span class="s1">        ),</span>
+<span class="s1">        gr.Radio(</span>
+<span class="s1">            choices=[&quot;Random Forest&quot;, &quot;Gradient Boosting&quot;],</span>
+<span class="s1">            value=&quot;Random Forest&quot;,</span>
+<span class="s1">            label=&quot;Model Type&quot;</span>
+<span class="s1">        ),</span>
+<span class="s1">        gr.Slider(</span>
+<span class="s1">            minimum=10,</span>
+<span class="s1">            maximum=100,  # Reduced for HF Spaces</span>
+<span class="s1">            value=50,</span>
+<span class="s1">            step=10,</span>
+<span class="s1">            label=&quot;Number of Estimators&quot;</span>
+<span class="s1">        )</span>
+<span class="s1">    ],</span>
+<span class="s1">    outputs=gr.Markdown(label=&quot;Training Results&quot;),</span>
+<span class="s1">    title=&quot;Clustrix Distributed ML Training&quot;,</span>
+<span class="s1">    description=&quot;Train machine learning models with optional Clustrix distributed computing backend.&quot;,</span>
+<span class="s1">    article=&quot;&quot;&quot;</span>
+<span class="s1">    ### About This Demo</span>
+
+<span class="s1">    This HuggingFace Space demonstrates integration between Clustrix and Gradio.</span>
+
+<span class="s1">    **Features:**</span>
+<span class="s1">    - Interactive ML model training</span>
+<span class="s1">    - Automatic fallback to local computation</span>
+<span class="s1">    - Real-time results and performance metrics</span>
+
+<span class="s1">    **Clustrix Integration:**</span>
+<span class="s1">    When properly configured, Clustrix can distribute computations across:</span>
+<span class="s1">    - AWS EC2, Batch, or ParallelCluster</span>
+<span class="s1">    - Azure VMs, Batch, or CycleCloud</span>
+<span class="s1">    - Google Cloud Compute Engine, GKE, or Batch</span>
+<span class="s1">    - On-premise SLURM, PBS, or SGE clusters</span>
+
+<span class="s1">    Visit [Clustrix Documentation](https://clustrix.readthedocs.io/) for setup instructions.</span>
+<span class="s1">    &quot;&quot;&quot;,</span>
+<span class="s1">    examples=[</span>
+<span class="s1">        [3000, &quot;Random Forest&quot;, 30],</span>
+<span class="s1">        [8000, &quot;Gradient Boosting&quot;, 50],</span>
+<span class="s1">        [5000, &quot;Random Forest&quot;, 70]</span>
+<span class="s1">    ]</span>
+<span class="s1">)</span>
+
+<span class="s1">if __name__ == &quot;__main__&quot;:</span>
+<span class="s1">    demo.launch()</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="c1"># requirements.txt</span>
+    <span class="n">requirements_content</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">gradio==4.44.0</span>
+<span class="s1">numpy==1.24.3</span>
+<span class="s1">scikit-learn==1.3.0</span>
+<span class="s1">clustrix&gt;=0.1.1</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="c1"># README.md</span>
+    <span class="n">readme_content</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">---</span>
+<span class="s1">title: Clustrix Distributed ML Training</span>
+<span class="s1">emoji: 🚀</span>
+<span class="s1">colorFrom: blue</span>
+<span class="s1">colorTo: green</span>
+<span class="s1">sdk: gradio</span>
+<span class="s1">sdk_version: 4.44.0</span>
+<span class="s1">app_file: app.py</span>
+<span class="s1">pinned: false</span>
+<span class="s1">license: mit</span>
+<span class="s1">tags:</span>
+<span class="s1">- machine-learning</span>
+<span class="s1">- distributed-computing</span>
+<span class="s1">- clustrix</span>
+<span class="s1">- scikit-learn</span>
+<span class="s1">---</span>
+
+<span class="s1"># Clustrix Distributed ML Training</span>
+
+<span class="s1">This HuggingFace Space demonstrates how to integrate Clustrix distributed computing</span>
+<span class="s1">with Gradio for interactive machine learning applications.</span>
+
+<span class="s1">## Features</span>
+
+<span class="s1">- **Interactive Training**: Train ML models through a web interface</span>
+<span class="s1">- **Multiple Algorithms**: Support for Random Forest and Gradient Boosting</span>
+<span class="s1">- **Real-time Results**: See training progress and results immediately</span>
+<span class="s1">- **Distributed Backend**: Optional Clustrix integration for scaling</span>
+
+<span class="s1">## How It Works</span>
+
+<span class="s1">1. **Data Generation**: Creates synthetic classification datasets</span>
+<span class="s1">2. **Model Training**: Trains selected algorithm with specified parameters</span>
+<span class="s1">3. **Evaluation**: Performs cross-validation and test set evaluation</span>
+<span class="s1">4. **Results Display**: Shows metrics and feature importance</span>
+
+<span class="s1">## Clustrix Integration</span>
+
+<span class="s1">When Clustrix is properly configured, this app can distribute computations across:</span>
+
+<span class="s1">- **Cloud Platforms**: AWS, Azure, Google Cloud</span>
+<span class="s1">- **HPC Clusters**: SLURM, PBS/Torque, SGE</span>
+<span class="s1">- **Container Orchestration**: Kubernetes, Docker Swarm</span>
+<span class="s1">- **SSH Clusters**: Any SSH-accessible compute nodes</span>
+
+<span class="s1">## Usage</span>
+
+<span class="s1">1. Adjust the dataset size (1,000 - 20,000 samples)</span>
+<span class="s1">2. Select the model type (Random Forest or Gradient Boosting)</span>
+<span class="s1">3. Set the number of estimators (10 - 100)</span>
+<span class="s1">4. Click &quot;Submit&quot; to start training</span>
+<span class="s1">5. View results including accuracy, cross-validation scores, and timing</span>
+
+<span class="s1">## Local Development</span>
+
+<span class="s1">To run this app locally:</span>
+
+<span class="s1">```bash</span>
+<span class="s1">pip install -r requirements.txt</span>
+<span class="s1">python app.py</span>
+<span class="s1">```</span>
+
+<span class="s1">## Learn More</span>
+
+<span class="s1">- [Clustrix Documentation](https://clustrix.readthedocs.io/)</span>
+<span class="s1">- [Gradio Documentation](https://gradio.app/docs/)</span>
+<span class="s1">- [HuggingFace Spaces](https://huggingface.co/docs/hub/spaces)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="n">files</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;app.py&#39;</span><span class="p">:</span> <span class="n">app_py_content</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;requirements.txt&#39;</span><span class="p">:</span> <span class="n">requirements_content</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;README.md&#39;</span><span class="p">:</span> <span class="n">readme_content</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HuggingFace Space Files:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;========================&quot;</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">filename</span><span class="p">,</span> <span class="n">content</span> <span class="ow">in</span> <span class="n">files</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">--- </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s2"> ---&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="n">content</span><span class="p">[:</span><span class="mi">500</span><span class="p">]</span> <span class="o">+</span> <span class="s2">&quot;...&quot;</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">content</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">500</span> <span class="k">else</span> <span class="n">content</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">files</span>
+
+<span class="n">space_files</span> <span class="o">=</span> <span class="n">create_huggingface_space_files</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Space files created. Upload these to create your HuggingFace Space.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Deploy-to-HuggingFace-Spaces">
+<h3>Deploy to HuggingFace Spaces<a class="headerlink" href="#Deploy-to-HuggingFace-Spaces" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">deploy_clustrix_space</span><span class="p">(</span><span class="n">username</span><span class="p">,</span> <span class="n">space_name</span><span class="p">,</span> <span class="n">space_files</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Deploy Clustrix app to HuggingFace Spaces.</span>
+
+<span class="sd">    Args:</span>
+<span class="sd">        username: Your HuggingFace username</span>
+<span class="sd">        space_name: Name for the new space</span>
+<span class="sd">        space_files: Dictionary of files to upload</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Commands to create and deploy the space</span>
+    <span class="n">deployment_commands</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
+<span class="s2"># Method 1: Using HuggingFace Hub (Recommended)</span>
+
+<span class="s2"># Create space via web interface first:</span>
+<span class="s2"># 1. Go to https://huggingface.co/new-space</span>
+<span class="s2"># 2. Choose username: </span><span class="si">{</span><span class="n">username</span><span class="si">}</span>
+<span class="s2"># 3. Space name: </span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span>
+<span class="s2"># 4. License: MIT</span>
+<span class="s2"># 5. SDK: Gradio</span>
+<span class="s2"># 6. Hardware: CPU basic (free) or upgrade as needed</span>
+
+<span class="s2"># Then clone and upload files:</span>
+<span class="s2">git clone https://huggingface.co/spaces/</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span>
+<span class="s2">cd </span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span>
+
+<span class="s2"># Copy your files (app.py, requirements.txt, README.md) to this directory</span>
+
+<span class="s2">git add .</span>
+<span class="s2">git commit -m &quot;Initial commit: Clustrix distributed ML training app&quot;</span>
+<span class="s2">git push</span>
+
+<span class="s2"># Method 2: Using Python API</span>
+<span class="s2"># (Run this in Python after authentication)</span>
+<span class="s2">&quot;&quot;&quot;</span>
+
+    <span class="n">python_deployment</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">from huggingface_hub import HfApi, upload_file</span>
+<span class="s1">import tempfile</span>
+<span class="s1">import os</span>
+
+<span class="s1"># Initialize API</span>
+<span class="s1">api = HfApi()</span>
+
+<span class="s1"># Create space</span>
+<span class="s1">api.create_repo(</span>
+<span class="s1">    repo_id=&quot;</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span><span class="s1">&quot;,</span>
+<span class="s1">    repo_type=&quot;space&quot;,</span>
+<span class="s1">    space_sdk=&quot;gradio&quot;,</span>
+<span class="s1">    private=False</span>
+<span class="s1">)</span>
+
+<span class="s1"># Upload files</span>
+<span class="s1">space_files = </span><span class="si">{</span><span class="n">space_files</span><span class="si">}</span>
+
+<span class="s1">for filename, content in space_files.items():</span>
+<span class="s1">    with tempfile.NamedTemporaryFile(mode=&#39;w&#39;, suffix=f&#39;_</span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s1">&#39;, delete=False) as f:</span>
+<span class="s1">        f.write(content)</span>
+<span class="s1">        temp_path = f.name</span>
+
+<span class="s1">    upload_file(</span>
+<span class="s1">        path_or_fileobj=temp_path,</span>
+<span class="s1">        path_in_repo=filename,</span>
+<span class="s1">        repo_id=&quot;</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span><span class="s1">&quot;,</span>
+<span class="s1">        repo_type=&quot;space&quot;,</span>
+<span class="s1">        commit_message=f&quot;Add </span><span class="si">{</span><span class="n">filename</span><span class="si">}</span><span class="s1">&quot;</span>
+<span class="s1">    )</span>
+
+<span class="s1">    os.unlink(temp_path)</span>
+
+<span class="s1">print(f&quot;Space deployed: https://huggingface.co/spaces/</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span><span class="s1">&quot;)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;HuggingFace Space Deployment:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;==============================&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">deployment_commands</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Python Deployment Code:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">python_deployment</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;space_url&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s1">&#39;https://huggingface.co/spaces/</span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s1">/</span><span class="si">{</span><span class="n">space_name</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;deployment_commands&#39;</span><span class="p">:</span> <span class="n">deployment_commands</span><span class="p">,</span>
+        <span class="s1">&#39;python_code&#39;</span><span class="p">:</span> <span class="n">python_deployment</span>
+    <span class="p">}</span>
+
+<span class="c1"># Example deployment</span>
+<span class="n">deployment_info</span> <span class="o">=</span> <span class="n">deploy_clustrix_space</span><span class="p">(</span>
+    <span class="n">username</span><span class="o">=</span><span class="s1">&#39;your-username&#39;</span><span class="p">,</span>  <span class="c1"># Replace with your HF username</span>
+    <span class="n">space_name</span><span class="o">=</span><span class="s1">&#39;clustrix-ml-training&#39;</span><span class="p">,</span>
+    <span class="n">space_files</span><span class="o">=</span><span class="n">space_files</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Deployment instructions generated.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Method-2:-Streamlit-Space-with-Clustrix">
+<h2>Method 2: Streamlit Space with Clustrix<a class="headerlink" href="#Method-2:-Streamlit-Space-with-Clustrix" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">create_streamlit_clustrix_app</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a Streamlit app template for HuggingFace Spaces.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">streamlit_app_content</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">import streamlit as st</span>
+<span class="s1">import numpy as np</span>
+<span class="s1">import pandas as pd</span>
+<span class="s1">import plotly.express as px</span>
+<span class="s1">import plotly.graph_objects as go</span>
+<span class="s1">from sklearn.ensemble import RandomForestClassifier</span>
+<span class="s1">from sklearn.datasets import make_classification</span>
+<span class="s1">from sklearn.model_selection import train_test_split</span>
+<span class="s1">from sklearn.metrics import accuracy_score, confusion_matrix</span>
+<span class="s1">import time</span>
+
+<span class="s1"># Import clustrix if available</span>
+<span class="s1">try:</span>
+<span class="s1">    from clustrix import cluster, configure</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = True</span>
+<span class="s1">    configure(cluster_host=None, package_manager=&quot;pip&quot;)</span>
+<span class="s1">except ImportError:</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = False</span>
+
+<span class="s1">st.set_page_config(</span>
+<span class="s1">    page_title=&quot;Clustrix ML Dashboard&quot;,</span>
+<span class="s1">    page_icon=&quot;🚀&quot;,</span>
+<span class="s1">    layout=&quot;wide&quot;,</span>
+<span class="s1">    initial_sidebar_state=&quot;expanded&quot;</span>
+<span class="s1">)</span>
+
+<span class="s1">st.title(&quot;🚀 Clustrix Distributed ML Dashboard&quot;)</span>
+<span class="s1">st.markdown(&quot;&quot;&quot;</span>
+<span class="s1">This dashboard demonstrates machine learning with Clustrix distributed computing backend.</span>
+<span class="s1">&quot;&quot;&quot;)</span>
+
+<span class="s1"># Sidebar controls</span>
+<span class="s1">st.sidebar.header(&quot;Configuration&quot;)</span>
+
+<span class="s1">dataset_size = st.sidebar.slider(</span>
+<span class="s1">    &quot;Dataset Size&quot;,</span>
+<span class="s1">    min_value=1000,</span>
+<span class="s1">    max_value=20000,</span>
+<span class="s1">    value=5000,</span>
+<span class="s1">    step=1000</span>
+<span class="s1">)</span>
+
+<span class="s1">n_features = st.sidebar.slider(</span>
+<span class="s1">    &quot;Number of Features&quot;,</span>
+<span class="s1">    min_value=5,</span>
+<span class="s1">    max_value=50,</span>
+<span class="s1">    value=20,</span>
+<span class="s1">    step=5</span>
+<span class="s1">)</span>
+
+<span class="s1">n_estimators = st.sidebar.slider(</span>
+<span class="s1">    &quot;Number of Estimators&quot;,</span>
+<span class="s1">    min_value=10,</span>
+<span class="s1">    max_value=200,</span>
+<span class="s1">    value=100,</span>
+<span class="s1">    step=10</span>
+<span class="s1">)</span>
+
+<span class="s1">max_depth = st.sidebar.slider(</span>
+<span class="s1">    &quot;Max Depth&quot;,</span>
+<span class="s1">    min_value=3,</span>
+<span class="s1">    max_value=20,</span>
+<span class="s1">    value=10</span>
+<span class="s1">)</span>
+
+<span class="s1"># Backend selection</span>
+<span class="s1">backend = st.sidebar.radio(</span>
+<span class="s1">    &quot;Computation Backend&quot;,</span>
+<span class="s1">    [&quot;Local&quot;, &quot;Clustrix (if available)&quot;]</span>
+<span class="s1">)</span>
+
+<span class="s1">if CLUSTRIX_AVAILABLE and backend == &quot;Clustrix (if available)&quot;:</span>
+<span class="s1">    @cluster(cores=2, memory=&quot;4GB&quot;)</span>
+<span class="s1">    def train_model_clustrix(dataset_size, n_features, n_estimators, max_depth):</span>
+<span class="s1">        return train_model_local(dataset_size, n_features, n_estimators, max_depth)</span>
+
+<span class="s1">    train_function = train_model_clustrix</span>
+<span class="s1">    backend_status = &quot;🚀 Clustrix Distributed&quot;</span>
+<span class="s1">else:</span>
+<span class="s1">    train_function = lambda *args: train_model_local(*args)</span>
+<span class="s1">    backend_status = &quot;💻 Local Computation&quot;</span>
+
+<span class="s1">def train_model_local(dataset_size, n_features, n_estimators, max_depth):</span>
+<span class="s1">    &quot;&quot;&quot;Train model locally.&quot;&quot;&quot;</span>
+<span class="s1">    # Generate dataset</span>
+<span class="s1">    X, y = make_classification(</span>
+<span class="s1">        n_samples=dataset_size,</span>
+<span class="s1">        n_features=n_features,</span>
+<span class="s1">        n_classes=3,</span>
+<span class="s1">        n_informative=max(3, n_features // 2),</span>
+<span class="s1">        random_state=42</span>
+<span class="s1">    )</span>
+
+<span class="s1">    # Split data</span>
+<span class="s1">    X_train, X_test, y_train, y_test = train_test_split(</span>
+<span class="s1">        X, y, test_size=0.2, random_state=42</span>
+<span class="s1">    )</span>
+
+<span class="s1">    # Train model</span>
+<span class="s1">    start_time = time.time()</span>
+<span class="s1">    model = RandomForestClassifier(</span>
+<span class="s1">        n_estimators=n_estimators,</span>
+<span class="s1">        max_depth=max_depth,</span>
+<span class="s1">        random_state=42,</span>
+<span class="s1">        n_jobs=-1</span>
+<span class="s1">    )</span>
+<span class="s1">    model.fit(X_train, y_train)</span>
+<span class="s1">    training_time = time.time() - start_time</span>
+
+<span class="s1">    # Evaluate</span>
+<span class="s1">    y_pred = model.predict(X_test)</span>
+<span class="s1">    accuracy = accuracy_score(y_test, y_pred)</span>
+
+<span class="s1">    return {</span>
+<span class="s1">        &#39;model&#39;: model,</span>
+<span class="s1">        &#39;X_test&#39;: X_test,</span>
+<span class="s1">        &#39;y_test&#39;: y_test,</span>
+<span class="s1">        &#39;y_pred&#39;: y_pred,</span>
+<span class="s1">        &#39;accuracy&#39;: accuracy,</span>
+<span class="s1">        &#39;training_time&#39;: training_time,</span>
+<span class="s1">        &#39;feature_importance&#39;: model.feature_importances_</span>
+<span class="s1">    }</span>
+
+<span class="s1"># Main content</span>
+<span class="s1">col1, col2 = st.columns([2, 1])</span>
+
+<span class="s1">with col2:</span>
+<span class="s1">    st.markdown(f&quot;**Backend:** </span><span class="si">{backend_status}</span><span class="s1">&quot;)</span>
+<span class="s1">    st.markdown(f&quot;**Clustrix Available:** {&#39;✅&#39; if CLUSTRIX_AVAILABLE else &#39;❌&#39;}&quot;)</span>
+
+<span class="s1">if st.button(&quot;🚀 Train Model&quot;, type=&quot;primary&quot;):</span>
+<span class="s1">    with st.spinner(&quot;Training model...&quot;):</span>
+<span class="s1">        # Train model</span>
+<span class="s1">        result = train_function(dataset_size, n_features, n_estimators, max_depth)</span>
+
+<span class="s1">        # Display results</span>
+<span class="s1">        col1, col2, col3 = st.columns(3)</span>
+
+<span class="s1">        with col1:</span>
+<span class="s1">            st.metric(&quot;Accuracy&quot;, f&quot;</span><span class="si">{result[&#39;accuracy&#39;]:.4f}</span><span class="s1">&quot;)</span>
+
+<span class="s1">        with col2:</span>
+<span class="s1">            st.metric(&quot;Training Time&quot;, f&quot;</span><span class="si">{result[&#39;training_time&#39;]:.2f}</span><span class="s1">s&quot;)</span>
+
+<span class="s1">        with col3:</span>
+<span class="s1">            st.metric(&quot;Test Samples&quot;, len(result[&#39;y_test&#39;]))</span>
+
+<span class="s1">        # Feature importance plot</span>
+<span class="s1">        st.subheader(&quot;Feature Importance&quot;)</span>
+<span class="s1">        importance_df = pd.DataFrame({</span>
+<span class="s1">            &#39;Feature&#39;: [f&#39;Feature </span><span class="si">{i}</span><span class="s1">&#39; for i in range(len(result[&#39;feature_importance&#39;]))],</span>
+<span class="s1">            &#39;Importance&#39;: result[&#39;feature_importance&#39;]</span>
+<span class="s1">        }).sort_values(&#39;Importance&#39;, ascending=True)</span>
+
+<span class="s1">        fig_importance = px.bar(</span>
+<span class="s1">            importance_df.tail(10),</span>
+<span class="s1">            x=&#39;Importance&#39;,</span>
+<span class="s1">            y=&#39;Feature&#39;,</span>
+<span class="s1">            title=&quot;Top 10 Feature Importances&quot;,</span>
+<span class="s1">            orientation=&#39;h&#39;</span>
+<span class="s1">        )</span>
+<span class="s1">        st.plotly_chart(fig_importance, use_container_width=True)</span>
+
+<span class="s1">        # Confusion matrix</span>
+<span class="s1">        st.subheader(&quot;Confusion Matrix&quot;)</span>
+<span class="s1">        cm = confusion_matrix(result[&#39;y_test&#39;], result[&#39;y_pred&#39;])</span>
+
+<span class="s1">        fig_cm = px.imshow(</span>
+<span class="s1">            cm,</span>
+<span class="s1">            text_auto=True,</span>
+<span class="s1">            aspect=&quot;auto&quot;,</span>
+<span class="s1">            title=&quot;Confusion Matrix&quot;,</span>
+<span class="s1">            labels=dict(x=&quot;Predicted&quot;, y=&quot;Actual&quot;)</span>
+<span class="s1">        )</span>
+<span class="s1">        st.plotly_chart(fig_cm, use_container_width=True)</span>
+
+<span class="s1"># Information section</span>
+<span class="s1">st.markdown(&quot;---&quot;)</span>
+<span class="s1">st.subheader(&quot;About Clustrix Integration&quot;)</span>
+
+<span class="s1">col1, col2 = st.columns(2)</span>
+
+<span class="s1">with col1:</span>
+<span class="s1">    st.markdown(&quot;&quot;&quot;</span>
+<span class="s1">    **Clustrix Features:**</span>
+<span class="s1">    - 🌐 Distributed computing across clusters</span>
+<span class="s1">    - ☁️ Cloud platform integration (AWS, Azure, GCP)</span>
+<span class="s1">    - 🐳 Container and Kubernetes support</span>
+<span class="s1">    - 📊 Automatic workload distribution</span>
+<span class="s1">    - 🔧 Simple decorator-based API</span>
+<span class="s1">    &quot;&quot;&quot;)</span>
+
+<span class="s1">with col2:</span>
+<span class="s1">    st.markdown(&quot;&quot;&quot;</span>
+<span class="s1">    **Supported Platforms:**</span>
+<span class="s1">    - AWS EC2, Batch, ParallelCluster</span>
+<span class="s1">    - Azure VMs, Batch, CycleCloud</span>
+<span class="s1">    - Google Compute Engine, GKE, Batch</span>
+<span class="s1">    - SLURM, PBS/Torque, SGE clusters</span>
+<span class="s1">    - SSH-accessible compute nodes</span>
+<span class="s1">    &quot;&quot;&quot;)</span>
+
+<span class="s1">st.markdown(&quot;&quot;&quot;</span>
+<span class="s1">**Learn More:**</span>
+<span class="s1">- [Clustrix Documentation](https://clustrix.readthedocs.io/)</span>
+<span class="s1">- [GitHub Repository](https://github.com/ContextLab/clustrix)</span>
+<span class="s1">- [PyPI Package](https://pypi.org/project/clustrix/)</span>
+<span class="s1">&quot;&quot;&quot;)</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="n">streamlit_requirements</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">streamlit==1.28.0</span>
+<span class="s1">numpy==1.24.3</span>
+<span class="s1">pandas==2.0.3</span>
+<span class="s1">scikit-learn==1.3.0</span>
+<span class="s1">plotly==5.15.0</span>
+<span class="s1">clustrix&gt;=0.1.1</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="n">streamlit_readme</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">---</span>
+<span class="s1">title: Clustrix ML Dashboard</span>
+<span class="s1">emoji: 📊</span>
+<span class="s1">colorFrom: purple</span>
+<span class="s1">colorTo: pink</span>
+<span class="s1">sdk: streamlit</span>
+<span class="s1">sdk_version: 1.28.0</span>
+<span class="s1">app_file: app.py</span>
+<span class="s1">pinned: false</span>
+<span class="s1">license: mit</span>
+<span class="s1">tags:</span>
+<span class="s1">- machine-learning</span>
+<span class="s1">- distributed-computing</span>
+<span class="s1">- clustrix</span>
+<span class="s1">- dashboard</span>
+<span class="s1">---</span>
+
+<span class="s1"># Clustrix ML Dashboard</span>
+
+<span class="s1">An interactive Streamlit dashboard demonstrating Clustrix distributed computing</span>
+<span class="s1">for machine learning workflows.</span>
+
+<span class="s1">## Features</span>
+
+<span class="s1">- 📊 **Interactive Dashboard**: Real-time model training and visualization</span>
+<span class="s1">- 🚀 **Distributed Computing**: Optional Clustrix backend for scaling</span>
+<span class="s1">- 📈 **Rich Visualizations**: Feature importance and confusion matrix plots</span>
+<span class="s1">- ⚙️ **Configurable Parameters**: Adjust dataset size, model parameters</span>
+<span class="s1">- 🔄 **Backend Selection**: Choose between local and distributed computation</span>
+
+<span class="s1">## Usage</span>
+
+<span class="s1">1. Configure dataset and model parameters in the sidebar</span>
+<span class="s1">2. Select computation backend (local or Clustrix)</span>
+<span class="s1">3. Click &quot;Train Model&quot; to start training</span>
+<span class="s1">4. View results, metrics, and visualizations</span>
+
+<span class="s1">## Clustrix Integration</span>
+
+<span class="s1">When Clustrix is available and configured, this dashboard can distribute</span>
+<span class="s1">ML computations across various platforms for improved performance and scalability.</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;app.py&#39;</span><span class="p">:</span> <span class="n">streamlit_app_content</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;requirements.txt&#39;</span><span class="p">:</span> <span class="n">streamlit_requirements</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;README.md&#39;</span><span class="p">:</span> <span class="n">streamlit_readme</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="p">}</span>
+
+<span class="n">streamlit_files</span> <span class="o">=</span> <span class="n">create_streamlit_clustrix_app</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Streamlit app files created for HuggingFace Spaces deployment.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Key features:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Interactive dashboard with real-time training&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Rich visualizations with Plotly&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Configurable parameters and backend selection&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Automatic fallback to local computation&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Method-3:-GPU-Accelerated-Spaces">
+<h2>Method 3: GPU-Accelerated Spaces<a class="headerlink" href="#Method-3:-GPU-Accelerated-Spaces" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">create_gpu_clustrix_space</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Create a GPU-accelerated HuggingFace Space with Clustrix.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="n">gpu_app_content</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">import gradio as gr</span>
+<span class="s1">import torch</span>
+<span class="s1">import numpy as np</span>
+<span class="s1">from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification</span>
+<span class="s1">import time</span>
+<span class="s1">import json</span>
+
+<span class="s1"># Import clustrix if available</span>
+<span class="s1">try:</span>
+<span class="s1">    from clustrix import cluster, configure</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = True</span>
+
+<span class="s1">    # Configure for GPU-enabled remote clusters</span>
+<span class="s1">    configure(</span>
+<span class="s1">        cluster_host=None,  # Local for HF Spaces</span>
+<span class="s1">        package_manager=&quot;pip&quot;,</span>
+<span class="s1">        default_cores=1,  # GPU tasks typically use 1 core</span>
+<span class="s1">        default_memory=&quot;8GB&quot;</span>
+<span class="s1">    )</span>
+<span class="s1">except ImportError:</span>
+<span class="s1">    CLUSTRIX_AVAILABLE = False</span>
+
+<span class="s1"># Check GPU availability</span>
+<span class="s1">CUDA_AVAILABLE = torch.cuda.is_available()</span>
+<span class="s1">device = &quot;cuda&quot; if CUDA_AVAILABLE else &quot;cpu&quot;</span>
+
+<span class="s1">print(f&quot;Device: </span><span class="si">{device}</span><span class="s1">&quot;)</span>
+<span class="s1">print(f&quot;Clustrix available: </span><span class="si">{CLUSTRIX_AVAILABLE}</span><span class="s1">&quot;)</span>
+
+<span class="s1"># Load a pre-trained model for demonstration</span>
+<span class="s1">@cluster(cores=1, memory=&quot;8GB&quot;) if CLUSTRIX_AVAILABLE else (lambda f: f)</span>
+<span class="s1">def load_sentiment_model():</span>
+<span class="s1">    &quot;&quot;&quot;Load sentiment analysis model.&quot;&quot;&quot;</span>
+<span class="s1">    model_name = &quot;cardiffnlp/twitter-roberta-base-sentiment-latest&quot;</span>
+<span class="s1">    tokenizer = AutoTokenizer.from_pretrained(model_name)</span>
+<span class="s1">    model = AutoModelForSequenceClassification.from_pretrained(model_name)</span>
+
+<span class="s1">    if CUDA_AVAILABLE:</span>
+<span class="s1">        model = model.to(device)</span>
+
+<span class="s1">    return pipeline(</span>
+<span class="s1">        &quot;sentiment-analysis&quot;,</span>
+<span class="s1">        model=model,</span>
+<span class="s1">        tokenizer=tokenizer,</span>
+<span class="s1">        device=0 if CUDA_AVAILABLE else -1</span>
+<span class="s1">    )</span>
+
+<span class="s1"># Initialize model</span>
+<span class="s1">sentiment_pipeline = load_sentiment_model()</span>
+
+<span class="s1">@cluster(cores=1, memory=&quot;4GB&quot;) if CLUSTRIX_AVAILABLE else (lambda f: f)</span>
+<span class="s1">def batch_sentiment_analysis(texts, use_gpu=True):</span>
+<span class="s1">    &quot;&quot;&quot;Perform batch sentiment analysis.&quot;&quot;&quot;</span>
+<span class="s1">    start_time = time.time()</span>
+
+<span class="s1">    # Process texts in batches</span>
+<span class="s1">    batch_size = 16 if use_gpu and CUDA_AVAILABLE else 8</span>
+<span class="s1">    results = []</span>
+
+<span class="s1">    for i in range(0, len(texts), batch_size):</span>
+<span class="s1">        batch = texts[i:i+batch_size]</span>
+<span class="s1">        batch_results = sentiment_pipeline(batch)</span>
+<span class="s1">        results.extend(batch_results)</span>
+
+<span class="s1">    processing_time = time.time() - start_time</span>
+
+<span class="s1">    # Aggregate results</span>
+<span class="s1">    positive_count = sum(1 for r in results if r[&#39;label&#39;] == &#39;LABEL_2&#39;)</span>
+<span class="s1">    negative_count = sum(1 for r in results if r[&#39;label&#39;] == &#39;LABEL_0&#39;)</span>
+<span class="s1">    neutral_count = sum(1 for r in results if r[&#39;label&#39;] == &#39;LABEL_1&#39;)</span>
+
+<span class="s1">    avg_confidence = np.mean([r[&#39;score&#39;] for r in results])</span>
+
+<span class="s1">    return {</span>
+<span class="s1">        &#39;results&#39;: results,</span>
+<span class="s1">        &#39;summary&#39;: {</span>
+<span class="s1">            &#39;total_texts&#39;: len(texts),</span>
+<span class="s1">            &#39;positive&#39;: positive_count,</span>
+<span class="s1">            &#39;negative&#39;: negative_count,</span>
+<span class="s1">            &#39;neutral&#39;: neutral_count,</span>
+<span class="s1">            &#39;avg_confidence&#39;: avg_confidence,</span>
+<span class="s1">            &#39;processing_time&#39;: processing_time,</span>
+<span class="s1">            &#39;texts_per_second&#39;: len(texts) / processing_time,</span>
+<span class="s1">            &#39;device_used&#39;: device,</span>
+<span class="s1">            &#39;clustrix_enabled&#39;: CLUSTRIX_AVAILABLE</span>
+<span class="s1">        }</span>
+<span class="s1">    }</span>
+
+<span class="s1">def process_text_input(text_input, sample_size):</span>
+<span class="s1">    &quot;&quot;&quot;Process text input for sentiment analysis.&quot;&quot;&quot;</span>
+<span class="s1">    try:</span>
+<span class="s1">        # Split text into individual texts</span>
+<span class="s1">        texts = [t.strip() for t in text_input.split(&#39;</span><span class="se">\\</span><span class="s1">n&#39;) if t.strip()]</span>
+
+<span class="s1">        # Limit sample size for demo</span>
+<span class="s1">        if len(texts) &gt; sample_size:</span>
+<span class="s1">            texts = texts[:sample_size]</span>
+
+<span class="s1">        if not texts:</span>
+<span class="s1">            return &quot;Please provide some text to analyze.&quot;</span>
+
+<span class="s1">        # Run batch analysis</span>
+<span class="s1">        result = batch_sentiment_analysis(texts)</span>
+<span class="s1">        summary = result[&#39;summary&#39;]</span>
+
+<span class="s1">        # Format output</span>
+<span class="s1">        output = f&quot;&quot;&quot;</span>
+<span class="s1">**Batch Sentiment Analysis Results**</span>
+
+<span class="s1">📊 **Summary Statistics:**</span>
+<span class="s1">- Total texts analyzed: </span><span class="si">{summary[&#39;total_texts&#39;]}</span>
+<span class="s1">- Positive sentiment: </span><span class="si">{summary[&#39;positive&#39;]}</span><span class="s1"> ({summary[&#39;positive&#39;]/summary[&#39;total_texts&#39;]*100:.1f}%)</span>
+<span class="s1">- Negative sentiment: </span><span class="si">{summary[&#39;negative&#39;]}</span><span class="s1"> ({summary[&#39;negative&#39;]/summary[&#39;total_texts&#39;]*100:.1f}%)</span>
+<span class="s1">- Neutral sentiment: </span><span class="si">{summary[&#39;neutral&#39;]}</span><span class="s1"> ({summary[&#39;neutral&#39;]/summary[&#39;total_texts&#39;]*100:.1f}%)</span>
+<span class="s1">- Average confidence: </span><span class="si">{summary[&#39;avg_confidence&#39;]:.3f}</span>
+
+<span class="s1">⚡ **Performance:**</span>
+<span class="s1">- Processing time: </span><span class="si">{summary[&#39;processing_time&#39;]:.2f}</span><span class="s1"> seconds</span>
+<span class="s1">- Throughput: </span><span class="si">{summary[&#39;texts_per_second&#39;]:.1f}</span><span class="s1"> texts/second</span>
+<span class="s1">- Device: {summary[&#39;device_used&#39;].upper()}</span>
+<span class="s1">- Backend: {&#39;Clustrix Distributed&#39; if summary[&#39;clustrix_enabled&#39;] else &#39;Local Processing&#39;}</span>
+
+<span class="s1">📝 **Individual Results:**</span>
+<span class="s1">&quot;&quot;&quot;</span>
+
+<span class="s1">        # Show first few individual results</span>
+<span class="s1">        for i, (text, result_item) in enumerate(zip(texts[:5], result[&#39;results&#39;][:5])):</span>
+<span class="s1">            sentiment = {&#39;LABEL_0&#39;: &#39;Negative&#39;, &#39;LABEL_1&#39;: &#39;Neutral&#39;, &#39;LABEL_2&#39;: &#39;Positive&#39;}[result_item[&#39;label&#39;]]</span>
+<span class="s1">            confidence = result_item[&#39;score&#39;]</span>
+<span class="s1">            output += f&quot;</span><span class="se">\n</span><span class="s1">{i+1}. </span><span class="se">\&quot;</span><span class="si">{text[:50]}</span><span class="s1">{&#39;...&#39; if len(text) &gt; 50 else &#39;&#39;}</span><span class="se">\&quot;</span><span class="s1"> → </span><span class="si">{sentiment}</span><span class="s1"> (</span><span class="si">{confidence:.3f}</span><span class="s1">)&quot;</span>
+
+<span class="s1">        if len(texts) &gt; 5:</span>
+<span class="s1">            output += f&quot;</span><span class="se">\n</span><span class="s1">... and {len(texts) - 5} more texts&quot;</span>
+
+<span class="s1">        return output</span>
+
+<span class="s1">    except Exception as e:</span>
+<span class="s1">        return f&quot;Error during analysis: {str(e)}&quot;</span>
+
+<span class="s1"># Create Gradio interface</span>
+<span class="s1">demo = gr.Interface(</span>
+<span class="s1">    fn=process_text_input,</span>
+<span class="s1">    inputs=[</span>
+<span class="s1">        gr.Textbox(</span>
+<span class="s1">            lines=10,</span>
+<span class="s1">            placeholder=&quot;Enter texts to analyze (one per line)</span><span class="se">\\</span><span class="s1">nExample:</span><span class="se">\\</span><span class="s1">nI love this product!</span><span class="se">\\</span><span class="s1">nThis is terrible.</span><span class="se">\\</span><span class="s1">nIt&#39;s okay, nothing special.&quot;,</span>
+<span class="s1">            label=&quot;Text Input&quot;</span>
+<span class="s1">        ),</span>
+<span class="s1">        gr.Slider(</span>
+<span class="s1">            minimum=1,</span>
+<span class="s1">            maximum=100,</span>
+<span class="s1">            value=20,</span>
+<span class="s1">            step=1,</span>
+<span class="s1">            label=&quot;Max Texts to Process&quot;</span>
+<span class="s1">        )</span>
+<span class="s1">    ],</span>
+<span class="s1">    outputs=gr.Markdown(label=&quot;Analysis Results&quot;),</span>
+<span class="s1">    title=&quot;🚀 Clustrix GPU-Accelerated Sentiment Analysis&quot;,</span>
+<span class="s1">    description=f&quot;&quot;&quot;</span>
+<span class="s1">    Batch sentiment analysis using transformer models with optional Clustrix distributed computing.</span>
+
+<span class="s1">    **Current Setup:**</span>
+<span class="s1">    - Device: {device.upper()}</span>
+<span class="s1">    - Clustrix: {&#39;✅ Available&#39; if CLUSTRIX_AVAILABLE else &#39;❌ Not Available&#39;}</span>
+<span class="s1">    - GPU Acceleration: {&#39;✅ Enabled&#39; if CUDA_AVAILABLE else &#39;❌ CPU Only&#39;}</span>
+<span class="s1">    &quot;&quot;&quot;,</span>
+<span class="s1">    article=&quot;&quot;&quot;</span>
+<span class="s1">    ### About This Demo</span>
+
+<span class="s1">    This HuggingFace Space demonstrates GPU-accelerated NLP processing with Clustrix:</span>
+
+<span class="s1">    **Features:**</span>
+<span class="s1">    - Batch processing of multiple texts</span>
+<span class="s1">    - GPU acceleration when available</span>
+<span class="s1">    - Comprehensive performance metrics</span>
+<span class="s1">    - Optional distributed computing backend</span>
+
+<span class="s1">    **Clustrix Integration:**</span>
+<span class="s1">    In production, Clustrix can distribute GPU workloads across:</span>
+<span class="s1">    - Cloud GPU instances (AWS P3/P4, Azure NC/ND, GCP A100)</span>
+<span class="s1">    - Multi-GPU clusters with SLURM/PBS scheduling</span>
+<span class="s1">    - Kubernetes GPU nodes</span>
+<span class="s1">    - On-premise GPU clusters</span>
+
+<span class="s1">    **Model:** `cardiffnlp/twitter-roberta-base-sentiment-latest`</span>
+<span class="s1">    &quot;&quot;&quot;,</span>
+<span class="s1">    examples=[</span>
+<span class="s1">        [</span>
+<span class="s1">            &quot;I absolutely love this new feature!</span><span class="se">\\</span><span class="s1">nThis is the worst experience ever.</span><span class="se">\\</span><span class="s1">nIt&#39;s pretty good, could be better.</span><span class="se">\\</span><span class="s1">nAmazing work by the team!</span><span class="se">\\</span><span class="s1">nNot impressed at all.&quot;,</span>
+<span class="s1">            5</span>
+<span class="s1">        ],</span>
+<span class="s1">        [</span>
+<span class="s1">            &quot;Great product, highly recommend!</span><span class="se">\\</span><span class="s1">nTerrible customer service.</span><span class="se">\\</span><span class="s1">nAverage quality for the price.</span><span class="se">\\</span><span class="s1">nOutstanding performance!</span><span class="se">\\</span><span class="s1">nWaste of money.&quot;,</span>
+<span class="s1">            5</span>
+<span class="s1">        ]</span>
+<span class="s1">    ]</span>
+<span class="s1">)</span>
+
+<span class="s1">if __name__ == &quot;__main__&quot;:</span>
+<span class="s1">    demo.launch()</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="n">gpu_requirements</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">gradio==4.44.0</span>
+<span class="s1">torch==2.1.0</span>
+<span class="s1">transformers==4.35.0</span>
+<span class="s1">numpy==1.24.3</span>
+<span class="s1">clustrix&gt;=0.1.1</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="n">gpu_readme</span> <span class="o">=</span> <span class="s1">&#39;&#39;&#39;</span>
+<span class="s1">---</span>
+<span class="s1">title: Clustrix GPU Sentiment Analysis</span>
+<span class="s1">emoji: ⚡</span>
+<span class="s1">colorFrom: yellow</span>
+<span class="s1">colorTo: orange</span>
+<span class="s1">sdk: gradio</span>
+<span class="s1">sdk_version: 4.44.0</span>
+<span class="s1">app_file: app.py</span>
+<span class="s1">pinned: false</span>
+<span class="s1">license: mit</span>
+<span class="s1">tags:</span>
+<span class="s1">- nlp</span>
+<span class="s1">- sentiment-analysis</span>
+<span class="s1">- gpu</span>
+<span class="s1">- distributed-computing</span>
+<span class="s1">- clustrix</span>
+<span class="s1">hardware: t4-small</span>
+<span class="s1">---</span>
+
+<span class="s1"># Clustrix GPU-Accelerated Sentiment Analysis</span>
+
+<span class="s1">A high-performance sentiment analysis demo showcasing GPU acceleration</span>
+<span class="s1">and Clustrix distributed computing integration.</span>
+
+<span class="s1">## Features</span>
+
+<span class="s1">- ⚡ **GPU Acceleration**: Utilizes GPU for faster inference</span>
+<span class="s1">- 📊 **Batch Processing**: Efficiently processes multiple texts</span>
+<span class="s1">- 🚀 **Clustrix Integration**: Optional distributed computing backend</span>
+<span class="s1">- 📈 **Performance Metrics**: Real-time throughput and timing</span>
+<span class="s1">- 🤖 **Transformer Models**: Uses state-of-the-art RoBERTa model</span>
+
+<span class="s1">## Usage</span>
+
+<span class="s1">1. Enter multiple texts (one per line) in the input box</span>
+<span class="s1">2. Set the maximum number of texts to process</span>
+<span class="s1">3. Click &quot;Submit&quot; to run batch sentiment analysis</span>
+<span class="s1">4. View results including sentiment distribution and performance metrics</span>
+
+<span class="s1">## Model</span>
+
+<span class="s1">This demo uses `cardiffnlp/twitter-roberta-base-sentiment-latest`,</span>
+<span class="s1">a RoBERTa model fine-tuned for sentiment analysis on Twitter data.</span>
+
+<span class="s1">## Clustrix Scaling</span>
+
+<span class="s1">In production environments, Clustrix can distribute GPU workloads across:</span>
+<span class="s1">- Multi-GPU cloud instances</span>
+<span class="s1">- GPU clusters with job schedulers</span>
+<span class="s1">- Kubernetes GPU nodes</span>
+<span class="s1">- Hybrid cloud-edge deployments</span>
+<span class="s1">&#39;&#39;&#39;</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;app.py&#39;</span><span class="p">:</span> <span class="n">gpu_app_content</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;requirements.txt&#39;</span><span class="p">:</span> <span class="n">gpu_requirements</span><span class="o">.</span><span class="n">strip</span><span class="p">(),</span>
+        <span class="s1">&#39;README.md&#39;</span><span class="p">:</span> <span class="n">gpu_readme</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+    <span class="p">}</span>
+
+<span class="n">gpu_files</span> <span class="o">=</span> <span class="n">create_gpu_clustrix_space</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;GPU-accelerated HuggingFace Space files created.&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Key features:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- GPU acceleration for transformer models&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Batch processing for improved throughput&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Real-time performance metrics&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;- Clustrix integration for distributed GPU computing&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Note: Requires GPU hardware tier on HuggingFace Spaces.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Secrets-and-Configuration-Management">
+<h2>Secrets and Configuration Management<a class="headerlink" href="#Secrets-and-Configuration-Management" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">os</span>
+<span class="kn">import</span> <span class="nn">base64</span>
+<span class="kn">import</span> <span class="nn">tempfile</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">configure</span>
+
+<span class="k">def</span> <span class="nf">setup_clustrix_from_secrets</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configure Clustrix using HuggingFace Spaces secrets.&quot;&quot;&quot;</span>
+
+    <span class="c1"># Get cluster configuration from secrets</span>
+    <span class="n">cluster_host</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;CLUSTER_HOST&#39;</span><span class="p">)</span>
+    <span class="n">cluster_username</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;CLUSTER_USERNAME&#39;</span><span class="p">,</span> <span class="s1">&#39;clustrix&#39;</span><span class="p">)</span>
+    <span class="n">ssh_key_b64</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;CLUSTER_SSH_KEY&#39;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">cluster_host</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;No cluster host configured, using local execution&quot;</span><span class="p">)</span>
+        <span class="n">configure</span><span class="p">(</span><span class="n">cluster_host</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="c1"># Handle SSH key</span>
+    <span class="n">key_file_path</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="k">if</span> <span class="n">ssh_key_b64</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="c1"># Decode base64 SSH key</span>
+            <span class="n">ssh_key</span> <span class="o">=</span> <span class="n">base64</span><span class="o">.</span><span class="n">b64decode</span><span class="p">(</span><span class="n">ssh_key_b64</span><span class="p">)</span><span class="o">.</span><span class="n">decode</span><span class="p">(</span><span class="s1">&#39;utf-8&#39;</span><span class="p">)</span>
+
+            <span class="c1"># Write to temporary file</span>
+            <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">delete</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;.pem&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+                <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">ssh_key</span><span class="p">)</span>
+                <span class="n">key_file_path</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+
+            <span class="c1"># Set correct permissions</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">chmod</span><span class="p">(</span><span class="n">key_file_path</span><span class="p">,</span> <span class="mo">0o600</span><span class="p">)</span>
+
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Error processing SSH key: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">False</span>
+
+    <span class="c1"># Configure Clustrix</span>
+    <span class="k">try</span><span class="p">:</span>
+        <span class="n">configure</span><span class="p">(</span>
+            <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+            <span class="n">cluster_host</span><span class="o">=</span><span class="n">cluster_host</span><span class="p">,</span>
+            <span class="n">username</span><span class="o">=</span><span class="n">cluster_username</span><span class="p">,</span>
+            <span class="n">key_file</span><span class="o">=</span><span class="n">key_file_path</span><span class="p">,</span>
+            <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/clustrix&quot;</span><span class="p">,</span>
+            <span class="n">package_manager</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+            <span class="n">default_cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span>
+            <span class="n">default_memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">,</span>
+            <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;01:00:00&quot;</span>
+        <span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ Clustrix configured for remote execution on </span><span class="si">{</span><span class="n">cluster_host</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">True</span>
+
+    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Failed to configure Clustrix: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="n">configure</span><span class="p">(</span><span class="n">cluster_host</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>  <span class="c1"># Fallback to local</span>
+        <span class="k">return</span> <span class="kc">False</span>
+
+<span class="k">def</span> <span class="nf">setup_cloud_credentials</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Setup cloud credentials from secrets.&quot;&quot;&quot;</span>
+
+    <span class="c1"># AWS credentials</span>
+    <span class="n">aws_key</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;AWS_ACCESS_KEY_ID&#39;</span><span class="p">)</span>
+    <span class="n">aws_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;AWS_SECRET_ACCESS_KEY&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">aws_key</span> <span class="ow">and</span> <span class="n">aws_secret</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AWS_ACCESS_KEY_ID&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">aws_key</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AWS_SECRET_ACCESS_KEY&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">aws_secret</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ AWS credentials configured&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Azure credentials</span>
+    <span class="n">azure_client_id</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;AZURE_CLIENT_ID&#39;</span><span class="p">)</span>
+    <span class="n">azure_client_secret</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;AZURE_CLIENT_SECRET&#39;</span><span class="p">)</span>
+    <span class="n">azure_tenant_id</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;AZURE_TENANT_ID&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">azure_client_id</span> <span class="ow">and</span> <span class="n">azure_client_secret</span> <span class="ow">and</span> <span class="n">azure_tenant_id</span><span class="p">:</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AZURE_CLIENT_ID&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">azure_client_id</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AZURE_CLIENT_SECRET&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">azure_client_secret</span>
+        <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;AZURE_TENANT_ID&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">azure_tenant_id</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Azure credentials configured&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Google Cloud credentials</span>
+    <span class="n">gcp_key</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">getenv</span><span class="p">(</span><span class="s1">&#39;GCP_SERVICE_ACCOUNT_KEY&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">gcp_key</span><span class="p">:</span>
+        <span class="k">with</span> <span class="n">tempfile</span><span class="o">.</span><span class="n">NamedTemporaryFile</span><span class="p">(</span><span class="n">mode</span><span class="o">=</span><span class="s1">&#39;w&#39;</span><span class="p">,</span> <span class="n">delete</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span> <span class="n">suffix</span><span class="o">=</span><span class="s1">&#39;.json&#39;</span><span class="p">)</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
+            <span class="n">f</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">gcp_key</span><span class="p">)</span>
+            <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s1">&#39;GOOGLE_APPLICATION_CREDENTIALS&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">f</span><span class="o">.</span><span class="n">name</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ Google Cloud credentials configured&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example usage in your Space app:</span>
+<span class="c1"># setup_cloud_credentials()</span>
+<span class="c1"># clustrix_enabled = setup_clustrix_from_secrets()</span>
+<span class="c1"># print(f&quot;Clustrix distributed computing: {&#39;Enabled&#39; if clustrix_enabled else &#39;Disabled (local mode)&#39;}&quot;)</span>
+</pre></div>
+</div>
+</div>
+<section id="HuggingFace-Spaces-Secrets-Management-for-Clustrix">
+<h3>HuggingFace Spaces Secrets Management for Clustrix<a class="headerlink" href="#HuggingFace-Spaces-Secrets-Management-for-Clustrix" title="Link to this heading">¶</a></h3>
+<section id="1.-Access-Secrets-in-Space-Settings">
+<h4>1. Access Secrets in Space Settings<a class="headerlink" href="#1.-Access-Secrets-in-Space-Settings" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Go to your Space settings page</p></li>
+<li><p>Navigate to the “Repository secrets” section</p></li>
+<li><p>Add secrets as key-value pairs</p></li>
+</ul>
+</section>
+<section id="2.-Common-Clustrix-Secrets">
+<h4>2. Common Clustrix Secrets<a class="headerlink" href="#2.-Common-Clustrix-Secrets" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p><strong>CLUSTER_HOST</strong>: IP address of your compute cluster</p></li>
+<li><p><strong>CLUSTER_USERNAME</strong>: SSH username for cluster access</p></li>
+<li><p><strong>CLUSTER_SSH_KEY</strong>: Private SSH key (base64 encoded)</p></li>
+<li><p><strong>AWS_ACCESS_KEY_ID</strong>: AWS credentials for cloud clusters</p></li>
+<li><p><strong>AWS_SECRET_ACCESS_KEY</strong>: AWS secret key</p></li>
+<li><p><strong>AZURE_CLIENT_ID</strong>: Azure service principal ID</p></li>
+<li><p><strong>AZURE_CLIENT_SECRET</strong>: Azure service principal secret</p></li>
+<li><p><strong>GCP_SERVICE_ACCOUNT_KEY</strong>: Google Cloud service account JSON</p></li>
+</ul>
+</section>
+<section id="3.-Security-Best-Practices">
+<h4>3. Security Best Practices<a class="headerlink" href="#3.-Security-Best-Practices" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Use service accounts instead of personal credentials</p></li>
+<li><p>Rotate secrets regularly</p></li>
+<li><p>Apply principle of least privilege</p></li>
+<li><p>Monitor secret usage and access logs</p></li>
+</ul>
+</section>
+<section id="4.-Environment-Variables-in-Code">
+<h4>4. Environment Variables in Code<a class="headerlink" href="#4.-Environment-Variables-in-Code" title="Link to this heading">¶</a></h4>
+<p>Secrets are automatically available as environment variables</p>
+</section>
+</section>
+<section id="Configuration-Code-Example">
+<h3>Configuration Code Example<a class="headerlink" href="#Configuration-Code-Example" title="Link to this heading">¶</a></h3>
+</section>
+</section>
+<section id="Deployment-Tips-and-Best-Practices">
+<h2>Deployment Tips and Best Practices<a class="headerlink" href="#Deployment-Tips-and-Best-Practices" title="Link to this heading">¶</a></h2>
+<section id="Troubleshooting-Guide">
+<h3>Troubleshooting Guide<a class="headerlink" href="#Troubleshooting-Guide" title="Link to this heading">¶</a></h3>
+<section id="Common-Issues-and-Solutions">
+<h4>Common Issues and Solutions<a class="headerlink" href="#Common-Issues-and-Solutions" title="Link to this heading">¶</a></h4>
+<p>❌ <strong>Problem: Space fails to start</strong> ✅ <strong>Solution:</strong></p>
+<ul class="simple">
+<li><p>Check requirements.txt for version conflicts</p></li>
+<li><p>Verify Python version compatibility</p></li>
+<li><p>Review app.py for syntax errors</p></li>
+<li><p>Check Space logs for detailed error messages</p></li>
+</ul>
+<p>❌ <strong>Problem: Clustrix connection fails</strong> ✅ <strong>Solution:</strong></p>
+<ul class="simple">
+<li><p>Verify cluster host is accessible from HF Spaces</p></li>
+<li><p>Check SSH key format and permissions</p></li>
+<li><p>Ensure firewall allows connections from HF IPs</p></li>
+<li><p>Implement fallback to local execution</p></li>
+</ul>
+<p>❌ <strong>Problem: GPU not detected</strong> ✅ <strong>Solution:</strong></p>
+<ul class="simple">
+<li><p>Upgrade to GPU-enabled hardware tier</p></li>
+<li><p>Check torch.cuda.is_available() in code</p></li>
+<li><p>Verify CUDA-compatible PyTorch version</p></li>
+<li><p>Add GPU requirements to README hardware field</p></li>
+</ul>
+<p>❌ <strong>Problem: Memory errors</strong> ✅ <strong>Solution:</strong></p>
+<ul class="simple">
+<li><p>Optimize batch sizes for available memory</p></li>
+<li><p>Clear GPU cache with torch.cuda.empty_cache()</p></li>
+<li><p>Use memory-efficient model loading</p></li>
+<li><p>Consider model quantization or distillation</p></li>
+</ul>
+<p>❌ <strong>Problem: Slow performance</strong> ✅ <strong>Solution:</strong></p>
+<ul class="simple">
+<li><p>Profile code to identify bottlenecks</p></li>
+<li><p>Use appropriate hardware tier</p></li>
+<li><p>Implement model caching and warm-up</p></li>
+<li><p>Optimize data preprocessing pipeline</p></li>
+</ul>
+</section>
+</section>
+<section id="HuggingFace-Spaces-Hardware-Tiers">
+<h3>HuggingFace Spaces Hardware Tiers<a class="headerlink" href="#HuggingFace-Spaces-Hardware-Tiers" title="Link to this heading">¶</a></h3>
+<p>🆓 <strong>CPU Basic (Free):</strong></p>
+<ul class="simple">
+<li><p>2 vCPUs, 16GB RAM</p></li>
+<li><p>Good for: Simple demos, small models, prototyping</p></li>
+<li><p>Clustrix use case: Local fallback, lightweight computations</p></li>
+</ul>
+<p>💰 <strong>CPU Upgrade ($3/hour):</strong></p>
+<ul class="simple">
+<li><p>8 vCPUs, 32GB RAM</p></li>
+<li><p>Good for: CPU-intensive tasks, larger datasets</p></li>
+<li><p>Clustrix use case: Medium-scale local processing</p></li>
+</ul>
+<p>🚀 <strong>T4 Small ($0.60/hour):</strong></p>
+<ul class="simple">
+<li><p>4 vCPUs, 15GB RAM, 1x T4 GPU (16GB VRAM)</p></li>
+<li><p>Good for: Deep learning inference, computer vision</p></li>
+<li><p>Clustrix use case: GPU-accelerated ML, model training demos</p></li>
+</ul>
+<p>⚡ <strong>A10G Small ($3.15/hour):</strong></p>
+<ul class="simple">
+<li><p>4 vCPUs, 15GB RAM, 1x A10G GPU (24GB VRAM)</p></li>
+<li><p>Good for: Large models, high-performance inference</p></li>
+<li><p>Clustrix use case: Production-scale ML applications</p></li>
+</ul>
+<p>🔥 <strong>A100 Large ($4.13/hour):</strong></p>
+<ul class="simple">
+<li><p>12 vCPUs, 46GB RAM, 1x A100 GPU (40GB VRAM)</p></li>
+<li><p>Good for: Massive models, research applications</p></li>
+<li><p>Clustrix use case: Distributed training coordination</p></li>
+</ul>
+</section>
+<section id="HuggingFace-Spaces-+-Clustrix-Best-Practices">
+<h3>HuggingFace Spaces + Clustrix Best Practices<a class="headerlink" href="#HuggingFace-Spaces-+-Clustrix-Best-Practices" title="Link to this heading">¶</a></h3>
+<section id="🚀-Performance-Optimization">
+<h4>🚀 Performance Optimization<a class="headerlink" href="#🚀-Performance-Optimization" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Use appropriate hardware tier (CPU Basic → T4 Small → A10G Small)</p></li>
+<li><p>Implement caching for models and data</p></li>
+<li><p>Use batch processing for multiple requests</p></li>
+<li><p>Optimize memory usage with careful tensor management</p></li>
+<li><p>Consider async processing for long-running tasks</p></li>
+</ul>
+</section>
+<section id="🔒-Security">
+<h4>🔒 Security<a class="headerlink" href="#🔒-Security" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Store all credentials in Spaces secrets</p></li>
+<li><p>Use service accounts instead of personal credentials</p></li>
+<li><p>Implement input validation and sanitization</p></li>
+<li><p>Never log sensitive information</p></li>
+<li><p>Use HTTPS for all external API calls</p></li>
+</ul>
+</section>
+<section id="🎯-User-Experience">
+<h4>🎯 User Experience<a class="headerlink" href="#🎯-User-Experience" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Provide clear error messages and fallbacks</p></li>
+<li><p>Show progress indicators for long operations</p></li>
+<li><p>Include example inputs and use cases</p></li>
+<li><p>Add comprehensive documentation</p></li>
+<li><p>Implement graceful degradation when Clustrix is unavailable</p></li>
+</ul>
+</section>
+<section id="📊-Monitoring-and-Debugging">
+<h4>📊 Monitoring and Debugging<a class="headerlink" href="#📊-Monitoring-and-Debugging" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Add logging for key operations</p></li>
+<li><p>Include performance metrics in the UI</p></li>
+<li><p>Monitor resource usage and costs</p></li>
+<li><p>Set up alerts for failures</p></li>
+<li><p>Use descriptive commit messages for versioning</p></li>
+</ul>
+</section>
+<section id="🔄-Scalability">
+<h4>🔄 Scalability<a class="headerlink" href="#🔄-Scalability" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Design for both local and distributed execution</p></li>
+<li><p>Implement proper error handling and retries</p></li>
+<li><p>Use connection pooling for database/API connections</p></li>
+<li><p>Consider rate limiting for external services</p></li>
+<li><p>Plan for traffic spikes and scaling needs</p></li>
+</ul>
+</section>
+<section id="📦-Deployment">
+<h4>📦 Deployment<a class="headerlink" href="#📦-Deployment" title="Link to this heading">¶</a></h4>
+<ul class="simple">
+<li><p>Pin specific package versions in requirements.txt</p></li>
+<li><p>Test locally before deploying</p></li>
+<li><p>Use environment variables for configuration</p></li>
+<li><p>Implement health checks and status endpoints</p></li>
+<li><p>Document deployment process and dependencies</p></li>
+</ul>
+</section>
+</section>
+</section>
+<section id="Summary">
+<h2>Summary<a class="headerlink" href="#Summary" title="Link to this heading">¶</a></h2>
+<p>This tutorial covered:</p>
+<ol class="arabic simple">
+<li><p><strong>Gradio Integration</strong>: Interactive ML training interfaces with Clustrix backend</p></li>
+<li><p><strong>Streamlit Dashboards</strong>: Rich data science applications with distributed computing</p></li>
+<li><p><strong>GPU Acceleration</strong>: High-performance NLP processing with transformer models</p></li>
+<li><p><strong>Secrets Management</strong>: Secure credential storage and configuration</p></li>
+<li><p><strong>Deployment Best Practices</strong>: Performance optimization and troubleshooting</p></li>
+<li><p><strong>Hardware Selection</strong>: Choosing appropriate tiers for different use cases</p></li>
+</ol>
+<section id="Key-Advantages-of-HuggingFace-Spaces-+-Clustrix">
+<h3>Key Advantages of HuggingFace Spaces + Clustrix<a class="headerlink" href="#Key-Advantages-of-HuggingFace-Spaces-+-Clustrix" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Easy Deployment</strong>: Simple git-based deployment workflow</p></li>
+<li><p><strong>Community Sharing</strong>: Built-in discoverability and collaboration</p></li>
+<li><p><strong>Flexible Hardware</strong>: From free CPU to high-end GPU instances</p></li>
+<li><p><strong>Hybrid Computing</strong>: Local execution with optional distributed scaling</p></li>
+<li><p><strong>ML Focus</strong>: Optimized for machine learning and AI applications</p></li>
+</ul>
+</section>
+<section id="Next-Steps">
+<h3>Next Steps<a class="headerlink" href="#Next-Steps" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Create your HuggingFace account and get an access token</p></li>
+<li><p>Start with a simple Gradio app using the provided templates</p></li>
+<li><p>Configure Clustrix integration using Spaces secrets</p></li>
+<li><p>Test locally before deploying to ensure compatibility</p></li>
+<li><p>Monitor performance and scale hardware as needed</p></li>
+</ol>
+</section>
+<section id="Use-Cases">
+<h3>Use Cases<a class="headerlink" href="#Use-Cases" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Research Demos</strong>: Showcase distributed computing research</p></li>
+<li><p><strong>Educational Tools</strong>: Interactive learning environments</p></li>
+<li><p><strong>Prototype Testing</strong>: Rapid prototyping with real user feedback</p></li>
+<li><p><strong>Model Serving</strong>: Production-ready ML model deployment</p></li>
+<li><p><strong>Collaborative Computing</strong>: Shared access to distributed resources</p></li>
+</ul>
+</section>
+<section id="Resources">
+<h3>Resources<a class="headerlink" href="#Resources" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://huggingface.co/docs/hub/spaces">HuggingFace Spaces Documentation</a></p></li>
+<li><p><a class="reference external" href="https://gradio.app/docs/">Gradio Documentation</a></p></li>
+<li><p><a class="reference external" href="https://docs.streamlit.io/">Streamlit Documentation</a></p></li>
+<li><p><a class="reference external" href="https://clustrix.readthedocs.io/">Clustrix Documentation</a></p></li>
+<li><p><a class="reference external" href="https://huggingface.co/docs/huggingface_hub/">HuggingFace Hub Python Library</a></p></li>
+</ul>
+<p><strong>Remember</strong>: HuggingFace Spaces provides an excellent platform for showcasing Clustrix capabilities and building interactive ML applications with distributed computing backends!</p>
+</section>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="gcp_cloud_tutorial.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Google Cloud Platform (GCP) Tutorial
+    </a>
+    <a class="float-right" href="lambda_cloud_tutorial.html" title="Next">
+        Lambda Cloud Tutorial <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">HuggingFace Spaces Tutorial</a><ul>
+<li><a class="reference internal" href="#Overview">Overview</a></li>
+<li><a class="reference internal" href="#Prerequisites">Prerequisites</a></li>
+<li><a class="reference internal" href="#Installation-and-Setup">Installation and Setup</a></li>
+<li><a class="reference internal" href="#HuggingFace-Authentication-Setup">HuggingFace Authentication Setup</a><ul>
+<li><a class="reference internal" href="#Option-1:-Interactive-Login">Option 1: Interactive Login</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Method-1:-Gradio-Space-with-Clustrix-Backend">Method 1: Gradio Space with Clustrix Backend</a><ul>
+<li><a class="reference internal" href="#Create-a-Gradio-App-with-Distributed-Computing">Create a Gradio App with Distributed Computing</a></li>
+<li><a class="reference internal" href="#Create-Space-Files-Structure">Create Space Files Structure</a></li>
+<li><a class="reference internal" href="#Deploy-to-HuggingFace-Spaces">Deploy to HuggingFace Spaces</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Method-2:-Streamlit-Space-with-Clustrix">Method 2: Streamlit Space with Clustrix</a></li>
+<li><a class="reference internal" href="#Method-3:-GPU-Accelerated-Spaces">Method 3: GPU-Accelerated Spaces</a></li>
+<li><a class="reference internal" href="#Secrets-and-Configuration-Management">Secrets and Configuration Management</a><ul>
+<li><a class="reference internal" href="#HuggingFace-Spaces-Secrets-Management-for-Clustrix">HuggingFace Spaces Secrets Management for Clustrix</a><ul>
+<li><a class="reference internal" href="#1.-Access-Secrets-in-Space-Settings">1. Access Secrets in Space Settings</a></li>
+<li><a class="reference internal" href="#2.-Common-Clustrix-Secrets">2. Common Clustrix Secrets</a></li>
+<li><a class="reference internal" href="#3.-Security-Best-Practices">3. Security Best Practices</a></li>
+<li><a class="reference internal" href="#4.-Environment-Variables-in-Code">4. Environment Variables in Code</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Configuration-Code-Example">Configuration Code Example</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Deployment-Tips-and-Best-Practices">Deployment Tips and Best Practices</a><ul>
+<li><a class="reference internal" href="#Troubleshooting-Guide">Troubleshooting Guide</a><ul>
+<li><a class="reference internal" href="#Common-Issues-and-Solutions">Common Issues and Solutions</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#HuggingFace-Spaces-Hardware-Tiers">HuggingFace Spaces Hardware Tiers</a></li>
+<li><a class="reference internal" href="#HuggingFace-Spaces-+-Clustrix-Best-Practices">HuggingFace Spaces + Clustrix Best Practices</a><ul>
+<li><a class="reference internal" href="#🚀-Performance-Optimization">🚀 Performance Optimization</a></li>
+<li><a class="reference internal" href="#🔒-Security">🔒 Security</a></li>
+<li><a class="reference internal" href="#🎯-User-Experience">🎯 User Experience</a></li>
+<li><a class="reference internal" href="#📊-Monitoring-and-Debugging">📊 Monitoring and Debugging</a></li>
+<li><a class="reference internal" href="#🔄-Scalability">🔄 Scalability</a></li>
+<li><a class="reference internal" href="#📦-Deployment">📦 Deployment</a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Key-Advantages-of-HuggingFace-Spaces-+-Clustrix">Key Advantages of HuggingFace Spaces + Clustrix</a></li>
+<li><a class="reference internal" href="#Next-Steps">Next Steps</a></li>
+<li><a class="reference internal" href="#Use-Cases">Use Cases</a></li>
+<li><a class="reference internal" href="#Resources">Resources</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 26, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

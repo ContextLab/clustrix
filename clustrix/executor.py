@@ -20,7 +20,7 @@ class ClusterExecutor:
         self.config = config
         self.ssh_client = None
         self.sftp_client = None
-        self.active_jobs = {}
+        self.active_jobs: Dict[str, Any] = {}
 
         # Connection will be established on-demand
 

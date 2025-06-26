@@ -81,7 +81,14 @@ class TestClusterConfigWidget:
             mock_widgets.HTML = MagicMock
             mock_widgets.Layout = MagicMock
 
-            with patch("clustrix.notebook_magic.widgets", mock_widgets):
+            # Import the module after patching IPYTHON_AVAILABLE
+            import clustrix.notebook_magic
+
+            # Set the widgets attribute on the module
+            setattr(clustrix.notebook_magic, "widgets", mock_widgets)
+
+            with patch("clustrix.notebook_magic.display") as mock_display:
+                mock_display.return_value = None
                 yield
 
     def test_widget_initialization(self, mock_ipython):

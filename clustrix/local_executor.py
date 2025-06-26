@@ -24,7 +24,7 @@ class LocalExecutor:
             max_workers: Maximum number of worker processes/threads
             use_threads: If True, use ThreadPoolExecutor, else ProcessPoolExecutor
         """
-        self.max_workers = max_workers or os.cpu_count()
+        self.max_workers = max_workers or os.cpu_count() or 4
         self.use_threads = use_threads
         self._executor = None
 
@@ -115,10 +115,13 @@ class LocalExecutor:
         timeout: Optional[float],
     ) -> List[Any]:
         """Execute chunks in parallel using the executor."""
-        futures = {}
+        futures: Dict[Any, int] = {}
         results = [None] * len(work_chunks)
 
         # Submit all tasks
+        if self._executor is None:
+            raise RuntimeError("LocalExecutor must be used as a context manager")
+
         for i, chunk in enumerate(work_chunks):
             args = chunk.get("args", ())
             kwargs = chunk.get("kwargs", {})
@@ -183,7 +186,7 @@ class LocalExecutor:
         loop_var: str,
         iterable: Union[range, List, tuple],
         func_args: tuple = (),
-        func_kwargs: dict = None,
+        func_kwargs: Optional[Dict[Any, Any]] = None,
         chunk_size: Optional[int] = None,
     ) -> List[Any]:
         """
@@ -419,7 +422,7 @@ def create_local_executor(
     use_threads: Optional[bool] = None,
     func: Optional[Callable] = None,
     args: tuple = (),
-    kwargs: dict = None,
+    kwargs: Optional[Dict[Any, Any]] = None,
 ) -> LocalExecutor:
     """
     Create a LocalExecutor with appropriate settings.

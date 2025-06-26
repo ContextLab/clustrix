@@ -311,7 +311,7 @@ def setup_remote_environment(
     ssh_client,
     work_dir: str,
     requirements: Dict[str, str],
-    config: ClusterConfig = None,
+    config: Optional[ClusterConfig] = None,
 ):
     """Setup environment on remote cluster via SSH."""
 
@@ -394,14 +394,17 @@ def _create_slurm_script(
         script_lines.append(f"#SBATCH --partition={job_config['partition']}")
 
     # Add environment setup
-    for module in config.module_loads:
-        script_lines.append(f"module load {module}")
+    if config.module_loads:
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
 
-    for var, value in config.environment_variables.items():
-        script_lines.append(f"export {var}={value}")
+    if config.environment_variables:
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
 
-    for cmd in config.pre_execution_commands:
-        script_lines.append(cmd)
+    if config.pre_execution_commands:
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
 
     # Add execution commands
     script_lines.extend(
