@@ -4,6 +4,7 @@ import pytest
 from unittest.mock import Mock, patch, MagicMock
 import base64
 import time
+import sys
 
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
@@ -225,6 +226,7 @@ class TestCloudProviderIntegration:
             cloud_region="us-central1",
             gke_cluster_name="test-cluster",
             gcp_project_id="test-project",
+            gcp_zone="us-central1-a",
         )
 
     def test_aws_auto_configuration_success(self, aws_config):
@@ -240,12 +242,18 @@ class TestCloudProviderIntegration:
 
                 # Verify aws command was called
                 mock_run.assert_called()
-                call_args = mock_run.call_args[0][0]
-                assert "aws" in call_args
-                assert "eks" in call_args
-                assert "update-kubeconfig" in call_args
-                assert "test-cluster" in call_args
-                assert "us-west-2" in call_args
+                # Find the AWS call in all the calls made
+                aws_call_found = False
+                for call in mock_run.call_args_list:
+                    call_args = call[0][0]
+                    if "aws" in call_args:
+                        aws_call_found = True
+                        assert "eks" in call_args
+                        assert "update-kubeconfig" in call_args
+                        assert "test-cluster" in call_args
+                        assert "us-west-2" in call_args
+                        break
+                assert aws_call_found, "AWS command was not called"
 
     def test_azure_auto_configuration_success(self, azure_config):
         """Test successful Azure AKS auto-configuration."""
@@ -260,12 +268,18 @@ class TestCloudProviderIntegration:
 
                 # Verify az command was called
                 mock_run.assert_called()
-                call_args = mock_run.call_args[0][0]
-                assert "az" in call_args
-                assert "aks" in call_args
-                assert "get-credentials" in call_args
-                assert "test-cluster" in call_args
-                assert "test-rg" in call_args
+                # Find the Azure call in all the calls made
+                az_call_found = False
+                for call in mock_run.call_args_list:
+                    call_args = call[0][0]
+                    if "az" in call_args:
+                        az_call_found = True
+                        assert "aks" in call_args
+                        assert "get-credentials" in call_args
+                        assert "test-cluster" in call_args
+                        assert "test-rg" in call_args
+                        break
+                assert az_call_found, "Azure command was not called"
 
     def test_gcp_auto_configuration_success(self, gcp_config):
         """Test successful GCP GKE auto-configuration."""
@@ -280,12 +294,18 @@ class TestCloudProviderIntegration:
 
                 # Verify gcloud command was called
                 mock_run.assert_called()
-                call_args = mock_run.call_args[0][0]
-                assert "gcloud" in call_args
-                assert "container" in call_args
-                assert "clusters" in call_args
-                assert "get-credentials" in call_args
-                assert "test-cluster" in call_args
+                # Find the gcloud call in all the calls made
+                gcloud_call_found = False
+                for call in mock_run.call_args_list:
+                    call_args = call[0][0]
+                    if "gcloud" in call_args:
+                        gcloud_call_found = True
+                        assert "container" in call_args
+                        assert "clusters" in call_args
+                        assert "get-credentials" in call_args
+                        assert "test-cluster" in call_args
+                        break
+                assert gcloud_call_found, "GCloud command was not called"
 
     def test_cloud_auto_configuration_disabled(self):
         """Test when cloud auto-configuration is disabled."""
@@ -398,9 +418,7 @@ class TestKubernetesErrorHandling:
         """Test handling of missing kubernetes package."""
         config = ClusterConfig(cluster_type="kubernetes")
 
-        with patch(
-            "kubernetes.client", side_effect=ImportError("No module named 'kubernetes'")
-        ):
+        with patch.dict('sys.modules', {'kubernetes': None}):
             executor = ClusterExecutor(config)
 
             with pytest.raises(ImportError, match="kubernetes package required"):
