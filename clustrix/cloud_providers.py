@@ -83,9 +83,7 @@ class CloudProviderDetector:
     def _check_gcp_context() -> bool:
         """Check if GCP environment is configured."""
         # Check for GCP environment variables
-        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv(
-            "GCLOUD_PROJECT"
-        ):
+        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv("GCLOUD_PROJECT"):
             return True
 
         # Check if gcloud is configured
@@ -95,9 +93,7 @@ class CloudProviderDetector:
                 capture_output=True,
                 timeout=10,
             )
-            return (
-                result.returncode == 0 and "ACTIVE" in result.stdout.decode()
-            )
+            return result.returncode == 0 and "ACTIVE" in result.stdout.decode()
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
@@ -108,9 +104,7 @@ class AWSEKSConfigurator:
     def __init__(self, config: ClusterConfig):
         self.config = config
 
-    def configure_cluster(
-        self, cluster_name: str, region: str
-    ) -> Dict[str, Any]:
+    def configure_cluster(self, cluster_name: str, region: str) -> Dict[str, Any]:
         """
         Configure AWS EKS cluster access.
 
@@ -136,9 +130,7 @@ class AWSEKSConfigurator:
             if self.config.aws_profile:
                 cmd.extend(["--profile", self.config.aws_profile])
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
                 raise CloudProviderError(
@@ -205,13 +197,9 @@ class AzureAKSConfigurator:
             ]
 
             if self.config.azure_subscription_id:
-                cmd.extend(
-                    ["--subscription", self.config.azure_subscription_id]
-                )
+                cmd.extend(["--subscription", self.config.azure_subscription_id])
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
                 raise CloudProviderError(
@@ -279,9 +267,7 @@ class GoogleGKEConfigurator:
                 project_id,
             ]
 
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60
-            )
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
 
             if result.returncode != 0:
                 raise CloudProviderError(
@@ -379,10 +365,7 @@ class CloudProviderManager:
 
     def _configure_azure(self) -> Dict[str, Any]:
         """Configure Azure AKS."""
-        if (
-            not self.config.aks_cluster_name
-            or not self.config.azure_resource_group
-        ):
+        if not self.config.aks_cluster_name or not self.config.azure_resource_group:
             return {
                 "auto_configured": False,
                 "reason": "Missing AKS cluster name or resource group",

@@ -42,9 +42,7 @@ class LoopInfo:
         self.iterable = iterable  # string representation of iterable
         self.range_info = range_info  # {start, stop, step} for range loops
         self.nested_level = nested_level  # nesting depth
-        self.dependencies = (
-            dependencies or set()
-        )  # variables this loop depends on
+        self.dependencies = dependencies or set()  # variables this loop depends on
         self.is_parallelizable = self._assess_parallelizability()
 
     def _assess_parallelizability(self) -> bool:
@@ -411,9 +409,7 @@ def estimate_work_size(loop_info: LoopInfo) -> int:
 
 
 # Backward compatibility
-def detect_loops(
-    func: Callable, args: tuple, kwargs: dict
-) -> Optional[Dict[str, Any]]:
+def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
     """
     Legacy function for backward compatibility.
 

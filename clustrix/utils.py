@@ -12,9 +12,7 @@ import cloudpickle
 from .config import ClusterConfig
 
 
-def detect_loops(
-    func: Callable, args: tuple, kwargs: dict
-) -> Optional[Dict[str, Any]]:
+def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
     """
     Analyze function to detect parallelizable loops.
 
@@ -55,9 +53,7 @@ def detect_loops(
                 loop_info = {
                     "type": "while",
                     "condition": (
-                        ast.unparse(node.test)
-                        if hasattr(ast, "unparse")
-                        else "unknown"
+                        ast.unparse(node.test) if hasattr(ast, "unparse") else "unknown"
                     ),
                 }
                 self.loops.append(loop_info)
@@ -77,7 +73,7 @@ def detect_loops(
                     range_str = loop["iterable"]
                     if "range(" in range_str:
                         range_part = range_str[
-                            range_str.find("range("):range_str.find(
+                            range_str.find("range(") : range_str.find(
                                 ")", range_str.find("range(")
                             )
                             + 1
@@ -98,9 +94,7 @@ def detect_loops(
         return None
 
 
-def serialize_function(
-    func: Callable, args: tuple, kwargs: dict
-) -> Dict[str, Any]:
+def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """
     Serialize function and all its dependencies.
 

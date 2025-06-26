@@ -1,0 +1,17 @@
+[flake8]
+max-line-length = 120
+exclude = .git,__pycache__,docs/source/conf.py,old,build,dist,docs/build
+ignore = 
+    # E501: line too long - we'll use a more reasonable 120 char limit
+    # W503: line break before binary operator - this is actually preferred by PEP8 now
+    # E203: whitespace before ':' - black introduces this and it's not actually wrong
+    W503,
+    E203,
+    # Allow for some specific cases where we know the code is correct
+    # F841: local variable assigned but never used (for exception handling)
+    # F401: imported but unused (for compatibility imports)
+per-file-ignores =
+    # Specific file ignores
+    clustrix/executor.py:F841
+    clustrix/local_executor.py:F401,F811,F841
+    clustrix/utils.py:E501

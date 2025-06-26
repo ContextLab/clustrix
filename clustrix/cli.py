@@ -22,9 +22,7 @@ def cli():
 @click.option("--cores", type=int, help="Default number of cores")
 @click.option("--memory", help="Default memory allocation (e.g., 8GB)")
 @click.option("--time", help="Default time allocation (e.g., 04:00:00)")
-@click.option(
-    "--config-file", type=click.Path(), help="Save configuration to file"
-)
+@click.option("--config-file", type=click.Path(), help="Save configuration to file")
 def config(
     cluster_type,
     cluster_host,

@@ -27,9 +27,7 @@ class ClusterExecutor:
     def _setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
         if not self.config.cluster_host:
-            raise ValueError(
-                "cluster_host must be specified for SSH-based clusters"
-            )
+            raise ValueError("cluster_host must be specified for SSH-based clusters")
 
         self.ssh_client = paramiko.SSHClient()
         self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -87,9 +85,7 @@ class ClusterExecutor:
                             )
 
                 except Exception as e:
-                    logger.warning(
-                        f"Cloud provider auto-configuration failed: {e}"
-                    )
+                    logger.warning(f"Cloud provider auto-configuration failed: {e}")
                     # Continue with manual configuration
 
             config.load_kube_config()
@@ -99,9 +95,7 @@ class ClusterExecutor:
                 "kubernetes package required for Kubernetes cluster support"
             )
 
-    def submit_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
+    def submit_job(self, func_data: Dict[str, Any], job_config: Dict[str, Any]) -> str:
         """
         Submit a job to the cluster.
 
@@ -126,9 +120,7 @@ class ClusterExecutor:
         elif self.config.cluster_type == "ssh":
             return self._submit_ssh_job(func_data, job_config)
         else:
-            raise ValueError(
-                f"Unsupported cluster type: {self.config.cluster_type}"
-            )
+            raise ValueError(f"Unsupported cluster type: {self.config.cluster_type}")
 
     def _submit_slurm_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
@@ -136,9 +128,7 @@ class ClusterExecutor:
         """Submit job via SLURM."""
 
         # Create remote working directory
-        remote_job_dir = (
-            f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        )
+        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -146,9 +136,7 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
+        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
         # Setup environment
@@ -192,9 +180,7 @@ class ClusterExecutor:
     ) -> str:
         """Submit job via PBS."""
         # Similar to SLURM but with PBS commands
-        remote_job_dir = (
-            f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        )
+        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -202,9 +188,7 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
+        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
         # Create PBS script
@@ -238,9 +222,7 @@ class ClusterExecutor:
         """Submit job via SGE."""
 
         # Create remote working directory
-        remote_job_dir = (
-            f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        )
+        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -248,9 +230,7 @@ class ClusterExecutor:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
+        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
         # Setup environment
@@ -278,11 +258,7 @@ class ClusterExecutor:
         stdout, stderr = self._execute_remote_command(cmd)
 
         # Extract job ID from qsub output (SGE format: "Your job 123456 ...")
-        job_id = (
-            stdout.strip().split()[2]
-            if "Your job" in stdout
-            else stdout.strip()
-        )
+        job_id = stdout.strip().split()[2] if "Your job" in stdout else stdout.strip()
 
         # Store job info
         self.active_jobs[job_id] = {
@@ -439,15 +415,11 @@ except Exception as e:
                                 "resources": {
                                     "requests": {
                                         "cpu": str(job_config.get("cores", 1)),
-                                        "memory": job_config.get(
-                                            "memory", "1Gi"
-                                        ),
+                                        "memory": job_config.get("memory", "1Gi"),
                                     },
                                     "limits": {
                                         "cpu": str(job_config.get("cores", 1)),
-                                        "memory": job_config.get(
-                                            "memory", "1Gi"
-                                        ),
+                                        "memory": job_config.get("memory", "1Gi"),
                                     },
                                 },
                             }
@@ -481,9 +453,7 @@ except Exception as e:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via direct SSH (no scheduler)."""
-        remote_job_dir = (
-            f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        )
+        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -491,9 +461,7 @@ except Exception as e:
             pickle.dump(func_data, f)
             local_pickle_path = f.name
 
-        self._upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
+        self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
         # Create execution script
@@ -562,9 +530,7 @@ except Exception as e:
                     # SSH-based job result collection
                     result_path = f"{remote_dir}/result.pkl"
 
-                    with tempfile.NamedTemporaryFile(
-                        mode="wb", delete=False
-                    ) as f:
+                    with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
                         local_result_path = f.name
 
                     try:
@@ -575,9 +541,7 @@ except Exception as e:
 
                         # Cleanup
                         if self.config.cleanup_on_success:
-                            self._execute_remote_command(
-                                f"rm -rf {remote_dir}"
-                            )
+                            self._execute_remote_command(f"rm -rf {remote_dir}")
 
                         del self.active_jobs[job_id]
 
@@ -602,9 +566,7 @@ except Exception as e:
                 else:
                     # SSH-based error handling
                     error_log = self._get_error_log(job_id)
-                    original_exception = self._extract_original_exception(
-                        job_id
-                    )
+                    original_exception = self._extract_original_exception(job_id)
 
                     if original_exception:
                         # Re-raise the original exception
@@ -1136,7 +1098,7 @@ except Exception as e:
                     # Parse result from logs
                     for line in logs.split("\n"):
                         if line.startswith("CLUSTRIX_RESULT:"):
-                            result_str = line[len("CLUSTRIX_RESULT:"):]
+                            result_str = line[len("CLUSTRIX_RESULT:") :]
                             # Try to evaluate the result
                             try:
                                 import ast
@@ -1181,11 +1143,7 @@ except Exception as e:
                         f"Pod {pod.metadata.name}: Failed to get logs - {e}"
                     )
 
-            return (
-                "\n\n".join(error_logs)
-                if error_logs
-                else "No error logs available"
-            )
+            return "\n\n".join(error_logs) if error_logs else "No error logs available"
 
         except Exception as e:
             return f"Failed to get Kubernetes error logs: {e}"
@@ -1202,7 +1160,7 @@ except Exception as e:
 
             for line in lines:
                 if line.startswith("CLUSTRIX_ERROR:"):
-                    error_msg = line[len("CLUSTRIX_ERROR:"):]
+                    error_msg = line[len("CLUSTRIX_ERROR:") :]
                 elif line.startswith("CLUSTRIX_TRACEBACK:"):
                     traceback_found = True
                     break

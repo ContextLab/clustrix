@@ -1,7 +1,6 @@
 """Local parallel execution using multiprocessing and threading."""
 
 import os
-import multiprocessing as mp
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
@@ -9,9 +8,7 @@ from concurrent.futures import (
 )
 from typing import Any, List, Callable, Dict, Optional, Union
 import logging
-import functools
 import pickle
-import time
 
 logger = logging.getLogger(__name__)
 
@@ -19,9 +16,7 @@ logger = logging.getLogger(__name__)
 class LocalExecutor:
     """Execute functions locally using multiprocessing or threading."""
 
-    def __init__(
-        self, max_workers: Optional[int] = None, use_threads: bool = False
-    ):
+    def __init__(self, max_workers: Optional[int] = None, use_threads: bool = False):
         """
         Initialize local executor.
 
@@ -134,15 +129,12 @@ class LocalExecutor:
         try:
             if timeout:
                 # Wait for all futures with a global timeout
-                done_futures = set()
                 try:
                     # Use wait with timeout to check for completion
                     from concurrent.futures import (
                         wait,
-                        FIRST_COMPLETED,
                         ALL_COMPLETED,
                     )
-                    import time
 
                     done, not_done = wait(
                         futures.keys(),
@@ -302,7 +294,7 @@ class LocalExecutor:
         # Create work chunks
         work_chunks = []
         for i in range(0, len(items), chunk_size):
-            chunk_items = items[i:i + chunk_size]
+            chunk_items = items[i : i + chunk_size]
             chunk_kwargs = func_kwargs.copy()
             chunk_kwargs[loop_var] = chunk_items
 

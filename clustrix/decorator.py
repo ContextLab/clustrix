@@ -54,9 +54,7 @@ def cluster(
             }
 
             # Determine execution mode
-            execution_mode = _choose_execution_mode(
-                config, func, args, func_kwargs
-            )
+            execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
 
             # Check if function contains loops that can be parallelized
             should_parallelize = (
@@ -65,9 +63,7 @@ def cluster(
 
             if execution_mode == "local":
                 if should_parallelize:
-                    return _execute_local_parallel(
-                        func, args, func_kwargs, job_config
-                    )
+                    return _execute_local_parallel(func, args, func_kwargs, job_config)
                 else:
                     # Execute locally without parallelization
                     return func(*args, **func_kwargs)
@@ -88,9 +84,7 @@ def cluster(
                         )
 
                 # Execute normally on cluster
-                return _execute_single(
-                    executor, func, args, func_kwargs, job_config
-                )
+                return _execute_single(executor, func, args, func_kwargs, job_config)
 
         # Store cluster config for access outside execution
         wrapper._cluster_config = {
@@ -186,7 +180,7 @@ def _create_work_chunks(
     chunk_size = max(1, len(loop_range) // max_jobs)
 
     for i in range(0, len(loop_range), chunk_size):
-        chunk_range = loop_range[i:i + chunk_size]
+        chunk_range = loop_range[i : i + chunk_size]
 
         # Create modified kwargs for this chunk
         chunk_kwargs = kwargs.copy()
@@ -216,9 +210,7 @@ def _combine_results(results: List[tuple], loop_info: Dict) -> Any:
     return [result[1] for result in results]
 
 
-def _choose_execution_mode(
-    config, func: Callable, args: tuple, kwargs: dict
-) -> str:
+def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) -> str:
     """
     Choose between local and remote execution.
 
@@ -236,10 +228,7 @@ def _choose_execution_mode(
         return "local"
 
     # Check if there's a preference for local parallel execution
-    if (
-        hasattr(config, "prefer_local_parallel")
-        and config.prefer_local_parallel
-    ):
+    if hasattr(config, "prefer_local_parallel") and config.prefer_local_parallel:
         return "local"
 
     # Default to remote execution when cluster is available
@@ -280,9 +269,7 @@ def _execute_local_parallel(
     try:
         with local_executor:
             # Create work chunks for the loop
-            work_chunks = _create_local_work_chunks(
-                func, args, kwargs, loop_info
-            )
+            work_chunks = _create_local_work_chunks(func, args, kwargs, loop_info)
 
             if not work_chunks:
                 # Fallback to normal execution
@@ -360,7 +347,7 @@ def _create_local_work_chunks(
 
     # Create chunks
     for i in range(0, len(loop_range), chunk_size):
-        chunk_range = list(loop_range[i:i + chunk_size])
+        chunk_range = list(loop_range[i : i + chunk_size])
 
         # Create modified kwargs for this chunk
         chunk_kwargs = kwargs.copy()
