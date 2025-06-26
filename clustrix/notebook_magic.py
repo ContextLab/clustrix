@@ -30,9 +30,65 @@ except ImportError:
 
     def cell_magic(name):
         def decorator(func):
+            # When IPython isn't available, return the original function unchanged
             return func
 
         return decorator
+
+    def display(*args, **kwargs):
+        """Placeholder display function."""
+        pass
+
+    class HTML:  # type: ignore
+        """Placeholder HTML class."""
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+    # Mock widgets module
+    class widgets:  # type: ignore
+        class Dropdown:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class Button:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class Text:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class IntText:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class Textarea:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class Output:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def clear_output(self, *args, **kwargs):
+                pass
+
+        class VBox:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class HBox:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class HTML:
+            def __init__(self, *args, **kwargs):
+                pass
+
+        class Layout:
+            def __init__(self, *args, **kwargs):
+                pass
 
 
 from .config import configure, get_config

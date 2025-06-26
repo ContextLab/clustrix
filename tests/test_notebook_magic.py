@@ -87,9 +87,11 @@ class TestClusterConfigWidget:
             # Set the widgets attribute on the module
             setattr(clustrix.notebook_magic, "widgets", mock_widgets)
 
-            with patch("clustrix.notebook_magic.display") as mock_display:
-                mock_display.return_value = None
-                yield
+            # Mock display function
+            mock_display = MagicMock()
+            setattr(clustrix.notebook_magic, "display", mock_display)
+
+            yield
 
     def test_widget_initialization(self, mock_ipython):
         """Test widget initialization with defaults."""
@@ -364,11 +366,11 @@ class TestClusterfyMagics:
 
     def test_magic_without_ipython(self):
         """Test magic command fails gracefully without IPython."""
+        # Patch the IPYTHON_AVAILABLE check directly in the method
         with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False):
-            # Create a simple mock without trying to use the Magics base class
-            mock_shell = MagicMock()
-            magic = ClusterfyMagics.__new__(ClusterfyMagics)  # Create without __init__
-            magic.shell = mock_shell
+            # Create magic instance properly
+            magic = ClusterfyMagics()
+            magic.shell = MagicMock()
 
             # Should print error message
             with patch("builtins.print") as mock_print:
@@ -382,31 +384,29 @@ class TestClusterfyMagics:
         """Test magic command creates widget with IPython."""
         with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", True):
             with patch("clustrix.notebook_magic.ClusterConfigWidget") as MockWidget:
-                with patch("clustrix.notebook_magic.display"):
-                    magic = ClusterfyMagics()
-                    magic.shell = MagicMock()
+                magic = ClusterfyMagics()
+                magic.shell = MagicMock()
 
-                    # Call magic
-                    magic.clusterfy("", "")
+                # Call magic
+                magic.clusterfy("", "")
 
-                    # Check widget was created and displayed
-                    MockWidget.assert_called_once()
-                    MockWidget.return_value.display.assert_called_once()
+                # Check widget was created and displayed
+                MockWidget.assert_called_once()
+                MockWidget.return_value.display.assert_called_once()
 
     def test_magic_executes_cell_code(self):
         """Test magic command executes code in cell."""
         with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", True):
             with patch("clustrix.notebook_magic.ClusterConfigWidget"):
-                with patch("clustrix.notebook_magic.display"):
-                    magic = ClusterfyMagics()
-                    magic.shell = MagicMock()
+                magic = ClusterfyMagics()
+                magic.shell = MagicMock()
 
-                    # Call magic with code
-                    test_code = "x = 42"
-                    magic.clusterfy("", test_code)
+                # Call magic with code
+                test_code = "x = 42"
+                magic.clusterfy("", test_code)
 
-                    # Check code was executed
-                    magic.shell.run_cell.assert_called_once_with(test_code)
+                # Check code was executed
+                magic.shell.run_cell.assert_called_once_with(test_code)
 
 
 class TestIPythonExtension:
