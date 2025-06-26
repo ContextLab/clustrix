@@ -34,23 +34,23 @@ class TestKubernetesJobSubmission:
             # Mock BatchV1Api
             mock_batch_api = Mock()
             mock_client.BatchV1Api.return_value = mock_batch_api
-            
+
             # Mock job creation response
             mock_job_response = Mock()
             mock_job_response.metadata.name = "test-job-123"
             mock_batch_api.create_namespaced_job.return_value = mock_job_response
-            
+
             # Mock job status
             mock_job_status = Mock()
             mock_job_status.status.succeeded = 1
             mock_job_status.status.failed = None
             mock_job_status.status.active = None
             mock_batch_api.read_namespaced_job.return_value = mock_job_status
-            
+
             # Mock CoreV1Api for pod logs
             mock_core_api = Mock()
             mock_client.CoreV1Api.return_value = mock_core_api
-            
+
             # Mock pod listing
             mock_pod = Mock()
             mock_pod.metadata.name = "test-pod-123"
@@ -59,21 +59,23 @@ class TestKubernetesJobSubmission:
             mock_pods_response = Mock()
             mock_pods_response.items = [mock_pod]
             mock_core_api.list_namespaced_pod.return_value = mock_pods_response
-            
+
             # Mock pod logs
             mock_core_api.read_namespaced_pod_log.return_value = "CLUSTRIX_RESULT:42"
-            
+
             yield mock_client
 
     @patch("kubernetes.config.load_kube_config")
-    def test_kubernetes_job_submission_success(self, mock_load_config, k8s_config, mock_k8s_client):
+    def test_kubernetes_job_submission_success(
+        self, mock_load_config, k8s_config, mock_k8s_client
+    ):
         """Test successful Kubernetes job submission."""
         executor = ClusterExecutor(k8s_config)
-        
+
         # Mock cloudpickle
         with patch("clustrix.executor.cloudpickle") as mock_cloudpickle:
             mock_cloudpickle.dumps.return_value = b"serialized_data"
-            
+
             func_data = {
                 "func": lambda x: x * 2,
                 "args": (21,),
@@ -81,24 +83,24 @@ class TestKubernetesJobSubmission:
                 "requirements": {},
             }
             job_config = {"cores": 2, "memory": "4Gi"}
-            
+
             job_id = executor._submit_k8s_job(func_data, job_config)
-            
+
             # Verify job was submitted
             assert job_id == "test-job-123"
-            
+
             # Verify Kubernetes API calls
             mock_k8s_client.BatchV1Api().create_namespaced_job.assert_called_once()
             call_args = mock_k8s_client.BatchV1Api().create_namespaced_job.call_args
-            
+
             # Check namespace
             assert call_args[1]["namespace"] == "test-namespace"
-            
+
             # Check job manifest
             job_manifest = call_args[1]["body"]
             assert job_manifest["kind"] == "Job"
             assert job_manifest["metadata"]["name"].startswith("clustrix-job-")
-            
+
             # Check container configuration
             container = job_manifest["spec"]["template"]["spec"]["containers"][0]
             assert container["name"] == "clustrix-worker"
@@ -110,7 +112,7 @@ class TestKubernetesJobSubmission:
         """Test collecting results from Kubernetes job."""
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
-            
+
             # Set up active job
             job_id = "test-job-123"
             executor.active_jobs[job_id] = {
@@ -118,7 +120,7 @@ class TestKubernetesJobSubmission:
                 "submit_time": time.time(),
                 "k8s_job": True,
             }
-            
+
             # Test result collection
             result = executor._get_k8s_result(job_id)
             assert result == 42
@@ -127,18 +129,18 @@ class TestKubernetesJobSubmission:
         """Test error handling in Kubernetes jobs."""
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
-            
+
             # Mock failed pod logs
             mock_k8s_client.CoreV1Api().read_namespaced_pod_log.return_value = (
                 "CLUSTRIX_ERROR:Division by zero\n"
                 "CLUSTRIX_TRACEBACK:Traceback (most recent call last):\n"
-                "  File \"<string>\", line 1, in <module>\n"
+                '  File "<string>", line 1, in <module>\n'
                 "ZeroDivisionError: division by zero"
             )
-            
+
             job_id = "failed-job-123"
             error_log = executor._get_k8s_error_log(job_id)
-            
+
             assert "CLUSTRIX_ERROR:Division by zero" in error_log
             assert "CLUSTRIX_TRACEBACK" in error_log
 
@@ -146,22 +148,26 @@ class TestKubernetesJobSubmission:
         """Test Kubernetes job status checking."""
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
-            
+
             job_id = "test-job-123"
             executor.active_jobs[job_id] = {
                 "status": "submitted",
                 "submit_time": time.time(),
                 "k8s_job": True,
             }
-            
+
             # Test completed status
             status = executor._check_job_status(job_id)
             assert status == "completed"
-            
+
             # Test failed status
-            mock_k8s_client.BatchV1Api().read_namespaced_job.return_value.status.succeeded = None
-            mock_k8s_client.BatchV1Api().read_namespaced_job.return_value.status.failed = 1
-            
+            mock_k8s_client.BatchV1Api().read_namespaced_job.return_value.status.succeeded = (
+                None
+            )
+            mock_k8s_client.BatchV1Api().read_namespaced_job.return_value.status.failed = (
+                1
+            )
+
             status = executor._check_job_status(job_id)
             assert status == "failed"
 
@@ -169,10 +175,10 @@ class TestKubernetesJobSubmission:
         """Test Kubernetes job cleanup."""
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
-            
+
             job_id = "cleanup-job-123"
             executor._cleanup_k8s_job(job_id)
-            
+
             # Verify deletion was called
             mock_k8s_client.BatchV1Api().delete_namespaced_job.assert_called_once_with(
                 name=job_id,
@@ -227,11 +233,11 @@ class TestCloudProviderIntegration:
             # Mock successful aws eks update-kubeconfig
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "Updated context"
-            
+
             with patch("kubernetes.config.load_kube_config"):
                 executor = ClusterExecutor(aws_config)
                 executor._setup_kubernetes()
-                
+
                 # Verify aws command was called
                 mock_run.assert_called()
                 call_args = mock_run.call_args[0][0]
@@ -247,11 +253,11 @@ class TestCloudProviderIntegration:
             # Mock successful az aks get-credentials
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "Merged credentials"
-            
+
             with patch("kubernetes.config.load_kube_config"):
                 executor = ClusterExecutor(azure_config)
                 executor._setup_kubernetes()
-                
+
                 # Verify az command was called
                 mock_run.assert_called()
                 call_args = mock_run.call_args[0][0]
@@ -267,11 +273,11 @@ class TestCloudProviderIntegration:
             # Mock successful gcloud container clusters get-credentials
             mock_run.return_value.returncode = 0
             mock_run.return_value.stdout = "Fetching cluster endpoint"
-            
+
             with patch("kubernetes.config.load_kube_config"):
                 executor = ClusterExecutor(gcp_config)
                 executor._setup_kubernetes()
-                
+
                 # Verify gcloud command was called
                 mock_run.assert_called()
                 call_args = mock_run.call_args[0][0]
@@ -287,7 +293,7 @@ class TestCloudProviderIntegration:
             cluster_type="kubernetes",
             cloud_auto_configure=False,
         )
-        
+
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(config)
             # Should not raise any cloud provider errors
@@ -299,7 +305,7 @@ class TestCloudProviderIntegration:
             # Mock failed aws command
             mock_run.return_value.returncode = 1
             mock_run.return_value.stderr = "Cluster not found"
-            
+
             with patch("kubernetes.config.load_kube_config"):
                 # Should not raise exception, should fallback to manual config
                 executor = ClusterExecutor(aws_config)
@@ -312,7 +318,7 @@ class TestKubernetesConfiguration:
     def test_kubernetes_config_defaults(self):
         """Test Kubernetes configuration defaults."""
         config = ClusterConfig(cluster_type="kubernetes")
-        
+
         assert config.k8s_namespace == "default"
         assert config.k8s_image == "python:3.11-slim"
         assert config.k8s_service_account is None
@@ -331,7 +337,7 @@ class TestKubernetesConfiguration:
             k8s_job_ttl_seconds=7200,
             k8s_backoff_limit=5,
         )
-        
+
         assert config.k8s_namespace == "custom-namespace"
         assert config.k8s_image == "python:3.12"
         assert config.k8s_service_account == "my-service-account"
@@ -342,7 +348,7 @@ class TestKubernetesConfiguration:
     def test_cloud_provider_config_defaults(self):
         """Test cloud provider configuration defaults."""
         config = ClusterConfig()
-        
+
         assert config.cloud_provider == "manual"
         assert config.cloud_region is None
         assert config.cloud_auto_configure is False
@@ -354,7 +360,7 @@ class TestKubernetesConfiguration:
             eks_cluster_name="my-cluster",
             aws_profile="production",
         )
-        
+
         assert config.eks_cluster_name == "my-cluster"
         assert config.aws_profile == "production"
 
@@ -366,7 +372,7 @@ class TestKubernetesConfiguration:
             azure_resource_group="my-rg",
             azure_subscription_id="my-subscription",
         )
-        
+
         assert config.aks_cluster_name == "my-cluster"
         assert config.azure_resource_group == "my-rg"
         assert config.azure_subscription_id == "my-subscription"
@@ -379,7 +385,7 @@ class TestKubernetesConfiguration:
             gcp_project_id="my-project",
             gcp_zone="us-central1-a",
         )
-        
+
         assert config.gke_cluster_name == "my-cluster"
         assert config.gcp_project_id == "my-project"
         assert config.gcp_zone == "us-central1-a"
@@ -391,52 +397,63 @@ class TestKubernetesErrorHandling:
     def test_kubernetes_import_error(self):
         """Test handling of missing kubernetes package."""
         config = ClusterConfig(cluster_type="kubernetes")
-        
-        with patch("kubernetes.client", side_effect=ImportError("No module named 'kubernetes'")):
+
+        with patch(
+            "kubernetes.client", side_effect=ImportError("No module named 'kubernetes'")
+        ):
             executor = ClusterExecutor(config)
-            
+
             with pytest.raises(ImportError, match="kubernetes package required"):
                 executor._setup_kubernetes()
 
     def test_kubernetes_job_submission_api_error(self):
         """Test handling of Kubernetes API errors during job submission."""
         config = ClusterConfig(cluster_type="kubernetes")
-        
+
         with patch("kubernetes.config.load_kube_config"):
             with patch("kubernetes.client") as mock_client:
                 # Mock API error
-                mock_client.BatchV1Api().create_namespaced_job.side_effect = Exception("API Error")
-                
+                mock_client.BatchV1Api().create_namespaced_job.side_effect = Exception(
+                    "API Error"
+                )
+
                 executor = ClusterExecutor(config)
                 executor._setup_kubernetes()
-                
-                func_data = {"func": lambda: 42, "args": (), "kwargs": {}, "requirements": {}}
+
+                func_data = {
+                    "func": lambda: 42,
+                    "args": (),
+                    "kwargs": {},
+                    "requirements": {},
+                }
                 job_config = {"cores": 1, "memory": "1Gi"}
-                
+
                 with pytest.raises(Exception, match="API Error"):
                     executor._submit_k8s_job(func_data, job_config)
 
     def test_kubernetes_result_collection_no_pods(self):
         """Test result collection when no pods are found."""
         config = ClusterConfig(cluster_type="kubernetes")
-        
+
         with patch("kubernetes.config.load_kube_config"):
             with patch("kubernetes.client") as mock_client:
                 # Mock empty pod list
                 mock_pods_response = Mock()
                 mock_pods_response.items = []
-                mock_client.CoreV1Api().list_namespaced_pod.return_value = mock_pods_response
-                
+                mock_client.CoreV1Api().list_namespaced_pod.return_value = (
+                    mock_pods_response
+                )
+
                 executor = ClusterExecutor(config)
                 executor._setup_kubernetes()
-                
+
                 with pytest.raises(RuntimeError, match="No successful pod found"):
                     executor._get_k8s_result("test-job")
 
     def test_kubernetes_log_collection_error(self):
         """Test error handling when log collection fails."""
         config = ClusterConfig(cluster_type="kubernetes")
-        
+
         with patch("kubernetes.config.load_kube_config"):
             with patch("kubernetes.client") as mock_client:
                 # Mock pod with log collection error
@@ -444,14 +461,18 @@ class TestKubernetesErrorHandling:
                 mock_pod.metadata.name = "test-pod"
                 mock_pods_response = Mock()
                 mock_pods_response.items = [mock_pod]
-                mock_client.CoreV1Api().list_namespaced_pod.return_value = mock_pods_response
-                
+                mock_client.CoreV1Api().list_namespaced_pod.return_value = (
+                    mock_pods_response
+                )
+
                 # Mock log collection failure
-                mock_client.CoreV1Api().read_namespaced_pod_log.side_effect = Exception("Log error")
-                
+                mock_client.CoreV1Api().read_namespaced_pod_log.side_effect = Exception(
+                    "Log error"
+                )
+
                 executor = ClusterExecutor(config)
                 executor._setup_kubernetes()
-                
+
                 error_log = executor._get_k8s_error_log("test-job")
                 assert "Failed to get logs - Log error" in error_log
 
@@ -468,25 +489,25 @@ class TestEndToEndKubernetesWorkflow:
             k8s_namespace="test",
             cleanup_on_success=True,
         )
-        
+
         # Set up mocks for successful workflow
         mock_batch_api = Mock()
         mock_core_api = Mock()
         mock_client.BatchV1Api.return_value = mock_batch_api
         mock_client.CoreV1Api.return_value = mock_core_api
-        
+
         # Mock job creation
         mock_job_response = Mock()
         mock_job_response.metadata.name = "clustrix-job-123"
         mock_batch_api.create_namespaced_job.return_value = mock_job_response
-        
+
         # Mock job status (completed)
         mock_job_status = Mock()
         mock_job_status.status.succeeded = 1
         mock_job_status.status.failed = None
         mock_job_status.status.active = None
         mock_batch_api.read_namespaced_job.return_value = mock_job_status
-        
+
         # Mock pod listing and logs
         mock_pod = Mock()
         mock_pod.metadata.name = "test-pod"
@@ -495,10 +516,12 @@ class TestEndToEndKubernetesWorkflow:
         mock_pods_response = Mock()
         mock_pods_response.items = [mock_pod]
         mock_core_api.list_namespaced_pod.return_value = mock_pods_response
-        mock_core_api.read_namespaced_pod_log.return_value = "CLUSTRIX_RESULT:Hello World"
-        
+        mock_core_api.read_namespaced_pod_log.return_value = (
+            "CLUSTRIX_RESULT:Hello World"
+        )
+
         executor = ClusterExecutor(config)
-        
+
         # Test complete workflow
         func_data = {
             "func": lambda: "Hello World",
@@ -507,19 +530,19 @@ class TestEndToEndKubernetesWorkflow:
             "requirements": {},
         }
         job_config = {"cores": 1, "memory": "1Gi"}
-        
+
         # Submit job
         job_id = executor._submit_k8s_job(func_data, job_config)
         assert job_id == "clustrix-job-123"
-        
+
         # Check status
         status = executor._check_job_status(job_id)
         assert status == "completed"
-        
+
         # Collect result
         result = executor._get_k8s_result(job_id)
         assert result == "Hello World"
-        
+
         # Verify cleanup was called
         executor._cleanup_k8s_job(job_id)
         mock_batch_api.delete_namespaced_job.assert_called_once()

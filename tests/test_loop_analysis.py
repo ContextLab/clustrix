@@ -22,7 +22,7 @@ class TestLoopInfo:
             iterable="range(10)",
             range_info={"start": 0, "stop": 10, "step": 1},
         )
-        
+
         assert loop_info.loop_type == "for"
         assert loop_info.variable == "i"
         assert loop_info.iterable == "range(10)"
@@ -39,7 +39,7 @@ class TestLoopInfo:
             iterable="items",
             dependencies={"items", "config"},
         )
-        
+
         assert loop_info.dependencies == {"items", "config"}
         assert loop_info.is_parallelizable is False  # Has dependencies
 
@@ -52,9 +52,9 @@ class TestLoopInfo:
             range_info={"start": 0, "stop": 5, "step": 1},
             nested_level=1,
         )
-        
+
         result = loop_info.to_dict()
-        
+
         assert result["variable"] == "i"
         assert result["iterable"] == "range(5)"
         assert result["range_info"] == {"start": 0, "stop": 5, "step": 1}
@@ -64,15 +64,20 @@ class TestLoopInfo:
     def test_assess_parallelizability_with_dependencies(self):
         """Test parallelizability assessment with dependencies."""
         # With dependencies - not parallelizable
-        loop_info = LoopInfo(loop_type="for", variable="i", iterable="range(10)", dependencies={"shared_var"})
+        loop_info = LoopInfo(
+            loop_type="for",
+            variable="i",
+            iterable="range(10)",
+            dependencies={"shared_var"},
+        )
         assert loop_info.is_parallelizable is False
-        
+
         # No dependencies and range info - should be parallelizable
         loop_info = LoopInfo(
-            loop_type="for", 
-            variable="i", 
+            loop_type="for",
+            variable="i",
             iterable="range(10)",
-            range_info={"start": 0, "stop": 10, "step": 1}
+            range_info={"start": 0, "stop": 10, "step": 1},
         )
         assert loop_info.is_parallelizable is True
 
@@ -82,6 +87,7 @@ class TestLoopDetection:
 
     def test_detect_for_loop(self):
         """Test detecting for loops in function."""
+
         def function_with_for_loop():
             results = []
             for i in range(10):
@@ -93,11 +99,12 @@ class TestLoopDetection:
         # Note: Loop detection may vary based on implementation
         # Check that if loops are detected, they have expected attributes
         for loop in loops:
-            assert hasattr(loop, 'variable')
-            assert hasattr(loop, 'iterable')
+            assert hasattr(loop, "variable")
+            assert hasattr(loop, "iterable")
 
     def test_detect_while_loop(self):
         """Test detecting while loops in function."""
+
         def function_with_while_loop():
             i = 0
             result = []
@@ -111,6 +118,7 @@ class TestLoopDetection:
 
     def test_detect_nested_loops(self):
         """Test detecting nested loops."""
+
         def function_with_nested_loops():
             results = []
             for i in range(5):
@@ -123,6 +131,7 @@ class TestLoopDetection:
 
     def test_detect_no_loops(self):
         """Test function with no loops."""
+
         def function_without_loops():
             return 42
 
@@ -143,10 +152,11 @@ class TestParallelizableLoopFinding:
 
     def test_find_parallelizable_range_loop(self):
         """Test finding parallelizable range-based loop."""
+
         def range_loop_function():
             results = []
             for i in range(100):
-                results.append(i ** 2)
+                results.append(i**2)
             return results
 
         loops = find_parallelizable_loops(range_loop_function, (), {})
@@ -154,6 +164,7 @@ class TestParallelizableLoopFinding:
 
     def test_find_parallelizable_with_arguments(self):
         """Test finding loops with function arguments."""
+
         def parameterized_function(n):
             results = []
             for i in range(n):
@@ -165,6 +176,7 @@ class TestParallelizableLoopFinding:
 
     def test_find_loops_with_dependencies(self):
         """Test finding loops that have dependencies."""
+
         def dependent_loop_function():
             shared_counter = 0
             results = []
@@ -178,6 +190,7 @@ class TestParallelizableLoopFinding:
 
     def test_find_loops_no_parallelizable(self):
         """Test function with no parallelizable loops."""
+
         def non_parallelizable_function():
             result = 0
             for i in range(10):
@@ -199,7 +212,7 @@ class TestWorkSizeEstimation:
             iterable="range(1000)",
             range_info={"start": 0, "stop": 1000, "step": 1},
         )
-        
+
         work_size = estimate_work_size(loop_info)
         assert work_size == 1000
 
@@ -211,7 +224,7 @@ class TestWorkSizeEstimation:
             iterable="range(0, 100, 2)",
             range_info={"start": 0, "stop": 100, "step": 2},
         )
-        
+
         work_size = estimate_work_size(loop_info)
         assert work_size == 50  # (100 - 0) // 2
 
@@ -222,7 +235,7 @@ class TestWorkSizeEstimation:
             variable="item",
             iterable="items",
         )
-        
+
         work_size = estimate_work_size(loop_info)
         assert work_size == 100  # Default estimate for non-range loops
 
@@ -232,6 +245,7 @@ class TestBackwardCompatibility:
 
     def test_legacy_detect_loops_function(self):
         """Test the legacy detect_loops function."""
+
         def simple_loop_function():
             for i in range(10):
                 pass
@@ -246,6 +260,7 @@ class TestEdgeCases:
 
     def test_empty_function(self):
         """Test analyzing empty function."""
+
         def empty_function():
             pass
 
@@ -254,6 +269,7 @@ class TestEdgeCases:
 
     def test_function_with_exception(self):
         """Test analyzing function that raises exception."""
+
         def exception_function():
             for i in range(10):
                 if i == 5:
@@ -265,10 +281,11 @@ class TestEdgeCases:
 
     def test_complex_loop_conditions(self):
         """Test loops with complex conditions."""
+
         def complex_loop_function(items):
             results = []
             for item in items:
-                if hasattr(item, 'value'):
+                if hasattr(item, "value"):
                     results.append(item.value * 2)
             return results
 
@@ -277,16 +294,18 @@ class TestEdgeCases:
 
     def test_generator_expression(self):
         """Test function with generator expressions."""
+
         def generator_function():
-            return sum(x ** 2 for x in range(100))
+            return sum(x**2 for x in range(100))
 
         loops = find_parallelizable_loops(generator_function, (), {})
         assert isinstance(loops, list)
 
     def test_list_comprehension(self):
         """Test function with list comprehensions."""
+
         def list_comp_function():
-            return [x ** 2 for x in range(100)]
+            return [x**2 for x in range(100)]
 
         loops = find_parallelizable_loops(list_comp_function, (), {})
         assert isinstance(loops, list)
@@ -297,13 +316,15 @@ class TestIntegrationWithRealFunctions:
 
     def test_mathematical_computation_loop(self):
         """Test loop detection in mathematical computation."""
+
         def monte_carlo_pi(n_samples):
             import random
+
             inside_circle = 0
             for _ in range(n_samples):
                 x = random.random()
                 y = random.random()
-                if x*x + y*y <= 1:
+                if x * x + y * y <= 1:
                     inside_circle += 1
             return 4 * inside_circle / n_samples
 
@@ -312,6 +333,7 @@ class TestIntegrationWithRealFunctions:
 
     def test_data_processing_loop(self):
         """Test loop detection in data processing function."""
+
         def process_data(data):
             results = []
             for item in data:
@@ -324,6 +346,7 @@ class TestIntegrationWithRealFunctions:
 
     def test_machine_learning_loop(self):
         """Test loop detection in ML-style function."""
+
         def train_epochs(data, epochs):
             loss = 0
             for epoch in range(epochs):

@@ -100,7 +100,7 @@ class TestEnvironmentInfo:
         # Should contain specific packages from mock output
         assert requirements["package1"] == "1.0.0"
         assert requirements["package2"] == "2.0.0"
-        assert requirements["numpy"] == "1.21.5" 
+        assert requirements["numpy"] == "1.21.5"
         # Should not include editable packages (those starting with -e)
         assert "-e" not in str(requirements)
         # Verify subprocess.run was called
@@ -379,35 +379,39 @@ class TestPackageManager:
     def test_is_uv_available_true(self, mock_run):
         """Test uv availability check when uv is available."""
         mock_run.return_value = Mock(returncode=0)
-        
+
         from clustrix.utils import is_uv_available
+
         assert is_uv_available() is True
-        
+
         mock_run.assert_called_once_with(
             ["uv", "--version"], capture_output=True, text=True, timeout=10
         )
 
-    @patch("clustrix.utils.subprocess.run")  
+    @patch("clustrix.utils.subprocess.run")
     def test_is_uv_available_false(self, mock_run):
         """Test uv availability check when uv is not available."""
         mock_run.side_effect = FileNotFoundError()
-        
+
         from clustrix.utils import is_uv_available
+
         assert is_uv_available() is False
 
     def test_get_package_manager_command_pip(self):
         """Test package manager command selection for pip."""
         from clustrix.utils import get_package_manager_command
+
         config = ClusterConfig(package_manager="pip")
-        
+
         result = get_package_manager_command(config)
         assert result == "pip"
 
     def test_get_package_manager_command_uv(self):
         """Test package manager command selection for uv."""
         from clustrix.utils import get_package_manager_command
+
         config = ClusterConfig(package_manager="uv")
-        
+
         result = get_package_manager_command(config)
         assert result == "uv pip"
 
@@ -416,8 +420,9 @@ class TestPackageManager:
         """Test auto package manager selection when uv is available."""
         mock_uv_available.return_value = True
         from clustrix.utils import get_package_manager_command
+
         config = ClusterConfig(package_manager="auto")
-        
+
         result = get_package_manager_command(config)
         assert result == "uv pip"
 
@@ -426,7 +431,8 @@ class TestPackageManager:
         """Test auto package manager selection when uv is not available."""
         mock_uv_available.return_value = False
         from clustrix.utils import get_package_manager_command
+
         config = ClusterConfig(package_manager="auto")
-        
+
         result = get_package_manager_command(config)
         assert result == "pip"

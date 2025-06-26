@@ -95,7 +95,9 @@ requests==2.25.1
 
     @patch("subprocess.run")
     @patch("importlib.import_module")
-    def test_get_environment_requirements_essential_fallback(self, mock_import, mock_run):
+    def test_get_environment_requirements_essential_fallback(
+        self, mock_import, mock_run
+    ):
         """Test fallback to essential packages when pip fails."""
         # Mock pip command failure
         mock_result = Mock()
@@ -247,7 +249,11 @@ class TestRemoteEnvironmentSetup:
         mock_stdout = Mock()
         mock_stderr = Mock()
         mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_ssh_client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+        mock_ssh_client.exec_command.return_value = (
+            mock_stdin,
+            mock_stdout,
+            mock_stderr,
+        )
 
         requirements = {"numpy": "1.21.0", "pandas": "1.3.0"}
         config = ClusterConfig(package_manager="uv")
@@ -283,7 +289,11 @@ class TestRemoteEnvironmentSetup:
         mock_stdout = Mock()
         mock_stderr = Mock()
         mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_ssh_client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+        mock_ssh_client.exec_command.return_value = (
+            mock_stdin,
+            mock_stdout,
+            mock_stderr,
+        )
 
         requirements = {"requests": "2.25.1"}
         config = ClusterConfig(package_manager="pip")
@@ -316,9 +326,15 @@ class TestRemoteEnvironmentSetup:
         mock_stdin = Mock()
         mock_stdout = Mock()
         mock_stderr = Mock()
-        mock_stderr.read.return_value.decode.return_value = "Package installation failed"
+        mock_stderr.read.return_value.decode.return_value = (
+            "Package installation failed"
+        )
         mock_stdout.channel.recv_exit_status.return_value = 1  # Failure
-        mock_ssh_client.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+        mock_ssh_client.exec_command.return_value = (
+            mock_stdin,
+            mock_stdout,
+            mock_stderr,
+        )
 
         requirements = {"nonexistent-package": "1.0.0"}
         config = ClusterConfig()
