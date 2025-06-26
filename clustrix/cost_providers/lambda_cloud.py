@@ -255,4 +255,3 @@ class LambdaCostMonitor(BaseCostMonitor):
             "monthly_cost_24x7": hourly_rate * 24 * 30,  # 24/7 usage
             "instance_type": instance_type,
         }
-

@@ -379,4 +379,3 @@ def get_pricing_info(provider: str) -> Optional[Dict[str, float]]:
     if monitor:
         return monitor.get_pricing_info()
     return None
-

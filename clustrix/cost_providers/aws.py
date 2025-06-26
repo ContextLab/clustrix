@@ -306,4 +306,3 @@ class AWSCostMonitor(BaseCostMonitor):
         # - Reserved instance coverage
         # For now, return a placeholder
         return 75.0
-

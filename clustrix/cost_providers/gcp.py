@@ -366,4 +366,3 @@ class GCPCostMonitor(BaseCostMonitor):
         # - Committed use discount opportunities
         # For now, return a placeholder
         return 78.0
-

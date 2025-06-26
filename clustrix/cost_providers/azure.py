@@ -339,4 +339,3 @@ class AzureCostMonitor(BaseCostMonitor):
         # - Auto-shutdown configurations
         # For now, return a placeholder
         return 72.0
-
