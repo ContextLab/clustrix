@@ -90,26 +90,26 @@ class ClusterConfig:
         """Save this configuration instance to a file."""
         config_path = Path(config_path)
         config_data = asdict(self)
-        
+
         with open(config_path, "w") as f:
             if config_path.suffix.lower() in [".yml", ".yaml"]:
                 yaml.dump(config_data, f, default_flow_style=False)
             else:
                 json.dump(config_data, f, indent=2)
-    
+
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
         """Load configuration from a file and return a new instance."""
         config_path = Path(config_path)
         if not config_path.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
-        
+
         with open(config_path, "r") as f:
             if config_path.suffix.lower() in [".yml", ".yaml"]:
                 config_data = yaml.safe_load(f)
             else:
                 config_data = json.load(f)
-        
+
         return cls(**config_data)
 
 
