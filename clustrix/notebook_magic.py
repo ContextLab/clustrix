@@ -8,6 +8,7 @@ widget for managing cluster configurations in Jupyter notebooks.
 import json
 import yaml
 from pathlib import Path
+
 # Type hints would be used if adding type annotations in the future
 import logging
 

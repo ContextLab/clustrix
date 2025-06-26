@@ -15,6 +15,7 @@ from clustrix.notebook_magic import (
     ClusterfyMagics,
     load_ipython_extension,
 )
+
 # Import removed as it's not used directly in tests
 
 
