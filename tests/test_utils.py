@@ -88,7 +88,7 @@ class TestEnvironmentInfo:
 
     @patch("subprocess.run")
     def test_get_environment_requirements(self, mock_run):
-        """Test getting environment requirements."""
+        """Test getting environment requirements using pip list --format=freeze."""
         mock_run.return_value = Mock(
             stdout="package1==1.0.0\npackage2==2.0.0\nnumpy==1.21.5\n-e /path/to/editable\n",
             returncode=0,
@@ -100,13 +100,15 @@ class TestEnvironmentInfo:
         # Should contain specific packages from mock output
         assert requirements["package1"] == "1.0.0"
         assert requirements["package2"] == "2.0.0"
-        assert requirements["numpy"] == "1.21.5"
+        assert requirements["numpy"] == "1.21.5" 
         # Should not include editable packages (those starting with -e)
         assert "-e" not in str(requirements)
+        # Verify subprocess.run was called
+        mock_run.assert_called_once()
 
     @patch("subprocess.run")
     def test_get_environment_requirements_failure(self, mock_run):
-        """Test environment requirements when pip freeze fails."""
+        """Test environment requirements when pip list --format=freeze fails."""
         mock_run.return_value = Mock(stdout="", returncode=1)  # Failure
 
         requirements = get_environment_requirements()
@@ -116,7 +118,7 @@ class TestEnvironmentInfo:
 
     @patch("subprocess.run")
     def test_get_environment_requirements_empty_output(self, mock_run):
-        """Test environment requirements with empty pip freeze output."""
+        """Test environment requirements with empty pip list output."""
         mock_run.return_value = Mock(stdout="", returncode=0)
 
         requirements = get_environment_requirements()

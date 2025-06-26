@@ -182,9 +182,9 @@ def get_environment_requirements() -> Dict[str, str]:
     requirements = {}
 
     try:
-        # Try to get pip freeze output
+        # Use pip list --format=freeze to capture all packages including conda-installed ones
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True
+            [sys.executable, "-m", "pip", "list", "--format=freeze"], capture_output=True, text=True
         )
 
         if result.returncode == 0:
@@ -212,9 +212,9 @@ def get_environment_requirements() -> Dict[str, str]:
 def get_environment_info() -> str:
     """Get current Python environment information as string (for compatibility)."""
     try:
-        # Try to get pip freeze output
+        # Use pip list --format=freeze to capture all packages including conda-installed ones
         result = subprocess.run(
-            [sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True
+            [sys.executable, "-m", "pip", "list", "--format=freeze"], capture_output=True, text=True
         )
 
         if result.returncode == 0:
