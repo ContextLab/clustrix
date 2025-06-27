@@ -14,10 +14,16 @@ import logging
 
 try:
     from IPython.core.magic import Magics, magics_class, cell_magic
-    from IPython.display import display, HTML
-    import ipywidgets as widgets
+    from IPython.display import display as _display, HTML as _HTML
+    import ipywidgets as _widgets
 
     IPYTHON_AVAILABLE = True
+
+    # Make functions available at module level for testing
+    display = _display
+    HTML = _HTML
+    widgets = _widgets
+
 except ImportError:
     IPYTHON_AVAILABLE = False
 
