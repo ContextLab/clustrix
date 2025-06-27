@@ -36,15 +36,19 @@ __all__ = [
     "CostReport",
 ]
 
-# Auto-register IPython magic command if in notebook environment
+# Auto-register IPython magic command and display widget if in notebook environment
 try:
     from IPython import get_ipython
 
     ipython = get_ipython()
     if ipython is not None:
-        from .notebook_magic import load_ipython_extension
+        from .notebook_magic import load_ipython_extension, auto_display_on_import
 
+        # Load the magic command
         load_ipython_extension(ipython)
+
+        # Auto-display widget if in notebook
+        auto_display_on_import()
 except (ImportError, AttributeError):
     # Not in IPython/Jupyter environment
     pass

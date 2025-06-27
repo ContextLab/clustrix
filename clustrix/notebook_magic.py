@@ -1,29 +1,28 @@
 """
 IPython magic command and widget for Clustrix configuration management.
-
 This module provides a %%clusterfy magic command that creates an interactive
-widget for managing cluster configurations in Jupyter notebooks.
+widget for managing cluster configurations in Jupyter notebooks. The widget
+also displays automatically when clustrix is imported in a notebook environment.
 """
 
 import json
 import yaml
+import re
 from pathlib import Path
-
-# Type hints would be used if adding type annotations in the future
+from typing import Dict, List, Optional, Any
 import logging
 
 try:
     from IPython.core.magic import Magics, magics_class, cell_magic
     from IPython.display import display as _display, HTML as _HTML
     import ipywidgets as _widgets
+    from IPython import get_ipython
 
     IPYTHON_AVAILABLE = True
-
     # Make functions available at module level for testing
     display = _display
     HTML = _HTML
     widgets = _widgets
-
 except ImportError:
     IPYTHON_AVAILABLE = False
 
@@ -36,7 +35,6 @@ except ImportError:
 
     def cell_magic(name):
         def decorator(func):
-            # When IPython isn't available, return the original function unchanged
             return func
 
         return decorator
@@ -44,6 +42,9 @@ except ImportError:
     def display(*args, **kwargs):
         """Placeholder display function."""
         pass
+
+    def get_ipython():
+        return None
 
     class HTML:  # type: ignore
         """Placeholder HTML class."""
@@ -55,23 +56,30 @@ except ImportError:
     class widgets:  # type: ignore
         class Dropdown:
             def __init__(self, *args, **kwargs):
+                self.value = kwargs.get("value")
+                self.options = kwargs.get("options", [])
+
+            def observe(self, *args, **kwargs):
                 pass
 
         class Button:
             def __init__(self, *args, **kwargs):
                 pass
 
+            def on_click(self, *args, **kwargs):
+                pass
+
         class Text:
             def __init__(self, *args, **kwargs):
-                pass
+                self.value = kwargs.get("value", "")
 
         class IntText:
             def __init__(self, *args, **kwargs):
-                pass
+                self.value = kwargs.get("value", 0)
 
         class Textarea:
             def __init__(self, *args, **kwargs):
-                pass
+                self.value = kwargs.get("value", "")
 
         class Output:
             def __init__(self, *args, **kwargs):
@@ -80,503 +88,746 @@ except ImportError:
             def clear_output(self, *args, **kwargs):
                 pass
 
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
         class VBox:
             def __init__(self, *args, **kwargs):
-                pass
+                self.children = args[0] if args else []
 
         class HBox:
             def __init__(self, *args, **kwargs):
-                pass
+                self.children = args[0] if args else []
 
         class HTML:
             def __init__(self, *args, **kwargs):
-                pass
+                self.value = args[0] if args else ""
 
         class Layout:
             def __init__(self, *args, **kwargs):
+                pass
+
+        class Accordion:
+            def __init__(self, *args, **kwargs):
+                self.children = args[0] if args else []
+                self.selected_index = None
+
+            def set_title(self, *args, **kwargs):
                 pass
 
 
 from .config import configure, get_config
 
 logger = logging.getLogger(__name__)
-
-
 # Default cluster configurations
 DEFAULT_CONFIGS = {
-    "local_dev": {
+    "local": {
         "name": "Local Development",
         "cluster_type": "local",
         "default_cores": 4,
         "default_memory": "8GB",
         "description": "Local machine for development and testing",
     },
-    "aws_gpu_small": {
-        "name": "AWS GPU Small",
-        "cluster_type": "ssh",
-        "cluster_host": "aws-instance-ip",
-        "username": "ubuntu",
-        "key_file": "~/.ssh/aws_key.pem",
-        "default_cores": 8,
-        "default_memory": "60GB",
-        "description": "AWS p3.2xlarge instance (1 V100 GPU)",
-    },
-    "aws_gpu_large": {
-        "name": "AWS GPU Large",
-        "cluster_type": "ssh",
-        "cluster_host": "aws-instance-ip",
-        "username": "ubuntu",
-        "key_file": "~/.ssh/aws_key.pem",
-        "default_cores": 32,
-        "default_memory": "244GB",
-        "description": "AWS p3.8xlarge instance (4 V100 GPUs)",
-    },
-    "gcp_cpu": {
-        "name": "GCP CPU Instance",
-        "cluster_type": "ssh",
-        "cluster_host": "gcp-instance-ip",
-        "username": "clustrix",
-        "key_file": "~/.ssh/gcp_key",
-        "default_cores": 16,
-        "default_memory": "64GB",
-        "description": "GCP n2-standard-16 instance",
-    },
-    "azure_gpu": {
-        "name": "Azure GPU",
-        "cluster_type": "ssh",
-        "cluster_host": "azure-instance-ip",
-        "username": "azureuser",
-        "key_file": "~/.ssh/azure_key",
-        "default_cores": 12,
-        "default_memory": "224GB",
-        "description": "Azure NC12s_v3 instance (2 V100 GPUs)",
-    },
-    "slurm_hpc": {
-        "name": "SLURM HPC Cluster",
-        "cluster_type": "slurm",
-        "cluster_host": "hpc.university.edu",
-        "username": "username",
-        "key_file": "~/.ssh/id_rsa",
-        "remote_work_dir": "/scratch/$USER/clustrix",
-        "default_cores": 16,
-        "default_memory": "64GB",
-        "default_time": "04:00:00",
-        "description": "University HPC cluster with SLURM",
-    },
-    "kubernetes": {
-        "name": "Kubernetes Cluster",
-        "cluster_type": "kubernetes",
-        "kube_namespace": "default",
-        "default_cores": 4,
+    "local_multicore": {
+        "name": "Local Multi-core",
+        "cluster_type": "local",
+        "default_cores": -1,  # Use all available cores
         "default_memory": "16GB",
-        "description": "Kubernetes cluster for containerized workloads",
+        "description": "Local machine using all available cores",
     },
 }
 
 
-class ClusterConfigWidget:
-    """Interactive widget for managing Clustrix configurations."""
+def detect_config_files(search_dirs: Optional[List[str]] = None) -> List[Path]:
+    """Detect configuration files in standard locations."""
+    if search_dirs is None:
+        search_dirs = [
+            ".",  # Current directory
+            "~/.clustrix",  # User config directory
+            "/etc/clustrix",  # System config directory
+        ]
+    config_files = []
+    config_names = ["clustrix.yml", "clustrix.yaml", "config.yml", "config.yaml"]
+    for dir_path in search_dirs:
+        dir_path = Path(dir_path).expanduser()
+        if dir_path.exists() and dir_path.is_dir():
+            for config_name in config_names:
+                config_path = dir_path / config_name
+                if config_path.exists() and config_path.is_file():
+                    config_files.append(config_path)
+    return config_files
 
-    def __init__(self):
+
+def load_config_from_file(file_path: Path) -> Dict[str, Any]:
+    """Load configuration from a YAML or JSON file."""
+    try:
+        with open(file_path, "r") as f:
+            if file_path.suffix.lower() in [".yml", ".yaml"]:
+                return yaml.safe_load(f) or {}
+            else:
+                return json.load(f)
+    except Exception as e:
+        logger.warning(f"Failed to load config from {file_path}: {e}")
+        return {}
+
+
+def validate_ip_address(ip: str) -> bool:
+    """Validate IP address format."""
+    if not ip:
+        return False
+    # IPv4 validation
+    parts = ip.split(".")
+    if len(parts) == 4:
+        try:
+            for part in parts:
+                num = int(part)
+                if not (0 <= num <= 255):
+                    return False
+            return True
+        except ValueError:
+            return False
+    # Simple IPv6 pattern check
+    ipv6_pattern = re.compile(r"^([0-9a-fA-F]{0,4}:){7}[0-9a-fA-F]{0,4}$")
+    return bool(ipv6_pattern.match(ip))
+
+
+def validate_hostname(hostname: str) -> bool:
+    """Validate hostname format."""
+    if not hostname or len(hostname) > 255:
+        return False
+    # Hostname regex
+    hostname_pattern = re.compile(
+        r"^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?"
+        r"(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$"
+    )
+    return bool(hostname_pattern.match(hostname))
+
+
+class EnhancedClusterConfigWidget:
+    """Enhanced interactive widget for managing Clustrix configurations."""
+
+    def __init__(self, auto_display: bool = False):
         if not IPYTHON_AVAILABLE:
             raise ImportError(
                 "IPython and ipywidgets are required for the widget interface"
             )
-
         self.configs = {}
         self.current_config_name = None
-
-        # Load default configurations
-        self._load_defaults()
-
+        self.config_files = []
+        self.config_file_map = {}  # Maps config names to their source files
+        self.auto_display = auto_display
+        # Initialize configurations
+        self._initialize_configs()
         # Create widget components
         self._create_widgets()
 
-    def _load_defaults(self):
-        """Load default configurations."""
+    def _initialize_configs(self):
+        """Initialize configurations from defaults and detected files."""
+        # Start with default configurations
         self.configs = DEFAULT_CONFIGS.copy()
+        # Detect and load configuration files
+        self.config_files = detect_config_files()
+        for config_file in self.config_files:
+            file_configs = load_config_from_file(config_file)
+            if isinstance(file_configs, dict):
+                # Handle both single config and multiple configs in file
+                if "cluster_type" in file_configs:
+                    # Single config - use filename as config name
+                    config_name = config_file.stem
+                    self.configs[config_name] = file_configs
+                    self.config_file_map[config_name] = config_file
+                else:
+                    # Multiple configs
+                    for name, config in file_configs.items():
+                        if isinstance(config, dict):
+                            self.configs[name] = config
+                            self.config_file_map[name] = config_file
 
     def _create_widgets(self):
-        """Create the widget interface."""
-        # Style
+        """Create the enhanced widget interface."""
+        # Styles and layouts
         style = {"description_width": "120px"}
-        layout = widgets.Layout(width="100%")
-
-        # Configuration selector
-        self.config_selector = widgets.Dropdown(
+        full_layout = widgets.Layout(width="100%")
+        # Configuration selector with add button
+        self.config_dropdown = widgets.Dropdown(
             options=list(self.configs.keys()),
             value=list(self.configs.keys())[0] if self.configs else None,
-            description="Configuration:",
+            description="Active Config:",
             style=style,
-            layout=layout,
+            layout=widgets.Layout(width="70%"),
         )
-        self.config_selector.observe(self._on_config_select, names="value")
-
-        # Buttons
-        self.new_button = widgets.Button(
-            description="New Config", button_style="success", icon="plus"
+        self.config_dropdown.observe(self._on_config_select, names="value")
+        self.add_config_btn = widgets.Button(
+            description="+",
+            tooltip="Add new configuration",
+            layout=widgets.Layout(width="40px"),
+            button_style="success",
         )
-        self.new_button.on_click(self._on_new_config)
-
-        self.delete_button = widgets.Button(
-            description="Delete Config", button_style="danger", icon="trash"
-        )
-        self.delete_button.on_click(self._on_delete_config)
-
-        self.apply_button = widgets.Button(
-            description="Apply Config", button_style="primary", icon="check"
-        )
-        self.apply_button.on_click(self._on_apply_config)
-
-        # Configuration fields
-        self.name_input = widgets.Text(description="Name:", style=style, layout=layout)
-
+        self.add_config_btn.on_click(self._on_add_config)
+        # Cluster type dropdown
         self.cluster_type = widgets.Dropdown(
             options=["local", "ssh", "slurm", "pbs", "sge", "kubernetes"],
             description="Cluster Type:",
             style=style,
-            layout=layout,
+            layout=full_layout,
         )
         self.cluster_type.observe(self._on_cluster_type_change, names="value")
-
-        self.cluster_host = widgets.Text(
-            description="Host:",
-            placeholder="hostname or IP address",
+        # Dynamic fields container
+        self._create_dynamic_fields()
+        # Configuration name field
+        self.config_name = widgets.Text(
+            description="Config Name:",
+            placeholder="Enter configuration name",
             style=style,
-            layout=layout,
+            layout=full_layout,
         )
-
-        self.username = widgets.Text(
-            description="Username:", style=style, layout=layout
+        # Advanced options
+        self._create_advanced_options()
+        # Save configuration section
+        self._create_save_section()
+        # Action buttons
+        self.apply_btn = widgets.Button(
+            description="Apply Configuration",
+            button_style="primary",
+            icon="check",
+            layout=widgets.Layout(width="auto"),
         )
-
-        self.key_file = widgets.Text(
-            description="SSH Key:",
-            placeholder="~/.ssh/id_rsa",
-            style=style,
-            layout=layout,
+        self.apply_btn.on_click(self._on_apply_config)
+        self.delete_btn = widgets.Button(
+            description="Delete",
+            button_style="danger",
+            icon="trash",
+            layout=widgets.Layout(width="auto"),
         )
-
-        self.remote_work_dir = widgets.Text(
-            description="Work Dir:",
-            placeholder="/tmp/clustrix",
-            style=style,
-            layout=layout,
-        )
-
-        self.default_cores = widgets.IntText(
-            value=4, description="Default Cores:", style=style, layout=layout
-        )
-
-        self.default_memory = widgets.Text(
-            value="8GB", description="Default Memory:", style=style, layout=layout
-        )
-
-        self.default_time = widgets.Text(
-            value="01:00:00", description="Default Time:", style=style, layout=layout
-        )
-
-        self.kube_namespace = widgets.Text(
-            value="default", description="K8s Namespace:", style=style, layout=layout
-        )
-
-        self.description = widgets.Textarea(
-            description="Description:", rows=3, style=style, layout=layout
-        )
-
-        # Save/Load section
-        self.file_path = widgets.Text(
-            value="cluster_configs.yaml",
-            description="File Path:",
-            style=style,
-            layout=widgets.Layout(width="70%"),
-        )
-
-        self.save_button = widgets.Button(
-            description="Save Configs", button_style="info", icon="save"
-        )
-        self.save_button.on_click(self._on_save_configs)
-
-        self.load_button = widgets.Button(
-            description="Load Configs", button_style="info", icon="folder-open"
-        )
-        self.load_button.on_click(self._on_load_configs)
-
+        self.delete_btn.on_click(self._on_delete_config)
         # Status output
         self.status_output = widgets.Output()
-
         # Load initial configuration
         if self.configs:
             self._load_config_to_widgets(list(self.configs.keys())[0])
 
+    def _create_dynamic_fields(self):
+        """Create dynamic fields that change based on cluster type."""
+        style = {"description_width": "120px"}
+        full_layout = widgets.Layout(width="100%")
+        half_layout = widgets.Layout(width="48%")
+        # Host/Address field with validation
+        self.host_field = widgets.Text(
+            description="Host/Address:",
+            placeholder="hostname or IP address",
+            style=style,
+            layout=full_layout,
+        )
+        self.host_field.observe(self._validate_host, names="value")
+        # Username field
+        self.username_field = widgets.Text(
+            description="Username:",
+            placeholder="remote username",
+            style=style,
+            layout=half_layout,
+        )
+        # SSH Key field
+        self.ssh_key_field = widgets.Text(
+            description="SSH Key:",
+            placeholder="~/.ssh/id_rsa",
+            style=style,
+            layout=half_layout,
+        )
+        # Port field
+        self.port_field = widgets.IntText(
+            value=22,
+            description="Port:",
+            style=style,
+            layout=widgets.Layout(width="200px"),
+        )
+        # Resource fields
+        self.cores_field = widgets.IntText(
+            value=4,
+            description="CPUs:",
+            style=style,
+            layout=widgets.Layout(width="200px"),
+        )
+        self.memory_field = widgets.Text(
+            value="8GB",
+            description="Memory:",
+            placeholder="e.g., 8GB, 16GB",
+            style=style,
+            layout=widgets.Layout(width="200px"),
+        )
+        self.time_field = widgets.Text(
+            value="01:00:00",
+            description="Time Limit:",
+            placeholder="HH:MM:SS",
+            style=style,
+            layout=widgets.Layout(width="200px"),
+        )
+        # Kubernetes-specific fields
+        self.k8s_namespace = widgets.Text(
+            value="default",
+            description="Namespace:",
+            style=style,
+            layout=half_layout,
+        )
+        self.k8s_image = widgets.Text(
+            value="python:3.11-slim",
+            description="Docker Image:",
+            style=style,
+            layout=half_layout,
+        )
+        # Remote work directory
+        self.work_dir_field = widgets.Text(
+            value="/tmp/clustrix",
+            description="Work Directory:",
+            style=style,
+            layout=full_layout,
+        )
+
+    def _create_advanced_options(self):
+        """Create advanced options accordion."""
+        style = {"description_width": "120px"}
+        full_layout = widgets.Layout(width="100%")
+        # Package manager selection
+        self.package_manager = widgets.Dropdown(
+            options=["auto", "pip", "conda", "uv"],
+            value="auto",
+            description="Package Manager:",
+            style=style,
+            layout=full_layout,
+        )
+        # Python version
+        self.python_version = widgets.Text(
+            value="python",
+            description="Python Executable:",
+            placeholder="python, python3, python3.11",
+            style=style,
+            layout=full_layout,
+        )
+        # Environment variables
+        self.env_vars = widgets.Textarea(
+            value="",
+            placeholder="KEY1=value1\nKEY2=value2",
+            description="Env Variables:",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
+        # Module loads
+        self.module_loads = widgets.Textarea(
+            value="",
+            placeholder="module1\nmodule2",
+            description="Module Loads:",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
+        # Pre-execution commands
+        self.pre_exec_commands = widgets.Textarea(
+            value="",
+            placeholder="source /path/to/setup.sh\nexport PATH=/custom/path:$PATH",
+            description="Pre-exec Commands:",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
+        # Advanced options container
+        self.advanced_container = widgets.VBox(
+            [
+                widgets.HTML("<h5>Environment Settings</h5>"),
+                self.package_manager,
+                self.python_version,
+                widgets.HTML("<h5>Additional Configuration</h5>"),
+                self.env_vars,
+                self.module_loads,
+                self.pre_exec_commands,
+            ]
+        )
+        # Accordion for collapsible advanced options
+        self.advanced_accordion = widgets.Accordion(children=[self.advanced_container])
+        self.advanced_accordion.set_title(0, "Advanced Options")
+        self.advanced_accordion.selected_index = None  # Start collapsed
+
+    def _create_save_section(self):
+        """Create save configuration section."""
+        style = {"description_width": "120px"}
+        # File selection dropdown
+        file_options = ["New file: clustrix.yml"]
+        for config_file in self.config_files:
+            file_options.append(f"Existing: {config_file}")
+        self.save_file_dropdown = widgets.Dropdown(
+            options=file_options,
+            value=file_options[0],
+            description="Save to:",
+            style=style,
+            layout=widgets.Layout(width="70%"),
+        )
+        # Save button
+        self.save_btn = widgets.Button(
+            description="Save Configuration",
+            button_style="info",
+            icon="save",
+            layout=widgets.Layout(width="auto"),
+        )
+        self.save_btn.on_click(self._on_save_config)
+
+    def _validate_host(self, change):
+        """Validate host field input."""
+        value = change["new"]
+        if value and not (validate_ip_address(value) or validate_hostname(value)):
+            # Visual feedback for invalid input
+            self.host_field.layout.border = "2px solid red"
+        else:
+            self.host_field.layout.border = ""
+
     def _on_cluster_type_change(self, change):
         """Handle cluster type change to show/hide relevant fields."""
         cluster_type = change["new"]
-
-        # Show/hide fields based on cluster type
+        # Update field visibility based on cluster type
         if cluster_type == "local":
-            self.cluster_host.layout.visibility = "hidden"
-            self.username.layout.visibility = "hidden"
-            self.key_file.layout.visibility = "hidden"
-            self.remote_work_dir.layout.visibility = "hidden"
-            self.kube_namespace.layout.visibility = "hidden"
+            # Hide remote-specific fields
+            self.host_field.layout.display = "none"
+            self.username_field.layout.display = "none"
+            self.ssh_key_field.layout.display = "none"
+            self.port_field.layout.display = "none"
+            self.work_dir_field.layout.display = "none"
+            self.k8s_namespace.layout.display = "none"
+            self.k8s_image.layout.display = "none"
         elif cluster_type == "kubernetes":
-            self.cluster_host.layout.visibility = "visible"
-            self.username.layout.visibility = "hidden"
-            self.key_file.layout.visibility = "hidden"
-            self.remote_work_dir.layout.visibility = "visible"
-            self.kube_namespace.layout.visibility = "visible"
+            # Show Kubernetes-specific fields
+            self.host_field.layout.display = ""
+            self.username_field.layout.display = "none"
+            self.ssh_key_field.layout.display = "none"
+            self.port_field.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self.k8s_namespace.layout.display = ""
+            self.k8s_image.layout.display = ""
         else:  # ssh, slurm, pbs, sge
-            self.cluster_host.layout.visibility = "visible"
-            self.username.layout.visibility = "visible"
-            self.key_file.layout.visibility = "visible"
-            self.remote_work_dir.layout.visibility = "visible"
-            self.kube_namespace.layout.visibility = "hidden"
+            # Show SSH-based fields
+            self.host_field.layout.display = ""
+            self.username_field.layout.display = ""
+            self.ssh_key_field.layout.display = ""
+            self.port_field.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self.k8s_namespace.layout.display = "none"
+            self.k8s_image.layout.display = "none"
 
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
         if config_name not in self.configs:
             return
-
         config = self.configs[config_name]
         self.current_config_name = config_name
-
-        # Set widget values
-        self.name_input.value = config.get("name", config_name)
+        # Basic fields
+        self.config_name.value = config.get("name", config_name)
         self.cluster_type.value = config.get("cluster_type", "local")
-        self.cluster_host.value = config.get("cluster_host", "")
-        self.username.value = config.get("username", "")
-        self.key_file.value = config.get("key_file", "")
-        self.remote_work_dir.value = config.get("remote_work_dir", "/tmp/clustrix")
-        self.default_cores.value = config.get("default_cores", 4)
-        self.default_memory.value = config.get("default_memory", "8GB")
-        self.default_time.value = config.get("default_time", "01:00:00")
-        self.kube_namespace.value = config.get("kube_namespace", "default")
-        self.description.value = config.get("description", "")
-
-        # Trigger visibility update
+        # Connection fields
+        self.host_field.value = config.get("cluster_host", "")
+        self.username_field.value = config.get("username", "")
+        self.ssh_key_field.value = config.get("key_file", "")
+        self.port_field.value = config.get("cluster_port", 22)
+        # Resource fields
+        self.cores_field.value = config.get("default_cores", 4)
+        self.memory_field.value = config.get("default_memory", "8GB")
+        self.time_field.value = config.get("default_time", "01:00:00")
+        # Kubernetes fields
+        self.k8s_namespace.value = config.get("k8s_namespace", "default")
+        self.k8s_image.value = config.get("k8s_image", "python:3.11-slim")
+        # Paths
+        self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
+        # Advanced options
+        self.package_manager.value = config.get("package_manager", "auto")
+        self.python_version.value = config.get("python_executable", "python")
+        # Environment variables
+        env_vars = config.get("environment_variables", {})
+        if env_vars:
+            self.env_vars.value = "\n".join(f"{k}={v}" for k, v in env_vars.items())
+        else:
+            self.env_vars.value = ""
+        # Module loads
+        modules = config.get("module_loads", [])
+        self.module_loads.value = "\n".join(modules) if modules else ""
+        # Pre-execution commands
+        pre_cmds = config.get("pre_execution_commands", [])
+        self.pre_exec_commands.value = "\n".join(pre_cmds) if pre_cmds else ""
+        # Update field visibility
         self._on_cluster_type_change({"new": self.cluster_type.value})
 
-    def _save_config_from_widgets(self, config_name: str):
-        """Save current widget values to a configuration."""
+    def _save_config_from_widgets(self) -> Dict[str, Any]:
+        """Save current widget values to a configuration dict."""
         config = {
-            "name": self.name_input.value,
+            "name": self.config_name.value,
             "cluster_type": self.cluster_type.value,
-            "default_cores": self.default_cores.value,
-            "default_memory": self.default_memory.value,
-            "default_time": self.default_time.value,
-            "description": self.description.value,
+            "default_cores": self.cores_field.value,
+            "default_memory": self.memory_field.value,
+            "default_time": self.time_field.value,
+            "package_manager": self.package_manager.value,
+            "python_executable": self.python_version.value,
         }
-
-        # Add fields based on cluster type
+        # Add cluster-specific fields
         if self.cluster_type.value != "local":
             if self.cluster_type.value == "kubernetes":
-                config["cluster_host"] = self.cluster_host.value
-                config["remote_work_dir"] = self.remote_work_dir.value
-                config["kube_namespace"] = self.kube_namespace.value
-            else:
-                config["cluster_host"] = self.cluster_host.value
-                config["username"] = self.username.value
-                config["key_file"] = self.key_file.value
-                config["remote_work_dir"] = self.remote_work_dir.value
-
-        self.configs[config_name] = config
+                config["cluster_host"] = self.host_field.value
+                config["cluster_port"] = self.port_field.value
+                config["remote_work_dir"] = self.work_dir_field.value
+                config["k8s_namespace"] = self.k8s_namespace.value
+                config["k8s_image"] = self.k8s_image.value
+            else:  # SSH-based clusters
+                config["cluster_host"] = self.host_field.value
+                config["cluster_port"] = self.port_field.value
+                config["username"] = self.username_field.value
+                config["key_file"] = self.ssh_key_field.value
+                config["remote_work_dir"] = self.work_dir_field.value
+        # Parse environment variables
+        if self.env_vars.value.strip():
+            env_dict = {}
+            for line in self.env_vars.value.strip().split("\n"):
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    env_dict[key.strip()] = value.strip()
+            if env_dict:
+                config["environment_variables"] = env_dict
+        # Parse module loads
+        if self.module_loads.value.strip():
+            config["module_loads"] = [
+                m.strip()
+                for m in self.module_loads.value.strip().split("\n")
+                if m.strip()
+            ]
+        # Parse pre-execution commands
+        if self.pre_exec_commands.value.strip():
+            config["pre_execution_commands"] = [
+                c.strip()
+                for c in self.pre_exec_commands.value.strip().split("\n")
+                if c.strip()
+            ]
+        return config
 
     def _on_config_select(self, change):
-        """Handle configuration selection."""
+        """Handle configuration selection from dropdown."""
         config_name = change["new"]
         if config_name:
             self._load_config_to_widgets(config_name)
 
-    def _on_new_config(self, button):
-        """Create a new configuration."""
+    def _on_add_config(self, button):
+        """Add a new configuration."""
         with self.status_output:
             self.status_output.clear_output()
-
             # Generate unique name
             base_name = "new_config"
-            name = base_name
             counter = 1
-            while name in self.configs:
-                name = f"{base_name}_{counter}"
+            config_name = base_name
+            while config_name in self.configs:
+                config_name = f"{base_name}_{counter}"
                 counter += 1
-
-            # Create new config with defaults
-            self.configs[name] = {
+            # Create new config
+            self.configs[config_name] = {
                 "name": f"New Configuration {counter}",
                 "cluster_type": "local",
                 "default_cores": 4,
                 "default_memory": "8GB",
                 "default_time": "01:00:00",
-                "description": "New cluster configuration",
             }
-
-            # Update selector
-            self.config_selector.options = list(self.configs.keys())
-            self.config_selector.value = name
-
-            print(f"✅ Created new configuration: {name}")
+            # Update dropdown
+            self.config_dropdown.options = list(self.configs.keys())
+            self.config_dropdown.value = config_name
+            print(f"✅ Created new configuration: {config_name}")
 
     def _on_delete_config(self, button):
         """Delete the current configuration."""
         with self.status_output:
             self.status_output.clear_output()
-
-            if self.current_config_name and self.current_config_name in self.configs:
-                if len(self.configs) <= 1:
-                    print("❌ Cannot delete the last configuration")
-                    return
-
-                del self.configs[self.current_config_name]
-
-                # Update selector
-                self.config_selector.options = list(self.configs.keys())
-                if self.configs:
-                    self.config_selector.value = list(self.configs.keys())[0]
-
-                print(f"✅ Deleted configuration: {self.current_config_name}")
+            if self.current_config_name in DEFAULT_CONFIGS:
+                print("❌ Cannot delete default configurations")
+                return
+            if len(self.configs) <= 1:
+                print("❌ Cannot delete the last configuration")
+                return
+            # Delete config
+            del self.configs[self.current_config_name]
+            if self.current_config_name in self.config_file_map:
+                del self.config_file_map[self.current_config_name]
+            # Update dropdown
+            self.config_dropdown.options = list(self.configs.keys())
+            self.config_dropdown.value = list(self.configs.keys())[0]
+            print(f"✅ Deleted configuration: {self.current_config_name}")
 
     def _on_apply_config(self, button):
         """Apply the current configuration."""
         with self.status_output:
             self.status_output.clear_output()
-
-            # Save current widget state
-            if self.current_config_name:
-                self._save_config_from_widgets(self.current_config_name)
-
-                # Get config without UI-only fields
-                config = self.configs[self.current_config_name].copy()
-                config.pop("name", None)
-                config.pop("description", None)
-
+            try:
+                # Save current state
+                config = self._save_config_from_widgets()
+                self.configs[self.current_config_name] = config
+                # Prepare config for application
+                apply_config = config.copy()
+                apply_config.pop("name", None)
                 # Apply configuration
-                try:
-                    configure(**config)
-                    print(f"✅ Applied configuration: {self.current_config_name}")
+                configure(**apply_config)
+                print(f"✅ Applied configuration: {self.current_config_name}")
+                # Show current config
+                current = get_config()
+                print("\nActive configuration:")
+                print(f"  Type: {current.cluster_type}")
+                if current.cluster_type != "local":
+                    print(f"  Host: {current.cluster_host}")
+                print(f"  CPUs: {current.default_cores}")
+                print(f"  Memory: {current.default_memory}")
+            except Exception as e:
+                print(f"❌ Error applying configuration: {str(e)}")
 
-                    # Show current config
-                    current = get_config()
-                    print("\nCurrent configuration:")
-                    print(f"  Cluster Type: {current.cluster_type}")
-                    if current.cluster_type != "local":
-                        print(f"  Host: {current.cluster_host}")
-                    print(f"  Default Cores: {current.default_cores}")
-                    print(f"  Default Memory: {current.default_memory}")
-                except Exception as e:
-                    print(f"❌ Error applying configuration: {str(e)}")
-
-    def _on_save_configs(self, button):
-        """Save configurations to file."""
+    def _on_save_config(self, button):
+        """Save configuration to file."""
         with self.status_output:
             self.status_output.clear_output()
-
-            # Save current widget state
-            if self.current_config_name:
-                self._save_config_from_widgets(self.current_config_name)
-
             try:
-                file_path = Path(self.file_path.value)
-
-                # Determine format from extension
-                if file_path.suffix.lower() in [".yaml", ".yml"]:
-                    with open(file_path, "w") as f:
-                        yaml.dump(self.configs, f, default_flow_style=False)
+                # Save current widget state
+                config = self._save_config_from_widgets()
+                self.configs[self.current_config_name] = config
+                # Determine save file
+                save_option = self.save_file_dropdown.value
+                if save_option.startswith("New file:"):
+                    save_path = Path("clustrix.yml")
                 else:
-                    with open(file_path, "w") as f:
-                        json.dump(self.configs, f, indent=2)
-
-                print(f"✅ Saved {len(self.configs)} configurations to {file_path}")
-            except Exception as e:
-                print(f"❌ Error saving configurations: {str(e)}")
-
-    def _on_load_configs(self, button):
-        """Load configurations from file."""
-        with self.status_output:
-            self.status_output.clear_output()
-
-            try:
-                file_path = Path(self.file_path.value)
-
-                if not file_path.exists():
-                    print(f"❌ File not found: {file_path}")
-                    return
-
-                # Load based on extension
-                with open(file_path, "r") as f:
-                    if file_path.suffix.lower() in [".yaml", ".yml"]:
-                        loaded_configs = yaml.safe_load(f)
+                    # Extract path from "Existing: /path/to/file"
+                    save_path = Path(save_option.split("Existing: ", 1)[1])
+                # Load existing configs if updating a file
+                if save_path.exists():
+                    existing_configs = load_config_from_file(save_path)
+                    if isinstance(existing_configs, dict):
+                        if "cluster_type" in existing_configs:
+                            # Single config file - convert to multi-config
+                            existing_configs = {save_path.stem: existing_configs}
+                        existing_configs[self.current_config_name] = config
+                        save_data = existing_configs
                     else:
-                        loaded_configs = json.load(f)
-
-                if not isinstance(loaded_configs, dict):
-                    print("❌ Invalid configuration file format")
-                    return
-
-                self.configs = loaded_configs
-
-                # Update selector
-                self.config_selector.options = list(self.configs.keys())
-                if self.configs:
-                    self.config_selector.value = list(self.configs.keys())[0]
-
-                print(f"✅ Loaded {len(self.configs)} configurations from {file_path}")
+                        save_data = {self.current_config_name: config}
+                else:
+                    save_data = {self.current_config_name: config}
+                # Save to file
+                with open(save_path, "w") as f:
+                    yaml.dump(save_data, f, default_flow_style=False)
+                print(
+                    f"✅ Saved configuration '{self.current_config_name}' to {save_path}"
+                )
+                # Update file list if new file
+                if save_path not in self.config_files:
+                    self.config_files.append(save_path)
+                    self.config_file_map[self.current_config_name] = save_path
+                    # Update save dropdown
+                    file_options = ["New file: clustrix.yml"]
+                    for config_file in self.config_files:
+                        file_options.append(f"Existing: {config_file}")
+                    self.save_file_dropdown.options = file_options
             except Exception as e:
-                print(f"❌ Error loading configurations: {str(e)}")
+                print(f"❌ Error saving configuration: {str(e)}")
 
     def display(self):
-        """Display the widget interface."""
-        # Title
-        display(HTML("<h3>🚀 Clustrix Configuration Manager</h3>"))
-
-        # Configuration section
-        config_section = widgets.VBox(
+        """Display the enhanced widget interface."""
+        # Title with conditional text
+        title_text = "🚀 Clustrix Configuration Manager"
+        if self.auto_display:
+            title_text += " (Auto-displayed on import)"
+        display(HTML(f"<h3>{title_text}</h3>"))
+        # Configuration selector section
+        config_section = widgets.HBox(
             [
-                widgets.HBox(
-                    [
-                        self.config_selector,
-                        self.new_button,
-                        self.delete_button,
-                        self.apply_button,
-                    ]
-                ),
-                widgets.HTML("<hr>"),
-                self.name_input,
-                self.description,
-                widgets.HTML("<h4>Cluster Settings</h4>"),
+                self.config_dropdown,
+                self.add_config_btn,
+            ]
+        )
+        # Main configuration fields
+        basic_fields = widgets.VBox(
+            [
+                self.config_name,
                 self.cluster_type,
-                self.cluster_host,
-                self.username,
-                self.key_file,
-                self.remote_work_dir,
-                self.kube_namespace,
-                widgets.HTML("<h4>Resource Defaults</h4>"),
-                self.default_cores,
-                self.default_memory,
-                self.default_time,
             ]
         )
-
-        # Save/Load section
-        save_load_section = widgets.VBox(
+        # Connection fields (dynamically shown/hidden)
+        connection_fields = widgets.VBox(
             [
-                widgets.HTML("<h4>Save/Load Configurations</h4>"),
-                widgets.HBox([self.file_path, self.save_button, self.load_button]),
+                widgets.HTML("<h5>Connection Settings</h5>"),
+                self.host_field,
+                widgets.HBox([self.username_field, self.ssh_key_field]),
+                self.port_field,
             ]
         )
-
+        # Kubernetes fields
+        k8s_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Kubernetes Settings</h5>"),
+                widgets.HBox([self.k8s_namespace, self.k8s_image]),
+            ]
+        )
+        # Resource fields
+        resource_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Resource Defaults</h5>"),
+                widgets.HBox([self.cores_field, self.memory_field, self.time_field]),
+                self.work_dir_field,
+            ]
+        )
+        # Save section
+        save_section = widgets.VBox(
+            [
+                widgets.HTML("<h5>Configuration Management</h5>"),
+                widgets.HBox([self.save_file_dropdown, self.save_btn]),
+            ]
+        )
+        # Action buttons
+        action_buttons = widgets.HBox(
+            [
+                self.apply_btn,
+                self.delete_btn,
+            ]
+        )
         # Main layout
         main_layout = widgets.VBox(
             [
                 config_section,
                 widgets.HTML("<hr>"),
-                save_load_section,
+                basic_fields,
+                connection_fields,
+                k8s_fields,
+                resource_fields,
+                self.advanced_accordion,
+                widgets.HTML("<hr>"),
+                save_section,
+                widgets.HTML("<hr>"),
+                action_buttons,
                 widgets.HTML("<hr>"),
                 self.status_output,
             ]
         )
-
         display(main_layout)
+
+
+# Global variable to track if widget has been auto-displayed
+_auto_displayed = False
+
+
+def display_config_widget(auto_display: bool = False):
+    """Display the configuration widget."""
+    widget = EnhancedClusterConfigWidget(auto_display=auto_display)
+    widget.display()
+
+
+def auto_display_on_import():
+    """Automatically display widget when clustrix is imported in a notebook."""
+    global _auto_displayed
+    if _auto_displayed or not IPYTHON_AVAILABLE:
+        return
+    ipython = get_ipython()
+    if ipython is None:
+        return
+    # Check if we're in a notebook environment
+    if hasattr(ipython, "kernel") and hasattr(ipython, "register_magic_function"):
+        # Mark as displayed
+        _auto_displayed = True
+        # Display the widget
+        display_config_widget(auto_display=True)
 
 
 @magics_class
@@ -587,26 +838,20 @@ class ClusterfyMagics(Magics):
     def clusterfy(self, line, cell):
         """
         Create an interactive widget for managing Clustrix configurations.
-
         Usage:
             %%clusterfy
-
         This creates a widget interface that allows you to:
-        - Define and name cluster configurations
-        - Select between different configurations
+        - Select and manage cluster configurations
+        - Create new configurations with validation
+        - Save/load configurations from files
         - Apply configurations to the current session
-        - Save configurations to YAML/JSON files
-        - Load configurations from files
         """
         if not IPYTHON_AVAILABLE:
             print("❌ This magic command requires IPython and ipywidgets")
             print("Install with: pip install ipywidgets")
             return
-
-        # Create and display the widget
-        widget = ClusterConfigWidget()
-        widget.display()
-
+        # Create and display the widget (not auto-display)
+        display_config_widget(auto_display=False)
         # Execute any code in the cell (if provided)
         if cell.strip():
             self.shell.run_cell(cell)
@@ -621,3 +866,7 @@ def load_ipython_extension(ipython):
         print(
             "Clustrix notebook magic loaded. Use %%clusterfy to manage configurations."
         )
+
+
+# Export the widget class for testing
+ClusterConfigWidget = EnhancedClusterConfigWidget
