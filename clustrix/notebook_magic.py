@@ -35,8 +35,8 @@ except ImportError:
 
     def cell_magic(name):
         def decorator(func):
-            def wrapper(self, line, cell):
-                return func(self, line, cell)
+            def wrapper(*args, **kwargs):
+                return func(*args, **kwargs)
 
             return wrapper
 
