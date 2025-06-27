@@ -10,9 +10,10 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-# Import only non-widget functionality at module level
+# Test the module's imports and functionality
 from clustrix.notebook_magic import (
     DEFAULT_CONFIGS,
+    EnhancedClusterConfigWidget,
     detect_config_files,
     load_config_from_file,
     validate_ip_address,
@@ -21,13 +22,6 @@ from clustrix.notebook_magic import (
     auto_display_on_import,
     load_ipython_extension,
 )
-
-# Import widget conditionally to avoid GitHub Actions import issues
-try:
-    from clustrix.notebook_magic import EnhancedClusterConfigWidget
-except ImportError:
-    # In GitHub Actions, widget import fails - will be handled by fixture
-    EnhancedClusterConfigWidget = None
 
 
 class TestEnhancedDefaultConfigs:
@@ -163,48 +157,41 @@ class TestValidationFunctions:
 @pytest.fixture
 def mock_ipython_environment():
     """Mock IPython environment for testing."""
-    # Save current module state and global variable
-    original_module = sys.modules.get("clustrix.notebook_magic")
-    global EnhancedClusterConfigWidget
-    original_widget_class = EnhancedClusterConfigWidget
-
+    # Save current module state
+    original_module = sys.modules.get('clustrix.notebook_magic')
+    
     try:
         # Clear the module to force re-import with mocks
-        if "clustrix.notebook_magic" in sys.modules:
-            del sys.modules["clustrix.notebook_magic"]
-
-        # Mock the IPython/ipywidgets modules
-        with patch.dict(
-            "sys.modules",
-            {
-                "IPython": MagicMock(),
-                "IPython.core": MagicMock(),
-                "IPython.core.magic": MagicMock(),
-                "IPython.display": MagicMock(),
-                "ipywidgets": MagicMock(),
-            },
-        ):
+        if 'clustrix.notebook_magic' in sys.modules:
+            del sys.modules['clustrix.notebook_magic']
+        
+        # Mock the actual modules in case they're not installed
+        mock_ipython_module = MagicMock()
+        mock_ipywidgets_module = MagicMock()
+        
+        # Configure ipywidgets mock to return mock widget classes
+        mock_ipywidgets_module.widgets = MagicMock()
+        
+        with patch.dict('sys.modules', {
+            'IPython': mock_ipython_module,
+            'IPython.core': MagicMock(),
+            'IPython.core.magic': MagicMock(),
+            'IPython.display': MagicMock(),
+            'ipywidgets': mock_ipywidgets_module
+        }):
             # Re-import the module with mocked dependencies
             import clustrix.notebook_magic
-
-            # Mock get_ipython
+            
             with patch("clustrix.notebook_magic.get_ipython") as mock_get_ipython:
                 mock_ipython = MagicMock()
                 mock_ipython.kernel = True
                 mock_ipython.register_magic_function = MagicMock()
                 mock_get_ipython.return_value = mock_ipython
-
-                # Make the widget class available globally
-                EnhancedClusterConfigWidget = (
-                    clustrix.notebook_magic.EnhancedClusterConfigWidget
-                )
-
                 yield mock_ipython
     finally:
-        # Restore original module and global variable
+        # Restore original module
         if original_module:
-            sys.modules["clustrix.notebook_magic"] = original_module
-        EnhancedClusterConfigWidget = original_widget_class
+            sys.modules['clustrix.notebook_magic'] = original_module
 
 
 class TestEnhancedClusterConfigWidget:
@@ -212,7 +199,9 @@ class TestEnhancedClusterConfigWidget:
 
     def test_widget_initialization(self, mock_ipython_environment):
         """Test widget initialization with defaults."""
-        widget = EnhancedClusterConfigWidget()
+        # Import widget from the mocked module
+        import clustrix.notebook_magic
+        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
         # Check that default configs are loaded
         assert len(widget.configs) >= len(DEFAULT_CONFIGS)
         assert "local" in widget.configs
@@ -223,7 +212,8 @@ class TestEnhancedClusterConfigWidget:
 
     def test_widget_auto_display_flag(self, mock_ipython_environment):
         """Test widget with auto_display flag."""
-        widget = EnhancedClusterConfigWidget(auto_display=True)
+        import clustrix.notebook_magic
+        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget(auto_display=True)
         assert widget.auto_display is True
 
     def test_widget_without_ipython(self):
@@ -266,10 +256,7 @@ class TestEnhancedClusterConfigWidget:
                 "clustrix.notebook_magic.detect_config_files",
                 return_value=[config_file],
             ):
-                # Use the widget class from the mocked module
-                import clustrix.notebook_magic
-
-                widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+                widget = EnhancedClusterConfigWidget()
                 # Check that file config was loaded
                 assert "remote_cluster" in widget.configs
                 assert (
@@ -281,39 +268,14 @@ class TestEnhancedClusterConfigWidget:
     def test_save_config_from_widgets(self, mock_ipython_environment):
         """Test saving configuration from widget values."""
         widget = EnhancedClusterConfigWidget()
-
-        # Mock the widget fields directly to avoid complex mock interactions
-        widget.config_name = MagicMock()
+        # Set widget values directly (simulating user input)
         widget.config_name.value = "Test Config"
-        widget.cluster_type = MagicMock()
         widget.cluster_type.value = "ssh"
-        widget.host_field = MagicMock()
         widget.host_field.value = "test.example.com"
-        widget.username_field = MagicMock()
         widget.username_field.value = "testuser"
-        widget.cores_field = MagicMock()
         widget.cores_field.value = 8
-        widget.memory_field = MagicMock()
         widget.memory_field.value = "32GB"
-        widget.package_manager = MagicMock()
         widget.package_manager.value = "conda"
-        widget.time_field = MagicMock()
-        widget.time_field.value = "01:00:00"
-        widget.python_version = MagicMock()
-        widget.python_version.value = "python"
-        widget.env_vars = MagicMock()
-        widget.env_vars.value = ""
-        widget.module_loads = MagicMock()
-        widget.module_loads.value = ""
-        widget.pre_exec_commands = MagicMock()
-        widget.pre_exec_commands.value = ""
-        widget.port_field = MagicMock()
-        widget.port_field.value = 22
-        widget.work_dir_field = MagicMock()
-        widget.work_dir_field.value = "/tmp/clustrix"
-        widget.ssh_key_field = MagicMock()
-        widget.ssh_key_field.value = ""
-
         # Test save functionality
         config = widget._save_config_from_widgets()
         assert config["name"] == "Test Config"
@@ -327,26 +289,6 @@ class TestEnhancedClusterConfigWidget:
     def test_load_config_to_widgets(self, mock_ipython_environment):
         """Test loading configuration into widgets."""
         widget = EnhancedClusterConfigWidget()
-
-        # Mock the widget fields to test the loading functionality
-        widget.config_name = MagicMock()
-        widget.cluster_type = MagicMock()
-        widget.host_field = MagicMock()
-        widget.port_field = MagicMock()
-        widget.cores_field = MagicMock()
-        widget.memory_field = MagicMock()
-        widget.k8s_namespace = MagicMock()
-        widget.package_manager = MagicMock()
-        widget.username_field = MagicMock()
-        widget.ssh_key_field = MagicMock()
-        widget.work_dir_field = MagicMock()
-        widget.time_field = MagicMock()
-        widget.python_version = MagicMock()
-        widget.env_vars = MagicMock()
-        widget.module_loads = MagicMock()
-        widget.pre_exec_commands = MagicMock()
-        widget.k8s_image = MagicMock()
-
         test_config = {
             "name": "Test Load Config",
             "cluster_type": "kubernetes",
@@ -372,10 +314,7 @@ class TestEnhancedClusterConfigWidget:
 
     def test_cluster_type_field_visibility(self, mock_ipython_environment):
         """Test field visibility changes based on cluster type."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         # Test local cluster type (should hide remote fields)
         widget._on_cluster_type_change({"new": "local"})
         # Check that layout.display attribute is properly set
@@ -391,10 +330,7 @@ class TestEnhancedClusterConfigWidget:
 
     def test_host_validation(self, mock_ipython_environment):
         """Test host field validation."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         # Test valid hostname
         widget._validate_host({"new": "example.com"})
         assert widget.host_field.layout.border == ""
@@ -407,10 +343,7 @@ class TestEnhancedClusterConfigWidget:
 
     def test_environment_variable_parsing(self, mock_ipython_environment):
         """Test environment variable parsing from textarea."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         # Set environment variables
         widget.env_vars.value = "KEY1=value1\nKEY2=value2\nKEY3=value with spaces"
         config = widget._save_config_from_widgets()
@@ -419,10 +352,7 @@ class TestEnhancedClusterConfigWidget:
 
     def test_module_loads_parsing(self, mock_ipython_environment):
         """Test module loads parsing from textarea."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         # Set module loads
         widget.module_loads.value = "gcc/9.3.0\npython/3.11\ncuda/11.8"
         config = widget._save_config_from_widgets()
@@ -431,10 +361,7 @@ class TestEnhancedClusterConfigWidget:
 
     def test_add_new_config(self, mock_ipython_environment):
         """Test adding a new configuration."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         initial_count = len(widget.configs)
         # Mock status output
         widget.status_output = MagicMock()
@@ -451,43 +378,31 @@ class TestAutoDisplayFunctionality:
 
     def test_display_config_widget_function(self, mock_ipython_environment):
         """Test display_config_widget function."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
-
         with patch("clustrix.notebook_magic.EnhancedClusterConfigWidget") as MockWidget:
             mock_widget = MagicMock()
             MockWidget.return_value = mock_widget
-            clustrix.notebook_magic.display_config_widget(auto_display=True)
+            display_config_widget(auto_display=True)
             MockWidget.assert_called_once_with(auto_display=True)
             mock_widget.display.assert_called_once()
 
     def test_auto_display_on_import_notebook(self, mock_ipython_environment):
         """Test auto display when imported in notebook."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
-
         # Reset the global variable
         with patch("clustrix.notebook_magic._auto_displayed", False):
             with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
-                clustrix.notebook_magic.auto_display_on_import()
+                auto_display_on_import()
                 mock_display.assert_called_once_with(auto_display=True)
 
     def test_auto_display_already_displayed(self, mock_ipython_environment):
         """Test that auto display doesn't trigger twice."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
-
         # Set global variable to True
         with patch("clustrix.notebook_magic._auto_displayed", True):
             with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
-                clustrix.notebook_magic.auto_display_on_import()
+                auto_display_on_import()
                 mock_display.assert_not_called()
 
     def test_auto_display_no_ipython(self):
         """Test auto display when IPython not available."""
-        # Import functions from the module
-        from clustrix.notebook_magic import auto_display_on_import
-
         with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False):
             with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
                 auto_display_on_import()
@@ -499,16 +414,13 @@ class TestMagicCommands:
 
     def test_load_ipython_extension(self, mock_ipython_environment):
         """Test loading IPython extension."""
-        # Import functions from the mocked module
-        import clustrix.notebook_magic
-
         mock_ipython = mock_ipython_environment
         # Mock the ClusterfyMagics class to avoid trait validation issues
         with patch("clustrix.notebook_magic.ClusterfyMagics") as MockMagics:
             mock_magic_instance = MagicMock()
             MockMagics.return_value = mock_magic_instance
             with patch("builtins.print") as mock_print:
-                clustrix.notebook_magic.load_ipython_extension(mock_ipython)
+                load_ipython_extension(mock_ipython)
                 MockMagics.assert_called_once_with(mock_ipython)
                 mock_ipython.register_magic_function.assert_called_once()
                 mock_print.assert_called_once()
@@ -544,10 +456,7 @@ class TestConfigurationSaveLoad:
 
     def test_save_load_cycle(self, mock_ipython_environment):
         """Test complete save and load cycle."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        widget = EnhancedClusterConfigWidget()
         # Create a test configuration
         test_config = {
             "name": "Integration Test Config",
@@ -638,10 +547,7 @@ class TestConfigurationSaveLoad:
                 "clustrix.notebook_magic.detect_config_files",
                 return_value=[config1_path, config2_path],
             ):
-                # Use the widget class from the mocked module
-                import clustrix.notebook_magic
-
-                widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+                widget = EnhancedClusterConfigWidget()
                 # Check that both configs were loaded
                 assert "cluster1" in widget.configs
                 assert "cluster2" in widget.configs
