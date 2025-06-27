@@ -3,16 +3,16 @@ Tests for the enhanced notebook magic functionality.
 """
 
 import json
+import sys
 import tempfile
 import yaml
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 import pytest
 
-# Test the module's imports and functionality
+# Import only non-widget functionality at module level
 from clustrix.notebook_magic import (
     DEFAULT_CONFIGS,
-    EnhancedClusterConfigWidget,
     detect_config_files,
     load_config_from_file,
     validate_ip_address,
@@ -21,6 +21,13 @@ from clustrix.notebook_magic import (
     auto_display_on_import,
     load_ipython_extension,
 )
+
+# Import widget conditionally to avoid GitHub Actions import issues
+try:
+    from clustrix.notebook_magic import EnhancedClusterConfigWidget
+except ImportError:
+    # In GitHub Actions, widget import fails - will be handled by fixture
+    EnhancedClusterConfigWidget = None
 
 
 class TestEnhancedDefaultConfigs:
@@ -156,13 +163,46 @@ class TestValidationFunctions:
 @pytest.fixture
 def mock_ipython_environment():
     """Mock IPython environment for testing."""
-    with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", True):
-        with patch("clustrix.notebook_magic.get_ipython") as mock_get_ipython:
-            mock_ipython = MagicMock()
-            mock_ipython.kernel = True
-            mock_ipython.register_magic_function = MagicMock()
-            mock_get_ipython.return_value = mock_ipython
-            yield mock_ipython
+    # Save current module state
+    original_module = sys.modules.get("clustrix.notebook_magic")
+
+    try:
+        # Clear the module to force re-import with mocks
+        if "clustrix.notebook_magic" in sys.modules:
+            del sys.modules["clustrix.notebook_magic"]
+
+        # Mock the IPython/ipywidgets modules
+        with patch.dict(
+            "sys.modules",
+            {
+                "IPython": MagicMock(),
+                "IPython.core": MagicMock(),
+                "IPython.core.magic": MagicMock(),
+                "IPython.display": MagicMock(),
+                "ipywidgets": MagicMock(),
+            },
+        ):
+            # Re-import the module with mocked dependencies
+            import clustrix.notebook_magic
+
+            # Mock get_ipython
+            with patch("clustrix.notebook_magic.get_ipython") as mock_get_ipython:
+                mock_ipython = MagicMock()
+                mock_ipython.kernel = True
+                mock_ipython.register_magic_function = MagicMock()
+                mock_get_ipython.return_value = mock_ipython
+
+                # Make the widget class available globally
+                global EnhancedClusterConfigWidget
+                EnhancedClusterConfigWidget = (
+                    clustrix.notebook_magic.EnhancedClusterConfigWidget
+                )
+
+                yield mock_ipython
+    finally:
+        # Restore original module
+        if original_module:
+            sys.modules["clustrix.notebook_magic"] = original_module
 
 
 class TestEnhancedClusterConfigWidget:
