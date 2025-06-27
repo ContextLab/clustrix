@@ -44,19 +44,9 @@ class TestGitHubActionsCompatibility:
             magic = ClusterfyMagics()
             magic.shell = MagicMock()
 
-            # Test calling the method with proper error handling
+            # Test calling the method - decorator now handles this properly
             with patch("builtins.print") as mock_print:
-                # Try calling method, handling decorator issues gracefully
-                if hasattr(magic.clusterfy, "_original"):
-                    result = magic.clusterfy._original(magic, "", "")
-                else:
-                    try:
-                        result = magic.clusterfy("", "")
-                    except TypeError:
-                        # If decorator fails, simulate expected behavior
-                        print("❌ This magic command requires IPython and ipywidgets")
-                        print("Install with: pip install ipywidgets")
-                        result = None
+                result = magic.clusterfy("", "")
 
                 # Should have printed error messages
                 assert mock_print.call_count >= 1

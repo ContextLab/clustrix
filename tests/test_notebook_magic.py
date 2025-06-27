@@ -392,26 +392,17 @@ class TestMagicCommands:
             assert hasattr(magic, "clusterfy")
             assert callable(magic.clusterfy)
 
-            # Test calling the underlying function directly to avoid decorator issues
+            # Test calling the method directly - decorator now handles this properly
             with patch("builtins.print") as mock_print:
-                # Get the original function if it exists
-                if hasattr(magic.clusterfy, "_original"):
-                    result = magic.clusterfy._original(magic, "", "")
-                elif hasattr(magic.clusterfy, "__func__"):
-                    # Try calling through the bound method mechanism
-                    try:
-                        result = magic.clusterfy("", "")
-                    except TypeError:
-                        # If decorator call fails, simulate the expected behavior
-                        print("❌ This magic command requires IPython and ipywidgets")
-                        print("Install with: pip install ipywidgets")
-                        result = None
-                else:
-                    result = magic.clusterfy("", "")
+                result = magic.clusterfy("", "")
 
+                # Should have printed error messages
                 assert mock_print.call_count >= 1
                 print_calls = [call[0][0] for call in mock_print.call_args_list]
                 assert any("IPython and ipywidgets" in msg for msg in print_calls)
+
+                # Should return None (graceful failure)
+                assert result is None
 
 
 class TestConfigurationSaveLoad:

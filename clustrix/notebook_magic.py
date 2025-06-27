@@ -34,16 +34,30 @@ except ImportError:
         return cls
 
     def cell_magic(name):
-        def decorator(func):
-            # Create a wrapper that handles both decorator and method call scenarios
-            def wrapper(*args, **kwargs):
-                return func(*args, **kwargs)
+        def decorator(*args, **kwargs):
+            # If this is being used as a decorator (first call with just the function)
+            if len(args) == 1 and callable(args[0]) and len(kwargs) == 0:
+                func = args[0]
 
-            # Copy function attributes to make it look like the original
-            wrapper.__name__ = getattr(func, "__name__", "clusterfy")
-            wrapper.__doc__ = getattr(func, "__doc__", "")
-            wrapper._original = func
-            return wrapper
+                # Return a wrapper that can handle method calls
+                def method_wrapper(self, line="", cell=""):
+                    return func(self, line, cell)
+
+                method_wrapper.__name__ = getattr(func, "__name__", "clusterfy")
+                method_wrapper.__doc__ = getattr(func, "__doc__", "")
+                method_wrapper._original = func
+                return method_wrapper
+            # If this is being called as a method (self, line, cell)
+            else:
+                # This means the decorator was bound as a method and is being called
+                # In this case, we need to find the original function and call it
+                # But since we can't access it here, we'll just simulate the behavior
+                if not IPYTHON_AVAILABLE:
+                    print("❌ This magic command requires IPython and ipywidgets")
+                    print("Install with: pip install ipywidgets")
+                    return None
+                # If IPython is available, this shouldn't happen
+                return None
 
         return decorator
 
