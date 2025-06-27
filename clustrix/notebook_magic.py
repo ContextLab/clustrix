@@ -35,7 +35,9 @@ except ImportError:
 
     def cell_magic(name):
         def decorator(func):
-            return func
+            def wrapper(self, line, cell):
+                return func(self, line, cell)
+            return wrapper
 
         return decorator
 
@@ -54,17 +56,25 @@ except ImportError:
 
     # Mock widgets module
     class widgets:  # type: ignore
+        class Layout:
+            def __init__(self, *args, **kwargs):
+                self.display = ""
+                self.border = ""
+                for key, value in kwargs.items():
+                    setattr(self, key, value)
+
         class Dropdown:
             def __init__(self, *args, **kwargs):
                 self.value = kwargs.get("value")
                 self.options = kwargs.get("options", [])
+                self.layout = widgets.Layout()
 
             def observe(self, *args, **kwargs):
                 pass
 
         class Button:
             def __init__(self, *args, **kwargs):
-                pass
+                self.layout = widgets.Layout()
 
             def on_click(self, *args, **kwargs):
                 pass
@@ -72,18 +82,30 @@ except ImportError:
         class Text:
             def __init__(self, *args, **kwargs):
                 self.value = kwargs.get("value", "")
+                self.layout = widgets.Layout()
+
+            def observe(self, *args, **kwargs):
+                pass
 
         class IntText:
             def __init__(self, *args, **kwargs):
                 self.value = kwargs.get("value", 0)
+                self.layout = widgets.Layout()
+
+            def observe(self, *args, **kwargs):
+                pass
 
         class Textarea:
             def __init__(self, *args, **kwargs):
                 self.value = kwargs.get("value", "")
+                self.layout = widgets.Layout()
+
+            def observe(self, *args, **kwargs):
+                pass
 
         class Output:
             def __init__(self, *args, **kwargs):
-                pass
+                self.layout = widgets.Layout()
 
             def clear_output(self, *args, **kwargs):
                 pass
@@ -97,23 +119,23 @@ except ImportError:
         class VBox:
             def __init__(self, *args, **kwargs):
                 self.children = args[0] if args else []
+                self.layout = widgets.Layout()
 
         class HBox:
             def __init__(self, *args, **kwargs):
                 self.children = args[0] if args else []
+                self.layout = widgets.Layout()
 
         class HTML:
             def __init__(self, *args, **kwargs):
                 self.value = args[0] if args else ""
-
-        class Layout:
-            def __init__(self, *args, **kwargs):
-                pass
+                self.layout = widgets.Layout()
 
         class Accordion:
             def __init__(self, *args, **kwargs):
                 self.children = args[0] if args else []
                 self.selected_index = None
+                self.layout = widgets.Layout()
 
             def set_title(self, *args, **kwargs):
                 pass
