@@ -37,6 +37,7 @@ except ImportError:
         def decorator(func):
             def wrapper(self, line, cell):
                 return func(self, line, cell)
+
             return wrapper
 
         return decorator
