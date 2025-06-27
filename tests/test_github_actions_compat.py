@@ -11,10 +11,35 @@ from unittest.mock import patch, MagicMock
 import pytest
 
 
+@pytest.fixture
+def preserve_modules():
+    """Preserve module state before and after test."""
+    # Save original modules
+    original_modules = {}
+    modules_to_preserve = [
+        mod for mod in sys.modules.keys() if mod.startswith("clustrix")
+    ]
+    for mod in modules_to_preserve:
+        original_modules[mod] = sys.modules.get(mod)
+
+    yield
+
+    # Clear any test modules
+    modules_to_clear = [mod for mod in sys.modules.keys() if mod.startswith("clustrix")]
+    for mod in modules_to_clear:
+        if mod in sys.modules:
+            del sys.modules[mod]
+
+    # Restore original modules
+    for mod, value in original_modules.items():
+        if value is not None:
+            sys.modules[mod] = value
+
+
 class TestGitHubActionsCompatibility:
     """Test compatibility with GitHub Actions CI/CD environment."""
 
-    def test_notebook_magic_without_dependencies(self):
+    def test_notebook_magic_without_dependencies(self, preserve_modules):
         """Test notebook magic works when IPython/ipywidgets are completely unavailable."""
         # Clear any existing clustrix modules
         modules_to_clear = [
@@ -56,7 +81,7 @@ class TestGitHubActionsCompatibility:
                 # Should return None (graceful failure)
                 assert result is None
 
-    def test_widget_creation_without_dependencies(self):
+    def test_widget_creation_without_dependencies(self, preserve_modules):
         """Test widget creation fails gracefully when dependencies missing."""
         # Clear any existing clustrix modules
         modules_to_clear = [
@@ -80,7 +105,7 @@ class TestGitHubActionsCompatibility:
             ):
                 EnhancedClusterConfigWidget()
 
-    def test_auto_display_without_dependencies(self):
+    def test_auto_display_without_dependencies(self, preserve_modules):
         """Test auto display function handles missing dependencies gracefully."""
         # Clear any existing clustrix modules
         modules_to_clear = [
@@ -101,7 +126,7 @@ class TestGitHubActionsCompatibility:
             # Should not raise any exceptions
             auto_display_on_import()
 
-    def test_load_ipython_extension_without_dependencies(self):
+    def test_load_ipython_extension_without_dependencies(self, preserve_modules):
         """Test IPython extension loading handles missing dependencies."""
         # Clear any existing clustrix modules
         modules_to_clear = [
@@ -132,7 +157,7 @@ class TestGitHubActionsCompatibility:
                 # Should not try to register magic function
                 assert not mock_ipython.register_magic_function.called
 
-    def test_module_import_chain_without_dependencies(self):
+    def test_module_import_chain_without_dependencies(self, preserve_modules):
         """Test the full module import chain works without dependencies."""
         # Clear any existing clustrix modules
         modules_to_clear = [

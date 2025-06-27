@@ -186,11 +186,25 @@ class TestEnhancedClusterConfigWidget:
 
     def test_widget_without_ipython(self):
         """Test widget creation fails without IPython."""
-        with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False):
-            with pytest.raises(
-                ImportError, match="IPython and ipywidgets are required"
-            ):
-                EnhancedClusterConfigWidget()
+        # Clear the module cache to ensure clean import
+        import sys
+
+        original_module = sys.modules.get("clustrix.notebook_magic")
+        try:
+            if "clustrix.notebook_magic" in sys.modules:
+                del sys.modules["clustrix.notebook_magic"]
+
+            with patch.dict("sys.modules", {"IPython": None, "ipywidgets": None}):
+                from clustrix.notebook_magic import EnhancedClusterConfigWidget
+
+                with pytest.raises(
+                    ImportError, match="IPython and ipywidgets are required"
+                ):
+                    EnhancedClusterConfigWidget()
+        finally:
+            # Restore the original module
+            if original_module:
+                sys.modules["clustrix.notebook_magic"] = original_module
 
     def test_config_file_loading(self, mock_ipython_environment):
         """Test configuration loading from files."""
