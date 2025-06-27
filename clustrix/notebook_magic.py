@@ -35,9 +35,14 @@ except ImportError:
 
     def cell_magic(name):
         def decorator(func):
+            # Create a wrapper that handles both decorator and method call scenarios
             def wrapper(*args, **kwargs):
                 return func(*args, **kwargs)
 
+            # Copy function attributes to make it look like the original
+            wrapper.__name__ = getattr(func, "__name__", "clusterfy")
+            wrapper.__doc__ = getattr(func, "__doc__", "")
+            wrapper._original = func
             return wrapper
 
         return decorator
