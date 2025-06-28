@@ -470,6 +470,14 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
+        # Remote Kubernetes checkbox
+        self.k8s_remote_checkbox = widgets.Checkbox(
+            value=False,
+            description="Remote Kubernetes Cluster",
+            style=style,
+            layout=full_layout,
+        )
+        self.k8s_remote_checkbox.observe(self._on_k8s_remote_change, names="value")
         # Remote work directory
         self.work_dir_field = widgets.Text(
             value="/tmp/clustrix",
@@ -581,6 +589,7 @@ class EnhancedClusterConfigWidget:
             [
                 widgets.HTML("<h5>Kubernetes Settings</h5>"),
                 widgets.HBox([self.k8s_namespace, self.k8s_image]),
+                self.k8s_remote_checkbox,
             ]
         )
 
@@ -603,15 +612,28 @@ class EnhancedClusterConfigWidget:
             self.k8s_fields.layout.display = "none"
             self.work_dir_field.layout.display = "none"
         elif cluster_type == "kubernetes":
-            # Show Kubernetes-specific fields, hide SSH connection fields
-            self.connection_fields.layout.display = "none"
+            # Show Kubernetes-specific fields, conditionally show connection fields
             self.k8s_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            # Connection fields depend on remote checkbox
+            self._update_kubernetes_connection_visibility()
         else:  # ssh, slurm, pbs, sge
             # Show SSH-based connection fields, hide Kubernetes fields
             self.connection_fields.layout.display = ""
             self.k8s_fields.layout.display = "none"
             self.work_dir_field.layout.display = ""
+
+    def _on_k8s_remote_change(self, change):
+        """Handle remote Kubernetes checkbox change."""
+        self._update_kubernetes_connection_visibility()
+
+    def _update_kubernetes_connection_visibility(self):
+        """Update connection fields visibility for Kubernetes clusters."""
+        if self.cluster_type.value == "kubernetes":
+            if self.k8s_remote_checkbox.value:
+                self.connection_fields.layout.display = ""
+            else:
+                self.connection_fields.layout.display = "none"
 
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
@@ -634,6 +656,7 @@ class EnhancedClusterConfigWidget:
         # Kubernetes fields
         self.k8s_namespace.value = config.get("k8s_namespace", "default")
         self.k8s_image.value = config.get("k8s_image", "python:3.11-slim")
+        self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
         # Paths
         self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
         # Advanced options
@@ -668,11 +691,16 @@ class EnhancedClusterConfigWidget:
         # Add cluster-specific fields
         if self.cluster_type.value != "local":
             if self.cluster_type.value == "kubernetes":
-                config["cluster_host"] = self.host_field.value
-                config["cluster_port"] = self.port_field.value
                 config["remote_work_dir"] = self.work_dir_field.value
                 config["k8s_namespace"] = self.k8s_namespace.value
                 config["k8s_image"] = self.k8s_image.value
+                config["k8s_remote"] = self.k8s_remote_checkbox.value
+                # Only include connection details if remote Kubernetes
+                if self.k8s_remote_checkbox.value:
+                    config["cluster_host"] = self.host_field.value
+                    config["cluster_port"] = self.port_field.value
+                    config["username"] = self.username_field.value
+                    config["key_file"] = self.ssh_key_field.value
             else:  # SSH-based clusters
                 config["cluster_host"] = self.host_field.value
                 config["cluster_port"] = self.port_field.value
