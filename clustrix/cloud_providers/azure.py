@@ -327,79 +327,309 @@ class AzureProvider(CloudProvider):
         else:
             raise ValueError(f"Unknown cluster type: {cluster_type}")
 
-    def delete_cluster(self, cluster_identifier: str) -> bool:
+    def delete_cluster(self, cluster_identifier: str, cluster_type: str = "vm") -> bool:
         """Delete an Azure cluster."""
-        # TODO: Implement Azure cluster deletion
-        logger.info(f"Would delete Azure cluster: {cluster_identifier}")
-        return True
+        if not self.authenticated:
+            raise RuntimeError("Not authenticated with Azure")
+            
+        try:
+            if cluster_type == "vm":
+                # Delete VM and associated resources
+                self.compute_client.virtual_machines.begin_delete(
+                    self.resource_group, cluster_identifier
+                ).result()
+                
+                # Also delete associated resources (NIC, IP, NSG, etc.)
+                try:
+                    self.network_client.network_interfaces.begin_delete(
+                        self.resource_group, f"{cluster_identifier}-nic"
+                    ).result()
+                    
+                    self.network_client.public_ip_addresses.begin_delete(
+                        self.resource_group, f"{cluster_identifier}-ip"
+                    ).result()
+                    
+                    self.network_client.network_security_groups.begin_delete(
+                        self.resource_group, f"{cluster_identifier}-nsg"
+                    ).result()
+                    
+                    self.network_client.virtual_networks.begin_delete(
+                        self.resource_group, f"{cluster_identifier}-vnet"
+                    ).result()
+                except Exception as e:
+                    logger.warning(f"Failed to delete some associated resources: {e}")
+                
+                logger.info(f"Deleted Azure VM '{cluster_identifier}'")
+                return True
+            elif cluster_type == "aks":
+                # TODO: Implement AKS cluster deletion
+                logger.info(f"Would delete AKS cluster '{cluster_identifier}'")
+                return True
+            else:
+                raise ValueError(f"Unknown cluster type: {cluster_type}")
+                
+        except Exception as e:
+            logger.error(f"Failed to delete Azure cluster: {e}")
+            return False
 
-    def get_cluster_status(self, cluster_identifier: str) -> Dict[str, Any]:
+    def get_cluster_status(self, cluster_identifier: str, cluster_type: str = "vm") -> Dict[str, Any]:
         """Get status of an Azure cluster."""
-        # TODO: Implement Azure cluster status
-        return {
-            "cluster_name": cluster_identifier,
-            "status": "running",
-            "provider": "azure",
-        }
+        if not self.authenticated:
+            raise RuntimeError("Not authenticated with Azure")
+            
+        try:
+            if cluster_type == "vm":
+                vm = self.compute_client.virtual_machines.get(
+                    self.resource_group, cluster_identifier
+                )
+                return {
+                    "vm_name": cluster_identifier,
+                    "status": vm.provisioning_state.lower() if vm.provisioning_state else "unknown",
+                    "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
+                    "region": vm.location,
+                    "resource_group": self.resource_group,
+                    "provider": "azure",
+                    "cluster_type": "vm"
+                }
+            elif cluster_type == "aks":
+                # TODO: Implement AKS status check
+                return {
+                    "cluster_name": cluster_identifier,
+                    "status": "running",
+                    "provider": "azure",
+                    "cluster_type": "aks"
+                }
+        except Exception as e:
+            logger.error(f"Failed to get cluster status: {e}")
+            raise
 
     def list_clusters(self) -> List[Dict[str, Any]]:
         """List all Azure clusters."""
-        # TODO: Implement Azure cluster listing
-        return []
+        if not self.authenticated:
+            raise RuntimeError("Not authenticated with Azure")
+            
+        clusters = []
+        
+        try:
+            # List VMs with clustrix tag
+            vms = self.compute_client.virtual_machines.list(self.resource_group)
+            
+            for vm in vms:
+                # Check if VM has clustrix tag
+                tags = getattr(vm, 'tags', {})
+                
+                if tags and tags.get('created_by') == 'clustrix':
+                    clusters.append({
+                        "name": vm.name,
+                        "vm_id": vm.id,
+                        "type": "vm",
+                        "status": vm.provisioning_state.lower() if vm.provisioning_state else "unknown",
+                        "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
+                        "region": vm.location,
+                        "resource_group": self.resource_group
+                    })
+                    
+        except Exception as e:
+            logger.error(f"Failed to list Azure VMs: {e}")
+        
+        # TODO: Add AKS cluster listing
+        
+        return clusters
 
-    def get_cluster_config(self, cluster_identifier: str) -> Dict[str, Any]:
+    def get_cluster_config(self, cluster_identifier: str, cluster_type: str = "vm") -> Dict[str, Any]:
         """Get Clustrix configuration for an Azure cluster."""
-        # TODO: Implement Azure cluster config generation
-        return {
-            "name": f"Azure - {cluster_identifier}",
-            "cluster_type": "ssh",  # or "kubernetes" for AKS
-            "cluster_host": "placeholder.azure.com",
-            "provider": "azure",
-        }
+        if cluster_type == "vm":
+            # Get VM details and public IP
+            try:
+                vm = self.compute_client.virtual_machines.get(
+                    self.resource_group, cluster_identifier
+                )
+                
+                # Get public IP
+                public_ip = ""
+                try:
+                    ip_result = self.network_client.public_ip_addresses.get(
+                        self.resource_group, f"{cluster_identifier}-ip"
+                    )
+                    public_ip = ip_result.ip_address or ""
+                except Exception:
+                    pass
+                
+                return {
+                    "name": f"Azure VM - {cluster_identifier}",
+                    "cluster_type": "ssh",
+                    "cluster_host": public_ip,
+                    "username": "azureuser",  # Default admin username
+                    "cluster_port": 22,
+                    "default_cores": 2,  # Would need to map VM size to cores
+                    "default_memory": "4GB",  # Would need to map VM size to memory
+                    "remote_work_dir": "/home/azureuser/clustrix",
+                    "package_manager": "conda",
+                    "cost_monitoring": True,
+                    "provider": "azure",
+                    "provider_config": {
+                        "vm_name": cluster_identifier,
+                        "resource_group": self.resource_group,
+                        "region": self.region,
+                        "subscription_id": self.subscription_id
+                    }
+                }
+            except Exception as e:
+                logger.error(f"Failed to get VM details: {e}")
+                # Return basic config
+                return {
+                    "name": f"Azure VM - {cluster_identifier}",
+                    "cluster_type": "ssh",
+                    "cluster_host": "placeholder.azure.com",
+                    "provider": "azure"
+                }
+        elif cluster_type == "aks":
+            return {
+                "name": f"Azure AKS - {cluster_identifier}",
+                "cluster_type": "kubernetes",
+                "cluster_host": f"{cluster_identifier}.aks.{self.region}.azure.com",
+                "cluster_port": 443,
+                "k8s_namespace": "default",
+                "k8s_image": "python:3.11",
+                "default_cores": 2,
+                "default_memory": "4GB",
+                "cost_monitoring": True,
+                "provider": "azure",
+                "provider_config": {
+                    "cluster_name": cluster_identifier,
+                    "resource_group": self.resource_group,
+                    "region": self.region,
+                    "subscription_id": self.subscription_id
+                }
+            }
+        else:
+            raise ValueError(f"Unknown cluster type: {cluster_type}")
 
     def estimate_cost(self, **kwargs) -> Dict[str, float]:
         """Estimate Azure costs."""
-        # TODO: Implement Azure cost estimation
-        return {"total": 0.0}
+        cluster_type = kwargs.get('cluster_type', 'vm')
+        vm_size = kwargs.get('vm_size', 'Standard_D2s_v3')
+        hours = kwargs.get('hours', 1)
+        
+        # Simplified pricing - real implementation would use Azure Pricing API
+        vm_prices = {
+            "Standard_B1s": 0.0104,
+            "Standard_B1ms": 0.0207,
+            "Standard_B2s": 0.0416,
+            "Standard_B2ms": 0.0832,
+            "Standard_D2s_v3": 0.096,
+            "Standard_D4s_v3": 0.192,
+            "Standard_D8s_v3": 0.384,
+            "Standard_F2s_v2": 0.0834,
+            "Standard_F4s_v2": 0.1669,
+            "Standard_E2s_v3": 0.126,
+            "Standard_E4s_v3": 0.252,
+        }
+        
+        base_price = vm_prices.get(vm_size, 0.10)  # Default price
+        
+        if cluster_type == "aks":
+            # AKS has cluster management fee (free tier available)
+            cluster_fee = 0.0  # Free tier for development
+            node_cost = base_price * hours
+            total = cluster_fee + node_cost
+            
+            return {
+                "cluster_management": cluster_fee,
+                "nodes": node_cost,
+                "total": total
+            }
+        else:  # vm
+            total = base_price * hours
+            return {
+                "vm": total,
+                "total": total
+            }
 
     def get_available_instance_types(self, region: Optional[str] = None) -> List[str]:
         """Get available Azure VM sizes."""
-        # TODO: Query Azure API for actual VM sizes
-        return [
-            "Standard_B1s",
-            "Standard_B1ms",
-            "Standard_B2s",
-            "Standard_B2ms",
-            "Standard_D2s_v3",
-            "Standard_D4s_v3",
-            "Standard_D8s_v3",
-            "Standard_F2s_v2",
-            "Standard_F4s_v2",
-            "Standard_F8s_v2",
-            "Standard_E2s_v3",
-            "Standard_E4s_v3",
-            "Standard_E8s_v3",
-        ]
+        if not self.authenticated:
+            # Return common VM sizes if not authenticated
+            return [
+                "Standard_B1s", "Standard_B2s", "Standard_D2s_v3", "Standard_D4s_v3",
+                "Standard_F2s_v2", "Standard_E2s_v3", "Standard_E4s_v3"
+            ]
+
+        try:
+            # Use specified region or current region
+            query_region = region or self.region
+            
+            # Get VM sizes for the region
+            vm_sizes = self.compute_client.virtual_machine_sizes.list(query_region)
+            
+            # Extract VM size names and filter to common families
+            all_sizes = [size.name for size in vm_sizes]
+            
+            # Filter to common VM families for better UX
+            common_families = ['Standard_B', 'Standard_D', 'Standard_E', 'Standard_F', 'Standard_A']
+            filtered_sizes = []
+            
+            for family in common_families:
+                family_sizes = [s for s in all_sizes if s.startswith(family)]
+                # Sort by size (1s, 2s, 4s, etc.)
+                family_sizes.sort(key=lambda x: (
+                    int(x.split('_')[1][1:].split('s')[0]) if 's' in x.split('_')[1] and x.split('_')[1][1:].split('s')[0].isdigit()
+                    else 999
+                ))
+                filtered_sizes.extend(family_sizes[:8])  # Limit to 8 per family
+            
+            return filtered_sizes[:30]  # Limit total to 30 for better UX
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch VM sizes for region {query_region}: {e}")
+            # Return default list on error
+            return [
+                "Standard_B1s", "Standard_B2s", "Standard_D2s_v3", "Standard_D4s_v3",
+                "Standard_F2s_v2", "Standard_E2s_v3", "Standard_E4s_v3"
+            ]
 
     def get_available_regions(self) -> List[str]:
         """Get available Azure regions."""
-        # TODO: Query Azure API for actual regions
-        return [
-            "eastus",
-            "eastus2",
-            "westus",
-            "westus2",
-            "centralus",
-            "northeurope",
-            "westeurope",
-            "uksouth",
-            "ukwest",
-            "southeastasia",
-            "eastasia",
-            "australiaeast",
-            "japaneast",
-        ]
+        if not self.authenticated:
+            # Return common regions if not authenticated
+            return [
+                "eastus", "westus2", "northeurope", "westeurope", 
+                "centralus", "southeastasia", "japaneast", "australiaeast"
+            ]
+
+        try:
+            # Get all available regions where VMs can be deployed
+            subscription_client = self.resource_client
+            locations = subscription_client.subscriptions.list_locations(self.subscription_id)
+            
+            region_names = [loc.name for loc in locations]
+            region_names.sort()
+            
+            # Prioritize common regions
+            priority_regions = [
+                "eastus", "eastus2", "westus", "westus2", "centralus",
+                "northeurope", "westeurope", "uksouth", "ukwest",
+                "southeastasia", "eastasia", "japaneast", "australiaeast"
+            ]
+            
+            # Put priority regions first, then others
+            sorted_regions = []
+            for region in priority_regions:
+                if region in region_names:
+                    sorted_regions.append(region)
+                    region_names.remove(region)
+            
+            sorted_regions.extend(region_names)
+            return sorted_regions
+
+        except Exception as e:
+            logger.warning(f"Failed to fetch Azure regions: {e}")
+            return [
+                "eastus", "westus2", "northeurope", "westeurope", 
+                "centralus", "southeastasia", "japaneast", "australiaeast"
+            ]
 
 
-# Register the provider (placeholder - will be enabled when azure-identity is available)
-# PROVIDERS['azure'] = AzureProvider
+# Register the provider
+if AZURE_AVAILABLE:
+    PROVIDERS['azure'] = AzureProvider
