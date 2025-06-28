@@ -345,6 +345,8 @@ class EnhancedClusterConfigWidget:
         self._create_advanced_options()
         # Save configuration section
         self._create_save_section()
+        # Create section containers
+        self._create_section_containers()
         # Action buttons
         self.apply_btn = widgets.Button(
             description="Apply Configuration",
@@ -563,6 +565,25 @@ class EnhancedClusterConfigWidget:
         )
         self.save_btn.on_click(self._on_save_config)
 
+    def _create_section_containers(self):
+        """Create the main UI section containers."""
+        # Connection fields (dynamically shown/hidden)
+        self.connection_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Connection Settings</h5>"),
+                self.host_field,
+                widgets.HBox([self.username_field, self.ssh_key_field]),
+                self.port_field,
+            ]
+        )
+        # Kubernetes fields
+        self.k8s_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Kubernetes Settings</h5>"),
+                widgets.HBox([self.k8s_namespace, self.k8s_image]),
+            ]
+        )
+
     def _validate_host(self, change):
         """Validate host field input."""
         value = change["new"]
@@ -573,36 +594,24 @@ class EnhancedClusterConfigWidget:
             self.host_field.layout.border = ""
 
     def _on_cluster_type_change(self, change):
-        """Handle cluster type change to show/hide relevant fields."""
+        """Handle cluster type change to show/hide relevant sections."""
         cluster_type = change["new"]
-        # Update field visibility based on cluster type
+        # Update section visibility based on cluster type
         if cluster_type == "local":
-            # Hide remote-specific fields
-            self.host_field.layout.display = "none"
-            self.username_field.layout.display = "none"
-            self.ssh_key_field.layout.display = "none"
-            self.port_field.layout.display = "none"
+            # Hide both remote-specific sections
+            self.connection_fields.layout.display = "none"
+            self.k8s_fields.layout.display = "none"
             self.work_dir_field.layout.display = "none"
-            self.k8s_namespace.layout.display = "none"
-            self.k8s_image.layout.display = "none"
         elif cluster_type == "kubernetes":
-            # Show Kubernetes-specific fields
-            self.host_field.layout.display = ""
-            self.username_field.layout.display = "none"
-            self.ssh_key_field.layout.display = "none"
-            self.port_field.layout.display = ""
+            # Show Kubernetes-specific fields, hide SSH connection fields
+            self.connection_fields.layout.display = "none"
+            self.k8s_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
-            self.k8s_namespace.layout.display = ""
-            self.k8s_image.layout.display = ""
         else:  # ssh, slurm, pbs, sge
-            # Show SSH-based fields
-            self.host_field.layout.display = ""
-            self.username_field.layout.display = ""
-            self.ssh_key_field.layout.display = ""
-            self.port_field.layout.display = ""
+            # Show SSH-based connection fields, hide Kubernetes fields
+            self.connection_fields.layout.display = ""
+            self.k8s_fields.layout.display = "none"
             self.work_dir_field.layout.display = ""
-            self.k8s_namespace.layout.display = "none"
-            self.k8s_image.layout.display = "none"
 
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
@@ -877,22 +886,6 @@ class EnhancedClusterConfigWidget:
                 self.cluster_type,
             ]
         )
-        # Connection fields (dynamically shown/hidden)
-        connection_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Connection Settings</h5>"),
-                self.host_field,
-                widgets.HBox([self.username_field, self.ssh_key_field]),
-                self.port_field,
-            ]
-        )
-        # Kubernetes fields
-        k8s_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Kubernetes Settings</h5>"),
-                widgets.HBox([self.k8s_namespace, self.k8s_image]),
-            ]
-        )
         # Resource fields
         resource_fields = widgets.VBox(
             [
@@ -921,8 +914,8 @@ class EnhancedClusterConfigWidget:
                 config_section,
                 widgets.HTML("<hr>"),
                 basic_fields,
-                connection_fields,
-                k8s_fields,
+                self.connection_fields,
+                self.k8s_fields,
                 resource_fields,
                 self.advanced_accordion,
                 widgets.HTML("<hr>"),
