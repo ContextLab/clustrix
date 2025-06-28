@@ -1,322 +1,240 @@
-"""Tests for cloud provider integration."""
+"""Tests for cloud provider integrations."""
 
 import pytest
-from unittest.mock import Mock, patch
-import subprocess
-import os
+from unittest.mock import MagicMock, patch
+from datetime import datetime
 
-from clustrix.cloud_providers import (
-    CloudProviderDetector,
-    AWSEKSConfigurator,
-    AzureAKSConfigurator,
-    GoogleGKEConfigurator,
-    CloudProviderManager,
-    CloudProviderError,
-)
-from clustrix.config import ClusterConfig
+from clustrix.cloud_providers.base import CloudProvider
+from clustrix.cloud_providers import PROVIDERS
 
 
-class TestCloudProviderDetector:
-    """Test cloud provider detection."""
-
-    def test_detect_provider_aws(self):
-        """Test AWS provider detection."""
-        with patch.dict(os.environ, {"AWS_ACCESS_KEY_ID": "test"}):
-            provider = CloudProviderDetector.detect_provider()
-            assert provider == "aws"
-
-    def test_detect_provider_azure(self):
-        """Test Azure provider detection."""
-        with patch.dict(os.environ, {"AZURE_SUBSCRIPTION_ID": "test"}):
-            provider = CloudProviderDetector.detect_provider()
-            assert provider == "azure"
-
-    def test_detect_provider_gcp(self):
-        """Test GCP provider detection."""
-        with patch.dict(os.environ, {"GOOGLE_APPLICATION_CREDENTIALS": "test"}):
-            provider = CloudProviderDetector.detect_provider()
-            assert provider == "gcp"
-
-    def test_detect_provider_manual(self):
-        """Test fallback to manual when no provider detected."""
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("subprocess.run") as mock_run:
-                mock_run.side_effect = FileNotFoundError()
-                provider = CloudProviderDetector.detect_provider()
-                assert provider == "manual"
-
-    def test_check_aws_context_with_cli(self):
-        """Test AWS context check with CLI."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0)
-            result = CloudProviderDetector._check_aws_context()
-            assert result is True
-
-    def test_check_aws_context_cli_failure(self):
-        """Test AWS context check with CLI failure."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=1)
-            result = CloudProviderDetector._check_aws_context()
-            assert result is False
-
-    def test_check_azure_context_with_cli(self):
-        """Test Azure context check with CLI."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0)
-            result = CloudProviderDetector._check_azure_context()
-            assert result is True
-
-    def test_check_gcp_context_with_cli(self):
-        """Test GCP context check with CLI."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(
-                returncode=0, stdout=b"ACTIVE test@example.com"
-            )
-            result = CloudProviderDetector._check_gcp_context()
-            assert result is True
+class TestCloudProviderBase:
+    """Test the base cloud provider class."""
+    
+    def test_abstract_methods(self):
+        """Test that base class can't be instantiated."""
+        with pytest.raises(TypeError):
+            CloudProvider()
+    
+    def test_is_authenticated(self):
+        """Test authentication status check."""
+        # Create a concrete implementation for testing
+        class TestProvider(CloudProvider):
+            def authenticate(self, **credentials):
+                self.authenticated = True
+                return True
+            def validate_credentials(self):
+                return True
+            def create_cluster(self, cluster_name, **kwargs):
+                return {}
+            def delete_cluster(self, cluster_identifier):
+                return True
+            def get_cluster_status(self, cluster_identifier):
+                return {}
+            def list_clusters(self):
+                return []
+            def get_cluster_config(self, cluster_identifier):
+                return {}
+            def estimate_cost(self, **kwargs):
+                return {}
+            def get_available_instance_types(self, region=None):
+                return ["test-instance"]
+            def get_available_regions(self):
+                return ["test-region"]
+        
+        provider = TestProvider()
+        assert not provider.is_authenticated()
+        
+        provider.authenticate()
+        assert provider.is_authenticated()
 
 
-class TestAWSEKSConfigurator:
-    """Test AWS EKS configuration."""
-
-    def test_configure_cluster_success(self):
-        """Test successful EKS cluster configuration."""
-        config = ClusterConfig()
-        configurator = AWSEKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stderr="")
-
-            result = configurator.configure_cluster("test-cluster", "us-west-2")
-
-            assert result["provider"] == "aws"
-            assert result["cluster_name"] == "test-cluster"
-            assert result["region"] == "us-west-2"
-            assert result["configured"] is True
-
-    def test_configure_cluster_with_profile(self):
-        """Test EKS configuration with AWS profile."""
-        config = ClusterConfig(aws_profile="test-profile")
-        configurator = AWSEKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stderr="")
-
-            configurator.configure_cluster("test-cluster", "us-west-2")
-
-            # Verify profile was included in command (first call is AWS EKS, second is kubectl verify)
-            aws_call_args = mock_run.call_args_list[0][0][0]
-            assert "--profile" in aws_call_args
-            assert "test-profile" in aws_call_args
-
-    def test_configure_cluster_failure(self):
-        """Test EKS configuration failure."""
-        config = ClusterConfig()
-        configurator = AWSEKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=1, stderr="Error message")
-
-            with pytest.raises(CloudProviderError):
-                configurator.configure_cluster("test-cluster", "us-west-2")
-
-    def test_configure_cluster_timeout(self):
-        """Test EKS configuration timeout."""
-        config = ClusterConfig()
-        configurator = AWSEKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.TimeoutExpired(cmd="test", timeout=60)
-
-            with pytest.raises(CloudProviderError):
-                configurator.configure_cluster("test-cluster", "us-west-2")
-
-
-class TestAzureAKSConfigurator:
-    """Test Azure AKS configuration."""
-
-    def test_configure_cluster_success(self):
-        """Test successful AKS cluster configuration."""
-        config = ClusterConfig()
-        configurator = AzureAKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stderr="")
-
-            result = configurator.configure_cluster("test-cluster", "test-rg")
-
-            assert result["provider"] == "azure"
-            assert result["cluster_name"] == "test-cluster"
-            assert result["resource_group"] == "test-rg"
-            assert result["configured"] is True
-
-    def test_configure_cluster_with_subscription(self):
-        """Test AKS configuration with subscription ID."""
-        config = ClusterConfig(azure_subscription_id="test-sub")
-        configurator = AzureAKSConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stderr="")
-
-            configurator.configure_cluster("test-cluster", "test-rg")
-
-            # Verify subscription was included in command (first call is AZ CLI, second is kubectl verify)
-            az_call_args = mock_run.call_args_list[0][0][0]
-            assert "--subscription" in az_call_args
-            assert "test-sub" in az_call_args
-
-
-class TestGoogleGKEConfigurator:
-    """Test Google GKE configuration."""
-
-    def test_configure_cluster_success(self):
-        """Test successful GKE cluster configuration."""
-        config = ClusterConfig()
-        configurator = GoogleGKEConfigurator(config)
-
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stderr="")
-
-            result = configurator.configure_cluster(
-                "test-cluster", "us-central1-a", "test-project"
-            )
-
-            assert result["provider"] == "gcp"
-            assert result["cluster_name"] == "test-cluster"
-            assert result["zone"] == "us-central1-a"
-            assert result["project_id"] == "test-project"
-            assert result["configured"] is True
-
-
-class TestCloudProviderManager:
-    """Test cloud provider manager."""
-
-    def test_auto_configure_disabled(self):
-        """Test auto-configuration when disabled."""
-        config = ClusterConfig(cloud_auto_configure=False)
-        manager = CloudProviderManager(config)
-
-        result = manager.auto_configure()
-
-        assert result["auto_configured"] is False
-        assert "disabled" in result["reason"]
-
-    def test_auto_configure_manual_provider(self):
-        """Test auto-configuration with manual provider."""
-        config = ClusterConfig(cloud_auto_configure=True, cloud_provider="manual")
-
-        with patch.object(
-            CloudProviderDetector, "detect_provider", return_value="manual"
-        ):
-            manager = CloudProviderManager(config)
-            result = manager.auto_configure()
-
-            assert result["auto_configured"] is False
-            assert "No cloud provider detected" in result["reason"]
-
-    def test_auto_configure_aws_success(self):
-        """Test successful AWS auto-configuration."""
-        config = ClusterConfig(
-            cloud_auto_configure=True,
-            cloud_provider="aws",
-            eks_cluster_name="test-cluster",
-            cloud_region="us-west-2",
-        )
-
-        manager = CloudProviderManager(config)
-
-        with patch.object(AWSEKSConfigurator, "configure_cluster") as mock_configure:
-            mock_configure.return_value = {
-                "provider": "aws",
-                "cluster_name": "test-cluster",
-                "region": "us-west-2",
-                "configured": True,
+@pytest.mark.skipif('aws' not in PROVIDERS, reason="boto3 not installed")
+class TestAWSProvider:
+    """Test AWS provider implementation."""
+    
+    @pytest.fixture
+    def mock_boto3(self):
+        """Mock boto3 for testing."""
+        with patch('clustrix.cloud_providers.aws.boto3') as mock_boto3:
+            # Mock session
+            mock_session = MagicMock()
+            mock_boto3.Session.return_value = mock_session
+            
+            # Mock clients
+            mock_ec2 = MagicMock()
+            mock_eks = MagicMock()
+            mock_iam = MagicMock()
+            
+            mock_session.client.side_effect = lambda service: {
+                'ec2': mock_ec2,
+                'eks': mock_eks,
+                'iam': mock_iam
+            }[service]
+            
+            yield {
+                'boto3': mock_boto3,
+                'session': mock_session,
+                'ec2': mock_ec2,
+                'eks': mock_eks,
+                'iam': mock_iam
             }
-
-            result = manager.auto_configure()
-
-            assert result["auto_configured"] is True
-            assert result["provider"] == "aws"
-
-    def test_auto_configure_aws_missing_config(self):
-        """Test AWS auto-configuration with missing configuration."""
-        config = ClusterConfig(
-            cloud_auto_configure=True,
-            cloud_provider="aws",
-            # Missing cluster_name and region
+    
+    def test_authenticate_success(self, mock_boto3):
+        """Test successful authentication."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        provider = AWSProvider()
+        result = provider.authenticate(
+            access_key_id='test_key',
+            secret_access_key='test_secret',
+            region='us-west-2'
         )
-
-        manager = CloudProviderManager(config)
-        result = manager.auto_configure()
-
-        assert result["auto_configured"] is False
-        assert "Missing EKS cluster name or region" in result["reason"]
-
-    def test_auto_configure_azure_success(self):
-        """Test successful Azure auto-configuration."""
-        config = ClusterConfig(
-            cloud_auto_configure=True,
-            cloud_provider="azure",
-            aks_cluster_name="test-cluster",
-            azure_resource_group="test-rg",
+        
+        assert result is True
+        assert provider.is_authenticated()
+        assert provider.region == 'us-west-2'
+        
+        # Check that clients were initialized
+        assert provider.ec2_client is not None
+        assert provider.eks_client is not None
+        assert provider.iam_client is not None
+    
+    def test_authenticate_failure(self, mock_boto3):
+        """Test authentication failure."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        from botocore.exceptions import ClientError
+        
+        # Make get_user fail
+        mock_boto3['iam'].get_user.side_effect = ClientError(
+            {'Error': {'Code': 'InvalidUserID.NotFound'}},
+            'GetUser'
         )
-
-        manager = CloudProviderManager(config)
-
-        with patch.object(AzureAKSConfigurator, "configure_cluster") as mock_configure:
-            mock_configure.return_value = {
-                "provider": "azure",
-                "cluster_name": "test-cluster",
-                "resource_group": "test-rg",
-                "configured": True,
-            }
-
-            result = manager.auto_configure()
-
-            assert result["auto_configured"] is True
-            assert result["provider"] == "azure"
-
-    def test_auto_configure_gcp_success(self):
-        """Test successful GCP auto-configuration."""
-        config = ClusterConfig(
-            cloud_auto_configure=True,
-            cloud_provider="gcp",
-            gke_cluster_name="test-cluster",
-            gcp_zone="us-central1-a",
-            gcp_project_id="test-project",
+        
+        provider = AWSProvider()
+        result = provider.authenticate(
+            access_key_id='bad_key',
+            secret_access_key='bad_secret'
         )
-
-        manager = CloudProviderManager(config)
-
-        with patch.object(GoogleGKEConfigurator, "configure_cluster") as mock_configure:
-            mock_configure.return_value = {
-                "provider": "gcp",
-                "cluster_name": "test-cluster",
-                "zone": "us-central1-a",
-                "project_id": "test-project",
-                "configured": True,
-            }
-
-            result = manager.auto_configure()
-
-            assert result["auto_configured"] is True
-            assert result["provider"] == "gcp"
-
-    def test_auto_configure_exception_handling(self):
-        """Test exception handling in auto-configuration."""
-        config = ClusterConfig(
-            cloud_auto_configure=True,
-            cloud_provider="aws",
-            eks_cluster_name="test-cluster",
-            cloud_region="us-west-2",
+        
+        assert result is False
+        assert not provider.is_authenticated()
+    
+    def test_create_ec2_instance(self, mock_boto3):
+        """Test EC2 instance creation."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        # Mock responses
+        mock_boto3['ec2'].describe_images.return_value = {
+            'Images': [{
+                'ImageId': 'ami-12345',
+                'CreationDate': '2024-01-01T00:00:00.000Z'
+            }]
+        }
+        
+        mock_boto3['ec2'].run_instances.return_value = {
+            'Instances': [{
+                'InstanceId': 'i-1234567890',
+                'State': {'Name': 'pending'}
+            }]
+        }
+        
+        mock_boto3['ec2'].describe_instances.return_value = {
+            'Reservations': [{
+                'Instances': [{
+                    'InstanceId': 'i-1234567890',
+                    'PublicIpAddress': '1.2.3.4',
+                    'PrivateIpAddress': '10.0.0.1',
+                    'State': {'Name': 'running'}
+                }]
+            }]
+        }
+        
+        provider = AWSProvider()
+        provider.authenticated = True
+        provider.ec2_client = mock_boto3['ec2']
+        
+        result = provider.create_ec2_instance(
+            instance_name='test-instance',
+            instance_type='t3.micro'
         )
-
-        manager = CloudProviderManager(config)
-
-        with patch.object(AWSEKSConfigurator, "configure_cluster") as mock_configure:
-            mock_configure.side_effect = Exception("Test error")
-
-            result = manager.auto_configure()
-
-            assert result["auto_configured"] is False
-            assert "Test error" in result["error"]
+        
+        assert result['instance_id'] == 'i-1234567890'
+        assert result['public_ip'] == '1.2.3.4'
+        assert result['instance_type'] == 't3.micro'
+    
+    def test_get_cluster_config_ec2(self, mock_boto3):
+        """Test getting Clustrix config for EC2 instance."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        mock_boto3['ec2'].describe_instances.return_value = {
+            'Reservations': [{
+                'Instances': [{
+                    'InstanceId': 'i-1234567890',
+                    'PublicIpAddress': '1.2.3.4',
+                    'State': {'Name': 'running'}
+                }]
+            }]
+        }
+        
+        provider = AWSProvider()
+        provider.authenticated = True
+        provider.ec2_client = mock_boto3['ec2']
+        provider.region = 'us-east-1'
+        
+        config = provider.get_cluster_config('i-1234567890', cluster_type='ec2')
+        
+        assert config['cluster_type'] == 'ssh'
+        assert config['cluster_host'] == '1.2.3.4'
+        assert config['username'] == 'ec2-user'
+        assert config['cost_monitoring'] is True
+        assert config['provider'] == 'aws'
+    
+    def test_get_cluster_config_eks(self, mock_boto3):
+        """Test getting Clustrix config for EKS cluster."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        provider = AWSProvider()
+        provider.authenticated = True
+        provider.region = 'us-west-2'
+        
+        config = provider.get_cluster_config('my-cluster', cluster_type='eks')
+        
+        assert config['cluster_type'] == 'kubernetes'
+        assert config['cluster_host'] == 'my-cluster.eks.us-west-2.amazonaws.com'
+        assert config['cluster_port'] == 443
+        assert config['cost_monitoring'] is True
+        assert config['provider'] == 'aws'
+    
+    def test_estimate_cost_eks(self, mock_boto3):
+        """Test cost estimation for EKS."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        provider = AWSProvider()
+        costs = provider.estimate_cost(
+            cluster_type='eks',
+            instance_type='t3.medium',
+            node_count=3,
+            hours=24
+        )
+        
+        assert 'control_plane' in costs
+        assert 'nodes' in costs
+        assert 'total' in costs
+        assert costs['control_plane'] == 0.10 * 24  # $0.10/hour * 24 hours
+        assert costs['nodes'] == 0.0416 * 3 * 24  # t3.medium price * 3 nodes * 24 hours
+    
+    def test_estimate_cost_ec2(self, mock_boto3):
+        """Test cost estimation for EC2."""
+        from clustrix.cloud_providers.aws import AWSProvider
+        
+        provider = AWSProvider()
+        costs = provider.estimate_cost(
+            cluster_type='ec2',
+            instance_type='t3.large',
+            hours=8
+        )
+        
+        assert 'instance' in costs
+        assert 'total' in costs
+        assert costs['total'] == 0.0832 * 8  # t3.large price * 8 hours
