@@ -351,10 +351,10 @@ def detect_config_files(search_dirs: Optional[List[str]] = None) -> List[Path]:
     config_files = []
     config_names = ["clustrix.yml", "clustrix.yaml", "config.yml", "config.yaml"]
     for dir_path in search_dirs:
-        dir_path = Path(dir_path).expanduser()
-        if dir_path.exists() and dir_path.is_dir():
+        path_obj = Path(dir_path).expanduser()
+        if path_obj.exists() and path_obj.is_dir():
             for config_name in config_names:
-                config_path = dir_path / config_name
+                config_path = path_obj / config_name
                 if config_path.exists() and config_path.is_file():
                     config_files.append(config_path)
     return config_files
