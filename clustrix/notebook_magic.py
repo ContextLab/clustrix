@@ -259,6 +259,79 @@ DEFAULT_CONFIGS = {
         "package_manager": "pip",
         "description": "Example SSH remote server configuration",
     },
+    # Cloud Provider Configurations
+    "AWS EC2 Cluster": {
+        "name": "AWS EC2 Cluster",
+        "cluster_type": "aws",
+        "aws_region": "us-east-1",
+        "aws_instance_type": "t3.medium",
+        "aws_cluster_type": "ec2",
+        "default_cores": 2,
+        "default_memory": "4GB",
+        "remote_work_dir": "/home/ec2-user/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "AWS EC2 instance for scalable computing",
+    },
+    "AWS EKS Cluster": {
+        "name": "AWS EKS Cluster",
+        "cluster_type": "aws",
+        "aws_region": "us-east-1",
+        "aws_instance_type": "t3.medium",
+        "aws_cluster_type": "eks",
+        "k8s_namespace": "default",
+        "k8s_image": "python:3.11",
+        "default_cores": 2,
+        "default_memory": "4GB",
+        "package_manager": "pip",
+        "cost_monitoring": True,
+        "description": "AWS EKS Kubernetes cluster for containerized workloads",
+    },
+    "Azure VM Cluster": {
+        "name": "Azure VM Cluster",
+        "cluster_type": "azure",
+        "azure_region": "eastus",
+        "azure_instance_type": "Standard_D2s_v3",
+        "default_cores": 2,
+        "default_memory": "8GB",
+        "remote_work_dir": "/home/azureuser/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "Azure Virtual Machine for cloud computing",
+    },
+    "Google Cloud VM": {
+        "name": "Google Cloud VM",
+        "cluster_type": "gcp",
+        "gcp_region": "us-central1",
+        "gcp_instance_type": "e2-medium",
+        "default_cores": 2,
+        "default_memory": "4GB",
+        "remote_work_dir": "/home/ubuntu/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "Google Compute Engine VM for scalable processing",
+    },
+    "Lambda Cloud GPU": {
+        "name": "Lambda Cloud GPU",
+        "cluster_type": "lambda",
+        "lambda_instance_type": "gpu_1x_a10",
+        "default_cores": 8,
+        "default_memory": "32GB",
+        "remote_work_dir": "/home/ubuntu/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "Lambda Cloud GPU instance for AI/ML workloads",
+    },
+    "HuggingFace Space": {
+        "name": "HuggingFace Space",
+        "cluster_type": "huggingface",
+        "hf_hardware": "cpu-basic",
+        "hf_sdk": "gradio",
+        "default_cores": 2,
+        "default_memory": "16GB",
+        "cost_monitoring": True,
+        "description": "HuggingFace Spaces for ML model deployment",
+    },
 }
 
 
@@ -404,6 +477,7 @@ class EnhancedClusterConfigWidget:
                 "azure",
                 "gcp",
                 "lambda",
+                "huggingface",
             ],
             description="Cluster Type:",
             style=style,
@@ -705,6 +779,34 @@ class EnhancedClusterConfigWidget:
             layout=half_layout,
         )
 
+        # HuggingFace fields
+        self.hf_token = widgets.Password(
+            description="HF Token:",
+            placeholder="Your HuggingFace API token",
+            style=style,
+            layout=half_layout,
+        )
+        self.hf_username = widgets.Text(
+            description="HF Username:",
+            placeholder="Your HuggingFace username",
+            style=style,
+            layout=half_layout,
+        )
+        self.hf_hardware = widgets.Dropdown(
+            options=["cpu-basic"],  # Will be populated dynamically
+            value="cpu-basic",
+            description="Hardware:",
+            style=style,
+            layout=half_layout,
+        )
+        self.hf_sdk = widgets.Dropdown(
+            options=["gradio", "streamlit", "docker"],
+            value="gradio",
+            description="SDK:",
+            style=style,
+            layout=half_layout,
+        )
+
     def _create_advanced_options(self):
         """Create advanced options accordion."""
         style = {"description_width": "120px"}
@@ -889,30 +991,51 @@ class EnhancedClusterConfigWidget:
             ]
         )
 
-        # Cloud provider fields
-        self.cloud_fields = widgets.VBox(
+        # Separate cloud provider field containers
+        self.aws_fields = widgets.VBox(
             [
-                widgets.HTML("<h5>Cloud Provider Settings</h5>"),
-                # AWS fields
-                widgets.HTML("<h6>AWS Settings</h6>"),
+                widgets.HTML("<h5>AWS Settings</h5>"),
                 widgets.HBox([self.aws_region, self.aws_instance_type]),
                 widgets.HBox([self.aws_access_key, self.aws_secret_key]),
                 self.aws_cluster_type,
-                # Azure fields
-                widgets.HTML("<h6>Azure Settings</h6>"),
+                self.cost_monitoring_checkbox,
+            ]
+        )
+
+        self.azure_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Azure Settings</h5>"),
                 widgets.HBox([self.azure_region, self.azure_instance_type]),
                 self.azure_subscription_id,
                 widgets.HBox([self.azure_client_id, self.azure_client_secret]),
-                # GCP fields
-                widgets.HTML("<h6>Google Cloud Settings</h6>"),
+                self.cost_monitoring_checkbox,
+            ]
+        )
+
+        self.gcp_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Google Cloud Settings</h5>"),
                 widgets.HBox([self.gcp_project_id, self.gcp_region]),
                 self.gcp_instance_type,
                 self.gcp_service_account_key,
-                # Lambda Cloud fields
-                widgets.HTML("<h6>Lambda Cloud Settings</h6>"),
+                self.cost_monitoring_checkbox,
+            ]
+        )
+
+        self.lambda_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>Lambda Cloud Settings</h5>"),
                 self.lambda_api_key,
                 self.lambda_instance_type,
-                # Common cloud settings
+                self.cost_monitoring_checkbox,
+            ]
+        )
+
+        self.hf_fields = widgets.VBox(
+            [
+                widgets.HTML("<h5>HuggingFace Spaces Settings</h5>"),
+                widgets.HBox([self.hf_token, self.hf_username]),
+                widgets.HBox([self.hf_hardware, self.hf_sdk]),
                 self.cost_monitoring_checkbox,
             ]
         )
@@ -933,8 +1056,14 @@ class EnhancedClusterConfigWidget:
         # Hide all sections first
         self.connection_fields.layout.display = "none"
         self.k8s_fields.layout.display = "none"
-        self.cloud_fields.layout.display = "none"
         self.work_dir_field.layout.display = "none"
+
+        # Hide all cloud provider sections
+        self.aws_fields.layout.display = "none"
+        self.azure_fields.layout.display = "none"
+        self.gcp_fields.layout.display = "none"
+        self.lambda_fields.layout.display = "none"
+        self.hf_fields.layout.display = "none"
 
         # Update section visibility based on cluster type
         if cluster_type == "local":
@@ -946,11 +1075,31 @@ class EnhancedClusterConfigWidget:
             self.work_dir_field.layout.display = ""
             # Connection fields depend on remote checkbox
             self._update_kubernetes_connection_visibility()
-        elif cluster_type in ["aws", "azure", "gcp", "lambda"]:
-            # Show cloud provider fields
-            self.cloud_fields.layout.display = ""
+        elif cluster_type == "aws":
+            # Show AWS cloud provider fields only
+            self.aws_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
-            self._update_cloud_provider_fields(cluster_type)
+            self._populate_cloud_provider_options("aws")
+        elif cluster_type == "azure":
+            # Show Azure cloud provider fields only
+            self.azure_fields.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self._populate_cloud_provider_options("azure")
+        elif cluster_type == "gcp":
+            # Show GCP cloud provider fields only
+            self.gcp_fields.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self._populate_cloud_provider_options("gcp")
+        elif cluster_type == "lambda":
+            # Show Lambda Cloud provider fields only
+            self.lambda_fields.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self._populate_cloud_provider_options("lambda")
+        elif cluster_type == "huggingface":
+            # Show HuggingFace Spaces provider fields only
+            self.hf_fields.layout.display = ""
+            self.work_dir_field.layout.display = ""
+            self._populate_cloud_provider_options("huggingface")
         else:  # ssh, slurm, pbs, sge
             # Show SSH-based connection fields, hide other fields
             self.connection_fields.layout.display = ""
@@ -967,34 +1116,6 @@ class EnhancedClusterConfigWidget:
                 self.connection_fields.layout.display = ""
             else:
                 self.connection_fields.layout.display = "none"
-
-    def _update_cloud_provider_fields(self, provider: str):
-        """Update cloud provider-specific field visibility and populate dropdowns."""
-        # Hide all provider-specific sections first
-        for field_name in ["aws", "azure", "gcp", "lambda"]:
-            section_fields = [
-                child
-                for child in self.cloud_fields.children
-                if hasattr(child, "children")
-                and any(
-                    hasattr(subchild, "value")
-                    and subchild.description
-                    and field_name.upper() in subchild.description.upper()
-                    for subchild in (
-                        child.children if hasattr(child, "children") else [child]
-                    )
-                    if hasattr(subchild, "description")
-                )
-            ]
-            # Hide sections for other providers
-            for section in section_fields:
-                if field_name != provider:
-                    section.layout.display = "none"
-                else:
-                    section.layout.display = ""
-
-        # Populate dropdowns for the selected provider
-        self._populate_cloud_provider_options(provider)
 
     def _populate_cloud_provider_options(self, provider: str):
         """Populate region and instance type options for the specified cloud provider."""
@@ -1032,6 +1153,9 @@ class EnhancedClusterConfigWidget:
                     # For Lambda, we might not have a region dropdown, but update instance types
                     pass
                 self.lambda_instance_type.options = instance_types
+            elif provider == "huggingface":
+                # HuggingFace Spaces hardware options
+                self.hf_hardware.options = instance_types
 
         except Exception as e:
             # Fallback to default options on error
@@ -1084,6 +1208,18 @@ class EnhancedClusterConfigWidget:
                     "gpu_2x_a10",
                 ],
             },
+            "huggingface": {
+                "regions": ["global"],
+                "instances": [
+                    "cpu-basic",
+                    "cpu-upgrade",
+                    "t4-small",
+                    "t4-medium",
+                    "a10g-small",
+                    "a10g-large",
+                    "a100-large",
+                ],
+            },
         }
 
         if provider in defaults:
@@ -1099,6 +1235,8 @@ class EnhancedClusterConfigWidget:
                 self.gcp_instance_type.options = provider_defaults["instances"]
             elif provider == "lambda":
                 self.lambda_instance_type.options = provider_defaults["instances"]
+            elif provider == "huggingface":
+                self.hf_hardware.options = provider_defaults["instances"]
 
     def _on_aws_region_change(self, change):
         """Handle AWS region change to update available instance types."""
@@ -1167,6 +1305,42 @@ class EnhancedClusterConfigWidget:
         self.k8s_namespace.value = config.get("k8s_namespace", "default")
         self.k8s_image.value = config.get("k8s_image", "python:3.11-slim")
         self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
+
+        # Cloud provider fields
+        # AWS fields
+        self.aws_region.value = config.get("aws_region", "us-east-1")
+        self.aws_instance_type.value = config.get("aws_instance_type", "t3.medium")
+        self.aws_access_key.value = config.get("aws_access_key", "")
+        self.aws_secret_key.value = config.get("aws_secret_key", "")
+        self.aws_cluster_type.value = config.get("aws_cluster_type", "ec2")
+
+        # Azure fields
+        self.azure_region.value = config.get("azure_region", "eastus")
+        self.azure_instance_type.value = config.get(
+            "azure_instance_type", "Standard_D2s_v3"
+        )
+        self.azure_subscription_id.value = config.get("azure_subscription_id", "")
+        self.azure_client_id.value = config.get("azure_client_id", "")
+        self.azure_client_secret.value = config.get("azure_client_secret", "")
+
+        # GCP fields
+        self.gcp_project_id.value = config.get("gcp_project_id", "")
+        self.gcp_region.value = config.get("gcp_region", "us-central1")
+        self.gcp_instance_type.value = config.get("gcp_instance_type", "e2-medium")
+        self.gcp_service_account_key.value = config.get("gcp_service_account_key", "")
+
+        # Lambda Cloud fields
+        self.lambda_api_key.value = config.get("lambda_api_key", "")
+        self.lambda_instance_type.value = config.get(
+            "lambda_instance_type", "gpu_1x_a10"
+        )
+
+        # HuggingFace fields
+        self.hf_token.value = config.get("hf_token", "")
+        self.hf_username.value = config.get("hf_username", "")
+        self.hf_hardware.value = config.get("hf_hardware", "cpu-basic")
+        self.hf_sdk.value = config.get("hf_sdk", "gradio")
+
         # Paths
         self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
         # Advanced options
@@ -1215,7 +1389,62 @@ class EnhancedClusterConfigWidget:
                     config["cluster_port"] = self.port_field.value
                     config["username"] = self.username_field.value
                     config["key_file"] = self.ssh_key_field.value
-            else:  # SSH-based clusters
+            elif self.cluster_type.value in [
+                "aws",
+                "azure",
+                "gcp",
+                "lambda",
+                "huggingface",
+            ]:
+                # Cloud provider configurations
+                config["remote_work_dir"] = self.work_dir_field.value
+                config["cost_monitoring"] = self.cost_monitoring_checkbox.value
+
+                if self.cluster_type.value == "aws":
+                    config["aws_region"] = self.aws_region.value
+                    config["aws_instance_type"] = self.aws_instance_type.value
+                    config["aws_cluster_type"] = self.aws_cluster_type.value
+                    if self.aws_access_key.value:
+                        config["aws_access_key"] = self.aws_access_key.value
+                    if self.aws_secret_key.value:
+                        config["aws_secret_key"] = self.aws_secret_key.value
+
+                elif self.cluster_type.value == "azure":
+                    config["azure_region"] = self.azure_region.value
+                    config["azure_instance_type"] = self.azure_instance_type.value
+                    if self.azure_subscription_id.value:
+                        config["azure_subscription_id"] = (
+                            self.azure_subscription_id.value
+                        )
+                    if self.azure_client_id.value:
+                        config["azure_client_id"] = self.azure_client_id.value
+                    if self.azure_client_secret.value:
+                        config["azure_client_secret"] = self.azure_client_secret.value
+
+                elif self.cluster_type.value == "gcp":
+                    config["gcp_region"] = self.gcp_region.value
+                    config["gcp_instance_type"] = self.gcp_instance_type.value
+                    if self.gcp_project_id.value:
+                        config["gcp_project_id"] = self.gcp_project_id.value
+                    if self.gcp_service_account_key.value:
+                        config["gcp_service_account_key"] = (
+                            self.gcp_service_account_key.value
+                        )
+
+                elif self.cluster_type.value == "lambda":
+                    config["lambda_instance_type"] = self.lambda_instance_type.value
+                    if self.lambda_api_key.value:
+                        config["lambda_api_key"] = self.lambda_api_key.value
+
+                elif self.cluster_type.value == "huggingface":
+                    config["hf_hardware"] = self.hf_hardware.value
+                    config["hf_sdk"] = self.hf_sdk.value
+                    if self.hf_token.value:
+                        config["hf_token"] = self.hf_token.value
+                    if self.hf_username.value:
+                        config["hf_username"] = self.hf_username.value
+
+            else:  # SSH-based clusters (slurm, pbs, sge, ssh)
                 config["cluster_host"] = self.host_field.value
                 config["cluster_port"] = self.port_field.value
                 config["username"] = self.username_field.value
@@ -1685,7 +1914,11 @@ class EnhancedClusterConfigWidget:
                 basic_fields,
                 self.connection_fields,
                 self.k8s_fields,
-                self.cloud_fields,
+                self.aws_fields,
+                self.azure_fields,
+                self.gcp_fields,
+                self.lambda_fields,
+                self.hf_fields,
                 resource_fields,
                 self.advanced_accordion,
                 widgets.HTML("<hr>"),
