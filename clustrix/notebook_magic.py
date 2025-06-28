@@ -271,7 +271,9 @@ class EnhancedClusterConfigWidget:
         self.configs: Dict[str, Dict[str, Any]] = {}
         self.current_config_name: Optional[str] = None
         self.config_files: List[Path] = []
-        self.config_file_map: Dict[str, Path] = {}  # Maps config names to their source files
+        self.config_file_map: Dict[str, Path] = (
+            {}
+        )  # Maps config names to their source files
         self.auto_display = auto_display
         # Initialize configurations
         self._initialize_configs()
