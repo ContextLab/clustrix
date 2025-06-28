@@ -178,11 +178,11 @@ from .config import configure, get_config
 logger = logging.getLogger(__name__)
 # Default cluster configurations
 DEFAULT_CONFIGS = {
-    "Local Development": {
-        "name": "Local Development",
+    "Local Single-core": {
+        "name": "Local Single-core",
         "cluster_type": "local",
-        "default_cores": 4,
-        "default_memory": "8GB",
+        "default_cores": 1,
+        "default_memory": "16GB",
         "description": "Local machine for development and testing",
     },
     "Local Multi-core": {

@@ -61,9 +61,9 @@ class TestEnhancedDefaultConfigs:
 
     def test_local_configs_present(self):
         """Test that local configurations are present."""
-        assert "Local Development" in DEFAULT_CONFIGS
+        assert "Local Single-core" in DEFAULT_CONFIGS
         assert "Local Multi-core" in DEFAULT_CONFIGS
-        assert DEFAULT_CONFIGS["Local Development"]["cluster_type"] == "local"
+        assert DEFAULT_CONFIGS["Local Single-core"]["cluster_type"] == "local"
         assert DEFAULT_CONFIGS["Local Multi-core"]["cluster_type"] == "local"
         assert DEFAULT_CONFIGS["Local Multi-core"]["default_cores"] == -1
 
@@ -215,7 +215,7 @@ class TestEnhancedClusterConfigWidget:
         widget = EnhancedClusterConfigWidget()
         # Check that default configs are loaded
         assert len(widget.configs) >= len(DEFAULT_CONFIGS)
-        assert "Local Development" in widget.configs
+        assert "Local Single-core" in widget.configs
         assert "Local Multi-core" in widget.configs
         # Check initial state
         assert widget.current_config_name is not None
