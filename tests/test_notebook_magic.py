@@ -507,12 +507,10 @@ class TestMagicCommands:
         with patch("clustrix.notebook_magic.ClusterfyMagics") as MockMagics:
             mock_magic_instance = MagicMock()
             MockMagics.return_value = mock_magic_instance
-            with patch("builtins.print") as mock_print:
-                clustrix.notebook_magic.load_ipython_extension(mock_ipython)
-                MockMagics.assert_called_once_with(mock_ipython)
-                mock_ipython.register_magic_function.assert_called_once()
-                mock_print.assert_called_once()
-                assert "Clustrix notebook magic loaded" in mock_print.call_args[0][0]
+            clustrix.notebook_magic.load_ipython_extension(mock_ipython)
+            MockMagics.assert_called_once_with(mock_ipython)
+            mock_ipython.register_magic_function.assert_called_once()
+            # Note: No print message expected since widget displays automatically
 
     def test_clusterfy_magic_without_ipython(self):
         """Test magic command fails gracefully without IPython."""
@@ -595,6 +593,9 @@ class TestConfigurationSaveLoad:
             widget.module_loads.value = ""
             widget.pre_exec_commands = MagicMock()
             widget.pre_exec_commands.value = ""
+            # Mock the new filename input field
+            widget.save_filename_input = MagicMock()
+            widget.save_filename_input.value = "clustrix.yml"
             # Change current directory for the test
             import os
 

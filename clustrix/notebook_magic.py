@@ -363,8 +363,15 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="auto"),
         )
         self.delete_btn.on_click(self._on_delete_config)
-        # Status output
-        self.status_output = widgets.Output()
+        # Status output with proper sizing
+        self.status_output = widgets.Output(
+            layout=widgets.Layout(
+                height="150px",
+                width="100%",
+                overflow_y="scroll",
+                border="1px solid #ccc",
+            )
+        )
         # Update dropdown and load initial configuration
         self._update_config_dropdown()
         if self.configs:
@@ -554,17 +561,28 @@ class EnhancedClusterConfigWidget:
     def _create_save_section(self):
         """Create save configuration section."""
         style = {"description_width": "120px"}
-        # File selection dropdown
-        file_options = ["New file: clustrix.yml"]
-        for config_file in self.config_files:
-            file_options.append(f"Existing: {config_file}")
-        self.save_file_dropdown = widgets.Dropdown(
-            options=file_options,
-            value=file_options[0],
-            description="Save to:",
+
+        # Custom filename input
+        self.save_filename_input = widgets.Text(
+            value="clustrix.yml",
+            description="Filename:",
+            placeholder="config.yml or config.json",
             style=style,
             layout=widgets.Layout(width="70%"),
         )
+
+        # Existing files dropdown (optional)
+        file_options = ["(Create new file)"]
+        for config_file in self.config_files:
+            file_options.append(f"Overwrite: {config_file}")
+        self.save_file_dropdown = widgets.Dropdown(
+            options=file_options,
+            value=file_options[0],
+            description="Or select:",
+            style=style,
+            layout=widgets.Layout(width="70%"),
+        )
+        self.save_file_dropdown.observe(self._on_save_file_select, names="value")
         # Save button
         self.save_btn = widgets.Button(
             description="Save Configuration",
@@ -626,6 +644,14 @@ class EnhancedClusterConfigWidget:
         ]
         for field in fields_to_track:
             field.observe(self._mark_unsaved_changes, names="value")
+
+    def _on_save_file_select(self, change):
+        """Handle selection from existing files dropdown."""
+        selected = change["new"]
+        if selected.startswith("Overwrite: "):
+            # Extract filename from "Overwrite: /path/to/file"
+            file_path = selected.replace("Overwrite: ", "")
+            self.save_filename_input.value = str(Path(file_path).name)
 
     def _create_section_containers(self):
         """Create the main UI section containers."""
@@ -909,13 +935,18 @@ class EnhancedClusterConfigWidget:
 
                 self.configs[new_config_name] = config
                 self.current_config_name = new_config_name
-                # Determine save file
-                save_option = self.save_file_dropdown.value
-                if save_option.startswith("New file:"):
-                    save_path = Path("clustrix.yml")
-                else:
-                    # Extract path from "Existing: /path/to/file"
-                    save_path = Path(save_option.split("Existing: ", 1)[1])
+                # Determine save file from custom filename input
+                filename = self.save_filename_input.value.strip()
+                if not filename:
+                    print("❌ Please enter a filename")
+                    return
+
+                # Validate file extension
+                if not filename.lower().endswith((".yml", ".yaml", ".json")):
+                    print("❌ Filename must end with .yml, .yaml, or .json")
+                    return
+
+                save_path = Path(filename)
                 # Load existing configs if updating a file
                 if save_path.exists():
                     existing_configs = load_config_from_file(save_path)
@@ -1071,6 +1102,8 @@ class EnhancedClusterConfigWidget:
         save_section = widgets.VBox(
             [
                 widgets.HTML("<h5>Configuration Management</h5>"),
+                widgets.HTML("<h6>Save Configuration</h6>"),
+                self.save_filename_input,
                 widgets.HBox([self.save_file_dropdown, self.save_btn]),
                 widgets.HTML("<br><h6>Load Configuration</h6>"),
                 widgets.HBox([self.load_file_upload, self.load_btn]),
@@ -1163,9 +1196,7 @@ def load_ipython_extension(ipython):
         ipython.register_magic_function(
             ClusterfyMagics(ipython).clusterfy, "cell", "clusterfy"
         )
-        print(
-            "Clustrix notebook magic loaded. Use %%clusterfy to manage configurations."
-        )
+        # Note: No print message since widget displays automatically on import
 
 
 # Export the widget class for testing
