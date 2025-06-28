@@ -57,6 +57,7 @@ class CloudProviderDetector:
             result = subprocess.run(
                 ["aws", "sts", "get-caller-identity"],
                 capture_output=True,
+                text=True,
                 timeout=10,
             )
             return result.returncode == 0
@@ -73,7 +74,7 @@ class CloudProviderDetector:
         # Check if Azure CLI is logged in
         try:
             result = subprocess.run(
-                ["az", "account", "show"], capture_output=True, timeout=10
+                ["az", "account", "show"], capture_output=True, text=True, timeout=10
             )
             return result.returncode == 0
         except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -91,9 +92,10 @@ class CloudProviderDetector:
             result = subprocess.run(
                 ["gcloud", "auth", "list", "--filter=status:ACTIVE"],
                 capture_output=True,
+                text=True,
                 timeout=10,
             )
-            return result.returncode == 0 and "ACTIVE" in result.stdout.decode()
+            return result.returncode == 0 and "ACTIVE" in result.stdout
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
@@ -156,7 +158,7 @@ class AWSEKSConfigurator:
         """Verify that kubectl can access the cluster."""
         try:
             result = subprocess.run(
-                ["kubectl", "cluster-info"], capture_output=True, timeout=30
+                ["kubectl", "cluster-info"], capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 raise CloudProviderError("Cannot access Kubernetes cluster")
@@ -225,7 +227,7 @@ class AzureAKSConfigurator:
         """Verify that kubectl can access the cluster."""
         try:
             result = subprocess.run(
-                ["kubectl", "cluster-info"], capture_output=True, timeout=30
+                ["kubectl", "cluster-info"], capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 raise CloudProviderError("Cannot access Kubernetes cluster")
@@ -294,7 +296,7 @@ class GoogleGKEConfigurator:
         """Verify that kubectl can access the cluster."""
         try:
             result = subprocess.run(
-                ["kubectl", "cluster-info"], capture_output=True, timeout=30
+                ["kubectl", "cluster-info"], capture_output=True, text=True, timeout=30
             )
             if result.returncode != 0:
                 raise CloudProviderError("Cannot access Kubernetes cluster")

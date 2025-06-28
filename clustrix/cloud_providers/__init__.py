@@ -29,4 +29,15 @@ try:
 except ImportError:
     pass
 
-__all__ = ["PROVIDERS"]
+try:
+    from . import huggingface_spaces  # noqa: F401
+except ImportError:
+    pass
+
+# Import CloudProviderManager from the old cloud_providers module
+try:
+    from ..cloud_providers import CloudProviderManager  # noqa: F401
+except ImportError:
+    pass
+
+__all__ = ["PROVIDERS", "CloudProviderManager"]
