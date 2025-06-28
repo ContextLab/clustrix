@@ -393,7 +393,18 @@ class EnhancedClusterConfigWidget:
         self.add_config_btn.on_click(self._on_add_config)
         # Cluster type dropdown
         self.cluster_type = widgets.Dropdown(
-            options=["local", "ssh", "slurm", "pbs", "sge", "kubernetes", "aws", "azure", "gcp", "lambda"],
+            options=[
+                "local",
+                "ssh",
+                "slurm",
+                "pbs",
+                "sge",
+                "kubernetes",
+                "aws",
+                "azure",
+                "gcp",
+                "lambda",
+            ],
             description="Cluster Type:",
             style=style,
             layout=full_layout,
@@ -574,7 +585,7 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
-        
+
         # Cloud provider-specific fields
         # AWS fields
         self.aws_region = widgets.Dropdown(
@@ -585,7 +596,7 @@ class EnhancedClusterConfigWidget:
             layout=half_layout,
         )
         self.aws_region.observe(self._on_aws_region_change, names="value")
-        
+
         self.aws_instance_type = widgets.Dropdown(
             options=["t3.medium"],  # Will be populated dynamically
             value="t3.medium",
@@ -612,8 +623,8 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
-        
-        # Azure fields  
+
+        # Azure fields
         self.azure_region = widgets.Dropdown(
             options=["eastus"],  # Will be populated dynamically
             value="eastus",
@@ -622,7 +633,7 @@ class EnhancedClusterConfigWidget:
             layout=half_layout,
         )
         self.azure_region.observe(self._on_azure_region_change, names="value")
-        
+
         self.azure_instance_type = widgets.Dropdown(
             options=["Standard_D2s_v3"],  # Will be populated dynamically
             value="Standard_D2s_v3",
@@ -648,7 +659,7 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
-        
+
         # Google Cloud fields
         self.gcp_project_id = widgets.Text(
             description="Project ID:",
@@ -664,7 +675,7 @@ class EnhancedClusterConfigWidget:
             layout=half_layout,
         )
         self.gcp_region.observe(self._on_gcp_region_change, names="value")
-        
+
         self.gcp_instance_type = widgets.Dropdown(
             options=["e2-medium"],  # Will be populated dynamically
             value="e2-medium",
@@ -678,7 +689,7 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
-        
+
         # Lambda Cloud fields
         self.lambda_api_key = widgets.Password(
             description="Lambda API Key:",
@@ -877,7 +888,7 @@ class EnhancedClusterConfigWidget:
                 self.cost_monitoring_checkbox,
             ]
         )
-        
+
         # Cloud provider fields
         self.cloud_fields = widgets.VBox(
             [
@@ -918,13 +929,13 @@ class EnhancedClusterConfigWidget:
     def _on_cluster_type_change(self, change):
         """Handle cluster type change to show/hide relevant sections."""
         cluster_type = change["new"]
-        
+
         # Hide all sections first
         self.connection_fields.layout.display = "none"
         self.k8s_fields.layout.display = "none"
         self.cloud_fields.layout.display = "none"
         self.work_dir_field.layout.display = "none"
-        
+
         # Update section visibility based on cluster type
         if cluster_type == "local":
             # Local only - no additional fields needed
@@ -960,133 +971,176 @@ class EnhancedClusterConfigWidget:
     def _update_cloud_provider_fields(self, provider: str):
         """Update cloud provider-specific field visibility and populate dropdowns."""
         # Hide all provider-specific sections first
-        for field_name in ['aws', 'azure', 'gcp', 'lambda']:
-            section_fields = [child for child in self.cloud_fields.children 
-                            if hasattr(child, 'children') and any(
-                                hasattr(subchild, 'value') and 
-                                subchild.description and field_name.upper() in subchild.description.upper()
-                                for subchild in (child.children if hasattr(child, 'children') else [child])
-                                if hasattr(subchild, 'description')
-                            )]
+        for field_name in ["aws", "azure", "gcp", "lambda"]:
+            section_fields = [
+                child
+                for child in self.cloud_fields.children
+                if hasattr(child, "children")
+                and any(
+                    hasattr(subchild, "value")
+                    and subchild.description
+                    and field_name.upper() in subchild.description.upper()
+                    for subchild in (
+                        child.children if hasattr(child, "children") else [child]
+                    )
+                    if hasattr(subchild, "description")
+                )
+            ]
             # Hide sections for other providers
             for section in section_fields:
                 if field_name != provider:
                     section.layout.display = "none"
                 else:
                     section.layout.display = ""
-        
+
         # Populate dropdowns for the selected provider
         self._populate_cloud_provider_options(provider)
-    
+
     def _populate_cloud_provider_options(self, provider: str):
         """Populate region and instance type options for the specified cloud provider."""
         try:
             from .cloud_providers import PROVIDERS
-            
+
             # Get the provider class
             provider_class = PROVIDERS.get(provider)
             if not provider_class:
                 # Fallback to default options if provider not available
                 self._set_default_cloud_options(provider)
                 return
-            
+
             # Create provider instance (not authenticated yet)
             provider_instance = provider_class()
-            
+
             # Get available regions and instance types
             regions = provider_instance.get_available_regions()
             instance_types = provider_instance.get_available_instance_types()
-            
+
             # Update the appropriate dropdowns
-            if provider == 'aws':
+            if provider == "aws":
                 self.aws_region.options = regions
                 self.aws_instance_type.options = instance_types
-            elif provider == 'azure':
+            elif provider == "azure":
                 self.azure_region.options = regions
                 self.azure_instance_type.options = instance_types
-            elif provider == 'gcp':
+            elif provider == "gcp":
                 self.gcp_region.options = regions
                 self.gcp_instance_type.options = instance_types
-            elif provider == 'lambda':
+            elif provider == "lambda":
                 # Lambda Cloud has limited regions
                 lambda_regions = provider_instance.get_available_regions()
                 if lambda_regions:
                     # For Lambda, we might not have a region dropdown, but update instance types
                     pass
                 self.lambda_instance_type.options = instance_types
-                
+
         except Exception as e:
             # Fallback to default options on error
             print(f"Failed to load {provider} options: {e}")
             self._set_default_cloud_options(provider)
-    
+
     def _set_default_cloud_options(self, provider: str):
         """Set default options when cloud provider API is not available."""
         defaults = {
-            'aws': {
-                'regions': ["us-east-1", "us-west-1", "us-west-2", "eu-west-1"],
-                'instances': ["t3.micro", "t3.small", "t3.medium", "t3.large", "c5.large"]
+            "aws": {
+                "regions": ["us-east-1", "us-west-1", "us-west-2", "eu-west-1"],
+                "instances": [
+                    "t3.micro",
+                    "t3.small",
+                    "t3.medium",
+                    "t3.large",
+                    "c5.large",
+                ],
             },
-            'azure': {
-                'regions': ["eastus", "westus2", "northeurope", "westeurope"],
-                'instances': ["Standard_B1s", "Standard_B2s", "Standard_D2s_v3", "Standard_D4s_v3"]
+            "azure": {
+                "regions": ["eastus", "westus2", "northeurope", "westeurope"],
+                "instances": [
+                    "Standard_B1s",
+                    "Standard_B2s",
+                    "Standard_D2s_v3",
+                    "Standard_D4s_v3",
+                ],
             },
-            'gcp': {
-                'regions': ["us-central1", "us-east1", "europe-west1", "asia-southeast1"],
-                'instances': ["e2-micro", "e2-small", "e2-medium", "n1-standard-1", "n1-standard-2"]
+            "gcp": {
+                "regions": [
+                    "us-central1",
+                    "us-east1",
+                    "europe-west1",
+                    "asia-southeast1",
+                ],
+                "instances": [
+                    "e2-micro",
+                    "e2-small",
+                    "e2-medium",
+                    "n1-standard-1",
+                    "n1-standard-2",
+                ],
             },
-            'lambda': {
-                'regions': ["us-east-1", "us-west-1"],
-                'instances': ["gpu_1x_a10", "gpu_1x_a6000", "gpu_1x_h100", "gpu_2x_a10"]
-            }
+            "lambda": {
+                "regions": ["us-east-1", "us-west-1"],
+                "instances": [
+                    "gpu_1x_a10",
+                    "gpu_1x_a6000",
+                    "gpu_1x_h100",
+                    "gpu_2x_a10",
+                ],
+            },
         }
-        
+
         if provider in defaults:
             provider_defaults = defaults[provider]
-            if provider == 'aws':
-                self.aws_region.options = provider_defaults['regions']
-                self.aws_instance_type.options = provider_defaults['instances']
-            elif provider == 'azure':
-                self.azure_region.options = provider_defaults['regions']
-                self.azure_instance_type.options = provider_defaults['instances']
-            elif provider == 'gcp':
-                self.gcp_region.options = provider_defaults['regions']
-                self.gcp_instance_type.options = provider_defaults['instances']
-            elif provider == 'lambda':
-                self.lambda_instance_type.options = provider_defaults['instances']
-                
+            if provider == "aws":
+                self.aws_region.options = provider_defaults["regions"]
+                self.aws_instance_type.options = provider_defaults["instances"]
+            elif provider == "azure":
+                self.azure_region.options = provider_defaults["regions"]
+                self.azure_instance_type.options = provider_defaults["instances"]
+            elif provider == "gcp":
+                self.gcp_region.options = provider_defaults["regions"]
+                self.gcp_instance_type.options = provider_defaults["instances"]
+            elif provider == "lambda":
+                self.lambda_instance_type.options = provider_defaults["instances"]
+
     def _on_aws_region_change(self, change):
         """Handle AWS region change to update available instance types."""
         try:
             from .cloud_providers import PROVIDERS
-            provider_class = PROVIDERS.get('aws')
+
+            provider_class = PROVIDERS.get("aws")
             if provider_class:
                 provider_instance = provider_class()
-                instance_types = provider_instance.get_available_instance_types(change['new'])
+                instance_types = provider_instance.get_available_instance_types(
+                    change["new"]
+                )
                 self.aws_instance_type.options = instance_types
         except Exception:
             pass  # Keep current options on error
-            
+
     def _on_azure_region_change(self, change):
         """Handle Azure region change to update available instance types."""
         try:
             from .cloud_providers import PROVIDERS
-            provider_class = PROVIDERS.get('azure')
+
+            provider_class = PROVIDERS.get("azure")
             if provider_class:
                 provider_instance = provider_class()
-                instance_types = provider_instance.get_available_instance_types(change['new'])
+                instance_types = provider_instance.get_available_instance_types(
+                    change["new"]
+                )
                 self.azure_instance_type.options = instance_types
         except Exception:
             pass  # Keep current options on error
-            
+
     def _on_gcp_region_change(self, change):
         """Handle GCP region change to update available instance types."""
         try:
             from .cloud_providers import PROVIDERS
-            provider_class = PROVIDERS.get('gcp')
+
+            provider_class = PROVIDERS.get("gcp")
             if provider_class:
                 provider_instance = provider_class()
-                instance_types = provider_instance.get_available_instance_types(change['new'])
+                instance_types = provider_instance.get_available_instance_types(
+                    change["new"]
+                )
                 self.gcp_instance_type.options = instance_types
         except Exception:
             pass  # Keep current options on error
