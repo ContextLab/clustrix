@@ -47,16 +47,179 @@ class LoopInfo:
 
     def _assess_parallelizability(self) -> bool:
         """Assess if this loop can be parallelized."""
-        # Basic heuristics for parallelizability
+        # While loops are generally harder to parallelize due to unknown iteration count
         if self.loop_type == "while":
-            return False  # While loops are harder to parallelize
+            return False
 
+        # Check for dependencies that prevent parallelization
+        if self.dependencies and len(self.dependencies) > 0:
+            # If loop depends on external variables that might be modified,
+            # parallelization is risky
+            return False
+
+        # Range-based loops with known bounds are excellent candidates
         if self.range_info:
-            # Range-based loops are good candidates
-            return True
+            start = self.range_info["start"]
+            stop = self.range_info["stop"]
+            step = self.range_info["step"]
 
-        # TODO: Add more sophisticated analysis
+            # Ensure we have positive iteration count
+            if step > 0 and stop > start:
+                iteration_count = (stop - start + step - 1) // step
+                # Only parallelize if we have enough work to justify overhead
+                return iteration_count >= 3  # Lowered threshold for compatibility
+            elif step < 0 and stop < start:
+                iteration_count = (start - stop - step - 1) // (-step)
+                return iteration_count >= 3  # Lowered threshold for compatibility
+            else:
+                return False
+
+        # Check for common parallelizable patterns
+        if self.iterable:
+            # Lists, tuples, and other collections are often parallelizable
+            # if they don't involve complex iteration patterns
+            parallelizable_patterns = [
+                "list(",
+                "tuple(",
+                "enumerate(",
+                "zip(",
+                "itertools.",
+                "numpy.",
+                "np.",
+                "pandas.",
+                "pd.",
+            ]
+
+            iterable_lower = self.iterable.lower()
+            for pattern in parallelizable_patterns:
+                if pattern in iterable_lower:
+                    return True
+
+        # Conservative default: only parallelize if we're confident
         return False
+
+    def estimate_parallelization_benefit(self) -> float:
+        """
+        Estimate the potential benefit of parallelizing this loop.
+
+        Returns:
+            Float between 0.0 and 1.0 indicating parallelization benefit
+        """
+        if not self.is_parallelizable:
+            return 0.0
+
+        benefit_score = 0.0
+
+        # Factor 1: Iteration count (more iterations = more benefit)
+        if self.range_info:
+            start = self.range_info["start"]
+            stop = self.range_info["stop"]
+            step = self.range_info["step"]
+
+            if step > 0 and stop > start:
+                iteration_count = (stop - start + step - 1) // step
+            elif step < 0 and stop < start:
+                iteration_count = (start - stop - step - 1) // (-step)
+            else:
+                iteration_count = 0
+
+            # Scale benefit based on iteration count
+            if iteration_count >= 1000:
+                benefit_score += 0.4
+            elif iteration_count >= 100:
+                benefit_score += 0.3
+            elif iteration_count >= 10:
+                benefit_score += 0.2
+        else:
+            # Unknown iteration count, assume moderate benefit
+            benefit_score += 0.2
+
+        # Factor 2: Nested level (lower nesting = easier parallelization)
+        if self.nested_level == 0:
+            benefit_score += 0.3
+        elif self.nested_level == 1:
+            benefit_score += 0.2
+        else:
+            benefit_score += 0.1
+
+        # Factor 3: No dependencies (independent iterations = high benefit)
+        if not self.dependencies:
+            benefit_score += 0.3
+        else:
+            benefit_score += 0.1
+
+        return min(benefit_score, 1.0)
+
+    def suggest_parallelization_strategy(self) -> Dict[str, Any]:
+        """
+        Suggest an appropriate parallelization strategy for this loop.
+
+        Returns:
+            Dictionary containing strategy recommendations
+        """
+        if not self.is_parallelizable:
+            return {
+                "strategy": "none",
+                "reason": "Loop is not suitable for parallelization",
+                "alternatives": [],
+            }
+
+        strategy: Dict[str, Any] = {
+            "strategy": "parallel_map",
+            "chunk_size": "auto",
+            "executor_type": "process",
+            "alternatives": [],
+            "considerations": [],
+        }
+
+        # Determine optimal executor type
+        if self.range_info:
+            iteration_count = self._get_iteration_count()
+
+            if iteration_count < 100:
+                strategy["executor_type"] = "thread"
+                strategy["considerations"].append(
+                    "Small iteration count - threads preferred for lower overhead"
+                )
+            elif iteration_count > 10000:
+                strategy["executor_type"] = "process"
+                strategy["chunk_size"] = max(10, iteration_count // 100)
+                strategy["considerations"].append(
+                    "Large iteration count - chunking recommended"
+                )
+            else:
+                strategy["executor_type"] = "process"
+
+        # Check for NumPy/Pandas opportunities
+        if self.iterable and any(
+            lib in self.iterable.lower() for lib in ["numpy", "np.", "pandas", "pd."]
+        ):
+            strategy["alternatives"].append("vectorization")
+            strategy["considerations"].append(
+                "Consider NumPy/Pandas vectorized operations"
+            )
+
+        # Nested loop considerations
+        if self.nested_level > 0:
+            strategy["considerations"].append(
+                f"Nested loop at level {self.nested_level} - consider parallelizing outer loop instead"
+            )
+
+        return strategy
+
+    def _get_iteration_count(self) -> int:
+        """Get the estimated iteration count for this loop."""
+        if self.range_info:
+            start = self.range_info["start"]
+            stop = self.range_info["stop"]
+            step = self.range_info["step"]
+
+            if step > 0 and stop > start:
+                return (stop - start + step - 1) // step
+            elif step < 0 and stop < start:
+                return (start - stop - step - 1) // (-step)
+
+        return 100  # Default estimate
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary representation."""
@@ -160,6 +323,12 @@ class DependencyAnalyzer(ast.NodeVisitor):
         self.reads = set()  # Variables read in the loop
         self.writes = set()  # Variables written in the loop
         self.loop_var = None
+        self.array_accesses = set()  # Array/list accesses
+        self.function_calls = set()  # Function calls in the loop
+        self.reduction_ops = []  # Potential reduction operations (+=, *=, etc.)
+        self.has_break = False  # Break statements
+        self.has_continue = False  # Continue statements
+        self.has_return = False  # Return statements
 
     def visit_Name(self, node):
         """Visit variable names."""
@@ -168,6 +337,52 @@ class DependencyAnalyzer(ast.NodeVisitor):
         elif isinstance(node.ctx, ast.Store):
             self.writes.add(node.id)
         self.generic_visit(node)
+
+    def visit_Subscript(self, node):
+        """Visit array/list subscript operations."""
+        if isinstance(node.value, ast.Name):
+            # Track array accesses
+            if isinstance(node.ctx, ast.Load):
+                self.array_accesses.add(f"{node.value.id}[read]")
+            elif isinstance(node.ctx, ast.Store):
+                self.array_accesses.add(f"{node.value.id}[write]")
+        self.generic_visit(node)
+
+    def visit_Call(self, node):
+        """Visit function calls."""
+        if isinstance(node.func, ast.Name):
+            self.function_calls.add(node.func.id)
+        elif isinstance(node.func, ast.Attribute):
+            # Method calls like obj.method()
+            if isinstance(node.func.value, ast.Name):
+                self.function_calls.add(f"{node.func.value.id}.{node.func.attr}")
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        """Visit augmented assignment operations (+=, -=, *=, etc.)."""
+        if isinstance(node.target, ast.Name):
+            op_type = type(node.op).__name__
+            self.reduction_ops.append(
+                {
+                    "variable": node.target.id,
+                    "operation": op_type,
+                    "is_reduction": op_type
+                    in ["Add", "Mult", "BitOr", "BitAnd", "BitXor"],
+                }
+            )
+        self.generic_visit(node)
+
+    def visit_Break(self, node):
+        """Visit break statements."""
+        self.has_break = True
+
+    def visit_Continue(self, node):
+        """Visit continue statements."""
+        self.has_continue = True
+
+    def visit_Return(self, node):
+        """Visit return statements."""
+        self.has_return = True
 
     def visit_For(self, node):
         """Visit for loops to track loop variables."""
@@ -187,6 +402,57 @@ class DependencyAnalyzer(ast.NodeVisitor):
         if self.loop_var:
             shared_vars.discard(self.loop_var)
         return len(shared_vars) > 0
+
+    def has_loop_carried_dependencies(self) -> bool:
+        """Check for loop-carried dependencies that prevent parallelization."""
+        # Control flow statements make parallelization complex
+        if self.has_break or self.has_continue or self.has_return:
+            return True
+
+        # Check for problematic array access patterns
+        array_writes = {
+            acc.split("[")[0] for acc in self.array_accesses if "[write]" in acc
+        }
+        array_reads = {
+            acc.split("[")[0] for acc in self.array_accesses if "[read]" in acc
+        }
+
+        # If the same array is both read and written, check for dependencies
+        shared_arrays = array_writes & array_reads
+        if shared_arrays:
+            return True
+
+        # Non-reduction operations on shared variables are problematic
+        for op in self.reduction_ops:
+            if not op["is_reduction"] and op["variable"] in self.reads:
+                return True
+
+        return False
+
+    def get_reduction_opportunities(self) -> List[Dict[str, Any]]:
+        """Identify reduction operations that can be parallelized."""
+        reductions = []
+        for op in self.reduction_ops:
+            if op["is_reduction"]:
+                reductions.append(
+                    {
+                        "variable": op["variable"],
+                        "operation": op["operation"],
+                        "strategy": self._suggest_reduction_strategy(op["operation"]),
+                    }
+                )
+        return reductions
+
+    def _suggest_reduction_strategy(self, operation: str) -> str:
+        """Suggest a reduction strategy for the given operation."""
+        strategies = {
+            "Add": "sum_reduction",
+            "Mult": "product_reduction",
+            "BitOr": "bitwise_or_reduction",
+            "BitAnd": "bitwise_and_reduction",
+            "BitXor": "bitwise_xor_reduction",
+        }
+        return strategies.get(operation, "custom_reduction")
 
 
 class LoopDetector(ast.NodeVisitor):
@@ -256,13 +522,21 @@ class LoopDetector(ast.NodeVisitor):
                 if evaluator.safe and evaluator.result:
                     range_info = evaluator.result
 
+            # Use enhanced dependency analysis
+            has_loop_deps = dep_analyzer.has_loop_carried_dependencies()
+            final_dependencies = dep_analyzer.reads - {variable}
+
+            # If there are loop-carried dependencies, add them to the dependency set
+            if has_loop_deps:
+                final_dependencies.update(["loop_carried_dependency"])
+
             return LoopInfo(
                 loop_type="for",
                 variable=variable,
                 iterable=iterable_str,
                 range_info=range_info,
                 nested_level=self.current_level - 1,
-                dependencies=dep_analyzer.reads - {variable},
+                dependencies=final_dependencies,
             )
 
         except Exception as e:
@@ -380,6 +654,79 @@ def find_parallelizable_loops(
             parallelizable.append(loop)
 
     return parallelizable
+
+
+def analyze_loop_patterns(
+    func: Callable, args: tuple = (), kwargs: Optional[Dict[Any, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Perform comprehensive loop pattern analysis.
+
+    Args:
+        func: Function to analyze
+        args: Function arguments for context
+        kwargs: Function keyword arguments for context
+
+    Returns:
+        Dictionary with comprehensive analysis results
+    """
+    loops = detect_loops_in_function(func, args, kwargs)
+
+    analysis: Dict[str, Any] = {
+        "total_loops": len(loops),
+        "parallelizable_loops": 0,
+        "nested_loops": 0,
+        "reduction_opportunities": [],
+        "vectorization_candidates": [],
+        "parallelization_recommendations": [],
+        "performance_estimates": {},
+    }
+
+    for loop in loops:
+        # Count parallelizable loops
+        if loop.is_parallelizable:
+            analysis["parallelizable_loops"] += 1
+
+        # Count nested loops
+        if loop.nested_level > 0:
+            analysis["nested_loops"] += 1
+
+        # Get parallelization strategy
+        strategy = loop.suggest_parallelization_strategy()
+        benefit = loop.estimate_parallelization_benefit()
+
+        if benefit > 0.3:  # Only recommend if significant benefit
+            analysis["parallelization_recommendations"].append(
+                {
+                    "loop_variable": loop.variable,
+                    "iterable": loop.iterable,
+                    "strategy": strategy,
+                    "benefit_score": benefit,
+                    "iteration_count": loop._get_iteration_count(),
+                }
+            )
+
+        # Check for vectorization opportunities
+        if "vectorization" in strategy.get("alternatives", []):
+            analysis["vectorization_candidates"].append(
+                {
+                    "loop_variable": loop.variable,
+                    "iterable": loop.iterable,
+                    "pattern": "numpy_pandas_operations",
+                }
+            )
+
+        # Estimate performance improvement
+        if loop.is_parallelizable:
+            estimated_speedup = min(4.0, benefit * 8.0)  # Cap at 4x speedup
+            analysis["performance_estimates"][f"loop_{loop.variable}"] = {
+                "estimated_speedup": estimated_speedup,
+                "confidence": (
+                    "high" if benefit > 0.6 else "medium" if benefit > 0.3 else "low"
+                ),
+            }
+
+    return analysis
 
 
 def estimate_work_size(loop_info: LoopInfo) -> int:
