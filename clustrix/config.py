@@ -72,6 +72,7 @@ class ClusterConfig:
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
+    async_submit: bool = False  # Use asynchronous job submission
 
     # Advanced settings
     environment_variables: Optional[Dict[str, str]] = None

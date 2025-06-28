@@ -37,6 +37,7 @@ class TestClusterDecorator:
             "queue": None,
             "parallel": None,
             "environment": None,
+            "async_submit": None,
         }
         assert test_func._cluster_config == expected_config
 

@@ -3,6 +3,7 @@ from typing import Any, Callable, Optional, Dict, List
 
 from .config import get_config
 from .executor import ClusterExecutor
+from .async_executor_simple import AsyncClusterExecutor
 from .local_executor import create_local_executor
 from .loop_analysis import find_parallelizable_loops
 from .utils import detect_loops, serialize_function
@@ -18,6 +19,7 @@ def cluster(
     queue: Optional[str] = None,
     parallel: Optional[bool] = None,
     environment: Optional[str] = None,
+    async_submit: Optional[bool] = None,
     **kwargs,
 ):
     """
@@ -31,10 +33,12 @@ def cluster(
         queue: Queue to submit to
         parallel: Whether to parallelize loops automatically
         environment: Conda environment name
+        async_submit: Whether to submit jobs asynchronously (non-blocking)
         **kwargs: Additional job parameters
 
     Returns:
         Decorated function that executes on cluster
+        If async_submit=True, returns AsyncJobResult for non-blocking execution
     """
 
     def decorator(func: Callable) -> Callable:
@@ -62,29 +66,56 @@ def cluster(
             )
 
             if execution_mode == "local":
-                if should_parallelize:
+                use_async = (
+                    async_submit
+                    if async_submit is not None
+                    else getattr(config, "async_submit", False)
+                )
+
+                if use_async:
+                    # Async local execution
+                    async_executor = AsyncClusterExecutor(config)
+                    return async_executor.submit_job_async(
+                        func, args, func_kwargs, job_config
+                    )
+                elif should_parallelize:
                     return _execute_local_parallel(func, args, func_kwargs, job_config)
                 else:
                     # Execute locally without parallelization
                     return func(*args, **func_kwargs)
             else:
                 # Remote execution
-                executor = ClusterExecutor(config)
+                use_async = (
+                    async_submit
+                    if async_submit is not None
+                    else getattr(config, "async_submit", False)
+                )
+                if use_async:
+                    # Async execution
+                    async_executor = AsyncClusterExecutor(config)
+                    return async_executor.submit_job_async(
+                        func, args, func_kwargs, job_config
+                    )
+                else:
+                    # Synchronous execution (original behavior)
+                    executor = ClusterExecutor(config)
 
-                if should_parallelize:
-                    loop_info = detect_loops(func, args, func_kwargs)
-                    if loop_info:
-                        return _execute_parallel(
-                            executor,
-                            func,
-                            args,
-                            func_kwargs,
-                            job_config,
-                            loop_info,
-                        )
+                    if should_parallelize:
+                        loop_info = detect_loops(func, args, func_kwargs)
+                        if loop_info:
+                            return _execute_parallel(
+                                executor,
+                                func,
+                                args,
+                                func_kwargs,
+                                job_config,
+                                loop_info,
+                            )
 
-                # Execute normally on cluster
-                return _execute_single(executor, func, args, func_kwargs, job_config)
+                    # Execute normally on cluster
+                    return _execute_single(
+                        executor, func, args, func_kwargs, job_config
+                    )
 
         # Store cluster config for access outside execution
         cluster_config = {
@@ -95,6 +126,7 @@ def cluster(
             "queue": queue,
             "parallel": parallel,
             "environment": environment,
+            "async_submit": async_submit,
         }
         cluster_config.update(kwargs)
         setattr(wrapper, "_cluster_config", cluster_config)
