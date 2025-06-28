@@ -275,6 +275,7 @@ class EnhancedClusterConfigWidget:
             {}
         )  # Maps config names to their source files
         self.auto_display = auto_display
+        self.has_unsaved_changes = False
         # Initialize configurations
         self._initialize_configs()
         # Create widget components
@@ -573,6 +574,59 @@ class EnhancedClusterConfigWidget:
         )
         self.save_btn.on_click(self._on_save_config)
 
+        # Load configuration widgets
+        self.load_file_upload = widgets.FileUpload(
+            accept=".yml,.yaml,.json",
+            multiple=False,
+            description="Load Config File",
+            style=style,
+            layout=widgets.Layout(width="70%"),
+        )
+        self.load_btn = widgets.Button(
+            description="Load Configuration",
+            button_style="warning",
+            icon="upload",
+            layout=widgets.Layout(width="auto"),
+        )
+        self.load_btn.on_click(self._on_load_config)
+
+        # Set up change tracking for all form fields
+        self._setup_change_tracking()
+
+    def _mark_unsaved_changes(self, change=None):
+        """Mark that there are unsaved changes."""
+        self.has_unsaved_changes = True
+
+    def _clear_unsaved_changes(self):
+        """Clear the unsaved changes flag."""
+        self.has_unsaved_changes = False
+
+    def _setup_change_tracking(self):
+        """Set up observers to track unsaved changes."""
+        # Note: config_name already has an observer, but we need to track changes too
+        # We'll add a second observer for change tracking
+        fields_to_track = [
+            self.cluster_type,
+            self.host_field,
+            self.username_field,
+            self.ssh_key_field,
+            self.port_field,
+            self.cores_field,
+            self.memory_field,
+            self.time_field,
+            self.k8s_namespace,
+            self.k8s_image,
+            self.k8s_remote_checkbox,
+            self.work_dir_field,
+            self.package_manager,
+            self.python_version,
+            self.env_vars,
+            self.module_loads,
+            self.pre_exec_commands,
+        ]
+        for field in fields_to_track:
+            field.observe(self._mark_unsaved_changes, names="value")
+
     def _create_section_containers(self):
         """Create the main UI section containers."""
         # Connection fields (dynamically shown/hidden)
@@ -676,6 +730,8 @@ class EnhancedClusterConfigWidget:
         self.pre_exec_commands.value = "\n".join(pre_cmds) if pre_cmds else ""
         # Update field visibility
         self._on_cluster_type_change({"new": self.cluster_type.value})
+        # Clear unsaved changes flag after loading
+        self._clear_unsaved_changes()
 
     def _save_config_from_widgets(self) -> Dict[str, Any]:
         """Save current widget values to a configuration dict."""
@@ -892,8 +948,97 @@ class EnhancedClusterConfigWidget:
                 # Update the config dropdown to reflect the new name
                 self._update_config_dropdown()
                 self.config_dropdown.value = self.current_config_name
+                # Clear unsaved changes flag
+                self._clear_unsaved_changes()
             except Exception as e:
                 print(f"❌ Error saving configuration: {str(e)}")
+
+    def _on_load_config(self, button):
+        """Load configuration from uploaded file."""
+        with self.status_output:
+            self.status_output.clear_output()
+
+            # Check if there's a file uploaded
+            if not self.load_file_upload.value:
+                print("❌ Please select a configuration file to load")
+                return
+
+            # Check for unsaved changes
+            if self.has_unsaved_changes:
+                print("⚠️  Warning: You have unsaved changes!")
+                print("Current configuration changes will be lost if you continue.")
+                print("Please save your current configuration first, or:")
+                print("- Click 'Load Configuration' again to confirm loading")
+                print("- Use 'Save Configuration' to save current changes")
+                # Mark as confirmed for next click
+                if not hasattr(self, "_load_confirmed"):
+                    self._load_confirmed = True
+                    return
+                else:
+                    # User clicked again, proceed with loading
+                    delattr(self, "_load_confirmed")
+
+            try:
+                # Get the uploaded file
+                file_info = list(self.load_file_upload.value.values())[0]
+                file_content = file_info["content"]
+                file_name = file_info["metadata"]["name"]
+
+                # Parse the file content
+                if file_name.lower().endswith((".yml", ".yaml")):
+                    import yaml
+
+                    config_data = yaml.safe_load(file_content)
+                elif file_name.lower().endswith(".json"):
+                    import json
+
+                    config_data = json.loads(file_content.decode("utf-8"))
+                else:
+                    print(f"❌ Unsupported file type: {file_name}")
+                    return
+
+                if not isinstance(config_data, dict):
+                    print(f"❌ Invalid configuration format in {file_name}")
+                    return
+
+                # Handle both single config and multiple configs
+                configs_loaded = 0
+                if "cluster_type" in config_data:
+                    # Single configuration
+                    config_name = config_data.get("name", Path(file_name).stem)
+                    self.configs[config_name] = config_data
+                    self.current_config_name = config_name
+                    configs_loaded = 1
+                else:
+                    # Multiple configurations
+                    for name, config in config_data.items():
+                        if isinstance(config, dict) and "cluster_type" in config:
+                            self.configs[name] = config
+                            configs_loaded += 1
+
+                    # Set the first loaded config as current
+                    if configs_loaded > 0:
+                        self.current_config_name = list(config_data.keys())[0]
+
+                if configs_loaded == 0:
+                    print(f"❌ No valid configurations found in {file_name}")
+                    return
+
+                # Update UI
+                self._update_config_dropdown()
+                if self.current_config_name:
+                    self.config_dropdown.value = self.current_config_name
+                    self._load_config_to_widgets(self.current_config_name)
+
+                # Clear the file upload
+                self.load_file_upload.value = {}
+
+                print(f"✅ Loaded {configs_loaded} configuration(s) from {file_name}")
+                if configs_loaded > 1:
+                    print(f"Set '{self.current_config_name}' as active configuration")
+
+            except Exception as e:
+                print(f"❌ Error loading configuration: {str(e)}")
 
     def display(self):
         """Display the enhanced widget interface."""
@@ -927,6 +1072,8 @@ class EnhancedClusterConfigWidget:
             [
                 widgets.HTML("<h5>Configuration Management</h5>"),
                 widgets.HBox([self.save_file_dropdown, self.save_btn]),
+                widgets.HTML("<br><h6>Load Configuration</h6>"),
+                widgets.HBox([self.load_file_upload, self.load_btn]),
             ]
         )
         # Action buttons
