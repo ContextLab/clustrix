@@ -150,6 +150,14 @@ except ImportError:
             self.value = args[0] if args else ""
             self.layout = _MockLayout()
 
+    class _MockCheckbox:
+        def __init__(self, *args, **kwargs):
+            self.value = kwargs.get("value", False)
+            self.layout = _MockLayout()
+
+        def observe(self, *args, **kwargs):
+            pass
+
     class _MockAccordion:
         def __init__(self, *args, **kwargs):
             self.children = args[0] if args else []
@@ -166,6 +174,7 @@ except ImportError:
         Text = _MockText
         IntText = _MockIntText
         Textarea = _MockTextarea
+        Checkbox = _MockCheckbox
         Output = _MockOutput
         VBox = _MockVBox
         HBox = _MockHBox
@@ -191,6 +200,142 @@ DEFAULT_CONFIGS = {
         "default_cores": -1,  # Use all available cores
         "default_memory": "16GB",
         "description": "Local machine using all available cores",
+    },
+    "University SLURM Cluster": {
+        "name": "University SLURM Cluster",
+        "cluster_type": "slurm",
+        "cluster_host": "login.hpc.university.edu",
+        "username": "your_username",
+        "default_cores": 16,
+        "default_memory": "64GB",
+        "default_time": "01:00:00",
+        "remote_work_dir": "/scratch/your_username/clustrix",
+        "package_manager": "conda",
+        "description": "Example SLURM cluster configuration for university HPC",
+    },
+    "Corporate PBS Cluster": {
+        "name": "Corporate PBS Cluster",
+        "cluster_type": "pbs",
+        "cluster_host": "hpc.company.com",
+        "username": "employee_id",
+        "default_cores": 8,
+        "default_memory": "32GB",
+        "default_time": "02:00:00",
+        "remote_work_dir": "/home/employee_id/clustrix",
+        "package_manager": "pip",
+        "description": "Example PBS/Torque cluster for corporate environment",
+    },
+    "SGE Research Cluster": {
+        "name": "SGE Research Cluster",
+        "cluster_type": "sge",
+        "cluster_host": "submit.research.org",
+        "username": "researcher",
+        "default_cores": 24,
+        "default_memory": "128GB",
+        "default_time": "04:00:00",
+        "remote_work_dir": "/data/researcher/clustrix",
+        "package_manager": "conda",
+        "description": "Example SGE cluster for research computing",
+    },
+    "SSH Remote Server": {
+        "name": "SSH Remote Server",
+        "cluster_type": "ssh",
+        "cluster_host": "remote.server.com",
+        "username": "user",
+        "cluster_port": 22,
+        "default_cores": 4,
+        "default_memory": "16GB",
+        "remote_work_dir": "/tmp/clustrix",
+        "package_manager": "pip",
+        "description": "Example SSH remote server configuration",
+    },
+    "Local Kubernetes": {
+        "name": "Local Kubernetes",
+        "cluster_type": "kubernetes",
+        "k8s_namespace": "default",
+        "k8s_image": "python:3.11",
+        "default_cores": 2,
+        "default_memory": "4GB",
+        "package_manager": "pip",
+        "description": "Local Kubernetes cluster (Docker Desktop/minikube)",
+    },
+    "AWS EKS Cluster": {
+        "name": "AWS EKS Cluster",
+        "cluster_type": "kubernetes",
+        "cluster_host": "cluster-api.region.eks.amazonaws.com",
+        "cluster_port": 443,
+        "k8s_namespace": "default",
+        "k8s_image": "python:3.11",
+        "default_cores": 4,
+        "default_memory": "8GB",
+        "package_manager": "pip",
+        "cost_monitoring": True,
+        "description": "Amazon EKS cluster configuration",
+    },
+    "GCP GKE Cluster": {
+        "name": "GCP GKE Cluster",
+        "cluster_type": "kubernetes",
+        "cluster_host": "gke-cluster.googleapis.com",
+        "cluster_port": 443,
+        "k8s_namespace": "default",
+        "k8s_image": "python:3.11",
+        "default_cores": 4,
+        "default_memory": "8GB",
+        "package_manager": "pip",
+        "cost_monitoring": True,
+        "description": "Google GKE cluster configuration",
+    },
+    "Azure AKS Cluster": {
+        "name": "Azure AKS Cluster",
+        "cluster_type": "kubernetes",
+        "cluster_host": "aks-cluster.region.azmk8s.io",
+        "cluster_port": 443,
+        "k8s_namespace": "default",
+        "k8s_image": "python:3.11",
+        "default_cores": 4,
+        "default_memory": "8GB",
+        "package_manager": "pip",
+        "cost_monitoring": True,
+        "description": "Azure AKS cluster configuration",
+    },
+    "AWS EC2 via SSH": {
+        "name": "AWS EC2 via SSH",
+        "cluster_type": "ssh",
+        "cluster_host": "ec2-xx-xx-xx-xx.compute-1.amazonaws.com",
+        "username": "ec2-user",
+        "cluster_port": 22,
+        "default_cores": 8,
+        "default_memory": "32GB",
+        "remote_work_dir": "/home/ec2-user/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "AWS EC2 instance accessed via SSH",
+    },
+    "GCP Compute via SSH": {
+        "name": "GCP Compute via SSH",
+        "cluster_type": "ssh",
+        "cluster_host": "instance-name.zone.c.project-id.internal",
+        "username": "gcp_user",
+        "cluster_port": 22,
+        "default_cores": 16,
+        "default_memory": "64GB",
+        "remote_work_dir": "/home/gcp_user/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "GCP Compute Engine instance via SSH",
+    },
+    "Azure VM via SSH": {
+        "name": "Azure VM via SSH",
+        "cluster_type": "ssh",
+        "cluster_host": "vm-name.region.cloudapp.azure.com",
+        "username": "azureuser",
+        "cluster_port": 22,
+        "default_cores": 12,
+        "default_memory": "48GB",
+        "remote_work_dir": "/home/azureuser/clustrix",
+        "package_manager": "conda",
+        "cost_monitoring": True,
+        "description": "Azure Virtual Machine via SSH",
     },
 }
 
@@ -363,10 +508,17 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="auto"),
         )
         self.delete_btn.on_click(self._on_delete_config)
+        self.test_btn = widgets.Button(
+            description="Test Configuration",
+            button_style="info",
+            icon="play",
+            layout=widgets.Layout(width="auto"),
+        )
+        self.test_btn.on_click(self._on_test_config)
         # Status output with proper sizing
         self.status_output = widgets.Output(
             layout=widgets.Layout(
-                height="150px",
+                height="80px",
                 width="100%",
                 overflow_y="scroll",
                 border="1px solid #ccc",
@@ -486,6 +638,13 @@ class EnhancedClusterConfigWidget:
             layout=full_layout,
         )
         self.k8s_remote_checkbox.observe(self._on_k8s_remote_change, names="value")
+        # Cost monitoring checkbox for cloud providers
+        self.cost_monitoring_checkbox = widgets.Checkbox(
+            value=False,
+            description="Enable Cost Monitoring",
+            style=style,
+            layout=full_layout,
+        )
         # Remote work directory
         self.work_dir_field = widgets.Text(
             value="/tmp/clustrix",
@@ -592,13 +751,16 @@ class EnhancedClusterConfigWidget:
         )
         self.save_btn.on_click(self._on_save_config)
 
-        # Load configuration widgets
-        self.load_file_upload = widgets.FileUpload(
-            accept=".yml,.yaml,.json",
-            multiple=False,
-            description="Load Config File",
+        # Load configuration widgets - using textarea for better Colab compatibility
+        self.load_config_textarea = widgets.Textarea(
+            value="",
+            placeholder="Paste your YAML or JSON configuration here...\n\n"
+            "Example:\nmy_config:\n  cluster_type: ssh\n  "
+            "cluster_host: myserver.com\n  username: myuser",
+            description="Config Content:",
+            rows=8,
             style=style,
-            layout=widgets.Layout(width="70%"),
+            layout=widgets.Layout(width="100%"),
         )
         self.load_btn = widgets.Button(
             description="Load Configuration",
@@ -635,6 +797,7 @@ class EnhancedClusterConfigWidget:
             self.k8s_namespace,
             self.k8s_image,
             self.k8s_remote_checkbox,
+            self.cost_monitoring_checkbox,
             self.work_dir_field,
             self.package_manager,
             self.python_version,
@@ -670,6 +833,7 @@ class EnhancedClusterConfigWidget:
                 widgets.HTML("<h5>Kubernetes Settings</h5>"),
                 widgets.HBox([self.k8s_namespace, self.k8s_image]),
                 self.k8s_remote_checkbox,
+                self.cost_monitoring_checkbox,
             ]
         )
 
@@ -754,6 +918,8 @@ class EnhancedClusterConfigWidget:
         # Pre-execution commands
         pre_cmds = config.get("pre_execution_commands", [])
         self.pre_exec_commands.value = "\n".join(pre_cmds) if pre_cmds else ""
+        # Cost monitoring
+        self.cost_monitoring_checkbox.value = config.get("cost_monitoring", False)
         # Update field visibility
         self._on_cluster_type_change({"new": self.cluster_type.value})
         # Clear unsaved changes flag after loading
@@ -812,6 +978,8 @@ class EnhancedClusterConfigWidget:
                 for c in self.pre_exec_commands.value.strip().split("\n")
                 if c.strip()
             ]
+        # Cost monitoring (mainly for cloud providers)
+        config["cost_monitoring"] = self.cost_monitoring_checkbox.value
         return config
 
     def _on_config_select(self, change):
@@ -947,25 +1115,42 @@ class EnhancedClusterConfigWidget:
                     return
 
                 save_path = Path(filename)
-                # Load existing configs if updating a file
-                if save_path.exists():
-                    existing_configs = load_config_from_file(save_path)
-                    if isinstance(existing_configs, dict):
-                        if "cluster_type" in existing_configs:
-                            # Single config file - convert to multi-config
-                            existing_configs = {save_path.stem: existing_configs}
-                        existing_configs[self.current_config_name] = config
-                        save_data = existing_configs
+                # Save all configurations from widget dropdown
+                save_data = {}
+
+                # Include all configurations from the widget dropdown
+                for config_name, config_data in self.configs.items():
+                    # Skip unmodified default configs unless they came from a file
+                    if config_name in DEFAULT_CONFIGS:
+                        # Include if it came from a file (in config_file_map)
+                        if config_name in self.config_file_map:
+                            save_data[config_name] = config_data
+                        else:
+                            # Check if the default config has been modified
+                            default_config = DEFAULT_CONFIGS[config_name]
+                            if config_data != default_config:
+                                save_data[config_name] = config_data
+                            # Skip unmodified defaults
                     else:
-                        save_data = {self.current_config_name: config}
-                else:
-                    save_data = {self.current_config_name: config}
+                        # Always include non-default configurations
+                        save_data[config_name] = config_data
+
+                # Check if we have any configurations to save
+                if not save_data:
+                    print(
+                        "❌ No modified configurations to save (only default configurations found)"
+                    )
+                    return
+
                 # Save to file
                 with open(save_path, "w") as f:
                     yaml.dump(save_data, f, default_flow_style=False)
-                print(
-                    f"✅ Saved configuration '{self.current_config_name}' to {save_path}"
-                )
+                config_count = len(save_data)
+                if config_count == 1:
+                    print(f"✅ Saved 1 configuration to {save_path}")
+                else:
+                    print(f"✅ Saved {config_count} configurations to {save_path}")
+                    print(f"Configurations: {', '.join(save_data.keys())}")
                 # Update file list if new file
                 if save_path not in self.config_files:
                     self.config_files.append(save_path)
@@ -985,13 +1170,14 @@ class EnhancedClusterConfigWidget:
                 print(f"❌ Error saving configuration: {str(e)}")
 
     def _on_load_config(self, button):
-        """Load configuration from uploaded file."""
+        """Load configuration from pasted content."""
         with self.status_output:
             self.status_output.clear_output()
 
-            # Check if there's a file uploaded
-            if not self.load_file_upload.value:
-                print("❌ Please select a configuration file to load")
+            # Check if there's content pasted
+            content = self.load_config_textarea.value.strip()
+            if not content:
+                print("❌ Please paste configuration content in the text area")
                 return
 
             # Check for unsaved changes
@@ -1010,33 +1196,32 @@ class EnhancedClusterConfigWidget:
                     delattr(self, "_load_confirmed")
 
             try:
-                # Get the uploaded file
-                file_info = list(self.load_file_upload.value.values())[0]
-                file_content = file_info["content"]
-                file_name = file_info["metadata"]["name"]
-
-                # Parse the file content
-                if file_name.lower().endswith((".yml", ".yaml")):
+                # Try to parse as YAML first, then JSON
+                config_data = None
+                try:
                     import yaml
 
-                    config_data = yaml.safe_load(file_content)
-                elif file_name.lower().endswith(".json"):
-                    import json
+                    config_data = yaml.safe_load(content)
+                except yaml.YAMLError:
+                    try:
+                        import json
 
-                    config_data = json.loads(file_content.decode("utf-8"))
-                else:
-                    print(f"❌ Unsupported file type: {file_name}")
-                    return
+                        config_data = json.loads(content)
+                    except json.JSONDecodeError:
+                        print(
+                            "❌ Invalid YAML or JSON format. Please check your configuration content."
+                        )
+                        return
 
                 if not isinstance(config_data, dict):
-                    print(f"❌ Invalid configuration format in {file_name}")
+                    print("❌ Invalid configuration format - expected YAML/JSON object")
                     return
 
                 # Handle both single config and multiple configs
                 configs_loaded = 0
                 if "cluster_type" in config_data:
                     # Single configuration
-                    config_name = config_data.get("name", Path(file_name).stem)
+                    config_name = config_data.get("name", "Imported Configuration")
                     self.configs[config_name] = config_data
                     self.current_config_name = config_name
                     configs_loaded = 1
@@ -1052,7 +1237,7 @@ class EnhancedClusterConfigWidget:
                         self.current_config_name = list(config_data.keys())[0]
 
                 if configs_loaded == 0:
-                    print(f"❌ No valid configurations found in {file_name}")
+                    print("❌ No valid configurations found in the provided content")
                     return
 
                 # Update UI
@@ -1061,15 +1246,124 @@ class EnhancedClusterConfigWidget:
                     self.config_dropdown.value = self.current_config_name
                     self._load_config_to_widgets(self.current_config_name)
 
-                # Clear the file upload
-                self.load_file_upload.value = {}
+                # Clear the textarea
+                self.load_config_textarea.value = ""
 
-                print(f"✅ Loaded {configs_loaded} configuration(s) from {file_name}")
+                print(
+                    f"✅ Loaded {configs_loaded} configuration(s) from pasted content"
+                )
                 if configs_loaded > 1:
                     print(f"Set '{self.current_config_name}' as active configuration")
 
             except Exception as e:
                 print(f"❌ Error loading configuration: {str(e)}")
+
+    def _on_test_config(self, button):
+        """Test the current configuration."""
+        with self.status_output:
+            self.status_output.clear_output()
+
+            try:
+                # Save current widget state
+                config = self._save_config_from_widgets()
+                cluster_type = config.get("cluster_type", "local")
+
+                print(f"🧪 Testing {cluster_type} configuration...")
+
+                if cluster_type == "local":
+                    # Test local configuration
+                    print("✅ Local configuration is valid")
+                    print(f"- CPUs: {config.get('default_cores', 'default')}")
+                    print(f"- Memory: {config.get('default_memory', 'default')}")
+                    print("- Ready for local execution")
+
+                elif cluster_type in ["ssh", "slurm", "pbs", "sge"]:
+                    # Test remote configuration by checking connection
+                    host = config.get("cluster_host", "")
+                    username = config.get("username", "")
+                    port = config.get("cluster_port", 22)
+
+                    if not host:
+                        print("❌ Host/Address is required for remote clusters")
+                        return
+                    if not username:
+                        print("❌ Username is required for remote clusters")
+                        return
+
+                    print(f"- Host: {host}:{port}")
+                    print(f"- Username: {username}")
+                    print(f"- Cluster type: {cluster_type}")
+
+                    # Basic validation - in a real implementation, we might try to connect
+                    if validate_hostname(host) or validate_ip_address(host):
+                        print("✅ Host format is valid")
+                    else:
+                        print("⚠️  Host format may be invalid")
+
+                    # Check SSH key if provided
+                    ssh_key = config.get("key_file", "")
+                    if ssh_key:
+                        from pathlib import Path
+
+                        key_path = Path(ssh_key).expanduser()
+                        if key_path.exists():
+                            print(f"✅ SSH key found: {ssh_key}")
+                        else:
+                            print(f"⚠️  SSH key not found: {ssh_key}")
+                    else:
+                        print("ℹ️  No SSH key specified (will use password auth)")
+
+                    print("ℹ️  Configuration appears valid (connection not tested)")
+
+                elif cluster_type == "kubernetes":
+                    # Test Kubernetes configuration
+                    namespace = config.get("k8s_namespace", "default")
+                    image = config.get("k8s_image", "python:3.11")
+                    is_remote = config.get("k8s_remote", False)
+
+                    print(f"- Namespace: {namespace}")
+                    print(f"- Docker image: {image}")
+
+                    if is_remote:
+                        host = config.get("cluster_host", "")
+                        if not host:
+                            print("❌ Host/Address is required for remote Kubernetes")
+                            return
+                        print(f"- Remote cluster: {host}")
+                        if validate_hostname(host) or validate_ip_address(host):
+                            print("✅ Host format is valid")
+                        else:
+                            print("⚠️  Host format may be invalid")
+                    else:
+                        print("- Local Kubernetes cluster")
+
+                    print("✅ Kubernetes configuration appears valid")
+
+                else:
+                    print(f"⚠️  Unknown cluster type: {cluster_type}")
+
+                # Test resource configuration
+                cores = config.get("default_cores", 4)
+                memory = config.get("default_memory", "8GB")
+
+                print("\n📊 Resource Configuration:")
+                print(f"- CPUs: {cores if cores != -1 else 'all available'}")
+                print(f"- Memory: {memory}")
+
+                if cluster_type != "local":
+                    time_limit = config.get("default_time", "01:00:00")
+                    print(f"- Time limit: {time_limit}")
+
+                # Check cost monitoring
+                if config.get("cost_monitoring", False):
+                    print("💰 Cost monitoring enabled")
+
+                print(
+                    f"\n✅ Configuration test completed for '{config.get('name', 'Unnamed')}'"
+                )
+
+            except Exception as e:
+                print(f"❌ Error testing configuration: {str(e)}")
 
     def display(self):
         """Display the enhanced widget interface."""
@@ -1106,13 +1400,14 @@ class EnhancedClusterConfigWidget:
                 self.save_filename_input,
                 widgets.HBox([self.save_file_dropdown, self.save_btn]),
                 widgets.HTML("<br><h6>Load Configuration</h6>"),
-                widgets.HBox([self.load_file_upload, self.load_btn]),
+                widgets.HBox([self.load_config_textarea, self.load_btn]),
             ]
         )
         # Action buttons
         action_buttons = widgets.HBox(
             [
                 self.apply_btn,
+                self.test_btn,
                 self.delete_btn,
             ]
         )

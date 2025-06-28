@@ -313,6 +313,8 @@ class TestEnhancedClusterConfigWidget:
         widget.work_dir_field.value = "/tmp/clustrix"
         widget.ssh_key_field = MagicMock()
         widget.ssh_key_field.value = ""
+        widget.cost_monitoring_checkbox = MagicMock()
+        widget.cost_monitoring_checkbox.value = True
 
         # Test save functionality
         config = widget._save_config_from_widgets()
@@ -323,6 +325,7 @@ class TestEnhancedClusterConfigWidget:
         assert config["default_cores"] == 8
         assert config["default_memory"] == "32GB"
         assert config["package_manager"] == "conda"
+        assert config["cost_monitoring"] == True
 
     def test_load_config_to_widgets(self, mock_ipython_environment):
         """Test loading configuration into widgets."""
@@ -346,6 +349,7 @@ class TestEnhancedClusterConfigWidget:
         widget.module_loads = MagicMock()
         widget.pre_exec_commands = MagicMock()
         widget.k8s_image = MagicMock()
+        widget.cost_monitoring_checkbox = MagicMock()
 
         test_config = {
             "name": "Test Load Config",
@@ -356,6 +360,7 @@ class TestEnhancedClusterConfigWidget:
             "default_memory": "64GB",
             "k8s_namespace": "production",
             "package_manager": "uv",
+            "cost_monitoring": True,
         }
         # Add test config and load it
         widget.configs["test_load"] = test_config
@@ -369,6 +374,7 @@ class TestEnhancedClusterConfigWidget:
         assert widget.memory_field.value == "64GB"
         assert widget.k8s_namespace.value == "production"
         assert widget.package_manager.value == "uv"
+        assert widget.cost_monitoring_checkbox.value == True
 
     def test_cluster_type_field_visibility(self, mock_ipython_environment):
         """Test field visibility changes based on cluster type."""
@@ -593,6 +599,8 @@ class TestConfigurationSaveLoad:
             widget.module_loads.value = ""
             widget.pre_exec_commands = MagicMock()
             widget.pre_exec_commands.value = ""
+            widget.cost_monitoring_checkbox = MagicMock()
+            widget.cost_monitoring_checkbox.value = False
             # Mock the new filename input field
             widget.save_filename_input = MagicMock()
             widget.save_filename_input.value = "clustrix.yml"
@@ -648,3 +656,145 @@ class TestConfigurationSaveLoad:
                 assert "cluster2" in widget.configs
                 assert widget.configs["cluster1"]["cluster_host"] == "host1.com"
                 assert widget.configs["cluster2"]["cluster_host"] == "host2.com"
+
+    def test_save_all_configurations(self, mock_ipython_environment):
+        """Test saving all configurations from widget dropdown."""
+        import clustrix.notebook_magic
+
+        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+
+        # Add multiple test configurations
+        config1 = {
+            "name": "Test Config 1",
+            "cluster_type": "ssh",
+            "cluster_host": "host1.com",
+            "default_cores": 4,
+            "default_memory": "8GB",
+        }
+        config2 = {
+            "name": "Test Config 2",
+            "cluster_type": "slurm",
+            "cluster_host": "host2.com",
+            "default_cores": 8,
+            "default_memory": "16GB",
+        }
+
+        widget.configs["test_config_1"] = config1
+        widget.configs["test_config_2"] = config2
+        widget.current_config_name = "test_config_1"
+
+        # Mock required widget fields
+        widget.config_name = MagicMock()
+        widget.config_name.value = "test_config_1"
+        widget.cluster_type = MagicMock()
+        widget.cluster_type.value = "ssh"
+        widget.host_field = MagicMock()
+        widget.host_field.value = "host1.com"
+        widget.username_field = MagicMock()
+        widget.username_field.value = "user"
+        widget.cores_field = MagicMock()
+        widget.cores_field.value = 4
+        widget.memory_field = MagicMock()
+        widget.memory_field.value = "8GB"
+        widget.time_field = MagicMock()
+        widget.time_field.value = "01:00:00"
+        widget.python_version = MagicMock()
+        widget.python_version.value = "python"
+        widget.package_manager = MagicMock()
+        widget.package_manager.value = "pip"
+        widget.env_vars = MagicMock()
+        widget.env_vars.value = ""
+        widget.module_loads = MagicMock()
+        widget.module_loads.value = ""
+        widget.pre_exec_commands = MagicMock()
+        widget.pre_exec_commands.value = ""
+        widget.port_field = MagicMock()
+        widget.port_field.value = 22
+        widget.work_dir_field = MagicMock()
+        widget.work_dir_field.value = "/tmp/clustrix"
+        widget.ssh_key_field = MagicMock()
+        widget.ssh_key_field.value = ""
+        widget.cost_monitoring_checkbox = MagicMock()
+        widget.cost_monitoring_checkbox.value = False
+        widget.save_filename_input = MagicMock()
+        widget.save_filename_input.value = "test_all_configs.yml"
+        widget.status_output = MagicMock()
+        widget.status_output.clear_output = MagicMock()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            import os
+
+            old_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+
+                # Trigger save - should save all configurations
+                widget._on_save_config(None)
+
+                # Check that file was created
+                save_path = Path(tmpdir) / "test_all_configs.yml"
+                assert save_path.exists()
+
+                # Load and verify content - should contain both configurations
+                with open(save_path, "r") as f:
+                    saved_data = yaml.safe_load(f)
+
+                # Should have both configs (defaults are skipped)
+                assert "test_config_1" in saved_data
+                assert "test_config_2" in saved_data
+                assert saved_data["test_config_1"]["cluster_host"] == "host1.com"
+                assert saved_data["test_config_2"]["cluster_host"] == "host2.com"
+
+            finally:
+                os.chdir(old_cwd)
+
+    def test_test_configuration_functionality(self, mock_ipython_environment):
+        """Test the test configuration button functionality."""
+        import clustrix.notebook_magic
+
+        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+
+        # Set up a test configuration
+        widget.current_config_name = "test_config"
+
+        # Mock required widget fields for SSH configuration
+        widget.config_name = MagicMock()
+        widget.config_name.value = "Test SSH Config"
+        widget.cluster_type = MagicMock()
+        widget.cluster_type.value = "ssh"
+        widget.host_field = MagicMock()
+        widget.host_field.value = "example.com"
+        widget.username_field = MagicMock()
+        widget.username_field.value = "testuser"
+        widget.cores_field = MagicMock()
+        widget.cores_field.value = 8
+        widget.memory_field = MagicMock()
+        widget.memory_field.value = "16GB"
+        widget.time_field = MagicMock()
+        widget.time_field.value = "02:00:00"
+        widget.python_version = MagicMock()
+        widget.python_version.value = "python"
+        widget.package_manager = MagicMock()
+        widget.package_manager.value = "conda"
+        widget.env_vars = MagicMock()
+        widget.env_vars.value = ""
+        widget.module_loads = MagicMock()
+        widget.module_loads.value = ""
+        widget.pre_exec_commands = MagicMock()
+        widget.pre_exec_commands.value = ""
+        widget.port_field = MagicMock()
+        widget.port_field.value = 22
+        widget.work_dir_field = MagicMock()
+        widget.work_dir_field.value = "/tmp/clustrix"
+        widget.ssh_key_field = MagicMock()
+        widget.ssh_key_field.value = "~/.ssh/id_rsa"
+        widget.cost_monitoring_checkbox = MagicMock()
+        widget.cost_monitoring_checkbox.value = False
+        widget.status_output = MagicMock()
+        widget.status_output.clear_output = MagicMock()
+
+        # Test the configuration - should succeed without errors
+        widget._on_test_config(None)
+
+        # Verify the status output was used
+        widget.status_output.clear_output.assert_called_once()
