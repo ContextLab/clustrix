@@ -178,14 +178,14 @@ from .config import configure, get_config
 logger = logging.getLogger(__name__)
 # Default cluster configurations
 DEFAULT_CONFIGS = {
-    "local": {
+    "Local Development": {
         "name": "Local Development",
         "cluster_type": "local",
         "default_cores": 4,
         "default_memory": "8GB",
         "description": "Local machine for development and testing",
     },
-    "local_multicore": {
+    "Local Multi-core": {
         "name": "Local Multi-core",
         "cluster_type": "local",
         "default_cores": -1,  # Use all available cores
@@ -268,10 +268,10 @@ class EnhancedClusterConfigWidget:
             raise ImportError(
                 "IPython and ipywidgets are required for the widget interface"
             )
-        self.configs = {}
-        self.current_config_name = None
-        self.config_files = []
-        self.config_file_map = {}  # Maps config names to their source files
+        self.configs: Dict[str, Dict[str, Any]] = {}
+        self.current_config_name: Optional[str] = None
+        self.config_files: List[Path] = []
+        self.config_file_map: Dict[str, Path] = {}  # Maps config names to their source files
         self.auto_display = auto_display
         # Initialize configurations
         self._initialize_configs()
@@ -669,15 +669,15 @@ class EnhancedClusterConfigWidget:
         with self.status_output:
             self.status_output.clear_output()
             # Generate unique name
-            base_name = "new_config"
+            base_name = "New Configuration"
             counter = 1
             config_name = base_name
             while config_name in self.configs:
-                config_name = f"{base_name}_{counter}"
+                config_name = f"{base_name} {counter}"
                 counter += 1
             # Create new config
             self.configs[config_name] = {
-                "name": f"New Configuration {counter}",
+                "name": config_name,  # Use the same name as the key
                 "cluster_type": "local",
                 "default_cores": 4,
                 "default_memory": "8GB",
@@ -714,7 +714,28 @@ class EnhancedClusterConfigWidget:
             try:
                 # Save current state
                 config = self._save_config_from_widgets()
-                self.configs[self.current_config_name] = config
+
+                # Use the user-provided name as the key
+                new_config_name = self.config_name.value.strip()
+                if not new_config_name:
+                    print("❌ Configuration name cannot be empty")
+                    return
+
+                # If renaming, remove old entry
+                if new_config_name != self.current_config_name:
+                    if self.current_config_name in self.configs:
+                        del self.configs[self.current_config_name]
+                    if self.current_config_name in self.config_file_map:
+                        self.config_file_map[new_config_name] = (
+                            self.config_file_map.pop(self.current_config_name)
+                        )
+
+                self.configs[new_config_name] = config
+                self.current_config_name = new_config_name
+
+                # Update the config dropdown to reflect the new name
+                self.config_dropdown.options = list(self.configs.keys())
+                self.config_dropdown.value = self.current_config_name
                 # Prepare config for application
                 apply_config = config.copy()
                 apply_config.pop("name", None)
@@ -739,7 +760,24 @@ class EnhancedClusterConfigWidget:
             try:
                 # Save current widget state
                 config = self._save_config_from_widgets()
-                self.configs[self.current_config_name] = config
+
+                # Use the user-provided name as the key
+                new_config_name = self.config_name.value.strip()
+                if not new_config_name:
+                    print("❌ Configuration name cannot be empty")
+                    return
+
+                # If renaming, remove old entry
+                if new_config_name != self.current_config_name:
+                    if self.current_config_name in self.configs:
+                        del self.configs[self.current_config_name]
+                    if self.current_config_name in self.config_file_map:
+                        self.config_file_map[new_config_name] = (
+                            self.config_file_map.pop(self.current_config_name)
+                        )
+
+                self.configs[new_config_name] = config
+                self.current_config_name = new_config_name
                 # Determine save file
                 save_option = self.save_file_dropdown.value
                 if save_option.startswith("New file:"):
@@ -775,15 +813,17 @@ class EnhancedClusterConfigWidget:
                     for config_file in self.config_files:
                         file_options.append(f"Existing: {config_file}")
                     self.save_file_dropdown.options = file_options
+
+                # Update the config dropdown to reflect the new name
+                self.config_dropdown.options = list(self.configs.keys())
+                self.config_dropdown.value = self.current_config_name
             except Exception as e:
                 print(f"❌ Error saving configuration: {str(e)}")
 
     def display(self):
         """Display the enhanced widget interface."""
-        # Title with conditional text
-        title_text = "🚀 Clustrix Configuration Manager"
-        if self.auto_display:
-            title_text += " (Auto-displayed on import)"
+        # Title
+        title_text = "Clustrix Configuration Manager"
         display(HTML(f"<h3>{title_text}</h3>"))
         # Configuration selector section
         config_section = widgets.HBox(

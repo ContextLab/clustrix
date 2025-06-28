@@ -61,11 +61,11 @@ class TestEnhancedDefaultConfigs:
 
     def test_local_configs_present(self):
         """Test that local configurations are present."""
-        assert "local" in DEFAULT_CONFIGS
-        assert "local_multicore" in DEFAULT_CONFIGS
-        assert DEFAULT_CONFIGS["local"]["cluster_type"] == "local"
-        assert DEFAULT_CONFIGS["local_multicore"]["cluster_type"] == "local"
-        assert DEFAULT_CONFIGS["local_multicore"]["default_cores"] == -1
+        assert "Local Development" in DEFAULT_CONFIGS
+        assert "Local Multi-core" in DEFAULT_CONFIGS
+        assert DEFAULT_CONFIGS["Local Development"]["cluster_type"] == "local"
+        assert DEFAULT_CONFIGS["Local Multi-core"]["cluster_type"] == "local"
+        assert DEFAULT_CONFIGS["Local Multi-core"]["default_cores"] == -1
 
 
 class TestConfigFileDetection:
@@ -215,8 +215,8 @@ class TestEnhancedClusterConfigWidget:
         widget = EnhancedClusterConfigWidget()
         # Check that default configs are loaded
         assert len(widget.configs) >= len(DEFAULT_CONFIGS)
-        assert "local" in widget.configs
-        assert "local_multicore" in widget.configs
+        assert "Local Development" in widget.configs
+        assert "Local Multi-core" in widget.configs
         # Check initial state
         assert widget.current_config_name is not None
         assert widget.auto_display is False
@@ -443,7 +443,7 @@ class TestEnhancedClusterConfigWidget:
         widget._on_add_config(None)
         # Check that config was added
         assert len(widget.configs) == initial_count + 1
-        assert "new_config" in widget.configs
+        assert "New Configuration" in widget.configs
 
 
 class TestAutoDisplayFunctionality:
@@ -609,8 +609,8 @@ class TestConfigurationSaveLoad:
                 # Load and verify content
                 with open(default_save_path, "r") as f:
                     saved_data = yaml.safe_load(f)
-                assert "integration_test" in saved_data
-                saved_config = saved_data["integration_test"]
+                assert "Integration Test Config" in saved_data
+                saved_config = saved_data["Integration Test Config"]
                 assert saved_config["name"] == test_config["name"]
                 assert saved_config["cluster_type"] == test_config["cluster_type"]
                 assert saved_config["cluster_host"] == test_config["cluster_host"]
