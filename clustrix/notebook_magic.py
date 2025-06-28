@@ -480,6 +480,8 @@ class EnhancedClusterConfigWidget:
                 "huggingface",
             ],
             description="Cluster Type:",
+            tooltip=("Choose where to run your jobs: local machine, remote servers "
+                     "(SSH/SLURM/PBS/SGE), Kubernetes clusters, or cloud providers"),
             style=style,
             layout=full_layout,
         )
@@ -490,6 +492,8 @@ class EnhancedClusterConfigWidget:
         self.config_name = widgets.Text(
             description="Config Name:",
             placeholder="Enter configuration name",
+            tooltip=("Give this configuration a descriptive name "
+                     "(e.g., 'AWS Production', 'Local Testing', 'HPC Cluster')"),
             style=style,
             layout=full_layout,
         )
@@ -582,6 +586,8 @@ class EnhancedClusterConfigWidget:
         self.host_field = widgets.Text(
             description="Host/Address:",
             placeholder="hostname or IP address",
+            tooltip=("Enter the hostname or IP address of your remote cluster "
+                     "(e.g., cluster.example.com or 192.168.1.100)"),
             style=style,
             layout=full_layout,
         )
@@ -590,6 +596,7 @@ class EnhancedClusterConfigWidget:
         self.username_field = widgets.Text(
             description="Username:",
             placeholder="remote username",
+            tooltip="Your username on the remote cluster for SSH authentication",
             style=style,
             layout=half_layout,
         )
@@ -597,6 +604,8 @@ class EnhancedClusterConfigWidget:
         self.ssh_key_field = widgets.Text(
             description="SSH Key:",
             placeholder="~/.ssh/id_rsa",
+            tooltip=("Path to your SSH private key file for passwordless authentication "
+                     "(generate with 'ssh-keygen -t rsa')"),
             style=style,
             layout=half_layout,
         )
@@ -604,6 +613,7 @@ class EnhancedClusterConfigWidget:
         self.port_field = widgets.IntText(
             value=22,
             description="Port:",
+            tooltip="SSH port number (default: 22). Check with your system administrator if unsure",
             style=style,
             layout=widgets.Layout(width="200px"),
         )
@@ -611,6 +621,7 @@ class EnhancedClusterConfigWidget:
         self.cores_field = widgets.IntText(
             value=4,
             description="CPUs:",
+            tooltip="Number of CPU cores to request for each job (affects job scheduling and performance)",
             style=style,
             layout=widgets.Layout(width="200px"),
         )
@@ -618,6 +629,8 @@ class EnhancedClusterConfigWidget:
             value="8GB",
             description="Memory:",
             placeholder="e.g., 8GB, 16GB",
+            tooltip=("Amount of RAM to request for each job (e.g., '8GB', '16GB'). "
+                     "Higher memory allows processing larger datasets"),
             style=style,
             layout=widgets.Layout(width="200px"),
         )
@@ -625,6 +638,7 @@ class EnhancedClusterConfigWidget:
             value="01:00:00",
             description="Time Limit:",
             placeholder="HH:MM:SS",
+            tooltip="Maximum time job can run (format: HH:MM:SS). Jobs exceeding this limit will be terminated",
             style=style,
             layout=widgets.Layout(width="200px"),
         )
@@ -632,12 +646,15 @@ class EnhancedClusterConfigWidget:
         self.k8s_namespace = widgets.Text(
             value="default",
             description="Namespace:",
+            tooltip=("Kubernetes namespace for job pods (default: 'default'). "
+                     "Contact your cluster admin for appropriate namespace"),
             style=style,
             layout=half_layout,
         )
         self.k8s_image = widgets.Text(
             value="python:3.11-slim",
             description="Docker Image:",
+            tooltip="Docker image for job containers (e.g., 'python:3.11-slim', 'tensorflow/tensorflow:latest')",
             style=style,
             layout=half_layout,
         )
@@ -645,6 +662,7 @@ class EnhancedClusterConfigWidget:
         self.k8s_remote_checkbox = widgets.Checkbox(
             value=False,
             description="Remote Kubernetes Cluster",
+            tooltip="Check if connecting to a remote Kubernetes cluster (requires kubectl configuration)",
             style=style,
             layout=full_layout,
         )
@@ -653,6 +671,7 @@ class EnhancedClusterConfigWidget:
         self.cost_monitoring_checkbox = widgets.Checkbox(
             value=False,
             description="Enable Cost Monitoring",
+            tooltip="Track and report estimated costs for cloud provider resources (AWS, Azure, GCP)",
             style=style,
             layout=full_layout,
         )
@@ -660,6 +679,7 @@ class EnhancedClusterConfigWidget:
         self.work_dir_field = widgets.Text(
             value="/tmp/clustrix",
             description="Work Directory:",
+            tooltip="Remote directory path where job files will be stored (must have write permissions)",
             style=style,
             layout=full_layout,
         )
@@ -670,6 +690,7 @@ class EnhancedClusterConfigWidget:
             options=["us-east-1"],  # Will be populated dynamically
             value="us-east-1",
             description="AWS Region:",
+            tooltip="AWS region for resources (affects latency and pricing). Choose region closest to your location",
             style=style,
             layout=half_layout,
         )
@@ -679,18 +700,21 @@ class EnhancedClusterConfigWidget:
             options=["t3.medium"],  # Will be populated dynamically
             value="t3.medium",
             description="Instance Type:",
+            tooltip="AWS EC2 instance type (affects CPU, memory, and cost). t3.medium = 2 vCPUs + 4GB RAM",
             style=style,
             layout=half_layout,
         )
         self.aws_access_key = widgets.Text(
             description="AWS Access Key ID:",
             placeholder="AKIA...",
+            tooltip="AWS access key ID from IAM user (starts with AKIA). Get from AWS Console > IAM > Users",
             style=style,
             layout=half_layout,
         )
         self.aws_secret_key = widgets.Password(
             description="AWS Secret Key:",
             placeholder="Your AWS secret access key",
+            tooltip="AWS secret access key (keep secure!). Generated when creating access key in IAM",
             style=style,
             layout=half_layout,
         )
@@ -698,6 +722,7 @@ class EnhancedClusterConfigWidget:
             options=["ec2", "eks"],
             value="ec2",
             description="AWS Cluster Type:",
+            tooltip="EC2: Virtual machines, EKS: Managed Kubernetes service (requires additional setup)",
             style=style,
             layout=half_layout,
         )
@@ -707,6 +732,7 @@ class EnhancedClusterConfigWidget:
             options=["eastus"],  # Will be populated dynamically
             value="eastus",
             description="Azure Region:",
+            tooltip="Azure region for resources (affects latency and pricing). Choose region closest to your location",
             style=style,
             layout=half_layout,
         )
@@ -716,24 +742,30 @@ class EnhancedClusterConfigWidget:
             options=["Standard_D2s_v3"],  # Will be populated dynamically
             value="Standard_D2s_v3",
             description="VM Size:",
+            tooltip="Azure VM size (affects CPU, memory, and cost). Standard_D2s_v3 = 2 vCPUs + 8GB RAM",
             style=style,
             layout=half_layout,
         )
         self.azure_subscription_id = widgets.Text(
             description="Subscription ID:",
             placeholder="Your Azure subscription ID",
+            tooltip="Azure subscription ID (UUID format). Find in Azure Portal > Subscriptions",
             style=style,
             layout=full_layout,
         )
         self.azure_client_id = widgets.Text(
             description="Client ID:",
             placeholder="Azure service principal client ID",
+            tooltip=("Azure service principal application ID (UUID format). "
+                     "Create in Azure AD > App registrations"),
             style=style,
             layout=half_layout,
         )
         self.azure_client_secret = widgets.Password(
             description="Client Secret:",
             placeholder="Azure service principal secret",
+            tooltip=("Azure service principal secret (keep secure!). Generated in Azure AD > "
+                     "App registrations > Certificates & secrets"),
             style=style,
             layout=half_layout,
         )
@@ -742,6 +774,7 @@ class EnhancedClusterConfigWidget:
         self.gcp_project_id = widgets.Text(
             description="Project ID:",
             placeholder="your-gcp-project-id",
+            tooltip="Google Cloud project ID (lowercase, hyphens allowed). Find in GCP Console dashboard",
             style=style,
             layout=half_layout,
         )
@@ -749,6 +782,8 @@ class EnhancedClusterConfigWidget:
             options=["us-central1"],  # Will be populated dynamically
             value="us-central1",
             description="GCP Region:",
+            tooltip=("Google Cloud region for resources (affects latency and pricing). "
+                     "Choose region closest to your location"),
             style=style,
             layout=half_layout,
         )
@@ -758,12 +793,15 @@ class EnhancedClusterConfigWidget:
             options=["e2-medium"],  # Will be populated dynamically
             value="e2-medium",
             description="Machine Type:",
+            tooltip="GCP machine type (affects CPU, memory, and cost). e2-medium = 1 vCPU + 4GB RAM",
             style=style,
             layout=half_layout,
         )
         self.gcp_service_account_key = widgets.Textarea(
             description="Service Account Key:",
             placeholder="Paste your GCP service account JSON key here",
+            tooltip=("Google Cloud service account key in JSON format (keep secure!). "
+                     "Create in GCP Console > IAM & Admin > Service Accounts"),
             style=style,
             layout=full_layout,
         )
@@ -772,6 +810,7 @@ class EnhancedClusterConfigWidget:
         self.lambda_api_key = widgets.Password(
             description="Lambda API Key:",
             placeholder="Your Lambda Cloud API key",
+            tooltip="Lambda Cloud API key for GPU instance access (keep secure!). Get from Lambda Cloud dashboard",
             style=style,
             layout=full_layout,
         )
@@ -779,6 +818,8 @@ class EnhancedClusterConfigWidget:
             options=["gpu_1x_a10"],  # Will be populated dynamically
             value="gpu_1x_a10",
             description="Instance Type:",
+            tooltip=("Lambda Cloud GPU instance type (affects GPU model, RAM, and cost). "
+                     "gpu_1x_a10 = 1x NVIDIA A10 + 30GB RAM"),
             style=style,
             layout=half_layout,
         )
@@ -787,6 +828,8 @@ class EnhancedClusterConfigWidget:
         self.hf_token = widgets.Password(
             description="HF Token:",
             placeholder="Your HuggingFace API token",
+            tooltip=("HuggingFace API token for Spaces access (keep secure!). "
+                     "Get from HuggingFace Settings > Access Tokens"),
             style=style,
             layout=half_layout,
         )
