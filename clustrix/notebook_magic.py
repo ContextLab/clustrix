@@ -309,8 +309,8 @@ class EnhancedClusterConfigWidget:
         full_layout = widgets.Layout(width="100%")
         # Configuration selector with add button
         self.config_dropdown = widgets.Dropdown(
-            options=list(self.configs.keys()),
-            value=list(self.configs.keys())[0] if self.configs else None,
+            options=[],  # Will be populated by _update_config_dropdown
+            value=None,
             description="Active Config:",
             style=style,
             layout=widgets.Layout(width="70%"),
@@ -340,6 +340,7 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
+        self.config_name.observe(self._on_config_name_change, names="value")
         # Advanced options
         self._create_advanced_options()
         # Save configuration section
@@ -361,9 +362,43 @@ class EnhancedClusterConfigWidget:
         self.delete_btn.on_click(self._on_delete_config)
         # Status output
         self.status_output = widgets.Output()
-        # Load initial configuration
+        # Update dropdown and load initial configuration
+        self._update_config_dropdown()
         if self.configs:
             self._load_config_to_widgets(list(self.configs.keys())[0])
+
+    def _update_config_dropdown(self):
+        """Update the configuration dropdown with current config names."""
+        if not self.configs:
+            self.config_dropdown.options = []
+            self.config_dropdown.value = None
+            return
+
+        # Create options list with display names and config keys
+        options = []
+        for config_key, config_data in self.configs.items():
+            display_name = config_data.get("name", config_key)
+            options.append((display_name, config_key))
+
+        # Store current selection
+        current_value = self.config_dropdown.value
+
+        # Update options
+        self.config_dropdown.options = options
+
+        # Restore selection if it still exists
+        if current_value and current_value in [opt[1] for opt in options]:
+            self.config_dropdown.value = current_value
+        elif options:
+            self.config_dropdown.value = options[0][1]
+
+    def _on_config_name_change(self, change):
+        """Handle changes to the config name field."""
+        if self.current_config_name and self.current_config_name in self.configs:
+            # Update the name in the current configuration
+            self.configs[self.current_config_name]["name"] = change["new"]
+            # Update the dropdown to reflect the new display name
+            self._update_config_dropdown()
 
     def _create_dynamic_fields(self):
         """Create dynamic fields that change based on cluster type."""
@@ -686,7 +721,7 @@ class EnhancedClusterConfigWidget:
                 "default_time": "01:00:00",
             }
             # Update dropdown
-            self.config_dropdown.options = list(self.configs.keys())
+            self._update_config_dropdown()
             self.config_dropdown.value = config_name
             print(f"✅ Created new configuration: {config_name}")
 
@@ -705,8 +740,9 @@ class EnhancedClusterConfigWidget:
             if self.current_config_name in self.config_file_map:
                 del self.config_file_map[self.current_config_name]
             # Update dropdown
-            self.config_dropdown.options = list(self.configs.keys())
-            self.config_dropdown.value = list(self.configs.keys())[0]
+            self._update_config_dropdown()
+            if self.configs:
+                self.config_dropdown.value = list(self.configs.keys())[0]
             print(f"✅ Deleted configuration: {self.current_config_name}")
 
     def _on_apply_config(self, button):
@@ -736,7 +772,7 @@ class EnhancedClusterConfigWidget:
                 self.current_config_name = new_config_name
 
                 # Update the config dropdown to reflect the new name
-                self.config_dropdown.options = list(self.configs.keys())
+                self._update_config_dropdown()
                 self.config_dropdown.value = self.current_config_name
                 # Prepare config for application
                 apply_config = config.copy()
@@ -817,7 +853,7 @@ class EnhancedClusterConfigWidget:
                     self.save_file_dropdown.options = file_options
 
                 # Update the config dropdown to reflect the new name
-                self.config_dropdown.options = list(self.configs.keys())
+                self._update_config_dropdown()
                 self.config_dropdown.value = self.current_config_name
             except Exception as e:
                 print(f"❌ Error saving configuration: {str(e)}")
