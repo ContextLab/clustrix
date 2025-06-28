@@ -10,6 +10,7 @@ try:
     from azure.mgmt.resource import ResourceManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
+
     AZURE_AVAILABLE = True
 except ImportError:
     AZURE_AVAILABLE = False
@@ -72,31 +73,30 @@ class AzureProvider(CloudProvider):
             return False
 
         if not AZURE_AVAILABLE:
-            logger.error("azure-identity and azure-mgmt-compute are not installed. Install with: pip install azure-identity azure-mgmt-compute azure-mgmt-resource azure-mgmt-network")
+            logger.error(
+                "azure-identity and azure-mgmt-compute are not installed. "
+                "Install with: pip install azure-identity azure-mgmt-compute "
+                "azure-mgmt-resource azure-mgmt-network"
+            )
             return False
 
         try:
             # Create credential object
             self.credential = ClientSecretCredential(
-                tenant_id=tenant_id,
-                client_id=client_id,
-                client_secret=client_secret
+                tenant_id=tenant_id, client_id=client_id, client_secret=client_secret
             )
 
             # Initialize Azure clients
             self.compute_client = ComputeManagementClient(
-                credential=self.credential,
-                subscription_id=subscription_id
+                credential=self.credential, subscription_id=subscription_id
             )
-            
+
             self.resource_client = ResourceManagementClient(
-                credential=self.credential,
-                subscription_id=subscription_id
+                credential=self.credential, subscription_id=subscription_id
             )
-            
+
             self.network_client = NetworkManagementClient(
-                credential=self.credential,
-                subscription_id=subscription_id
+                credential=self.credential, subscription_id=subscription_id
             )
 
             # Test credentials by listing resource groups
@@ -113,7 +113,9 @@ class AzureProvider(CloudProvider):
             self.resource_group = resource_group
             self.credentials = credentials
             self.authenticated = True
-            logger.info(f"Successfully authenticated with Azure subscription {subscription_id}")
+            logger.info(
+                f"Successfully authenticated with Azure subscription {subscription_id}"
+            )
             return True
 
         except ClientAuthenticationError:
@@ -127,7 +129,7 @@ class AzureProvider(CloudProvider):
         """Validate current Azure credentials."""
         if not self.authenticated or not self.compute_client:
             return False
-        
+
         try:
             # Try to list resource groups to verify credentials are still valid
             list(self.resource_client.resource_groups.list())
@@ -146,70 +148,74 @@ class AzureProvider(CloudProvider):
                 # Create resource group
                 rg_params = {
                     "location": self.region,
-                    "tags": {"created_by": "clustrix"}
+                    "tags": {"created_by": "clustrix"},
                 }
                 self.resource_client.resource_groups.create_or_update(
                     self.resource_group, rg_params
                 )
-                logger.info(f"Created resource group '{self.resource_group}' in {self.region}")
+                logger.info(
+                    f"Created resource group '{self.resource_group}' in {self.region}"
+                )
                 return True
         except Exception as e:
             logger.error(f"Failed to ensure resource group: {e}")
             return False
 
-    def create_vm(self, vm_name: str, vm_size: str = "Standard_D2s_v3",
-                  admin_username: str = "azureuser", admin_password: str = None) -> Dict[str, Any]:
+    def create_vm(
+        self,
+        vm_name: str,
+        vm_size: str = "Standard_D2s_v3",
+        admin_username: str = "azureuser",
+        admin_password: str = None,
+    ) -> Dict[str, Any]:
         """
         Create an Azure Virtual Machine.
-        
+
         Args:
             vm_name: Name for the VM
             vm_size: VM size (e.g., Standard_D2s_v3)
             admin_username: Admin username for the VM
             admin_password: Admin password (if None, uses SSH key)
-            
+
         Returns:
             Dict with VM information
         """
         if not self.authenticated:
             raise RuntimeError("Not authenticated with Azure")
-            
+
         try:
             # Ensure resource group exists
             if not self._ensure_resource_group():
                 raise RuntimeError("Failed to create or access resource group")
-            
+
             # Create or get virtual network
             vnet_name = f"{vm_name}-vnet"
             subnet_name = f"{vm_name}-subnet"
-            
+
             vnet_params = {
                 "location": self.region,
                 "address_space": {"address_prefixes": ["10.0.0.0/16"]},
-                "subnets": [
-                    {
-                        "name": subnet_name,
-                        "address_prefix": "10.0.0.0/24"
-                    }
-                ]
+                "subnets": [{"name": subnet_name, "address_prefix": "10.0.0.0/24"}],
             }
-            
+
             vnet_result = self.network_client.virtual_networks.begin_create_or_update(
                 self.resource_group, vnet_name, vnet_params
             ).result()
-            
+
             # Create public IP
             public_ip_name = f"{vm_name}-ip"
             public_ip_params = {
                 "location": self.region,
                 "public_ip_allocation_method": "Static",
-                "sku": {"name": "Standard"}
+                "sku": {"name": "Standard"},
             }
-            
-            public_ip_result = self.network_client.public_ip_addresses.begin_create_or_update(
-                self.resource_group, public_ip_name, public_ip_params
-            ).result()
-            
+
+            public_ip_result = (
+                self.network_client.public_ip_addresses.begin_create_or_update(
+                    self.resource_group, public_ip_name, public_ip_params
+                ).result()
+            )
+
             # Create network security group with SSH rule
             nsg_name = f"{vm_name}-nsg"
             nsg_params = {
@@ -224,15 +230,17 @@ class AzureProvider(CloudProvider):
                         "destination_address_prefix": "*",
                         "access": "Allow",
                         "priority": 1000,
-                        "direction": "Inbound"
+                        "direction": "Inbound",
                     }
-                ]
+                ],
             }
-            
-            nsg_result = self.network_client.network_security_groups.begin_create_or_update(
-                self.resource_group, nsg_name, nsg_params
-            ).result()
-            
+
+            nsg_result = (
+                self.network_client.network_security_groups.begin_create_or_update(
+                    self.resource_group, nsg_name, nsg_params
+                ).result()
+            )
+
             # Create network interface
             nic_name = f"{vm_name}-nic"
             nic_params = {
@@ -241,16 +249,16 @@ class AzureProvider(CloudProvider):
                     {
                         "name": "ipconfig1",
                         "subnet": {"id": vnet_result.subnets[0].id},
-                        "public_ip_address": {"id": public_ip_result.id}
+                        "public_ip_address": {"id": public_ip_result.id},
                     }
                 ],
-                "network_security_group": {"id": nsg_result.id}
+                "network_security_group": {"id": nsg_result.id},
             }
-            
+
             nic_result = self.network_client.network_interfaces.begin_create_or_update(
                 self.resource_group, nic_name, nic_params
             ).result()
-            
+
             # Create VM
             vm_params = {
                 "location": self.region,
@@ -260,9 +268,11 @@ class AzureProvider(CloudProvider):
                     "linux_configuration": {
                         "disable_password_authentication": admin_password is None,
                         "ssh": {
-                            "public_keys": [] if admin_password else []  # Would need SSH key
-                        }
-                    }
+                            "public_keys": (
+                                [] if admin_password else []
+                            )  # Would need SSH key
+                        },
+                    },
                 },
                 "hardware_profile": {"vm_size": vm_size},
                 "storage_profile": {
@@ -270,31 +280,29 @@ class AzureProvider(CloudProvider):
                         "publisher": "Canonical",
                         "offer": "0001-com-ubuntu-server-focal",
                         "sku": "20_04-lts-gen2",
-                        "version": "latest"
+                        "version": "latest",
                     },
                     "os_disk": {
                         "create_option": "FromImage",
                         "disk_size_gb": 30,
-                        "managed_disk": {"storage_account_type": "Standard_LRS"}
-                    }
+                        "managed_disk": {"storage_account_type": "Standard_LRS"},
+                    },
                 },
-                "network_profile": {
-                    "network_interfaces": [{"id": nic_result.id}]
-                },
-                "tags": {"created_by": "clustrix"}
+                "network_profile": {"network_interfaces": [{"id": nic_result.id}]},
+                "tags": {"created_by": "clustrix"},
             }
-            
+
             # Add password if provided
             if admin_password:
                 vm_params["os_profile"]["admin_password"] = admin_password
-            
+
             # Create the VM
             vm_result = self.compute_client.virtual_machines.begin_create_or_update(
                 self.resource_group, vm_name, vm_params
             ).result()
-            
+
             logger.info(f"Created Azure VM '{vm_name}' with size {vm_size}")
-            
+
             return {
                 "vm_name": vm_name,
                 "vm_id": vm_result.id,
@@ -304,14 +312,16 @@ class AzureProvider(CloudProvider):
                 "status": "creating",
                 "public_ip": public_ip_result.ip_address,
                 "admin_username": admin_username,
-                "created_at": datetime.now(timezone.utc).isoformat()
+                "created_at": datetime.now(timezone.utc).isoformat(),
             }
-            
+
         except Exception as e:
             logger.error(f"Failed to create Azure VM: {e}")
             raise
 
-    def create_cluster(self, cluster_name: str, cluster_type: str = "vm", **kwargs) -> Dict[str, Any]:
+    def create_cluster(
+        self, cluster_name: str, cluster_type: str = "vm", **kwargs
+    ) -> Dict[str, Any]:
         """Create an Azure cluster (VM or AKS)."""
         if cluster_type == "vm":
             return self.create_vm(cluster_name, **kwargs)
@@ -322,7 +332,7 @@ class AzureProvider(CloudProvider):
                 "status": "creating",
                 "region": self.region,
                 "provider": "azure",
-                "cluster_type": "aks"
+                "cluster_type": "aks",
             }
         else:
             raise ValueError(f"Unknown cluster type: {cluster_type}")
@@ -331,34 +341,34 @@ class AzureProvider(CloudProvider):
         """Delete an Azure cluster."""
         if not self.authenticated:
             raise RuntimeError("Not authenticated with Azure")
-            
+
         try:
             if cluster_type == "vm":
                 # Delete VM and associated resources
                 self.compute_client.virtual_machines.begin_delete(
                     self.resource_group, cluster_identifier
                 ).result()
-                
+
                 # Also delete associated resources (NIC, IP, NSG, etc.)
                 try:
                     self.network_client.network_interfaces.begin_delete(
                         self.resource_group, f"{cluster_identifier}-nic"
                     ).result()
-                    
+
                     self.network_client.public_ip_addresses.begin_delete(
                         self.resource_group, f"{cluster_identifier}-ip"
                     ).result()
-                    
+
                     self.network_client.network_security_groups.begin_delete(
                         self.resource_group, f"{cluster_identifier}-nsg"
                     ).result()
-                    
+
                     self.network_client.virtual_networks.begin_delete(
                         self.resource_group, f"{cluster_identifier}-vnet"
                     ).result()
                 except Exception as e:
                     logger.warning(f"Failed to delete some associated resources: {e}")
-                
+
                 logger.info(f"Deleted Azure VM '{cluster_identifier}'")
                 return True
             elif cluster_type == "aks":
@@ -367,16 +377,18 @@ class AzureProvider(CloudProvider):
                 return True
             else:
                 raise ValueError(f"Unknown cluster type: {cluster_type}")
-                
+
         except Exception as e:
             logger.error(f"Failed to delete Azure cluster: {e}")
             return False
 
-    def get_cluster_status(self, cluster_identifier: str, cluster_type: str = "vm") -> Dict[str, Any]:
+    def get_cluster_status(
+        self, cluster_identifier: str, cluster_type: str = "vm"
+    ) -> Dict[str, Any]:
         """Get status of an Azure cluster."""
         if not self.authenticated:
             raise RuntimeError("Not authenticated with Azure")
-            
+
         try:
             if cluster_type == "vm":
                 vm = self.compute_client.virtual_machines.get(
@@ -384,12 +396,20 @@ class AzureProvider(CloudProvider):
                 )
                 return {
                     "vm_name": cluster_identifier,
-                    "status": vm.provisioning_state.lower() if vm.provisioning_state else "unknown",
-                    "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
+                    "status": (
+                        vm.provisioning_state.lower()
+                        if vm.provisioning_state
+                        else "unknown"
+                    ),
+                    "vm_size": (
+                        vm.hardware_profile.vm_size
+                        if vm.hardware_profile
+                        else "unknown"
+                    ),
                     "region": vm.location,
                     "resource_group": self.resource_group,
                     "provider": "azure",
-                    "cluster_type": "vm"
+                    "cluster_type": "vm",
                 }
             elif cluster_type == "aks":
                 # TODO: Implement AKS status check
@@ -397,7 +417,7 @@ class AzureProvider(CloudProvider):
                     "cluster_name": cluster_identifier,
                     "status": "running",
                     "provider": "azure",
-                    "cluster_type": "aks"
+                    "cluster_type": "aks",
                 }
         except Exception as e:
             logger.error(f"Failed to get cluster status: {e}")
@@ -407,44 +427,56 @@ class AzureProvider(CloudProvider):
         """List all Azure clusters."""
         if not self.authenticated:
             raise RuntimeError("Not authenticated with Azure")
-            
+
         clusters = []
-        
+
         try:
             # List VMs with clustrix tag
             vms = self.compute_client.virtual_machines.list(self.resource_group)
-            
+
             for vm in vms:
                 # Check if VM has clustrix tag
-                tags = getattr(vm, 'tags', {})
-                
-                if tags and tags.get('created_by') == 'clustrix':
-                    clusters.append({
-                        "name": vm.name,
-                        "vm_id": vm.id,
-                        "type": "vm",
-                        "status": vm.provisioning_state.lower() if vm.provisioning_state else "unknown",
-                        "vm_size": vm.hardware_profile.vm_size if vm.hardware_profile else "unknown",
-                        "region": vm.location,
-                        "resource_group": self.resource_group
-                    })
-                    
+                tags = getattr(vm, "tags", {})
+
+                if tags and tags.get("created_by") == "clustrix":
+                    clusters.append(
+                        {
+                            "name": vm.name,
+                            "vm_id": vm.id,
+                            "type": "vm",
+                            "status": (
+                                vm.provisioning_state.lower()
+                                if vm.provisioning_state
+                                else "unknown"
+                            ),
+                            "vm_size": (
+                                vm.hardware_profile.vm_size
+                                if vm.hardware_profile
+                                else "unknown"
+                            ),
+                            "region": vm.location,
+                            "resource_group": self.resource_group,
+                        }
+                    )
+
         except Exception as e:
             logger.error(f"Failed to list Azure VMs: {e}")
-        
+
         # TODO: Add AKS cluster listing
-        
+
         return clusters
 
-    def get_cluster_config(self, cluster_identifier: str, cluster_type: str = "vm") -> Dict[str, Any]:
+    def get_cluster_config(
+        self, cluster_identifier: str, cluster_type: str = "vm"
+    ) -> Dict[str, Any]:
         """Get Clustrix configuration for an Azure cluster."""
         if cluster_type == "vm":
             # Get VM details and public IP
             try:
-                vm = self.compute_client.virtual_machines.get(
+                self.compute_client.virtual_machines.get(
                     self.resource_group, cluster_identifier
                 )
-                
+
                 # Get public IP
                 public_ip = ""
                 try:
@@ -454,7 +486,7 @@ class AzureProvider(CloudProvider):
                     public_ip = ip_result.ip_address or ""
                 except Exception:
                     pass
-                
+
                 return {
                     "name": f"Azure VM - {cluster_identifier}",
                     "cluster_type": "ssh",
@@ -471,8 +503,8 @@ class AzureProvider(CloudProvider):
                         "vm_name": cluster_identifier,
                         "resource_group": self.resource_group,
                         "region": self.region,
-                        "subscription_id": self.subscription_id
-                    }
+                        "subscription_id": self.subscription_id,
+                    },
                 }
             except Exception as e:
                 logger.error(f"Failed to get VM details: {e}")
@@ -481,7 +513,7 @@ class AzureProvider(CloudProvider):
                     "name": f"Azure VM - {cluster_identifier}",
                     "cluster_type": "ssh",
                     "cluster_host": "placeholder.azure.com",
-                    "provider": "azure"
+                    "provider": "azure",
                 }
         elif cluster_type == "aks":
             return {
@@ -499,18 +531,18 @@ class AzureProvider(CloudProvider):
                     "cluster_name": cluster_identifier,
                     "resource_group": self.resource_group,
                     "region": self.region,
-                    "subscription_id": self.subscription_id
-                }
+                    "subscription_id": self.subscription_id,
+                },
             }
         else:
             raise ValueError(f"Unknown cluster type: {cluster_type}")
 
     def estimate_cost(self, **kwargs) -> Dict[str, float]:
         """Estimate Azure costs."""
-        cluster_type = kwargs.get('cluster_type', 'vm')
-        vm_size = kwargs.get('vm_size', 'Standard_D2s_v3')
-        hours = kwargs.get('hours', 1)
-        
+        cluster_type = kwargs.get("cluster_type", "vm")
+        vm_size = kwargs.get("vm_size", "Standard_D2s_v3")
+        hours = kwargs.get("hours", 1)
+
         # Simplified pricing - real implementation would use Azure Pricing API
         vm_prices = {
             "Standard_B1s": 0.0104,
@@ -525,67 +557,84 @@ class AzureProvider(CloudProvider):
             "Standard_E2s_v3": 0.126,
             "Standard_E4s_v3": 0.252,
         }
-        
+
         base_price = vm_prices.get(vm_size, 0.10)  # Default price
-        
+
         if cluster_type == "aks":
             # AKS has cluster management fee (free tier available)
             cluster_fee = 0.0  # Free tier for development
             node_cost = base_price * hours
             total = cluster_fee + node_cost
-            
+
             return {
                 "cluster_management": cluster_fee,
                 "nodes": node_cost,
-                "total": total
+                "total": total,
             }
         else:  # vm
             total = base_price * hours
-            return {
-                "vm": total,
-                "total": total
-            }
+            return {"vm": total, "total": total}
 
     def get_available_instance_types(self, region: Optional[str] = None) -> List[str]:
         """Get available Azure VM sizes."""
         if not self.authenticated:
             # Return common VM sizes if not authenticated
             return [
-                "Standard_B1s", "Standard_B2s", "Standard_D2s_v3", "Standard_D4s_v3",
-                "Standard_F2s_v2", "Standard_E2s_v3", "Standard_E4s_v3"
+                "Standard_B1s",
+                "Standard_B2s",
+                "Standard_D2s_v3",
+                "Standard_D4s_v3",
+                "Standard_F2s_v2",
+                "Standard_E2s_v3",
+                "Standard_E4s_v3",
             ]
 
         try:
             # Use specified region or current region
             query_region = region or self.region
-            
+
             # Get VM sizes for the region
             vm_sizes = self.compute_client.virtual_machine_sizes.list(query_region)
-            
+
             # Extract VM size names and filter to common families
             all_sizes = [size.name for size in vm_sizes]
-            
+
             # Filter to common VM families for better UX
-            common_families = ['Standard_B', 'Standard_D', 'Standard_E', 'Standard_F', 'Standard_A']
+            common_families = [
+                "Standard_B",
+                "Standard_D",
+                "Standard_E",
+                "Standard_F",
+                "Standard_A",
+            ]
             filtered_sizes = []
-            
+
             for family in common_families:
                 family_sizes = [s for s in all_sizes if s.startswith(family)]
                 # Sort by size (1s, 2s, 4s, etc.)
-                family_sizes.sort(key=lambda x: (
-                    int(x.split('_')[1][1:].split('s')[0]) if 's' in x.split('_')[1] and x.split('_')[1][1:].split('s')[0].isdigit()
-                    else 999
-                ))
+                family_sizes.sort(
+                    key=lambda x: (
+                        int(x.split("_")[1][1:].split("s")[0])
+                        if "s" in x.split("_")[1]
+                        and x.split("_")[1][1:].split("s")[0].isdigit()
+                        else 999
+                    )
+                )
                 filtered_sizes.extend(family_sizes[:8])  # Limit to 8 per family
-            
+
             return filtered_sizes[:30]  # Limit total to 30 for better UX
 
         except Exception as e:
             logger.warning(f"Failed to fetch VM sizes for region {query_region}: {e}")
             # Return default list on error
             return [
-                "Standard_B1s", "Standard_B2s", "Standard_D2s_v3", "Standard_D4s_v3",
-                "Standard_F2s_v2", "Standard_E2s_v3", "Standard_E4s_v3"
+                "Standard_B1s",
+                "Standard_B2s",
+                "Standard_D2s_v3",
+                "Standard_D4s_v3",
+                "Standard_F2s_v2",
+                "Standard_E2s_v3",
+                "Standard_E4s_v3",
             ]
 
     def get_available_regions(self) -> List[str]:
@@ -593,43 +642,67 @@ class AzureProvider(CloudProvider):
         if not self.authenticated:
             # Return common regions if not authenticated
             return [
-                "eastus", "westus2", "northeurope", "westeurope", 
-                "centralus", "southeastasia", "japaneast", "australiaeast"
+                "eastus",
+                "westus2",
+                "northeurope",
+                "westeurope",
+                "centralus",
+                "southeastasia",
+                "japaneast",
+                "australiaeast",
             ]
 
         try:
             # Get all available regions where VMs can be deployed
             subscription_client = self.resource_client
-            locations = subscription_client.subscriptions.list_locations(self.subscription_id)
-            
+            locations = subscription_client.subscriptions.list_locations(
+                self.subscription_id
+            )
+
             region_names = [loc.name for loc in locations]
             region_names.sort()
-            
+
             # Prioritize common regions
             priority_regions = [
-                "eastus", "eastus2", "westus", "westus2", "centralus",
-                "northeurope", "westeurope", "uksouth", "ukwest",
-                "southeastasia", "eastasia", "japaneast", "australiaeast"
+                "eastus",
+                "eastus2",
+                "westus",
+                "westus2",
+                "centralus",
+                "northeurope",
+                "westeurope",
+                "uksouth",
+                "ukwest",
+                "southeastasia",
+                "eastasia",
+                "japaneast",
+                "australiaeast",
             ]
-            
+
             # Put priority regions first, then others
             sorted_regions = []
             for region in priority_regions:
                 if region in region_names:
                     sorted_regions.append(region)
                     region_names.remove(region)
-            
+
             sorted_regions.extend(region_names)
             return sorted_regions
 
         except Exception as e:
             logger.warning(f"Failed to fetch Azure regions: {e}")
             return [
-                "eastus", "westus2", "northeurope", "westeurope", 
-                "centralus", "southeastasia", "japaneast", "australiaeast"
+                "eastus",
+                "westus2",
+                "northeurope",
+                "westeurope",
+                "centralus",
+                "southeastasia",
+                "japaneast",
+                "australiaeast",
             ]
 
 
 # Register the provider
 if AZURE_AVAILABLE:
-    PROVIDERS['azure'] = AzureProvider
+    PROVIDERS["azure"] = AzureProvider
