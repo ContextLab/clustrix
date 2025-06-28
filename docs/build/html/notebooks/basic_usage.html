@@ -73,6 +73,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -88,11 +89,14 @@
 <li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -162,9 +166,30 @@
 </div>
 </div>
 </section>
-<section id="Basic-Setup">
-<h2>Basic Setup<a class="headerlink" href="#Basic-Setup" title="Link to this heading">¶</a></h2>
-<p>Import Clustrix and configure it for local execution (since we don’t have a cluster in this tutorial):</p>
+<section id="Configuration-Options">
+<h2>Configuration Options<a class="headerlink" href="#Configuration-Options" title="Link to this heading">¶</a></h2>
+<section id="Interactive-Widget-Configuration-(Recommended-for-Jupyter)">
+<h3>Interactive Widget Configuration (Recommended for Jupyter)<a class="headerlink" href="#Interactive-Widget-Configuration-(Recommended-for-Jupyter)" title="Link to this heading">¶</a></h3>
+<p>Clustrix provides an interactive widget for easy configuration management in Jupyter notebooks:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="o">%%</span><span class="n">clusterfy</span>
+<span class="c1"># This creates an interactive widget with:</span>
+<span class="c1"># - Pre-built cluster templates (AWS, GCP, Azure, SLURM, etc.)</span>
+<span class="c1"># - Forms to create and edit configurations</span>
+<span class="c1"># - One-click configuration application</span>
+<span class="c1"># - Save/load configurations to files</span>
+</pre></div>
+</div>
+<p><strong>Widget Features:</strong></p>
+<ul class="simple">
+<li><p><strong>Default Templates</strong>: Pre-configured setups for major cloud providers</p></li>
+<li><p><strong>Interactive Forms</strong>: GUI elements for all configuration options</p></li>
+<li><p><strong>Configuration Management</strong>: Create, edit, delete, and apply configurations</p></li>
+<li><p><strong>File I/O</strong>: Save/load configurations as YAML or JSON files</p></li>
+</ul>
+</section>
+<section id="Programmatic-Configuration">
+<h3>Programmatic Configuration<a class="headerlink" href="#Programmatic-Configuration" title="Link to this heading">¶</a></h3>
+<p>For programmatic setup, use the <code class="docutils literal notranslate"><span class="pre">configure()</span></code> function:</p>
 <div class="nbinput nblast docutils container">
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
@@ -193,6 +218,7 @@
 </pre></div>
 </div>
 </div>
+</section>
 </section>
 <section id="Simple-Function-Decoration">
 <h2>Simple Function Decoration<a class="headerlink" href="#Simple-Function-Decoration" title="Link to this heading">¶</a></h2>
@@ -392,8 +418,8 @@
 </div>
 </div>
 </section>
-<section id="Configuration-Options">
-<h2>Configuration Options<a class="headerlink" href="#Configuration-Options" title="Link to this heading">¶</a></h2>
+<section id="id1">
+<h2>Configuration Options<a class="headerlink" href="#id1" title="Link to this heading">¶</a></h2>
 <p>Clustrix provides many configuration options:</p>
 <div class="nbinput nblast docutils container">
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
@@ -413,10 +439,30 @@
 </div>
 </div>
 </section>
+<section id="Cost-Monitoring">
+<h2>Cost Monitoring<a class="headerlink" href="#Cost-Monitoring" title="Link to this heading">¶</a></h2>
+<p>Clustrix includes built-in cost monitoring for cloud providers:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cost_tracking_decorator</span>
+
+<span class="c1"># Automatic cost tracking</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+<span class="nd">@clustrix</span><span class="o">.</span><span class="n">cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s1">&#39;60GB&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">expensive_training</span><span class="p">():</span>
+    <span class="c1"># Your training code here</span>
+    <span class="k">pass</span>
+
+<span class="c1"># Execution includes cost reporting</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">expensive_training</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Training cost: $</span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
 <section id="Next-Steps">
 <h2>Next Steps<a class="headerlink" href="#Next-Steps" title="Link to this heading">¶</a></h2>
 <p>This tutorial covered the basics of Clustrix usage. For more advanced topics, check out:</p>
 <ul class="simple">
+<li><p><strong>Interactive Widget</strong>: Use <code class="docutils literal notranslate"><span class="pre">%%clusterfy</span></code> for GUI-based configuration management</p></li>
+<li><p><strong>Cost Monitoring</strong>: Track expenses with built-in cost monitoring for AWS, GCP, Azure, Lambda Cloud</p></li>
 <li><p><strong>Remote Cluster Configuration</strong>: Setting up SLURM, PBS, or SSH clusters</p></li>
 <li><p><strong>Advanced Parallelization</strong>: Custom loop detection and optimization</p></li>
 <li><p><strong>Machine Learning Workflows</strong>: Using Clustrix with scikit-learn, TensorFlow, or PyTorch</p></li>
@@ -443,13 +489,18 @@
                             <ul>
 <li><a class="reference internal" href="#">Clustrix Basic Usage Tutorial</a><ul>
 <li><a class="reference internal" href="#Installation">Installation</a></li>
-<li><a class="reference internal" href="#Basic-Setup">Basic Setup</a></li>
+<li><a class="reference internal" href="#Configuration-Options">Configuration Options</a><ul>
+<li><a class="reference internal" href="#Interactive-Widget-Configuration-(Recommended-for-Jupyter)">Interactive Widget Configuration (Recommended for Jupyter)</a></li>
+<li><a class="reference internal" href="#Programmatic-Configuration">Programmatic Configuration</a></li>
+</ul>
+</li>
 <li><a class="reference internal" href="#Simple-Function-Decoration">Simple Function Decoration</a></li>
 <li><a class="reference internal" href="#CPU-Intensive-Computation">CPU-Intensive Computation</a></li>
 <li><a class="reference internal" href="#Array-Processing">Array Processing</a></li>
 <li><a class="reference internal" href="#Data-Processing-Pipeline">Data Processing Pipeline</a></li>
 <li><a class="reference internal" href="#Performance-Comparison">Performance Comparison</a></li>
-<li><a class="reference internal" href="#Configuration-Options">Configuration Options</a></li>
+<li><a class="reference internal" href="#id1">Configuration Options</a></li>
+<li><a class="reference internal" href="#Cost-Monitoring">Cost Monitoring</a></li>
 <li><a class="reference internal" href="#Next-Steps">Next Steps</a></li>
 </ul>
 </li>
@@ -481,7 +532,7 @@
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

@@ -16,7 +16,7 @@
             <link rel="index" title="Index" href="../genindex.html" />
             <link rel="search" title="Search" href="../search.html" />
             <link rel="top" title="Clustrix Documentation" href="#" />
-            <link rel="next" title="Decorator API" href="../api/decorator.html" />
+            <link rel="next" title="Cloud Cost Monitoring and Optimization" href="cost_monitoring_tutorial.html" />
             <link rel="prev" title="HuggingFace Spaces Tutorial" href="huggingface_spaces_tutorial.html" />
     </head>
 <body>
@@ -73,6 +73,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -88,11 +89,14 @@
 <li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -1258,108 +1262,106 @@ lambda-cloud<span class="w"> </span>instance<span class="w"> </span>terminate<sp
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
-<span class="k">def</span> <span class="nf">monitor_lambda_costs</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monitor Lambda Cloud usage and costs.&quot;&quot;&quot;</span>
-    <span class="kn">import</span> <span class="nn">requests</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Import Clustrix cost monitoring functionality</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cost_tracking_decorator</span><span class="p">,</span> <span class="n">get_cost_monitor</span><span class="p">,</span> <span class="n">generate_cost_report</span>
+
+<span class="c1"># Example 1: Using the cost tracking decorator</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;lambda&#39;</span><span class="p">,</span> <span class="s1">&#39;a100_40gb&#39;</span><span class="p">)</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;32GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">lambda_training_with_cost_tracking</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example training function with automatic cost tracking.&quot;&quot;&quot;</span>
     <span class="kn">import</span> <span class="nn">time</span>
-    <span class="kn">import</span> <span class="nn">subprocess</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 
-    <span class="c1"># GPU utilization monitoring</span>
-    <span class="k">def</span> <span class="nf">get_gpu_utilization</span><span class="p">():</span>
-        <span class="k">try</span><span class="p">:</span>
-            <span class="n">result</span> <span class="o">=</span> <span class="n">subprocess</span><span class="o">.</span><span class="n">run</span><span class="p">([</span><span class="s1">&#39;nvidia-smi&#39;</span><span class="p">,</span> <span class="s1">&#39;--query-gpu=utilization.gpu,memory.used,memory.total&#39;</span><span class="p">,</span>
-                                   <span class="s1">&#39;--format=csv,noheader,nounits&#39;</span><span class="p">],</span>
-                                  <span class="n">capture_output</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">text</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
-            <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">returncode</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
-                <span class="n">lines</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
-                <span class="n">gpu_stats</span> <span class="o">=</span> <span class="p">[]</span>
-                <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">line</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">lines</span><span class="p">):</span>
-                    <span class="n">parts</span> <span class="o">=</span> <span class="n">line</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;, &#39;</span><span class="p">)</span>
-                    <span class="n">gpu_stats</span><span class="o">.</span><span class="n">append</span><span class="p">({</span>
-                        <span class="s1">&#39;gpu_id&#39;</span><span class="p">:</span> <span class="n">i</span><span class="p">,</span>
-                        <span class="s1">&#39;utilization_percent&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">0</span><span class="p">]),</span>
-                        <span class="s1">&#39;memory_used_mb&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">]),</span>
-                        <span class="s1">&#39;memory_total_mb&#39;</span><span class="p">:</span> <span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">]),</span>
-                        <span class="s1">&#39;memory_utilization_percent&#39;</span><span class="p">:</span> <span class="nb">round</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span> <span class="o">/</span> <span class="nb">int</span><span class="p">(</span><span class="n">parts</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">*</span> <span class="mi">100</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-                    <span class="p">})</span>
-                <span class="k">return</span> <span class="n">gpu_stats</span>
-        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-            <span class="k">return</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
-        <span class="k">return</span> <span class="p">[]</span>
+    <span class="c1"># Simulate training workload</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting training...&quot;</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># Simulate 2 seconds of work</span>
 
-    <span class="c1"># Cost estimation</span>
-    <span class="k">def</span> <span class="nf">estimate_costs</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="n">hours_used</span><span class="p">):</span>
-        <span class="c1"># Lambda Cloud pricing (approximate)</span>
-        <span class="n">pricing</span> <span class="o">=</span> <span class="p">{</span>
-            <span class="s1">&#39;rtx6000ada&#39;</span><span class="p">:</span> <span class="mf">0.75</span><span class="p">,</span>
-            <span class="s1">&#39;a10&#39;</span><span class="p">:</span> <span class="mf">0.60</span><span class="p">,</span>
-            <span class="s1">&#39;a100_40gb&#39;</span><span class="p">:</span> <span class="mf">1.10</span><span class="p">,</span>
-            <span class="s1">&#39;a100_80gb&#39;</span><span class="p">:</span> <span class="mf">1.40</span><span class="p">,</span>
-            <span class="s1">&#39;h100&#39;</span><span class="p">:</span> <span class="mf">2.50</span><span class="p">,</span>
-            <span class="s1">&#39;2xa100_40gb&#39;</span><span class="p">:</span> <span class="mf">2.20</span><span class="p">,</span>
-            <span class="s1">&#39;4xa100_40gb&#39;</span><span class="p">:</span> <span class="mf">4.40</span><span class="p">,</span>
-            <span class="s1">&#39;8xa100_40gb&#39;</span><span class="p">:</span> <span class="mf">8.80</span>
-        <span class="p">}</span>
+    <span class="c1"># Simulate some compute</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">data</span><span class="p">,</span> <span class="n">data</span><span class="o">.</span><span class="n">T</span><span class="p">)</span>
 
-        <span class="n">hourly_rate</span> <span class="o">=</span> <span class="n">pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
-        <span class="k">return</span> <span class="p">{</span>
-            <span class="s1">&#39;instance_type&#39;</span><span class="p">:</span> <span class="n">instance_type</span><span class="p">,</span>
-            <span class="s1">&#39;hourly_rate&#39;</span><span class="p">:</span> <span class="n">hourly_rate</span><span class="p">,</span>
-            <span class="s1">&#39;hours_used&#39;</span><span class="p">:</span> <span class="n">hours_used</span><span class="p">,</span>
-            <span class="s1">&#39;estimated_cost&#39;</span><span class="p">:</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="n">hours_used</span>
-        <span class="p">}</span>
-
-    <span class="c1"># Monitoring report</span>
-    <span class="n">gpu_stats</span> <span class="o">=</span> <span class="n">get_gpu_utilization</span><span class="p">()</span>
-    <span class="n">current_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Training completed!&quot;</span><span class="p">)</span>
     <span class="k">return</span> <span class="p">{</span>
-        <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="n">current_time</span><span class="p">,</span>
-        <span class="s1">&#39;gpu_utilization&#39;</span><span class="p">:</span> <span class="n">gpu_stats</span><span class="p">,</span>
-        <span class="s1">&#39;monitoring_tips&#39;</span><span class="p">:</span> <span class="p">[</span>
-            <span class="s1">&#39;Keep GPU utilization &gt; 80</span><span class="si">% f</span><span class="s1">or cost efficiency&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;Monitor memory usage to choose right instance type&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;Use mixed precision to reduce memory requirements&#39;</span><span class="p">,</span>
-            <span class="s1">&#39;Terminate instances immediately after training&#39;</span>
-        <span class="p">]</span>
+        <span class="s1">&#39;model_accuracy&#39;</span><span class="p">:</span> <span class="mf">0.95</span><span class="p">,</span>
+        <span class="s1">&#39;training_samples&#39;</span><span class="p">:</span> <span class="mi">10000</span><span class="p">,</span>
+        <span class="s1">&#39;final_loss&#39;</span><span class="p">:</span> <span class="mf">0.032</span>
     <span class="p">}</span>
 
-<span class="c1"># Cost tracking decorator</span>
-<span class="k">def</span> <span class="nf">track_costs</span><span class="p">(</span><span class="n">instance_type</span><span class="o">=</span><span class="s1">&#39;a100_40gb&#39;</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Decorator to track costs of Clustrix jobs.&quot;&quot;&quot;</span>
-    <span class="k">def</span> <span class="nf">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">):</span>
-        <span class="k">def</span> <span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">):</span>
-            <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-            <span class="k">try</span><span class="p">:</span>
-                <span class="n">result</span> <span class="o">=</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">)</span>
-                <span class="n">success</span> <span class="o">=</span> <span class="kc">True</span>
-            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-                <span class="n">result</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;error&quot;</span><span class="p">:</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)}</span>
-                <span class="n">success</span> <span class="o">=</span> <span class="kc">False</span>
+<span class="c1"># Example 2: Manual cost monitoring</span>
+<span class="k">def</span> <span class="nf">manual_cost_monitoring_example</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example of manual cost monitoring.&quot;&quot;&quot;</span>
+    <span class="c1"># Start cost monitoring</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;lambda&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="n">monitor</span><span class="o">.</span><span class="n">start_monitoring</span><span class="p">()</span>
 
-            <span class="n">end_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-            <span class="n">duration_hours</span> <span class="o">=</span> <span class="p">(</span><span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">)</span> <span class="o">/</span> <span class="mi">3600</span>
+        <span class="c1"># Your computation here</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
 
-            <span class="n">cost_info</span> <span class="o">=</span> <span class="n">estimate_costs</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="n">duration_hours</span><span class="p">)</span>
+        <span class="c1"># Stop monitoring and get report</span>
+        <span class="n">cost_report</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">stop_monitoring</span><span class="p">()</span>
+        <span class="k">if</span> <span class="n">cost_report</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Computation completed in </span><span class="si">{</span><span class="n">cost_report</span><span class="o">.</span><span class="n">duration_seconds</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Estimated cost: $</span><span class="si">{</span><span class="n">cost_report</span><span class="o">.</span><span class="n">cost_estimate</span><span class="o">.</span><span class="n">estimated_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;GPU utilization: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">cost_report</span><span class="o">.</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="w"> </span><span class="ow">or</span><span class="w"> </span><span class="p">[])</span><span class="si">}</span><span class="s2"> GPUs&quot;</span><span class="p">)</span>
 
-            <span class="k">return</span> <span class="p">{</span>
-                <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">result</span><span class="p">,</span>
-                <span class="s1">&#39;success&#39;</span><span class="p">:</span> <span class="n">success</span><span class="p">,</span>
-                <span class="s1">&#39;duration_seconds&#39;</span><span class="p">:</span> <span class="n">end_time</span> <span class="o">-</span> <span class="n">start_time</span><span class="p">,</span>
-                <span class="s1">&#39;cost_info&#39;</span><span class="p">:</span> <span class="n">cost_info</span>
-            <span class="p">}</span>
-        <span class="k">return</span> <span class="n">wrapper</span>
-    <span class="k">return</span> <span class="n">decorator</span>
+            <span class="k">if</span> <span class="n">cost_report</span><span class="o">.</span><span class="n">recommendations</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Cost optimization recommendations:&quot;</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">rec</span> <span class="ow">in</span> <span class="n">cost_report</span><span class="o">.</span><span class="n">recommendations</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  - </span><span class="si">{</span><span class="n">rec</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-<span class="c1"># Example usage:</span>
-<span class="c1"># @track_costs(&#39;a100_40gb&#39;)</span>
-<span class="c1"># @cluster(cores=8, memory=&quot;32GB&quot;)</span>
-<span class="c1"># def my_expensive_training():</span>
-<span class="c1">#     # Your training code here</span>
-<span class="c1">#     pass</span>
+<span class="c1"># Example 3: Generate real-time cost report</span>
+<span class="k">def</span> <span class="nf">get_current_cost_status</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get current cost and resource status.&quot;&quot;&quot;</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="s1">&#39;lambda&#39;</span><span class="p">,</span> <span class="s1">&#39;a100_40gb&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">report</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Current Lambda Cloud Status:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CPU Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;cpu_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Memory Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;memory_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">]:</span>
+            <span class="n">avg_gpu</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">gpu</span><span class="p">[</span><span class="s1">&#39;utilization_percent&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">])</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">])</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  GPU Usage: </span><span class="si">{</span><span class="n">avg_gpu</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Hourly Rate: $</span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;hourly_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Lambda Cloud offers excellent GPU price/performance!&quot;</span><span class="p">)</span>
+<span class="c1"># Example 4: Compare pricing across instance types</span>
+<span class="k">def</span> <span class="nf">compare_lambda_pricing</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare pricing for different Lambda Cloud instance types.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">get_pricing_info</span>
+
+    <span class="n">pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;lambda&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pricing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Lambda Cloud Instance Pricing (USD/hour):&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Group by category</span>
+        <span class="n">single_gpu</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s1">&#39;2x&#39;</span><span class="p">,</span> <span class="s1">&#39;4x&#39;</span><span class="p">,</span> <span class="s1">&#39;8x&#39;</span><span class="p">))</span> <span class="ow">and</span> <span class="n">k</span> <span class="o">!=</span> <span class="s1">&#39;default&#39;</span><span class="p">}</span>
+        <span class="n">multi_gpu</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s1">&#39;2x&#39;</span><span class="p">,</span> <span class="s1">&#39;4x&#39;</span><span class="p">,</span> <span class="s1">&#39;8x&#39;</span><span class="p">))}</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Single GPU Instances:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">instance</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">single_gpu</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">&lt;15</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Multi-GPU Instances:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">instance</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">multi_gpu</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">&lt;15</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="c1"># Run examples (uncomment to test)</span>
+<span class="c1"># print(&quot;1. Cost tracking decorator example:&quot;)</span>
+<span class="c1"># result = lambda_training_with_cost_tracking()</span>
+<span class="c1"># print(f&quot;Training result: {result}&quot;)</span>
+
+<span class="c1"># print(&quot;\n2. Manual cost monitoring example:&quot;)</span>
+<span class="c1"># manual_cost_monitoring_example()</span>
+
+<span class="c1"># print(&quot;\n3. Current cost status:&quot;)</span>
+<span class="c1"># get_current_cost_status()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;4. Lambda Cloud pricing comparison:&quot;</span><span class="p">)</span>
+<span class="n">compare_lambda_pricing</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✅ Lambda Cloud cost monitoring examples ready!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;💡 Use @cost_tracking_decorator(&#39;lambda&#39;, &#39;instance_type&#39;) for automatic cost tracking&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -1897,8 +1899,8 @@ lambda-cloud<span class="w"> </span>instance<span class="w"> </span>list
     <a class="float-left" href="huggingface_spaces_tutorial.html" title="Previous">
         <span aria-hidden="true">←&nbsp;</span>HuggingFace Spaces Tutorial
     </a>
-    <a class="float-right" href="../api/decorator.html" title="Next">
-        Decorator API <span aria-hidden="true">&nbsp;→</span>
+    <a class="float-right" href="cost_monitoring_tutorial.html" title="Next">
+        Cloud Cost Monitoring and Optimization <span aria-hidden="true">&nbsp;→</span>
     </a>
 </nav>
                     </div>
@@ -2024,7 +2026,7 @@ lambda-cloud<span class="w"> </span>instance<span class="w"> </span>list
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

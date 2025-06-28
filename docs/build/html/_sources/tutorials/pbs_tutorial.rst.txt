@@ -10,10 +10,24 @@ Prerequisites
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
 
-Basic PBS Configuration
-----------------------
+Configuration Options
+--------------------
 
-Configure Clustrix for your PBS cluster:
+**Option 1: Interactive Widget (Recommended for Jupyter)**
+
+For Jupyter notebook users, use the interactive configuration widget:
+
+.. code-block:: python
+
+   import clustrix  # Auto-loads the magic command
+   
+   # Use the magic command to open the configuration widget
+   %%clusterfy
+   # Interactive widget appears with PBS/Torque templates and GUI configuration
+
+**Option 2: Programmatic Configuration**
+
+Configure Clustrix programmatically for your PBS cluster:
 
 .. code-block:: python
 

@@ -73,6 +73,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -88,11 +89,14 @@
 <li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -1074,7 +1078,127 @@ ssh<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_rsa<span class="w
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example Spot VM configuration for cost savings</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Import Clustrix cost monitoring for Azure</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cost_tracking_decorator</span><span class="p">,</span> <span class="n">get_cost_monitor</span><span class="p">,</span> <span class="n">generate_cost_report</span><span class="p">,</span> <span class="n">get_pricing_info</span>
+
+<span class="c1"># Example 1: Cost tracking with Azure VMs</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_NC6s_v3&#39;</span><span class="p">)</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;112GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">azure_training_with_cost_tracking</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example training function with Azure cost tracking.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting Azure training with cost monitoring...&quot;</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># Simulate training</span>
+
+    <span class="c1"># Simulate ML workload</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">1500</span><span class="p">,</span> <span class="mi">1500</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">qr</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Training completed!&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="mf">0.89</span><span class="p">,</span> <span class="s1">&#39;training_time&#39;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">}</span>
+
+<span class="c1"># Example 2: Compare Azure VM pricing</span>
+<span class="k">def</span> <span class="nf">compare_azure_pricing</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare Azure VM pricing for different instance types.&quot;&quot;&quot;</span>
+    <span class="n">pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pricing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure VM Pay-as-you-go Pricing (USD/hour):&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Group by category</span>
+        <span class="n">gpu_vms</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Standard_NC&#39;</span><span class="p">)}</span>
+        <span class="n">general_vms</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Standard_D&#39;</span><span class="p">)}</span>
+        <span class="n">compute_vms</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Standard_F&#39;</span><span class="p">)}</span>
+        <span class="n">memory_vms</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;Standard_E&#39;</span><span class="p">)}</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GPU VMs:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">vm</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">gpu_vms</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">vm</span><span class="si">:</span><span class="s2">&lt;25</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">General Purpose:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">vm</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">general_vms</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">vm</span><span class="si">:</span><span class="s2">&lt;25</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Compute Optimized:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">vm</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">compute_vms</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">vm</span><span class="si">:</span><span class="s2">&lt;25</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example 3: Azure Spot VM savings analysis</span>
+<span class="k">def</span> <span class="nf">azure_spot_cost_analysis</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Analyze potential savings with Azure Spot VMs.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Spot VM Savings Analysis:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+
+        <span class="n">vm_types</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;Standard_NC6s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D4s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_F8s_v2&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_E8s_v3&#39;</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">vm</span> <span class="ow">in</span> <span class="n">vm_types</span><span class="p">:</span>
+            <span class="n">pay_as_you_go</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">vm</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">spot</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">vm</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">savings</span> <span class="o">=</span> <span class="p">((</span><span class="n">pay_as_you_go</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">-</span> <span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">/</span> <span class="n">pay_as_you_go</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">vm</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Pay-as-you-go: $</span><span class="si">{</span><span class="n">pay_as_you_go</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Spot:          $</span><span class="si">{</span><span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Savings:       </span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Example 4: Azure Batch cost estimation</span>
+<span class="k">def</span> <span class="nf">estimate_azure_batch_costs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Estimate costs for Azure Batch workloads.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="n">batch_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_batch_cost</span><span class="p">(</span>
+            <span class="n">pool_name</span><span class="o">=</span><span class="s2">&quot;clustrix-batch-pool&quot;</span><span class="p">,</span>
+            <span class="n">vm_size</span><span class="o">=</span><span class="s2">&quot;Standard_D4s_v3&quot;</span><span class="p">,</span>
+            <span class="n">target_nodes</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+            <span class="n">estimated_duration_hours</span><span class="o">=</span><span class="mf">2.0</span>
+        <span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Batch Cost Estimation:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Pool Name: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;pool_name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  VM Size: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;vm_size&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Target Nodes: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;target_nodes&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Duration: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;estimated_duration_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> hours&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total Compute Hours: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;total_compute_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Estimated Cost: $</span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Cost per Node-Hour: $</span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;cost_per_node_hour&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example 5: Regional pricing comparison</span>
+<span class="k">def</span> <span class="nf">compare_azure_regions</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare Azure pricing across different regions.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Regional Pricing Comparison for Standard_NC6s_v3:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">55</span><span class="p">)</span>
+
+        <span class="n">regional_pricing</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_region_pricing_comparison</span><span class="p">(</span><span class="s1">&#39;Standard_NC6s_v3&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">region</span><span class="p">,</span> <span class="n">pricing_info</span> <span class="ow">in</span> <span class="n">regional_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Pay-as-you-go: $</span><span class="si">{</span><span class="n">pricing_info</span><span class="p">[</span><span class="s1">&#39;pay_as_you_go_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Est. Spot:     $</span><span class="si">{</span><span class="n">pricing_info</span><span class="p">[</span><span class="s1">&#39;estimated_spot_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Example 6: Real-time Azure cost monitoring</span>
+<span class="k">def</span> <span class="nf">monitor_azure_costs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monitor current Azure resource usage and costs.&quot;&quot;&quot;</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_NC6s_v3&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">report</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Current Azure Resource Status:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CPU Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;cpu_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Memory Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;memory_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  GPU Count: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Hourly Rate: $</span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;hourly_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;recommendations&#39;</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Cost Optimization Recommendations:&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">rec</span> <span class="ow">in</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;recommendations&#39;</span><span class="p">]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  • </span><span class="si">{</span><span class="n">rec</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example 7: Spot VM configuration for cost savings</span>
 <span class="k">def</span> <span class="nf">configure_spot_vm</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Example configuration for using Azure Spot VMs.&quot;&quot;&quot;</span>
     <span class="n">configure</span><span class="p">(</span>
@@ -1089,6 +1213,28 @@ ssh<span class="w"> </span>-i<span class="w"> </span>~/.ssh/id_rsa<span class="w
         <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Clean up quickly</span>
     <span class="p">)</span>
     <span class="k">return</span> <span class="s2">&quot;Configured for Azure Spot VMs with appropriate timeouts.&quot;</span>
+
+<span class="c1"># Run examples</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Azure Cost Monitoring Examples:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">1. Azure VM Pricing Comparison:&quot;</span><span class="p">)</span>
+<span class="n">compare_azure_pricing</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. Spot VM Savings Analysis:&quot;</span><span class="p">)</span>
+<span class="n">azure_spot_cost_analysis</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3. Azure Batch Cost Estimation:&quot;</span><span class="p">)</span>
+<span class="n">estimate_azure_batch_costs</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">4. Regional Pricing Comparison:&quot;</span><span class="p">)</span>
+<span class="n">compare_azure_regions</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">5. Current Azure Status:&quot;</span><span class="p">)</span>
+<span class="n">monitor_azure_costs</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✅ Azure cost monitoring examples ready!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;💡 Use @cost_tracking_decorator(&#39;azure&#39;, &#39;vm_size&#39;) for automatic cost tracking&quot;</span><span class="p">)</span>
 
 <span class="c1"># Example spot VM configuration (uncomment to use)</span>
 <span class="c1"># spot_config = configure_spot_vm()</span>
@@ -1510,7 +1656,7 @@ az<span class="w"> </span>vm<span class="w"> </span>auto-shutdown<span class="w"
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

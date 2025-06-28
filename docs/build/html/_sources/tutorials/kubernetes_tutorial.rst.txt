@@ -10,13 +10,24 @@ Prerequisites
 2. kubectl configured with cluster access
 3. Clustrix installed with Kubernetes support: ``pip install clustrix[kubernetes]``
 
-Kubernetes Setup
-----------------
+Configuration Options
+--------------------
 
-Basic Kubernetes Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Option 1: Interactive Widget (Recommended for Jupyter)**
 
-Configure Clustrix for your Kubernetes cluster:
+For Jupyter notebook users, use the interactive configuration widget:
+
+.. code-block:: python
+
+   import clustrix  # Auto-loads the magic command
+   
+   # Use the magic command to open the configuration widget
+   %%clusterfy
+   # Interactive widget appears with Kubernetes templates and GUI configuration
+
+**Option 2: Programmatic Configuration**
+
+Configure Clustrix programmatically for your Kubernetes cluster:
 
 .. code-block:: python
 

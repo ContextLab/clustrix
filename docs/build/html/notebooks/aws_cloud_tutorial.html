@@ -73,6 +73,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -88,11 +89,14 @@
 <li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -734,43 +738,145 @@ aws<span class="w"> </span>ec2<span class="w"> </span>import-key-pair<span class
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example spot instance configuration</span>
-<span class="k">def</span> <span class="nf">configure_spot_instances</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example of using spot instances for cost savings.&quot;&quot;&quot;</span>
-    <span class="n">configure</span><span class="p">(</span>
-        <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
-        <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;your-spot-instance-ip&quot;</span><span class="p">,</span>
-        <span class="n">username</span><span class="o">=</span><span class="s2">&quot;ec2-user&quot;</span><span class="p">,</span>
-        <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/aws-clustrix-key&quot;</span><span class="p">,</span>
-        <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/clustrix&quot;</span><span class="p">,</span>
-        <span class="c1"># Spot instances can be terminated, so use short timeouts</span>
-        <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;00:30:00&quot;</span><span class="p">,</span>
-        <span class="n">job_poll_interval</span><span class="o">=</span><span class="mi">60</span><span class="p">,</span>  <span class="c1"># Check more frequently</span>
-        <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span>  <span class="c1"># Clean up quickly</span>
-    <span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ Configured for spot instances with appropriate timeouts.&quot;</span><span class="p">)</span>
-    <span class="k">return</span> <span class="s2">&quot;Spot instance configuration completed.&quot;</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Import Clustrix cost monitoring for AWS</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cost_tracking_decorator</span><span class="p">,</span> <span class="n">get_cost_monitor</span><span class="p">,</span> <span class="n">generate_cost_report</span><span class="p">,</span> <span class="n">get_pricing_info</span>
 
-<span class="c1"># Example function to check current spot prices</span>
-<span class="k">def</span> <span class="nf">check_spot_prices</span><span class="p">(</span><span class="n">instance_types</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;t3.large&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;c5.large&#39;</span><span class="p">],</span> <span class="n">region</span><span class="o">=</span><span class="s1">&#39;us-east-1&#39;</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Check current spot prices for different instance types.&quot;&quot;&quot;</span>
-    <span class="n">ec2</span> <span class="o">=</span> <span class="n">boto3</span><span class="o">.</span><span class="n">client</span><span class="p">(</span><span class="s1">&#39;ec2&#39;</span><span class="p">,</span> <span class="n">region_name</span><span class="o">=</span><span class="n">region</span><span class="p">)</span>
+<span class="c1"># Example 1: Cost tracking with AWS instances</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;60GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">aws_training_with_cost_tracking</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example training function with AWS cost tracking.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
 
-    <span class="k">try</span><span class="p">:</span>
-        <span class="n">response</span> <span class="o">=</span> <span class="n">ec2</span><span class="o">.</span><span class="n">describe_spot_price_history</span><span class="p">(</span>
-            <span class="n">InstanceTypes</span><span class="o">=</span><span class="n">instance_types</span><span class="p">,</span>
-            <span class="n">MaxResults</span><span class="o">=</span><span class="nb">len</span><span class="p">(</span><span class="n">instance_types</span><span class="p">),</span>
-            <span class="n">ProductDescriptions</span><span class="o">=</span><span class="p">[</span><span class="s1">&#39;Linux/UNIX&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Starting AWS training with cost monitoring...&quot;</span><span class="p">)</span>
+    <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>  <span class="c1"># Simulate training</span>
+
+    <span class="c1"># Simulate GPU workload</span>
+    <span class="n">data</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">randn</span><span class="p">(</span><span class="mi">2000</span><span class="p">,</span> <span class="mi">2000</span><span class="p">)</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">svd</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Training completed!&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="mf">0.92</span><span class="p">,</span> <span class="s1">&#39;epochs&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">}</span>
+
+<span class="c1"># Example 2: Compare AWS pricing</span>
+<span class="k">def</span> <span class="nf">compare_aws_pricing</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare AWS EC2 pricing for different instance types.&quot;&quot;&quot;</span>
+    <span class="n">pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">pricing</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AWS EC2 On-Demand Pricing (USD/hour):&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Group by category</span>
+        <span class="n">gpu_instances</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">((</span><span class="s1">&#39;p3&#39;</span><span class="p">,</span> <span class="s1">&#39;p4d&#39;</span><span class="p">,</span> <span class="s1">&#39;g4dn&#39;</span><span class="p">))}</span>
+        <span class="n">compute_instances</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;c5&#39;</span><span class="p">)}</span>
+        <span class="n">memory_instances</span> <span class="o">=</span> <span class="p">{</span><span class="n">k</span><span class="p">:</span> <span class="n">v</span> <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">pricing</span><span class="o">.</span><span class="n">items</span><span class="p">()</span> <span class="k">if</span> <span class="n">k</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;r5&#39;</span><span class="p">)}</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GPU Instances:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">instance</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">gpu_instances</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">&lt;20</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Compute Optimized:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">instance</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">compute_instances</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">&lt;20</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Memory Optimized:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">instance</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">memory_instances</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">]):</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">&lt;20</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example 3: AWS Spot vs On-Demand cost analysis</span>
+<span class="k">def</span> <span class="nf">aws_spot_cost_analysis</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Analyze potential savings with AWS Spot instances.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AWS Spot Instance Savings Analysis:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+
+        <span class="n">instance_types</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.8xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;g4dn.xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;c5.large&#39;</span><span class="p">]</span>
+
+        <span class="k">for</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">instance_types</span><span class="p">:</span>
+            <span class="n">on_demand</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+            <span class="n">spot</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+            <span class="n">savings</span> <span class="o">=</span> <span class="p">((</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">-</span> <span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">/</span> <span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  On-Demand: $</span><span class="si">{</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Spot:      $</span><span class="si">{</span><span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Savings:   </span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Example 4: AWS Batch cost estimation</span>
+<span class="k">def</span> <span class="nf">estimate_aws_batch_costs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Estimate costs for AWS Batch workloads.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="n">batch_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_batch_cost</span><span class="p">(</span>
+            <span class="n">job_queue</span><span class="o">=</span><span class="s2">&quot;clustrix-batch-queue&quot;</span><span class="p">,</span>
+            <span class="n">compute_environment</span><span class="o">=</span><span class="s2">&quot;clustrix-compute-env&quot;</span><span class="p">,</span>
+            <span class="n">estimated_jobs</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span>
+            <span class="n">avg_job_duration_hours</span><span class="o">=</span><span class="mf">0.25</span>
         <span class="p">)</span>
 
-        <span class="k">for</span> <span class="n">price</span> <span class="ow">in</span> <span class="n">response</span><span class="p">[</span><span class="s1">&#39;SpotPriceHistory&#39;</span><span class="p">]:</span>
-            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">price</span><span class="p">[</span><span class="s1">&#39;InstanceType&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">price</span><span class="p">[</span><span class="s1">&#39;SpotPrice&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">/hour in </span><span class="si">{</span><span class="n">price</span><span class="p">[</span><span class="s1">&#39;AvailabilityZone&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AWS Batch Cost Estimation:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Job Queue: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;job_queue&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total Jobs: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;estimated_jobs&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Avg Duration: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;avg_job_duration_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> hours&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total Compute Hours: </span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;total_compute_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Estimated Cost: $</span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Cost per Job: $</span><span class="si">{</span><span class="n">batch_estimate</span><span class="p">[</span><span class="s1">&#39;cost_per_job&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
-    <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✗ Error checking spot prices: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="c1"># Example 5: Regional pricing comparison</span>
+<span class="k">def</span> <span class="nf">compare_aws_regions</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Compare AWS pricing across different regions.&quot;&quot;&quot;</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">monitor</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AWS Regional Pricing Comparison for p3.2xlarge:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;-&quot;</span> <span class="o">*</span> <span class="mi">50</span><span class="p">)</span>
 
-<span class="c1"># Uncomment to check current spot prices:</span>
-<span class="c1"># check_spot_prices()</span>
+        <span class="n">regional_pricing</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_region_pricing_comparison</span><span class="p">(</span><span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">region</span><span class="p">,</span> <span class="n">pricing_info</span> <span class="ow">in</span> <span class="n">regional_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  On-Demand: $</span><span class="si">{</span><span class="n">pricing_info</span><span class="p">[</span><span class="s1">&#39;on_demand_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Est. Spot: $</span><span class="si">{</span><span class="n">pricing_info</span><span class="p">[</span><span class="s1">&#39;estimated_spot_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Example 6: Real-time AWS cost monitoring</span>
+<span class="k">def</span> <span class="nf">monitor_aws_costs</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monitor current AWS resource usage and costs.&quot;&quot;&quot;</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">report</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Current AWS Resource Status:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  CPU Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;cpu_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Memory Usage: </span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;memory_percent&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  GPU Count: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;resource_usage&#39;</span><span class="p">][</span><span class="s1">&#39;gpu_stats&#39;</span><span class="p">])</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Hourly Rate: $</span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;hourly_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;recommendations&#39;</span><span class="p">]:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Cost Optimization Recommendations:&quot;</span><span class="p">)</span>
+            <span class="k">for</span> <span class="n">rec</span> <span class="ow">in</span> <span class="n">report</span><span class="p">[</span><span class="s1">&#39;recommendations&#39;</span><span class="p">]:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  • </span><span class="si">{</span><span class="n">rec</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Run examples</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;AWS Cost Monitoring Examples:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">40</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">1. AWS Pricing Comparison:&quot;</span><span class="p">)</span>
+<span class="n">compare_aws_pricing</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. Spot Instance Savings Analysis:&quot;</span><span class="p">)</span>
+<span class="n">aws_spot_cost_analysis</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3. AWS Batch Cost Estimation:&quot;</span><span class="p">)</span>
+<span class="n">estimate_aws_batch_costs</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">4. Regional Pricing Comparison:&quot;</span><span class="p">)</span>
+<span class="n">compare_aws_regions</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">5. Current AWS Status:&quot;</span><span class="p">)</span>
+<span class="n">monitor_aws_costs</span><span class="p">()</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✅ AWS cost monitoring examples ready!&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;💡 Use @cost_tracking_decorator(&#39;aws&#39;, &#39;instance_type&#39;) for automatic cost tracking&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -1125,7 +1231,7 @@ aws<span class="w"> </span>ec2<span class="w"> </span>import-key-pair<span class
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

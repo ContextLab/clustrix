@@ -73,6 +73,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -88,11 +89,14 @@
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -580,7 +584,8 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example: GCP Data Analysis</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
 <span class="k">def</span> <span class="nf">gcp_data_analysis</span><span class="p">(</span><span class="n">dataset_size</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">analysis_type</span><span class="o">=</span><span class="s1">&#39;regression&#39;</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Perform data analysis on GCP Compute Engine.&quot;&quot;&quot;</span>
     <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
@@ -643,20 +648,48 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
         <span class="s1">&#39;test_samples&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">X_test</span><span class="p">)</span>
     <span class="p">}</span>
 
-<span class="c1"># Define the function for later use</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ GCP data analysis function defined&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;📝 To run this function:&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   1. Configure your Compute Engine instance&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   2. Set the correct INSTANCE_EXTERNAL_IP&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   3. Uncomment and run:&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   # result = gcp_data_analysis(dataset_size=50000, analysis_type=&#39;classification&#39;)&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   # print(f&#39;Analysis completed: </span><span class="si">{result[\&quot;accuracy\&quot;]:.4f}</span><span class="s2"> accuracy&#39;)&quot;</span><span class="p">)</span>
+<span class="c1"># Example: Parallel Computation</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">gcp_parallel_computation</span><span class="p">(</span><span class="n">n_iterations</span><span class="o">=</span><span class="mi">1000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Basic parallel computation example.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Simulate CPU-intensive work</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">n_iterations</span><span class="p">):</span>
+        <span class="c1"># Monte Carlo pi estimation</span>
+        <span class="n">points</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>
+        <span class="n">inside_circle</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">((</span><span class="n">points</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="n">pi_estimate</span> <span class="o">=</span> <span class="mi">4</span> <span class="o">*</span> <span class="n">inside_circle</span> <span class="o">/</span> <span class="mi">1000</span>
+        <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">pi_estimate</span><span class="p">)</span>
+
+    <span class="n">computation_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+    <span class="n">final_pi_estimate</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">results</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;iterations&#39;</span><span class="p">:</span> <span class="n">n_iterations</span><span class="p">,</span>
+        <span class="s1">&#39;pi_estimate&#39;</span><span class="p">:</span> <span class="n">final_pi_estimate</span><span class="p">,</span>
+        <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
+        <span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="nb">abs</span><span class="p">(</span><span class="n">final_pi_estimate</span> <span class="o">-</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ GCP computation examples defined&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">📝 Example usage:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# Data analysis:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# result = gcp_data_analysis(dataset_size=50000, analysis_type=&#39;classification&#39;)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# print(f&#39;Accuracy: </span><span class="si">{result[\&quot;accuracy\&quot;]:.4f}</span><span class="s2">&#39;)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# Parallel computation:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# result = gcp_parallel_computation(n_iterations=5000)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# print(f&#39;Pi estimate: </span><span class="si">{result[\&quot;pi_estimate\&quot;]:.6f}</span><span class="s2">&#39;)&quot;</span><span class="p">)</span>
 
 <span class="c1"># Example execution (commented out - uncomment after setup):</span>
-<span class="c1"># result = gcp_data_analysis(dataset_size=50000, analysis_type=&#39;classification&#39;)</span>
-<span class="c1"># print(f&quot;✓ Analysis completed: {result[&#39;accuracy&#39;]:.4f} accuracy in {result[&#39;total_time&#39;]:.2f} seconds&quot;)</span>
-<span class="c1"># print(f&quot;  Training time: {result[&#39;training_time&#39;]:.2f} seconds&quot;)</span>
-<span class="c1"># print(f&quot;  Dataset size: {result[&#39;training_samples&#39;]} training + {result[&#39;test_samples&#39;]} test samples&quot;)</span>
+<span class="c1"># result = gcp_data_analysis(dataset_size=5000, analysis_type=&#39;classification&#39;)</span>
+<span class="c1"># print(f&quot;✓ Analysis completed: {result[&#39;accuracy&#39;]:.4f} accuracy&quot;)</span>
+<span class="c1"># print(f&quot;⏱️  Training time: {result[&#39;training_time&#39;]:.2f} seconds&quot;)</span>
 </pre></div>
 </div>
 </div>
@@ -1214,139 +1247,6 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 </div>
 </div>
 </section>
-<section id="Cost-Optimization-with-Preemptible-VMs">
-<h2>Cost Optimization with Preemptible VMs<a class="headerlink" href="#Cost-Optimization-with-Preemptible-VMs" title="Link to this heading">¶</a></h2>
-<div class="nbinput nblast docutils container">
-<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
-</pre></div>
-</div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">setup_preemptible_cluster</span><span class="p">(</span><span class="n">project_id</span><span class="p">,</span> <span class="n">zone</span><span class="o">=</span><span class="s1">&#39;us-central1-a&#39;</span><span class="p">):</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">    Setup cost-effective cluster using preemptible VMs.</span>
-<span class="sd">    &quot;&quot;&quot;</span>
-
-    <span class="n">preemptible_commands</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;&quot;&quot;</span>
-<span class="s2"># Create preemptible instance template</span>
-<span class="s2">gcloud compute instance-templates create clustrix-preemptible-template </span><span class="se">\</span>
-<span class="s2">  --project </span><span class="si">{</span><span class="n">project_id</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --machine-type e2-standard-4 </span><span class="se">\</span>
-<span class="s2">  --preemptible </span><span class="se">\</span>
-<span class="s2">  --boot-disk-size 50GB </span><span class="se">\</span>
-<span class="s2">  --boot-disk-type pd-standard </span><span class="se">\</span>
-<span class="s2">  --image-family ubuntu-2204-lts </span><span class="se">\</span>
-<span class="s2">  --image-project ubuntu-os-cloud </span><span class="se">\</span>
-<span class="s2">  --metadata-from-file startup-script=clustrix-startup.sh </span><span class="se">\</span>
-<span class="s2">  --scopes cloud-platform </span><span class="se">\</span>
-<span class="s2">  --tags clustrix,preemptible</span>
-
-<span class="s2"># Create managed instance group</span>
-<span class="s2">gcloud compute instance-groups managed create clustrix-preemptible-group </span><span class="se">\</span>
-<span class="s2">  --project </span><span class="si">{</span><span class="n">project_id</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --zone </span><span class="si">{</span><span class="n">zone</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --template clustrix-preemptible-template </span><span class="se">\</span>
-<span class="s2">  --size 0</span>
-
-<span class="s2"># Set up auto-scaling</span>
-<span class="s2">gcloud compute instance-groups managed set-autoscaling clustrix-preemptible-group </span><span class="se">\</span>
-<span class="s2">  --project </span><span class="si">{</span><span class="n">project_id</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --zone </span><span class="si">{</span><span class="n">zone</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --min-num-replicas 0 </span><span class="se">\</span>
-<span class="s2">  --max-num-replicas 10 </span><span class="se">\</span>
-<span class="s2">  --target-cpu-utilization 0.6</span>
-
-<span class="s2"># Scale up the group</span>
-<span class="s2">gcloud compute instance-groups managed resize clustrix-preemptible-group </span><span class="se">\</span>
-<span class="s2">  --project </span><span class="si">{</span><span class="n">project_id</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --zone </span><span class="si">{</span><span class="n">zone</span><span class="si">}</span><span class="s2"> </span><span class="se">\</span>
-<span class="s2">  --size 2</span>
-<span class="s2">&quot;&quot;&quot;</span>
-
-    <span class="k">return</span> <span class="p">{</span>
-        <span class="s1">&#39;project_id&#39;</span><span class="p">:</span> <span class="n">project_id</span><span class="p">,</span>
-        <span class="s1">&#39;zone&#39;</span><span class="p">:</span> <span class="n">zone</span><span class="p">,</span>
-        <span class="s1">&#39;template_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-preemptible-template&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;group_name&#39;</span><span class="p">:</span> <span class="s1">&#39;clustrix-preemptible-group&#39;</span><span class="p">,</span>
-        <span class="s1">&#39;setup_commands&#39;</span><span class="p">:</span> <span class="n">preemptible_commands</span>
-    <span class="p">}</span>
-
-<span class="k">def</span> <span class="nf">configure_for_preemptible</span><span class="p">():</span>
-<span class="w">    </span><span class="sd">&quot;&quot;&quot;Configure Clustrix for preemptible VM usage.&quot;&quot;&quot;</span>
-    <span class="n">configure</span><span class="p">(</span>
-        <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
-        <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;preemptible-instance-ip&quot;</span><span class="p">,</span>  <span class="c1"># Replace with actual IP</span>
-        <span class="n">username</span><span class="o">=</span><span class="s2">&quot;clustrix&quot;</span><span class="p">,</span>
-        <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/gcp_key&quot;</span><span class="p">,</span>
-        <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/tmp/clustrix&quot;</span><span class="p">,</span>
-        <span class="n">package_manager</span><span class="o">=</span><span class="s2">&quot;uv&quot;</span><span class="p">,</span>
-        <span class="c1"># Preemptible VMs can be terminated, use shorter timeouts</span>
-        <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;00:30:00&quot;</span><span class="p">,</span>
-        <span class="n">job_poll_interval</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>  <span class="c1"># Check more frequently</span>
-        <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>  <span class="c1"># Clean up quickly</span>
-        <span class="c1"># Save work frequently</span>
-        <span class="n">max_parallel_jobs</span><span class="o">=</span><span class="mi">20</span>  <span class="c1"># Higher parallelism for fault tolerance</span>
-    <span class="p">)</span>
-    <span class="k">return</span> <span class="s2">&quot;✓ Configured Clustrix for preemptible VMs with fault-tolerant settings.&quot;</span>
-
-<span class="c1"># Setup preemptible configuration</span>
-<span class="n">preemptible_config</span> <span class="o">=</span> <span class="n">setup_preemptible_cluster</span><span class="p">(</span><span class="n">PROJECT_ID</span><span class="p">)</span>
-
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== Preemptible VM Setup Commands ===&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">preemptible_config</span><span class="p">[</span><span class="s1">&#39;setup_commands&#39;</span><span class="p">])</span>
-
-<span class="n">configuration_message</span> <span class="o">=</span> <span class="n">configure_for_preemptible</span><span class="p">()</span>
-<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">configuration_message</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">💰 Preemptible VMs can provide up to 80</span><span class="si">% c</span><span class="s2">ost savings for fault-tolerant workloads.&quot;</span><span class="p">)</span>
-</pre></div>
-</div>
-</div>
-<section id="GCP-Cost-Optimization-for-Clustrix">
-<h3>GCP Cost Optimization for Clustrix<a class="headerlink" href="#GCP-Cost-Optimization-for-Clustrix" title="Link to this heading">¶</a></h3>
-<section id="1.-Compute-Optimization">
-<h4>1. Compute Optimization<a class="headerlink" href="#1.-Compute-Optimization" title="Link to this heading">¶</a></h4>
-<ul class="simple">
-<li><p><strong>Use Preemptible VMs</strong> for fault-tolerant workloads (up to 80% savings)</p></li>
-<li><p><strong>Use Spot VMs</strong> (successor to Preemptible) for even better savings</p></li>
-<li><p><strong>Choose appropriate machine types</strong> (E2, N2, C2 based on workload)</p></li>
-<li><p><strong>Use sustained use discounts</strong> for long-running workloads</p></li>
-<li><p><strong>Consider committed use discounts</strong> for predictable usage</p></li>
-</ul>
-</section>
-<section id="2.-Storage-Optimization">
-<h4>2. Storage Optimization<a class="headerlink" href="#2.-Storage-Optimization" title="Link to this heading">¶</a></h4>
-<ul class="simple">
-<li><p><strong>Use appropriate storage classes</strong> (Standard, Nearline, Coldline, Archive)</p></li>
-<li><p><strong>Enable object lifecycle management</strong></p></li>
-<li><p><strong>Use regional storage</strong> for better performance/cost balance</p></li>
-<li><p><strong>Implement data compression</strong> and deduplication</p></li>
-</ul>
-</section>
-<section id="3.-Network-Optimization">
-<h4>3. Network Optimization<a class="headerlink" href="#3.-Network-Optimization" title="Link to this heading">¶</a></h4>
-<ul class="simple">
-<li><p><strong>Minimize inter-region data transfer</strong></p></li>
-<li><p><strong>Use Cloud CDN</strong> for static content</p></li>
-<li><p><strong>Optimize data transfer patterns</strong></p></li>
-</ul>
-</section>
-<section id="4.-Monitoring-and-Management">
-<h4>4. Monitoring and Management<a class="headerlink" href="#4.-Monitoring-and-Management" title="Link to this heading">¶</a></h4>
-<ul class="simple">
-<li><p><strong>Set up budget alerts</strong> and quotas</p></li>
-<li><p><strong>Use Cloud Billing reports</strong></p></li>
-<li><p><strong>Implement proper resource labeling</strong></p></li>
-<li><p><strong>Regular cost reviews</strong> and right-sizing</p></li>
-</ul>
-</section>
-<section id="5.-Service-Specific">
-<h4>5. Service-Specific<a class="headerlink" href="#5.-Service-Specific" title="Link to this heading">¶</a></h4>
-<ul class="simple">
-<li><p><strong>Use Cloud Functions</strong> for event-driven tasks</p></li>
-<li><p><strong>Consider Cloud Run</strong> for containerized applications</p></li>
-<li><p><strong>Use Google Cloud Batch</strong> for large batch processing</p></li>
-</ul>
-</section>
-</section>
-</section>
 <section id="Security-Best-Practices">
 <h2>Security Best Practices<a class="headerlink" href="#Security-Best-Practices" title="Link to this heading">¶</a></h2>
 <div class="nbinput nblast docutils container">
@@ -1575,19 +1475,25 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
 </pre></div>
 </div>
-<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="s2">&quot;01:00:00&quot;</span><span class="p">)</span>
-<span class="k">def</span> <span class="nf">gcp_scientific_simulation</span><span class="p">(</span><span class="n">simulation_params</span><span class="p">,</span> <span class="n">storage_config</span><span class="p">):</span>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Advanced Scientific Computing</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">,</span> <span class="n">time</span><span class="o">=</span><span class="s2">&quot;01:00:00&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">gcp_scientific_simulation</span><span class="p">(</span><span class="n">simulation_params</span><span class="p">,</span> <span class="n">storage_config</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">    Distributed scientific simulation using GCP infrastructure.</span>
 <span class="sd">    &quot;&quot;&quot;</span>
     <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
     <span class="kn">from</span> <span class="nn">scipy.integrate</span> <span class="kn">import</span> <span class="n">odeint</span>
     <span class="kn">from</span> <span class="nn">scipy.optimize</span> <span class="kn">import</span> <span class="n">minimize</span>
-    <span class="kn">from</span> <span class="nn">google.cloud</span> <span class="kn">import</span> <span class="n">storage</span>
     <span class="kn">import</span> <span class="nn">pickle</span>
     <span class="kn">import</span> <span class="nn">time</span>
+    <span class="kn">import</span> <span class="nn">matplotlib</span>
+    <span class="n">matplotlib</span><span class="o">.</span><span class="n">use</span><span class="p">(</span><span class="s1">&#39;Agg&#39;</span><span class="p">)</span>  <span class="c1"># Use non-interactive backend</span>
     <span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
     <span class="kn">import</span> <span class="nn">io</span>
+
+    <span class="c1"># Only import GCP storage if config provided</span>
+    <span class="k">if</span> <span class="n">storage_config</span><span class="p">:</span>
+        <span class="kn">from</span> <span class="nn">google.cloud</span> <span class="kn">import</span> <span class="n">storage</span>
 
     <span class="k">def</span> <span class="nf">lorenz_system</span><span class="p">(</span><span class="n">state</span><span class="p">,</span> <span class="n">t</span><span class="p">,</span> <span class="n">sigma</span><span class="p">,</span> <span class="n">rho</span><span class="p">,</span> <span class="n">beta</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Lorenz attractor differential equations.&quot;&quot;&quot;</span>
@@ -1631,7 +1537,10 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
             <span class="s1">&#39;max_z&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">z</span><span class="p">)),</span>
             <span class="s1">&#39;min_z&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">min</span><span class="p">(</span><span class="n">z</span><span class="p">)),</span>
             <span class="s1">&#39;mean_energy&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">x</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">y</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">z</span><span class="o">**</span><span class="mi">2</span><span class="p">)),</span>
-            <span class="s1">&#39;final_state&#39;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">y</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">z</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])]</span>
+            <span class="s1">&#39;final_state&#39;</span><span class="p">:</span> <span class="p">[</span><span class="nb">float</span><span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">y</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">]),</span> <span class="nb">float</span><span class="p">(</span><span class="n">z</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">])],</span>
+            <span class="s1">&#39;std_x&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">x</span><span class="p">)),</span>
+            <span class="s1">&#39;std_y&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">y</span><span class="p">)),</span>
+            <span class="s1">&#39;std_z&#39;</span><span class="p">:</span> <span class="nb">float</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">z</span><span class="p">))</span>
         <span class="p">}</span>
 
         <span class="n">results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">analysis</span><span class="p">)</span>
@@ -1642,91 +1551,167 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 
             <span class="c1"># Time series</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
-            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;X&#39;</span><span class="p">)</span>
-            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Y&#39;</span><span class="p">)</span>
-            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Z&#39;</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">x</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;X&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Y&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">time_points</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="s1">&#39;Z&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;Time&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;State&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="sa">f</span><span class="s1">&#39;Lorenz System (σ=</span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;sigma&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">, ρ=</span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;rho&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">, β=</span><span class="si">{</span><span class="n">params</span><span class="p">[</span><span class="s2">&quot;beta&quot;</span><span class="p">]</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
 
             <span class="c1"># Phase space (X-Y)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
-            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;X&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Y&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;X-Y Phase Space&#39;</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
 
             <span class="c1"># Phase space (X-Z)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">subplot</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
-            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">z</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">z</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.7</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mf">0.8</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">xlabel</span><span class="p">(</span><span class="s1">&#39;X&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">ylabel</span><span class="p">(</span><span class="s1">&#39;Z&#39;</span><span class="p">)</span>
             <span class="n">plt</span><span class="o">.</span><span class="n">title</span><span class="p">(</span><span class="s1">&#39;X-Z Phase Space&#39;</span><span class="p">)</span>
+            <span class="n">plt</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
 
             <span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
 
-            <span class="c1"># Save plot to Cloud Storage</span>
+            <span class="c1"># Save plot to Cloud Storage if configured</span>
             <span class="k">if</span> <span class="n">storage_config</span><span class="p">:</span>
-                <span class="n">img_buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
-                <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="n">img_buffer</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">,</span> <span class="n">bbox_inches</span><span class="o">=</span><span class="s1">&#39;tight&#39;</span><span class="p">)</span>
-                <span class="n">img_buffer</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+                <span class="k">try</span><span class="p">:</span>
+                    <span class="n">img_buffer</span> <span class="o">=</span> <span class="n">io</span><span class="o">.</span><span class="n">BytesIO</span><span class="p">()</span>
+                    <span class="n">plt</span><span class="o">.</span><span class="n">savefig</span><span class="p">(</span><span class="n">img_buffer</span><span class="p">,</span> <span class="nb">format</span><span class="o">=</span><span class="s1">&#39;png&#39;</span><span class="p">,</span> <span class="n">dpi</span><span class="o">=</span><span class="mi">150</span><span class="p">,</span> <span class="n">bbox_inches</span><span class="o">=</span><span class="s1">&#39;tight&#39;</span><span class="p">)</span>
+                    <span class="n">img_buffer</span><span class="o">.</span><span class="n">seek</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
 
-                <span class="n">storage_client</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;project_id&#39;</span><span class="p">])</span>
-                <span class="n">bucket</span> <span class="o">=</span> <span class="n">storage_client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">])</span>
+                    <span class="n">storage_client</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;project_id&#39;</span><span class="p">])</span>
+                    <span class="n">bucket</span> <span class="o">=</span> <span class="n">storage_client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">])</span>
 
-                <span class="n">plot_blob</span> <span class="o">=</span> <span class="n">bucket</span><span class="o">.</span><span class="n">blob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;plots/lorenz_simulation_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
-                <span class="n">plot_blob</span><span class="o">.</span><span class="n">upload_from_string</span><span class="p">(</span><span class="n">img_buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">content_type</span><span class="o">=</span><span class="s1">&#39;image/png&#39;</span><span class="p">)</span>
+                    <span class="n">plot_blob</span> <span class="o">=</span> <span class="n">bucket</span><span class="o">.</span><span class="n">blob</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;plots/lorenz_simulation_</span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">.png&quot;</span><span class="p">)</span>
+                    <span class="n">plot_blob</span><span class="o">.</span><span class="n">upload_from_string</span><span class="p">(</span><span class="n">img_buffer</span><span class="o">.</span><span class="n">getvalue</span><span class="p">(),</span> <span class="n">content_type</span><span class="o">=</span><span class="s1">&#39;image/png&#39;</span><span class="p">)</span>
+                <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: Could not save plot to GCS: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
             <span class="n">plt</span><span class="o">.</span><span class="n">close</span><span class="p">()</span>
 
     <span class="n">computation_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
 
-    <span class="c1"># Save detailed results to Cloud Storage</span>
-    <span class="k">if</span> <span class="n">storage_config</span><span class="p">:</span>
-        <span class="n">storage_client</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;project_id&#39;</span><span class="p">])</span>
-        <span class="n">bucket</span> <span class="o">=</span> <span class="n">storage_client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">])</span>
+    <span class="c1"># Calculate summary statistics</span>
+    <span class="n">energies</span> <span class="o">=</span> <span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;mean_energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]</span>
+    <span class="n">summary_stats</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;total_simulations&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameter_sets</span><span class="p">),</span>
+        <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
+        <span class="s1">&#39;average_energy&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">energies</span><span class="p">),</span>
+        <span class="s1">&#39;max_energy&#39;</span><span class="p">:</span> <span class="nb">max</span><span class="p">(</span><span class="n">energies</span><span class="p">),</span>
+        <span class="s1">&#39;min_energy&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">energies</span><span class="p">),</span>
+        <span class="s1">&#39;energy_std&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">energies</span><span class="p">),</span>
+        <span class="s1">&#39;time_per_simulation&#39;</span><span class="p">:</span> <span class="n">computation_time</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameter_sets</span><span class="p">)</span>
+    <span class="p">}</span>
 
-        <span class="n">results_blob</span> <span class="o">=</span> <span class="n">bucket</span><span class="o">.</span><span class="n">blob</span><span class="p">(</span><span class="s2">&quot;results/simulation_results.pkl&quot;</span><span class="p">)</span>
-        <span class="n">results_bytes</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">({</span>
-            <span class="s1">&#39;simulation_params&#39;</span><span class="p">:</span> <span class="n">simulation_params</span><span class="p">,</span>
-            <span class="s1">&#39;results&#39;</span><span class="p">:</span> <span class="n">results</span><span class="p">,</span>
-            <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
-            <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
-        <span class="p">})</span>
-        <span class="n">results_blob</span><span class="o">.</span><span class="n">upload_from_string</span><span class="p">(</span><span class="n">results_bytes</span><span class="p">)</span>
+    <span class="c1"># Save detailed results to Cloud Storage if configured</span>
+    <span class="k">if</span> <span class="n">storage_config</span><span class="p">:</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">storage_client</span> <span class="o">=</span> <span class="n">storage</span><span class="o">.</span><span class="n">Client</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;project_id&#39;</span><span class="p">])</span>
+            <span class="n">bucket</span> <span class="o">=</span> <span class="n">storage_client</span><span class="o">.</span><span class="n">bucket</span><span class="p">(</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">])</span>
+
+            <span class="n">results_blob</span> <span class="o">=</span> <span class="n">bucket</span><span class="o">.</span><span class="n">blob</span><span class="p">(</span><span class="s2">&quot;results/simulation_results.pkl&quot;</span><span class="p">)</span>
+            <span class="n">results_data</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;simulation_params&#39;</span><span class="p">:</span> <span class="n">simulation_params</span><span class="p">,</span>
+                <span class="s1">&#39;results&#39;</span><span class="p">:</span> <span class="n">results</span><span class="p">,</span>
+                <span class="s1">&#39;summary_stats&#39;</span><span class="p">:</span> <span class="n">summary_stats</span><span class="p">,</span>
+                <span class="s1">&#39;timestamp&#39;</span><span class="p">:</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+            <span class="p">}</span>
+            <span class="n">results_bytes</span> <span class="o">=</span> <span class="n">pickle</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">results_data</span><span class="p">)</span>
+            <span class="n">results_blob</span><span class="o">.</span><span class="n">upload_from_string</span><span class="p">(</span><span class="n">results_bytes</span><span class="p">)</span>
+        <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Warning: Could not save results to GCS: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
     <span class="k">return</span> <span class="p">{</span>
         <span class="s1">&#39;num_simulations&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameter_sets</span><span class="p">),</span>
         <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
-        <span class="s1">&#39;average_energy&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;mean_energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]),</span>
-        <span class="s1">&#39;max_energy&#39;</span><span class="p">:</span> <span class="nb">max</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;mean_energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]),</span>
-        <span class="s1">&#39;min_energy&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">([</span><span class="n">r</span><span class="p">[</span><span class="s1">&#39;mean_energy&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">results</span><span class="p">]),</span>
-        <span class="s1">&#39;results_summary&#39;</span><span class="p">:</span> <span class="n">results</span><span class="p">[:</span><span class="mi">3</span><span class="p">],</span>  <span class="c1"># First 3 for brevity</span>
-        <span class="s1">&#39;storage_location&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;gs://</span><span class="si">{</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">/results/&quot;</span> <span class="k">if</span> <span class="n">storage_config</span> <span class="k">else</span> <span class="kc">None</span>
+        <span class="s1">&#39;summary_stats&#39;</span><span class="p">:</span> <span class="n">summary_stats</span><span class="p">,</span>
+        <span class="s1">&#39;results_preview&#39;</span><span class="p">:</span> <span class="n">results</span><span class="p">[:</span><span class="mi">2</span><span class="p">],</span>  <span class="c1"># First 2 for brevity</span>
+        <span class="s1">&#39;storage_location&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;gs://</span><span class="si">{</span><span class="n">storage_config</span><span class="p">[</span><span class="s1">&#39;bucket_name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">/results/&quot;</span> <span class="k">if</span> <span class="n">storage_config</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+        <span class="s1">&#39;plots_saved&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">parameter_sets</span><span class="p">))</span>
     <span class="p">}</span>
 
-<span class="c1"># Example usage:</span>
-<span class="c1"># simulation_config = {</span>
-<span class="c1">#     &#39;parameter_sets&#39;: [</span>
-<span class="c1">#         {&#39;sigma&#39;: 10.0, &#39;rho&#39;: 28.0, &#39;beta&#39;: 8.0/3.0},</span>
-<span class="c1">#         {&#39;sigma&#39;: 10.0, &#39;rho&#39;: 24.0, &#39;beta&#39;: 8.0/3.0},</span>
-<span class="c1">#         {&#39;sigma&#39;: 10.0, &#39;rho&#39;: 32.0, &#39;beta&#39;: 8.0/3.0},</span>
-<span class="c1">#     ],</span>
-<span class="c1">#     &#39;max_time&#39;: 25.0,</span>
-<span class="c1">#     &#39;num_points&#39;: 10000</span>
-<span class="c1"># }</span>
-<span class="c1">#</span>
-<span class="c1"># storage_config = {</span>
-<span class="c1">#     &#39;project_id&#39;: &#39;your-project-id&#39;,</span>
-<span class="c1">#     &#39;bucket_name&#39;: &#39;your-results-bucket&#39;</span>
-<span class="c1"># }</span>
-<span class="c1">#</span>
-<span class="c1"># result = gcp_scientific_simulation(simulation_config, storage_config)</span>
-<span class="c1"># print(f&quot;Completed {result[&#39;num_simulations&#39;]} simulations in {result[&#39;computation_time&#39;]:.2f} seconds&quot;)</span>
-<span class="c1"># print(f&quot;Average energy: {result[&#39;average_energy&#39;]:.4f}&quot;)</span>
+<span class="c1"># Monte Carlo simulation example</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;4GB&quot;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">gcp_monte_carlo_simulation</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">1000000</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Monte Carlo simulation for option pricing.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">time</span>
 
-<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Advanced scientific computing example defined.&quot;</span><span class="p">)</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Black-Scholes parameters</span>
+    <span class="n">S0</span> <span class="o">=</span> <span class="mi">100</span>    <span class="c1"># Initial stock price</span>
+    <span class="n">K</span> <span class="o">=</span> <span class="mi">105</span>     <span class="c1"># Strike price</span>
+    <span class="n">T</span> <span class="o">=</span> <span class="mf">1.0</span>     <span class="c1"># Time to expiration</span>
+    <span class="n">r</span> <span class="o">=</span> <span class="mf">0.05</span>    <span class="c1"># Risk-free rate</span>
+    <span class="n">sigma</span> <span class="o">=</span> <span class="mf">0.2</span> <span class="c1"># Volatility</span>
+
+    <span class="c1"># Generate random samples</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">Z</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">standard_normal</span><span class="p">(</span><span class="n">n_samples</span><span class="p">)</span>
+
+    <span class="c1"># Simulate stock prices at expiration</span>
+    <span class="n">ST</span> <span class="o">=</span> <span class="n">S0</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">((</span><span class="n">r</span> <span class="o">-</span> <span class="mf">0.5</span> <span class="o">*</span> <span class="n">sigma</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="n">T</span> <span class="o">+</span> <span class="n">sigma</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">T</span><span class="p">)</span> <span class="o">*</span> <span class="n">Z</span><span class="p">)</span>
+
+    <span class="c1"># Calculate option payoffs</span>
+    <span class="n">call_payoffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">ST</span> <span class="o">-</span> <span class="n">K</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="n">put_payoffs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">maximum</span><span class="p">(</span><span class="n">K</span> <span class="o">-</span> <span class="n">ST</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="c1"># Discount to present value</span>
+    <span class="n">call_price</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">r</span> <span class="o">*</span> <span class="n">T</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">call_payoffs</span><span class="p">)</span>
+    <span class="n">put_price</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">r</span> <span class="o">*</span> <span class="n">T</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">put_payoffs</span><span class="p">)</span>
+
+    <span class="c1"># Calculate confidence intervals</span>
+    <span class="n">call_std</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">call_payoffs</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">n_samples</span><span class="p">)</span>
+    <span class="n">put_std</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">put_payoffs</span><span class="p">)</span> <span class="o">/</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span><span class="n">n_samples</span><span class="p">)</span>
+
+    <span class="n">computation_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;n_samples&#39;</span><span class="p">:</span> <span class="n">n_samples</span><span class="p">,</span>
+        <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
+        <span class="s1">&#39;call_price&#39;</span><span class="p">:</span> <span class="n">call_price</span><span class="p">,</span>
+        <span class="s1">&#39;put_price&#39;</span><span class="p">:</span> <span class="n">put_price</span><span class="p">,</span>
+        <span class="s1">&#39;call_confidence_interval&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">call_price</span> <span class="o">-</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">call_std</span><span class="p">,</span> <span class="n">call_price</span> <span class="o">+</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">call_std</span><span class="p">],</span>
+        <span class="s1">&#39;put_confidence_interval&#39;</span><span class="p">:</span> <span class="p">[</span><span class="n">put_price</span> <span class="o">-</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">put_std</span><span class="p">,</span> <span class="n">put_price</span> <span class="o">+</span> <span class="mf">1.96</span><span class="o">*</span><span class="n">put_std</span><span class="p">],</span>
+        <span class="s1">&#39;parameters&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;S0&#39;</span><span class="p">:</span> <span class="n">S0</span><span class="p">,</span> <span class="s1">&#39;K&#39;</span><span class="p">:</span> <span class="n">K</span><span class="p">,</span> <span class="s1">&#39;T&#39;</span><span class="p">:</span> <span class="n">T</span><span class="p">,</span> <span class="s1">&#39;r&#39;</span><span class="p">:</span> <span class="n">r</span><span class="p">,</span> <span class="s1">&#39;sigma&#39;</span><span class="p">:</span> <span class="n">sigma</span><span class="p">}</span>
+    <span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ Advanced scientific computing examples defined&quot;</span><span class="p">)</span>
+
+<span class="c1"># Example simulation parameters</span>
+<span class="n">example_lorenz_params</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;parameter_sets&#39;</span><span class="p">:</span> <span class="p">[</span>
+        <span class="p">{</span><span class="s1">&#39;sigma&#39;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span> <span class="s1">&#39;rho&#39;</span><span class="p">:</span> <span class="mf">28.0</span><span class="p">,</span> <span class="s1">&#39;beta&#39;</span><span class="p">:</span> <span class="mf">8.0</span><span class="o">/</span><span class="mf">3.0</span><span class="p">},</span>    <span class="c1"># Classic chaotic</span>
+        <span class="p">{</span><span class="s1">&#39;sigma&#39;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span> <span class="s1">&#39;rho&#39;</span><span class="p">:</span> <span class="mf">24.74</span><span class="p">,</span> <span class="s1">&#39;beta&#39;</span><span class="p">:</span> <span class="mf">8.0</span><span class="o">/</span><span class="mf">3.0</span><span class="p">},</span>   <span class="c1"># Near onset</span>
+        <span class="p">{</span><span class="s1">&#39;sigma&#39;</span><span class="p">:</span> <span class="mf">10.0</span><span class="p">,</span> <span class="s1">&#39;rho&#39;</span><span class="p">:</span> <span class="mf">99.65</span><span class="p">,</span> <span class="s1">&#39;beta&#39;</span><span class="p">:</span> <span class="mf">8.0</span><span class="o">/</span><span class="mf">3.0</span><span class="p">},</span>   <span class="c1"># High rho</span>
+        <span class="p">{</span><span class="s1">&#39;sigma&#39;</span><span class="p">:</span> <span class="mf">16.0</span><span class="p">,</span> <span class="s1">&#39;rho&#39;</span><span class="p">:</span> <span class="mf">45.92</span><span class="p">,</span> <span class="s1">&#39;beta&#39;</span><span class="p">:</span> <span class="mf">4.0</span><span class="p">},</span>       <span class="c1"># Different params</span>
+    <span class="p">],</span>
+    <span class="s1">&#39;max_time&#39;</span><span class="p">:</span> <span class="mf">25.0</span><span class="p">,</span>
+    <span class="s1">&#39;num_points&#39;</span><span class="p">:</span> <span class="mi">5000</span>
+<span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">📝 Example usage:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# Lorenz simulation:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# result = gcp_scientific_simulation(example_lorenz_params)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# print(f&#39;Completed </span><span class="si">{result[\&quot;num_simulations\&quot;]}</span><span class="s2"> simulations&#39;)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# print(f&#39;Computation time: </span><span class="si">{result[\&quot;computation_time\&quot;]:.2f}</span><span class="s2"> seconds&#39;)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;#&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# Monte Carlo simulation:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# mc_result = gcp_monte_carlo_simulation(n_samples=5000000)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;# print(f&#39;Call option price: $</span><span class="si">{mc_result[\&quot;call_price\&quot;]:.2f}</span><span class="s2">&#39;)&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">🧪 These examples demonstrate GCP&#39;s computational capabilities:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  • Parallel differential equation solving&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  • Statistical simulations with confidence intervals&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  • Cloud Storage integration for results&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  • Visualization generation and storage&quot;</span><span class="p">)</span>
 </pre></div>
 </div>
 </div>
@@ -1741,10 +1726,13 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <li><p><strong>Cloud Batch</strong>: Managed job scheduling for large-scale processing</p></li>
 <li><p><strong>Cloud Storage</strong>: Data management and result storage</p></li>
 <li><p><strong>Vertex AI</strong>: Machine learning platform integration</p></li>
-<li><p><strong>Cost Optimization</strong>: Preemptible VMs and cost management strategies</p></li>
 <li><p><strong>Security</strong>: Best practices for secure deployment</p></li>
 <li><p><strong>Resource Management</strong>: Proper cleanup procedures</p></li>
 </ol>
+<section id="Cost-Monitoring">
+<h3>Cost Monitoring<a class="headerlink" href="#Cost-Monitoring" title="Link to this heading">¶</a></h3>
+<p>For comprehensive cost monitoring, optimization strategies, and multi-cloud cost comparisons, see the dedicated <a class="reference internal" href="cost_monitoring_tutorial.html"><span class="doc">Cost Monitoring Tutorial</span></a>.</p>
+</section>
 <section id="Next-Steps">
 <h3>Next Steps<a class="headerlink" href="#Next-Steps" title="Link to this heading">¶</a></h3>
 <ul class="simple">
@@ -1752,8 +1740,8 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <li><p>Start with a simple Compute Engine instance for initial testing</p></li>
 <li><p>Consider GKE for containerized workloads and auto-scaling</p></li>
 <li><p>Explore Cloud Batch for large-scale batch processing</p></li>
-<li><p>Implement proper monitoring and cost controls</p></li>
-<li><p>Use preemptible VMs for cost-effective fault-tolerant workloads</p></li>
+<li><p>Implement proper monitoring and access controls</p></li>
+<li><p>Review the Cost Monitoring Tutorial for expense tracking</p></li>
 </ul>
 </section>
 <section id="GCP-Specific-Advantages">
@@ -1775,9 +1763,11 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <li><p><a class="reference external" href="https://cloud.google.com/batch/docs">Google Cloud Batch Documentation</a></p></li>
 <li><p><a class="reference external" href="https://cloud.google.com/vertex-ai/docs">Vertex AI Documentation</a></p></li>
 <li><p><a class="reference external" href="https://cloud.google.com/storage/docs">Google Cloud Storage Documentation</a></p></li>
+<li><p><a class="reference external" href="https://cloud.google.com/products/calculator">GCP Pricing Calculator</a></p></li>
 <li><p><a class="reference external" href="https://clustrix.readthedocs.io/">Clustrix Documentation</a></p></li>
+<li><p><a class="reference internal" href="cost_monitoring_tutorial.html"><span class="doc">Clustrix Cost Monitoring Tutorial</span></a></p></li>
 </ul>
-<p><strong>Remember</strong>: Always monitor your GCP costs and clean up resources when not in use. Use budget alerts and billing export to track spending!</p>
+<p><strong>Remember</strong>: Always monitor your cloud costs and clean up resources when not in use!</p>
 </section>
 </section>
 </section>
@@ -1826,17 +1816,6 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <li><a class="reference internal" href="#Method-3:-Google-Cloud-Batch">Method 3: Google Cloud Batch</a></li>
 <li><a class="reference internal" href="#Data-Management-with-Google-Cloud-Storage">Data Management with Google Cloud Storage</a></li>
 <li><a class="reference internal" href="#Vertex-AI-Integration">Vertex AI Integration</a></li>
-<li><a class="reference internal" href="#Cost-Optimization-with-Preemptible-VMs">Cost Optimization with Preemptible VMs</a><ul>
-<li><a class="reference internal" href="#GCP-Cost-Optimization-for-Clustrix">GCP Cost Optimization for Clustrix</a><ul>
-<li><a class="reference internal" href="#1.-Compute-Optimization">1. Compute Optimization</a></li>
-<li><a class="reference internal" href="#2.-Storage-Optimization">2. Storage Optimization</a></li>
-<li><a class="reference internal" href="#3.-Network-Optimization">3. Network Optimization</a></li>
-<li><a class="reference internal" href="#4.-Monitoring-and-Management">4. Monitoring and Management</a></li>
-<li><a class="reference internal" href="#5.-Service-Specific">5. Service-Specific</a></li>
-</ul>
-</li>
-</ul>
-</li>
 <li><a class="reference internal" href="#Security-Best-Practices">Security Best Practices</a><ul>
 <li><a class="reference internal" href="#GCP-Security-Checklist-for-Clustrix">GCP Security Checklist for Clustrix</a></li>
 </ul>
@@ -1844,6 +1823,7 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
 <li><a class="reference internal" href="#Resource-Cleanup">Resource Cleanup</a></li>
 <li><a class="reference internal" href="#Advanced-Example:-Distributed-Scientific-Computing">Advanced Example: Distributed Scientific Computing</a></li>
 <li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Cost-Monitoring">Cost Monitoring</a></li>
 <li><a class="reference internal" href="#Next-Steps">Next Steps</a></li>
 <li><a class="reference internal" href="#GCP-Specific-Advantages">GCP-Specific Advantages</a></li>
 <li><a class="reference internal" href="#Resources">Resources</a></li>
@@ -1879,7 +1859,7 @@ gcloud<span class="w"> </span>iam<span class="w"> </span>service-accounts<span c
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../../../">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>clustrix.cost_providers.lambda_cloud &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../../../genindex.html" />
+            <link rel="search" title="Search" href="../../../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="up" title="Module code" href="../../index.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../../../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../../../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../../../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../../../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/cost_monitoring.html">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../../../index.html">Docs</a></li>
+            <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+        <li class="breadcrumb-item active" aria-current="page">clustrix.cost_providers.lambda_cloud</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/_modules/clustrix/cost_providers/lambda_cloud" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <h1>Source code for clustrix.cost_providers.lambda_cloud</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Lambda Cloud cost monitoring implementation.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Any</span><span class="p">,</span> <span class="n">Optional</span>
+
+<span class="kn">from</span> <span class="nn">..cost_monitoring</span> <span class="kn">import</span> <span class="n">BaseCostMonitor</span><span class="p">,</span> <span class="n">ResourceUsage</span><span class="p">,</span> <span class="n">CostEstimate</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor">[docs]</a>
+<span class="k">class</span> <span class="nc">LambdaCostMonitor</span><span class="p">(</span><span class="n">BaseCostMonitor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cost monitoring for Lambda Cloud instances.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="LambdaCostMonitor.__init__">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s2">&quot;Lambda Cloud&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Lambda Cloud pricing (as of 2025, approximate rates in USD/hour)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="c1"># Single GPU instances</span>
+            <span class="s2">&quot;rtx6000ada&quot;</span><span class="p">:</span> <span class="mf">0.75</span><span class="p">,</span>
+            <span class="s2">&quot;a10&quot;</span><span class="p">:</span> <span class="mf">0.60</span><span class="p">,</span>
+            <span class="s2">&quot;a6000&quot;</span><span class="p">:</span> <span class="mf">0.80</span><span class="p">,</span>
+            <span class="s2">&quot;a100_40gb&quot;</span><span class="p">:</span> <span class="mf">1.10</span><span class="p">,</span>
+            <span class="s2">&quot;a100_80gb&quot;</span><span class="p">:</span> <span class="mf">1.40</span><span class="p">,</span>
+            <span class="s2">&quot;h100&quot;</span><span class="p">:</span> <span class="mf">2.50</span><span class="p">,</span>
+            <span class="c1"># Multi-GPU instances</span>
+            <span class="s2">&quot;2xa100_40gb&quot;</span><span class="p">:</span> <span class="mf">2.20</span><span class="p">,</span>
+            <span class="s2">&quot;4xa100_40gb&quot;</span><span class="p">:</span> <span class="mf">4.40</span><span class="p">,</span>
+            <span class="s2">&quot;8xa100_40gb&quot;</span><span class="p">:</span> <span class="mf">8.80</span><span class="p">,</span>
+            <span class="s2">&quot;2xa100_80gb&quot;</span><span class="p">:</span> <span class="mf">2.80</span><span class="p">,</span>
+            <span class="s2">&quot;4xa100_80gb&quot;</span><span class="p">:</span> <span class="mf">5.60</span><span class="p">,</span>
+            <span class="s2">&quot;8xa100_80gb&quot;</span><span class="p">:</span> <span class="mf">11.20</span><span class="p">,</span>
+            <span class="s2">&quot;8xh100&quot;</span><span class="p">:</span> <span class="mf">20.00</span><span class="p">,</span>
+            <span class="c1"># CPU instances</span>
+            <span class="s2">&quot;cpu_small&quot;</span><span class="p">:</span> <span class="mf">0.10</span><span class="p">,</span>
+            <span class="s2">&quot;cpu_medium&quot;</span><span class="p">:</span> <span class="mf">0.20</span><span class="p">,</span>
+            <span class="s2">&quot;cpu_large&quot;</span><span class="p">:</span> <span class="mf">0.40</span><span class="p">,</span>
+            <span class="c1"># Default fallback</span>
+            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="mf">1.00</span><span class="p">,</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Instance type metadata</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">instance_metadata</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;rtx6000ada&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;48GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;46GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;a10&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;24GB&quot;</span><span class="p">,</span> <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span> <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;46GB&quot;</span><span class="p">},</span>
+            <span class="s2">&quot;a6000&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;48GB&quot;</span><span class="p">,</span> <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">14</span><span class="p">,</span> <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;46GB&quot;</span><span class="p">},</span>
+            <span class="s2">&quot;a100_40gb&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;40GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;200GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;a100_80gb&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;80GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">30</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;200GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;h100&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;80GB&quot;</span><span class="p">,</span> <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">26</span><span class="p">,</span> <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;150GB&quot;</span><span class="p">},</span>
+            <span class="s2">&quot;2xa100_40gb&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;80GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">60</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;400GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;4xa100_40gb&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;160GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">120</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;800GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;8xa100_40gb&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;320GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">240</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;1600GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.get_resource_usage">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_resource_usage">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_resource_usage</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ResourceUsage</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get current resource utilization for Lambda Cloud instance.&quot;&quot;&quot;</span>
+        <span class="c1"># Get CPU and memory usage</span>
+        <span class="n">cpu_percent</span><span class="p">,</span> <span class="n">mem_used_mb</span><span class="p">,</span> <span class="n">mem_total_mb</span><span class="p">,</span> <span class="n">mem_percent</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_cpu_memory_usage</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Get GPU utilization</span>
+        <span class="n">gpu_stats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_gpu_utilization</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">ResourceUsage</span><span class="p">(</span>
+            <span class="n">cpu_percent</span><span class="o">=</span><span class="n">cpu_percent</span><span class="p">,</span>
+            <span class="n">memory_used_mb</span><span class="o">=</span><span class="n">mem_used_mb</span><span class="p">,</span>
+            <span class="n">memory_total_mb</span><span class="o">=</span><span class="n">mem_total_mb</span><span class="p">,</span>
+            <span class="n">memory_percent</span><span class="o">=</span><span class="n">mem_percent</span><span class="p">,</span>
+            <span class="n">gpu_stats</span><span class="o">=</span><span class="n">gpu_stats</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.estimate_cost">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_cost">[docs]</a>
+    <span class="k">def</span> <span class="nf">estimate_cost</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">hours_used</span><span class="p">:</span> <span class="nb">float</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CostEstimate</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Estimate cost for Lambda Cloud instance usage.&quot;&quot;&quot;</span>
+        <span class="c1"># Normalize instance type</span>
+        <span class="n">instance_type</span> <span class="o">=</span> <span class="n">instance_type</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Get hourly rate</span>
+        <span class="n">hourly_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Calculate estimated cost</span>
+        <span class="n">estimated_cost</span> <span class="o">=</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="n">hours_used</span>
+
+        <span class="k">return</span> <span class="n">CostEstimate</span><span class="p">(</span>
+            <span class="n">instance_type</span><span class="o">=</span><span class="n">instance_type</span><span class="p">,</span>
+            <span class="n">hourly_rate</span><span class="o">=</span><span class="n">hourly_rate</span><span class="p">,</span>
+            <span class="n">hours_used</span><span class="o">=</span><span class="n">hours_used</span><span class="p">,</span>
+            <span class="n">estimated_cost</span><span class="o">=</span><span class="n">estimated_cost</span><span class="p">,</span>
+            <span class="n">currency</span><span class="o">=</span><span class="s2">&quot;USD&quot;</span><span class="p">,</span>
+            <span class="n">last_updated</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.get_pricing_info">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_pricing_info">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_pricing_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get Lambda Cloud pricing information.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.get_instance_recommendations">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_instance_recommendations">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_instance_recommendations</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">resource_usage</span><span class="p">:</span> <span class="n">ResourceUsage</span><span class="p">,</span> <span class="n">current_instance</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get instance type recommendations based on current usage.&quot;&quot;&quot;</span>
+        <span class="n">recommendations</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">:</span>
+            <span class="c1"># No GPU usage detected</span>
+            <span class="k">if</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">cpu_percent</span> <span class="o">&lt;</span> <span class="mi">50</span> <span class="ow">and</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">memory_percent</span> <span class="o">&lt;</span> <span class="mi">50</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;Consider using CPU instances instead of GPU instances for this workload.&quot;</span>
+                <span class="p">)</span>
+            <span class="k">return</span> <span class="n">recommendations</span>
+
+        <span class="c1"># Analyze GPU usage</span>
+        <span class="n">gpu_utilizations</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">gpu</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;utilization_percent&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+        <span class="p">]</span>
+        <span class="n">avg_gpu_util</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">sum</span><span class="p">(</span><span class="n">gpu_utilizations</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">gpu_utilizations</span><span class="p">)</span> <span class="k">if</span> <span class="n">gpu_utilizations</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="p">)</span>
+
+        <span class="n">gpu_memory_utils</span> <span class="o">=</span> <span class="p">[</span>
+            <span class="n">gpu</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memory_utilization_percent&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+        <span class="p">]</span>
+        <span class="n">avg_gpu_mem_util</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="nb">sum</span><span class="p">(</span><span class="n">gpu_memory_utils</span><span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">gpu_memory_utils</span><span class="p">)</span> <span class="k">if</span> <span class="n">gpu_memory_utils</span> <span class="k">else</span> <span class="mi">0</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Single GPU recommendations</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">avg_gpu_util</span> <span class="o">&lt;</span> <span class="mi">30</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;Low GPU utilization. Consider optimizing your code or using a smaller instance.&quot;</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">avg_gpu_util</span> <span class="o">&gt;</span> <span class="mi">95</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;High GPU utilization. Consider multi-GPU instances for better performance.&quot;</span>
+                <span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">avg_gpu_mem_util</span> <span class="o">&gt;</span> <span class="mi">90</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;High GPU memory usage. Consider using GPU instances with more memory.&quot;</span>
+                <span class="p">)</span>
+            <span class="k">elif</span> <span class="n">avg_gpu_mem_util</span> <span class="o">&lt;</span> <span class="mi">20</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;Low GPU memory usage. Consider using GPU instances with less memory.&quot;</span>
+                <span class="p">)</span>
+
+        <span class="c1"># Multi-GPU recommendations</span>
+        <span class="k">else</span><span class="p">:</span>
+            <span class="n">underutilized_gpus</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">util</span> <span class="ow">in</span> <span class="n">gpu_utilizations</span> <span class="k">if</span> <span class="n">util</span> <span class="o">&lt;</span> <span class="mi">50</span><span class="p">)</span>
+            <span class="k">if</span> <span class="n">underutilized_gpus</span> <span class="o">&gt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">gpu_utilizations</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">underutilized_gpus</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">gpu_utilizations</span><span class="p">)</span><span class="si">}</span><span class="s2"> GPUs are underutilized. &quot;</span>
+                    <span class="s2">&quot;Consider using fewer GPUs or optimizing data parallelism.&quot;</span>
+                <span class="p">)</span>
+
+        <span class="c1"># Cost-efficiency recommendations</span>
+        <span class="k">if</span> <span class="n">current_instance</span><span class="p">:</span>
+            <span class="n">current_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="n">current_instance</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">),</span> <span class="mi">0</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="p">(</span>
+                <span class="n">current_rate</span> <span class="o">&gt;</span> <span class="mf">5.0</span> <span class="ow">and</span> <span class="n">avg_gpu_util</span> <span class="o">&lt;</span> <span class="mi">60</span>
+            <span class="p">):</span>  <span class="c1"># Expensive instance with low utilization</span>
+                <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                    <span class="s2">&quot;High-cost instance with low utilization. &quot;</span>
+                    <span class="s2">&quot;Consider using spot instances or smaller instance types.&quot;</span>
+                <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">recommendations</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.get_cost_optimization_tips">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_cost_optimization_tips">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_cost_optimization_tips</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get general cost optimization tips for Lambda Cloud.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">[</span>
+            <span class="s2">&quot;Use spot instances for non-critical workloads (up to 50</span><span class="si">% s</span><span class="s2">avings)&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Terminate instances immediately after completing jobs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Monitor GPU utilization and right-size instances accordingly&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use multi-GPU instances efficiently with proper data parallelism&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Consider CPU instances for non-GPU workloads&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use mixed precision training to reduce memory requirements&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Implement checkpointing to handle potential spot instance interruptions&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Monitor costs regularly and set up budget alerts&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Choose the right region based on pricing and latency requirements&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Batch multiple experiments to maximize instance utilization&quot;</span><span class="p">,</span>
+        <span class="p">]</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.get_performance_metrics">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_performance_metrics">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_performance_metrics</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get comprehensive performance metrics for Lambda Cloud instances.&quot;&quot;&quot;</span>
+        <span class="n">resource_usage</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_resource_usage</span><span class="p">()</span>
+
+        <span class="n">metrics</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;cpu_utilization&quot;</span><span class="p">:</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">cpu_percent</span><span class="p">,</span>
+            <span class="s2">&quot;memory_utilization&quot;</span><span class="p">:</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">memory_percent</span><span class="p">,</span>
+            <span class="s2">&quot;memory_used_gb&quot;</span><span class="p">:</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">memory_used_mb</span> <span class="o">/</span> <span class="mi">1024</span><span class="p">,</span>
+            <span class="s2">&quot;memory_total_gb&quot;</span><span class="p">:</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">memory_total_mb</span> <span class="o">/</span> <span class="mi">1024</span><span class="p">,</span>
+            <span class="s2">&quot;timestamp&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">:</span>
+            <span class="n">metrics</span><span class="p">[</span><span class="s2">&quot;gpu_count&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">)</span>
+            <span class="n">metrics</span><span class="p">[</span><span class="s2">&quot;gpu_utilization_avg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span>
+                <span class="n">gpu</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;utilization_percent&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+            <span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">)</span>
+            <span class="n">metrics</span><span class="p">[</span><span class="s2">&quot;gpu_memory_utilization_avg&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span>
+                <span class="n">gpu</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;memory_utilization_percent&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+            <span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">)</span>
+            <span class="n">metrics</span><span class="p">[</span><span class="s2">&quot;gpu_details&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+
+        <span class="k">return</span> <span class="n">metrics</span></div>
+
+
+<div class="viewcode-block" id="LambdaCostMonitor.estimate_monthly_cost">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_monthly_cost">[docs]</a>
+    <span class="k">def</span> <span class="nf">estimate_monthly_cost</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">hours_per_day</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mi">8</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Estimate monthly costs for different usage patterns.&quot;&quot;&quot;</span>
+        <span class="n">instance_type</span> <span class="o">=</span> <span class="n">instance_type</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;-&quot;</span><span class="p">,</span> <span class="s2">&quot;_&quot;</span><span class="p">)</span>
+        <span class="n">hourly_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">pricing</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">])</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;hourly_rate&quot;</span><span class="p">:</span> <span class="n">hourly_rate</span><span class="p">,</span>
+            <span class="s2">&quot;daily_cost_8h&quot;</span><span class="p">:</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="n">hours_per_day</span><span class="p">,</span>
+            <span class="s2">&quot;weekly_cost_40h&quot;</span><span class="p">:</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="mi">40</span><span class="p">,</span>  <span class="c1"># 5 days * 8 hours</span>
+            <span class="s2">&quot;monthly_cost_160h&quot;</span><span class="p">:</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="mi">160</span><span class="p">,</span>  <span class="c1"># ~20 working days * 8 hours</span>
+            <span class="s2">&quot;monthly_cost_24x7&quot;</span><span class="p">:</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="mi">24</span> <span class="o">*</span> <span class="mi">30</span><span class="p">,</span>  <span class="c1"># 24/7 usage</span>
+            <span class="s2">&quot;instance_type&quot;</span><span class="p">:</span> <span class="n">instance_type</span><span class="p">,</span>
+        <span class="p">}</span></div>
+</div>
+
+</pre></div>
+</main>
+                        
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 27, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../../../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script type="text/javascript" src="../../../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../../../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../../../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../../../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../../../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

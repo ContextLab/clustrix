@@ -135,6 +135,7 @@ Table of Contents
    notebooks/gcp_cloud_tutorial
    notebooks/huggingface_spaces_tutorial
    notebooks/lambda_cloud_tutorial
+   notebooks/cost_monitoring_tutorial
 
 .. toctree::
    :maxdepth: 2

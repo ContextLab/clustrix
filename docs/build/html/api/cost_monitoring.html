@@ -1,0 +1,1452 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>Cost Monitoring &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Local Executor API" href="local_executor.html" />
+            <link rel="prev" title="Notebook Magic Commands" href="notebook_magic.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Cost Monitoring</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/api/cost_monitoring.rst" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/api/cost_monitoring.rst.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="cost-monitoring">
+<h1>Cost Monitoring<a class="headerlink" href="#cost-monitoring" title="Link to this heading">¶</a></h1>
+<p>Clustrix provides comprehensive cost monitoring and optimization features for major cloud providers. This module enables automatic cost tracking, resource utilization monitoring, and cost optimization recommendations.</p>
+<section id="overview">
+<h2>Overview<a class="headerlink" href="#overview" title="Link to this heading">¶</a></h2>
+<p>The cost monitoring system supports:</p>
+<ul class="simple">
+<li><p><strong>AWS</strong>: EC2 instances, Batch, spot instances</p></li>
+<li><p><strong>Google Cloud</strong>: Compute Engine, preemptible VMs, sustained use discounts</p></li>
+<li><p><strong>Azure</strong>: Virtual Machines, Batch, spot VMs</p></li>
+<li><p><strong>Lambda Cloud</strong>: GPU instances with utilization tracking</p></li>
+</ul>
+</section>
+<section id="core-classes">
+<h2>Core Classes<a class="headerlink" href="#core-classes" title="Link to this heading">¶</a></h2>
+<section id="resourceusage">
+<h3>ResourceUsage<a class="headerlink" href="#resourceusage" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">ResourceUsage</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cpu_percent</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_used_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_total_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_percent</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpu_stats</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">network_io_mb</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">disk_io_mb</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#ResourceUsage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Resource utilization metrics.</p>
+<p>Data class containing resource utilization metrics.</p>
+<p><strong>Attributes:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">cpu_percent</span></code>: CPU utilization percentage</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">memory_used_mb</span></code>: Memory usage in MB</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">memory_total_mb</span></code>: Total memory in MB</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">memory_percent</span></code>: Memory utilization percentage</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">gpu_stats</span></code>: Optional GPU utilization data</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">network_io_mb</span></code>: Optional network I/O in MB</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">disk_io_mb</span></code>: Optional disk I/O in MB</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.cpu_percent">
+<span class="sig-name descname"><span class="pre">cpu_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.cpu_percent" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.memory_used_mb">
+<span class="sig-name descname"><span class="pre">memory_used_mb</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.memory_used_mb" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.memory_total_mb">
+<span class="sig-name descname"><span class="pre">memory_total_mb</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.memory_total_mb" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.memory_percent">
+<span class="sig-name descname"><span class="pre">memory_percent</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.memory_percent" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.gpu_stats">
+<span class="sig-name descname"><span class="pre">gpu_stats</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a><span class="pre">,</span> <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a><span class="pre">]]]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.gpu_stats" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.network_io_mb">
+<span class="sig-name descname"><span class="pre">network_io_mb</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.network_io_mb" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.disk_io_mb">
+<span class="sig-name descname"><span class="pre">disk_io_mb</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.disk_io_mb" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.ResourceUsage.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">cpu_percent</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_used_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_total_mb</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">memory_percent</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">gpu_stats</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">network_io_mb</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">disk_io_mb</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clustrix.cost_monitoring.ResourceUsage.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="costestimate">
+<h3>CostEstimate<a class="headerlink" href="#costestimate" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">CostEstimate</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hourly_rate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">estimated_cost</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">currency</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'USD'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">last_updated</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#CostEstimate"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Cost estimation information.</p>
+<p>Data class containing cost estimation information.</p>
+<p><strong>Attributes:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">instance_type</span></code>: Cloud instance type</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hourly_rate</span></code>: Cost per hour in USD</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hours_used</span></code>: Number of hours used</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">estimated_cost</span></code>: Total estimated cost</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">currency</span></code>: Currency (default: “USD”)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">last_updated</span></code>: Last update timestamp</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.instance_type">
+<span class="sig-name descname"><span class="pre">instance_type</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.instance_type" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.hourly_rate">
+<span class="sig-name descname"><span class="pre">hourly_rate</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.hourly_rate" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.hours_used">
+<span class="sig-name descname"><span class="pre">hours_used</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.hours_used" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.estimated_cost">
+<span class="sig-name descname"><span class="pre">estimated_cost</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.estimated_cost" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.currency">
+<span class="sig-name descname"><span class="pre">currency</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">'USD'</span></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.currency" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.last_updated">
+<span class="sig-name descname"><span class="pre">last_updated</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/datetime.html#datetime.datetime" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></a><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.last_updated" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostEstimate.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hourly_rate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">estimated_cost</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">currency</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'USD'</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">last_updated</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clustrix.cost_monitoring.CostEstimate.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="costreport">
+<h3>CostReport<a class="headerlink" href="#costreport" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">CostReport</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestamp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duration_seconds</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">provider</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recommendations</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#CostReport"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.CostReport" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/functions.html#object" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">object</span></code></a></p>
+<p>Comprehensive cost and usage report.</p>
+<p>Comprehensive cost and usage report.</p>
+<p><strong>Attributes:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">timestamp</span></code>: Report generation time</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">duration_seconds</span></code>: Monitoring duration</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">resource_usage</span></code>: Resource utilization data</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">cost_estimate</span></code>: Cost estimation data</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">region</span></code>: Optional region information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">recommendations</span></code>: Cost optimization suggestions</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">metadata</span></code>: Additional metadata</p></li>
+</ul>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.timestamp">
+<span class="sig-name descname"><span class="pre">timestamp</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/datetime.html#datetime.datetime" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">datetime</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.timestamp" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.duration_seconds">
+<span class="sig-name descname"><span class="pre">duration_seconds</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.duration_seconds" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.resource_usage">
+<span class="sig-name descname"><span class="pre">resource_usage</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.resource_usage" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.cost_estimate">
+<span class="sig-name descname"><span class="pre">cost_estimate</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.cost_estimate" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.provider">
+<span class="sig-name descname"><span class="pre">provider</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.provider" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.region">
+<span class="sig-name descname"><span class="pre">region</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a><span class="pre">]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.region" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.recommendations">
+<span class="sig-name descname"><span class="pre">recommendations</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a><span class="pre">]]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.recommendations" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.metadata">
+<span class="sig-name descname"><span class="pre">metadata</span></span><em class="property"><span class="p"><span class="pre">:</span></span><span class="w"> </span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a><span class="pre">[</span><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a><span class="pre">,</span> <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a><span class="pre">]]</span></em><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">None</span></em><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.metadata" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.CostReport.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">timestamp</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">duration_seconds</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">provider</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">recommendations</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">metadata</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="headerlink" href="#clustrix.cost_monitoring.CostReport.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="base-monitor-class">
+<h2>Base Monitor Class<a class="headerlink" href="#base-monitor-class" title="Link to this heading">¶</a></h2>
+<section id="basecostmonitor">
+<h3>BaseCostMonitor<a class="headerlink" href="#basecostmonitor" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">BaseCostMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference external" href="https://docs.python.org/3/library/abc.html#abc.ABC" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">ABC</span></code></a></p>
+<p>Base class for cloud provider cost monitoring.</p>
+<p>Abstract base class for cloud provider cost monitors.</p>
+<p><strong>Key Methods:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">get_resource_usage()</span></code>: Get current resource utilization</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">estimate_cost()</span></code>: Estimate costs for given usage</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">get_pricing_info()</span></code>: Get current pricing information</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">start_monitoring()</span></code>: Begin cost monitoring session</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">stop_monitoring()</span></code>: End monitoring and generate report</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider_name</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.get_resource_usage">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_resource_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.get_resource_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.get_resource_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get current resource utilization metrics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.estimate_cost">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">estimate_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.estimate_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.estimate_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate cost for given instance type and usage duration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.get_pricing_info">
+<em class="property"><span class="pre">abstract</span><span class="w"> </span></em><span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get current pricing information for different instance types.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.start_monitoring">
+<span class="sig-name descname"><span class="pre">start_monitoring</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.start_monitoring"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.start_monitoring" title="Link to this definition">¶</a></dt>
+<dd><p>Start cost monitoring session.</p>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.stop_monitoring">
+<span class="sig-name descname"><span class="pre">stop_monitoring</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.stop_monitoring"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.stop_monitoring" title="Link to this definition">¶</a></dt>
+<dd><p>Stop monitoring and generate cost report.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference internal" href="#clustrix.cost_monitoring.CostReport" title="clustrix.cost_monitoring.CostReport"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostReport</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.get_cost_optimization_recommendations">
+<span class="sig-name descname"><span class="pre">get_cost_optimization_recommendations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.get_cost_optimization_recommendations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.get_cost_optimization_recommendations" title="Link to this definition">¶</a></dt>
+<dd><p>Generate cost optimization recommendations based on usage patterns.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.get_gpu_utilization">
+<span class="sig-name descname"><span class="pre">get_gpu_utilization</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.get_gpu_utilization"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.get_gpu_utilization" title="Link to this definition">¶</a></dt>
+<dd><p>Get GPU utilization metrics using nvidia-smi.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.BaseCostMonitor.get_cpu_memory_usage">
+<span class="sig-name descname"><span class="pre">get_cpu_memory_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#BaseCostMonitor.get_cpu_memory_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.BaseCostMonitor.get_cpu_memory_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get CPU and memory usage using system tools.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="decorators-and-utilities">
+<h2>Decorators and Utilities<a class="headerlink" href="#decorators-and-utilities" title="Link to this heading">¶</a></h2>
+<section id="cost-tracking-decorator">
+<h3>cost_tracking_decorator<a class="headerlink" href="#cost-tracking-decorator" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.cost_tracking_decorator">
+<span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">cost_tracking_decorator</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'default'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#cost_tracking_decorator"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.cost_tracking_decorator" title="Link to this definition">¶</a></dt>
+<dd><p>Decorator to automatically track costs for Clustrix functions.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>provider</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Cloud provider name (e.g., ‘lambda’, ‘aws’, ‘azure’, ‘gcp’)</p></li>
+<li><p><strong>instance_type</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Instance type for cost estimation</p></li>
+</ul>
+</dd>
+</dl>
+<p class="rubric">Example</p>
+<p>&#64;cost_tracking_decorator(‘lambda’, ‘a100_40gb’)
+&#64;cluster(cores=8, memory=”32GB”)
+def my_training_function():</p>
+<blockquote>
+<div><p># Your code here
+pass</p>
+</div></blockquote>
+<p>Decorator for automatic cost tracking of functions.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name (‘aws’, ‘gcp’, ‘azure’, ‘lambda’)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">instance_type</span></code>: Instance type for cost estimation</p></li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s1">&#39;60GB&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">train_model</span><span class="p">():</span>
+    <span class="c1"># Your training code here</span>
+    <span class="k">pass</span>
+
+<span class="c1"># Automatic cost tracking with detailed report</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">train_model</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cost: $</span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+</section>
+<section id="utility-functions">
+<h2>Utility Functions<a class="headerlink" href="#utility-functions" title="Link to this heading">¶</a></h2>
+<section id="get-cost-monitor">
+<h3>get_cost_monitor<a class="headerlink" href="#get-cost-monitor" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.get_cost_monitor">
+<span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">get_cost_monitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#get_cost_monitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.get_cost_monitor" title="Link to this definition">¶</a></dt>
+<dd><p>Get the appropriate cost monitor for a cloud provider.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters<span class="colon">:</span></dt>
+<dd class="field-odd"><p><strong>provider</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a></span>) – Cloud provider name</p>
+</dd>
+<dt class="field-even">Return type<span class="colon">:</span></dt>
+<dd class="field-even"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a>]</span></p>
+</dd>
+<dt class="field-odd">Returns<span class="colon">:</span></dt>
+<dd class="field-odd"><p>Cost monitor instance or None if not available</p>
+</dd>
+</dl>
+<p>Get the appropriate cost monitor for a cloud provider.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name</p></li>
+</ul>
+<p><strong>Returns:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code>: Provider-specific cost monitor instance</p></li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">)</span>
+<span class="n">cost_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;n2-standard-4&#39;</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+<section id="start-cost-monitoring">
+<h3>start_cost_monitoring<a class="headerlink" href="#start-cost-monitoring" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.start_cost_monitoring">
+<span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">start_cost_monitoring</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#start_cost_monitoring"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.start_cost_monitoring" title="Link to this definition">¶</a></dt>
+<dd><p>Start cost monitoring for a specific provider.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a>]</span></p>
+</dd>
+</dl>
+<p>Start cost monitoring for a specific provider.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name</p></li>
+</ul>
+<p><strong>Returns:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code>: Active cost monitor instance</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="generate-cost-report">
+<h3>generate_cost_report<a class="headerlink" href="#generate-cost-report" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.generate_cost_report">
+<span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">generate_cost_report</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_type</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'default'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#generate_cost_report"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.generate_cost_report" title="Link to this definition">¶</a></dt>
+<dd><p>Generate a cost report for the current session.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span></p>
+</dd>
+</dl>
+<p>Generate a cost report for the current session.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">instance_type</span></code>: Instance type for cost estimation</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">duration_seconds</span></code>: Optional duration override</p></li>
+</ul>
+<p><strong>Returns:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dict</span></code>: Cost report with usage and estimates</p></li>
+</ul>
+</dd></dl>
+
+</section>
+<section id="get-pricing-info">
+<h3>get_pricing_info<a class="headerlink" href="#get-pricing-info" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.cost_monitoring.get_pricing_info">
+<span class="sig-prename descclassname"><span class="pre">clustrix.cost_monitoring.</span></span><span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">provider</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_monitoring.html#get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_monitoring.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get pricing information for a cloud provider.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]]</span></p>
+</dd>
+</dl>
+<p>Get pricing information for a cloud provider.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">provider</span></code>: Cloud provider name</p></li>
+</ul>
+<p><strong>Returns:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">dict</span></code>: Pricing information by instance type</p></li>
+</ul>
+</dd></dl>
+
+</section>
+</section>
+<section id="cloud-provider-monitors">
+<h2>Cloud Provider Monitors<a class="headerlink" href="#cloud-provider-monitors" title="Link to this heading">¶</a></h2>
+<section id="lambda-cloud-monitor">
+<h3>Lambda Cloud Monitor<a class="headerlink" href="#lambda-cloud-monitor" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_providers.lambda_cloud.</span></span><span class="sig-name descname"><span class="pre">LambdaCostMonitor</span></span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a></p>
+<p>Cost monitoring for Lambda Cloud instances.</p>
+<p>Cost monitoring for Lambda Cloud GPU instances.</p>
+<p><strong>Features:</strong></p>
+<ul class="simple">
+<li><p>Real-time GPU utilization monitoring</p></li>
+<li><p>Accurate pricing for all Lambda instance types</p></li>
+<li><p>Instance recommendations based on usage patterns</p></li>
+<li><p>Monthly cost estimation tools</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_resource_usage">
+<span class="sig-name descname"><span class="pre">get_resource_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.get_resource_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_resource_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get current resource utilization for Lambda Cloud instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_cost">
+<span class="sig-name descname"><span class="pre">estimate_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.estimate_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate cost for Lambda Cloud instance usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_pricing_info">
+<span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get Lambda Cloud pricing information.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_instance_recommendations">
+<span class="sig-name descname"><span class="pre">get_instance_recommendations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">current_instance</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">None</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.get_instance_recommendations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_instance_recommendations" title="Link to this definition">¶</a></dt>
+<dd><p>Get instance type recommendations based on current usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_cost_optimization_tips">
+<span class="sig-name descname"><span class="pre">get_cost_optimization_tips</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.get_cost_optimization_tips"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_cost_optimization_tips" title="Link to this definition">¶</a></dt>
+<dd><p>Get general cost optimization tips for Lambda Cloud.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_performance_metrics">
+<span class="sig-name descname"><span class="pre">get_performance_metrics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.get_performance_metrics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_performance_metrics" title="Link to this definition">¶</a></dt>
+<dd><p>Get comprehensive performance metrics for Lambda Cloud instances.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_monthly_cost">
+<span class="sig-name descname"><span class="pre">estimate_monthly_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_per_day</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">8</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/lambda_cloud.html#LambdaCostMonitor.estimate_monthly_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_monthly_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate monthly costs for different usage patterns.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="aws-cost-monitor">
+<h3>AWS Cost Monitor<a class="headerlink" href="#aws-cost-monitor" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_providers.aws.</span></span><span class="sig-name descname"><span class="pre">AWSCostMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'us-east-1'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a></p>
+<p>Cost monitoring for AWS instances (EC2, Batch, etc.).</p>
+<p>Cost monitoring for AWS EC2 and Batch services.</p>
+<p><strong>Features:</strong></p>
+<ul class="simple">
+<li><p>On-demand and spot instance pricing</p></li>
+<li><p>AWS Batch cost estimation</p></li>
+<li><p>Regional pricing comparisons</p></li>
+<li><p>Reserved instance recommendations</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'us-east-1'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_resource_usage">
+<span class="sig-name descname"><span class="pre">get_resource_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_resource_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_resource_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get current resource utilization for AWS instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.estimate_cost">
+<span class="sig-name descname"><span class="pre">estimate_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.estimate_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.estimate_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate cost for AWS instance usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_pricing_info">
+<span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get AWS EC2 pricing information.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_spot_pricing_info">
+<span class="sig-name descname"><span class="pre">get_spot_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_spot_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_spot_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get estimated AWS spot pricing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_cost_optimization_recommendations">
+<span class="sig-name descname"><span class="pre">get_cost_optimization_recommendations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_cost_optimization_recommendations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_cost_optimization_recommendations" title="Link to this definition">¶</a></dt>
+<dd><p>Get AWS-specific cost optimization recommendations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.estimate_batch_cost">
+<span class="sig-name descname"><span class="pre">estimate_batch_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_queue</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">compute_environment</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">estimated_jobs</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">avg_job_duration_hours</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.estimate_batch_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.estimate_batch_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate costs for AWS Batch workloads.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_region_pricing_comparison">
+<span class="sig-name descname"><span class="pre">get_region_pricing_comparison</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_region_pricing_comparison"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_region_pricing_comparison" title="Link to this definition">¶</a></dt>
+<dd><p>Compare pricing across AWS regions (simplified).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.aws.AWSCostMonitor.get_aws_specific_metrics">
+<span class="sig-name descname"><span class="pre">get_aws_specific_metrics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/aws.html#AWSCostMonitor.get_aws_specific_metrics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_aws_specific_metrics" title="Link to this definition">¶</a></dt>
+<dd><p>Get AWS-specific cost and performance metrics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="azure-cost-monitor">
+<h3>Azure Cost Monitor<a class="headerlink" href="#azure-cost-monitor" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_providers.azure.</span></span><span class="sig-name descname"><span class="pre">AzureCostMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'East</span> <span class="pre">US'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a></p>
+<p>Cost monitoring for Azure Virtual Machines and Batch.</p>
+<p>Cost monitoring for Azure Virtual Machines and Batch.</p>
+<p><strong>Features:</strong></p>
+<ul class="simple">
+<li><p>Pay-as-you-go and spot VM pricing</p></li>
+<li><p>Azure Batch cost estimation</p></li>
+<li><p>Regional pricing analysis</p></li>
+<li><p>Cost optimization recommendations</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'East</span> <span class="pre">US'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_resource_usage">
+<span class="sig-name descname"><span class="pre">get_resource_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_resource_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_resource_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get current resource utilization for Azure VM.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.estimate_cost">
+<span class="sig-name descname"><span class="pre">estimate_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_spot</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.estimate_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.estimate_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate cost for Azure VM usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_pricing_info">
+<span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get Azure VM pricing information.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_spot_pricing_info">
+<span class="sig-name descname"><span class="pre">get_spot_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_spot_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_spot_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get estimated Azure Spot VM pricing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_cost_optimization_recommendations">
+<span class="sig-name descname"><span class="pre">get_cost_optimization_recommendations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_cost_optimization_recommendations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_cost_optimization_recommendations" title="Link to this definition">¶</a></dt>
+<dd><p>Get Azure-specific cost optimization recommendations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.estimate_batch_cost">
+<span class="sig-name descname"><span class="pre">estimate_batch_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">pool_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">vm_size</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">target_nodes</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">estimated_duration_hours</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.estimate_batch_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.estimate_batch_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate costs for Azure Batch workloads.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_region_pricing_comparison">
+<span class="sig-name descname"><span class="pre">get_region_pricing_comparison</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_region_pricing_comparison"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_region_pricing_comparison" title="Link to this definition">¶</a></dt>
+<dd><p>Compare pricing across Azure regions (simplified).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_azure_specific_metrics">
+<span class="sig-name descname"><span class="pre">get_azure_specific_metrics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_azure_specific_metrics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_specific_metrics" title="Link to this definition">¶</a></dt>
+<dd><p>Get Azure-specific cost and performance metrics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.azure.AzureCostMonitor.get_azure_consumption_api_integration">
+<span class="sig-name descname"><span class="pre">get_azure_consumption_api_integration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/azure.html#AzureCostMonitor.get_azure_consumption_api_integration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_consumption_api_integration" title="Link to this definition">¶</a></dt>
+<dd><p>Framework for Azure Consumption API integration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+<section id="gcp-cost-monitor">
+<h3>GCP Cost Monitor<a class="headerlink" href="#gcp-cost-monitor" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.cost_providers.gcp.</span></span><span class="sig-name descname"><span class="pre">GCPCostMonitor</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'us-central1'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor" title="clustrix.cost_monitoring.BaseCostMonitor"><code class="xref py py-class docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a></p>
+<p>Cost monitoring for Google Cloud Platform Compute Engine instances.</p>
+<p>Cost monitoring for Google Cloud Compute Engine.</p>
+<p><strong>Features:</strong></p>
+<ul class="simple">
+<li><p>On-demand and preemptible instance pricing</p></li>
+<li><p>Sustained use discount calculations</p></li>
+<li><p>Regional pricing comparisons</p></li>
+<li><p>Google Cloud Batch cost estimation</p></li>
+</ul>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.__init__">
+<span class="sig-name descname"><span class="pre">__init__</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">region</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">'us-central1'</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.__init__"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.__init__" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_resource_usage">
+<span class="sig-name descname"><span class="pre">get_resource_usage</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_resource_usage"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_resource_usage" title="Link to this definition">¶</a></dt>
+<dd><p>Get current resource utilization for GCP instance.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage" title="clustrix.cost_monitoring.ResourceUsage"><code class="xref py py-class docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.estimate_cost">
+<span class="sig-name descname"><span class="pre">estimate_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">hours_used</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">use_preemptible</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">False</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">sustained_use_percent</span></span><span class="o"><span class="pre">=</span></span><span class="default_value"><span class="pre">0</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.estimate_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate cost for GCP instance usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate" title="clustrix.cost_monitoring.CostEstimate"><code class="xref py py-class docutils literal notranslate"><span class="pre">CostEstimate</span></code></a></span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_pricing_info">
+<span class="sig-name descname"><span class="pre">get_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get GCP Compute Engine pricing information.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_preemptible_pricing_info">
+<span class="sig-name descname"><span class="pre">get_preemptible_pricing_info</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_preemptible_pricing_info"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_preemptible_pricing_info" title="Link to this definition">¶</a></dt>
+<dd><p>Get GCP preemptible pricing.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/functions.html#float" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">float</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_cost_optimization_recommendations">
+<span class="sig-name descname"><span class="pre">get_cost_optimization_recommendations</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">resource_usage</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cost_estimate</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_cost_optimization_recommendations"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_cost_optimization_recommendations" title="Link to this definition">¶</a></dt>
+<dd><p>Get GCP-specific cost optimization recommendations.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.estimate_sustained_use_discount">
+<span class="sig-name descname"><span class="pre">estimate_sustained_use_discount</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">hours_per_month</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.estimate_sustained_use_discount"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_sustained_use_discount" title="Link to this definition">¶</a></dt>
+<dd><p>Calculate sustained use discount based on monthly usage.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_region_pricing_comparison">
+<span class="sig-name descname"><span class="pre">get_region_pricing_comparison</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">instance_type</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_region_pricing_comparison"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_region_pricing_comparison" title="Link to this definition">¶</a></dt>
+<dd><p>Compare pricing across GCP regions (simplified).</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.estimate_batch_cost">
+<span class="sig-name descname"><span class="pre">estimate_batch_cost</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">job_name</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">machine_type</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">instance_count</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">estimated_duration_hours</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.estimate_batch_cost"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_batch_cost" title="Link to this definition">¶</a></dt>
+<dd><p>Estimate costs for Google Cloud Batch workloads.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_gcp_specific_metrics">
+<span class="sig-name descname"><span class="pre">get_gcp_specific_metrics</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_gcp_specific_metrics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_gcp_specific_metrics" title="Link to this definition">¶</a></dt>
+<dd><p>Get GCP-specific cost and performance metrics.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.cost_providers.gcp.GCPCostMonitor.get_billing_api_integration">
+<span class="sig-name descname"><span class="pre">get_billing_api_integration</span></span><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/cost_providers/gcp.html#GCPCostMonitor.get_billing_api_integration"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_billing_api_integration" title="Link to this definition">¶</a></dt>
+<dd><p>Framework for GCP Billing API integration.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Return type<span class="colon">:</span></dt>
+<dd class="field-odd"><p><span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#str" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">str</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]</span></p>
+</dd>
+</dl>
+</dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="usage-examples">
+<h2>Usage Examples<a class="headerlink" href="#usage-examples" title="Link to this heading">¶</a></h2>
+<section id="basic-cost-monitoring">
+<h3>Basic Cost Monitoring<a class="headerlink" href="#basic-cost-monitoring" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">get_cost_monitor</span>
+
+<span class="c1"># Get AWS cost monitor</span>
+<span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+
+<span class="c1"># Estimate costs</span>
+<span class="n">cost_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">,</span> <span class="n">hours_used</span><span class="o">=</span><span class="mf">2.0</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Cost: $</span><span class="si">{</span><span class="n">cost_estimate</span><span class="o">.</span><span class="n">estimated_cost</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Get current resource usage</span>
+<span class="n">usage</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_resource_usage</span><span class="p">()</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;CPU: </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">cpu_percent</span><span class="si">}</span><span class="s2">%, Memory: </span><span class="si">{</span><span class="n">usage</span><span class="o">.</span><span class="n">memory_percent</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="automatic-cost-tracking">
+<h3>Automatic Cost Tracking<a class="headerlink" href="#automatic-cost-tracking" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cost_tracking_decorator</span><span class="p">,</span> <span class="n">cluster</span>
+
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-8&#39;</span><span class="p">)</span>
+<span class="nd">@cluster</span><span class="p">(</span><span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">memory</span><span class="o">=</span><span class="s1">&#39;32GB&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">data_processing</span><span class="p">():</span>
+    <span class="c1"># Your data processing code</span>
+    <span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+    <span class="n">df</span> <span class="o">=</span> <span class="n">pd</span><span class="o">.</span><span class="n">read_csv</span><span class="p">(</span><span class="s1">&#39;large_dataset.csv&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">df</span><span class="o">.</span><span class="n">groupby</span><span class="p">(</span><span class="s1">&#39;category&#39;</span><span class="p">)</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+<span class="c1"># Execute with automatic cost tracking</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">data_processing</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Processing completed successfully&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Estimated cost: $</span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Duration: </span><span class="si">{</span><span class="n">result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;duration_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="manual-session-monitoring">
+<h3>Manual Session Monitoring<a class="headerlink" href="#manual-session-monitoring" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">start_cost_monitoring</span><span class="p">,</span> <span class="n">generate_cost_report</span>
+
+<span class="c1"># Start monitoring</span>
+<span class="n">monitor</span> <span class="o">=</span> <span class="n">start_cost_monitoring</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+
+<span class="c1"># Run your workload</span>
+<span class="c1"># ... your code here ...</span>
+
+<span class="c1"># Generate report</span>
+<span class="n">report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_NC6s_v3&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Session cost: $</span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="cost-optimization">
+<h3>Cost Optimization<a class="headerlink" href="#cost-optimization" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">get_cost_monitor</span>
+
+<span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+
+<span class="c1"># Get pricing information</span>
+<span class="n">pricing</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_pricing_info</span><span class="p">()</span>
+
+<span class="c1"># Compare spot vs on-demand pricing</span>
+<span class="n">on_demand</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span>
+<span class="n">spot</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+
+<span class="n">savings</span> <span class="o">=</span> <span class="p">((</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">-</span> <span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">/</span> <span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Spot instance savings: </span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="regional-pricing-comparison">
+<h3>Regional Pricing Comparison<a class="headerlink" href="#regional-pricing-comparison" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">)</span>
+
+<span class="c1"># Compare pricing across regions</span>
+<span class="n">regional_pricing</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">get_region_pricing_comparison</span><span class="p">(</span><span class="s1">&#39;n2-standard-4&#39;</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">region</span><span class="p">,</span> <span class="n">pricing</span> <span class="ow">in</span> <span class="n">regional_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s2">: $</span><span class="si">{</span><span class="n">pricing</span><span class="p">[</span><span class="s1">&#39;on_demand_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+</section>
+<section id="error-handling">
+<h2>Error Handling<a class="headerlink" href="#error-handling" title="Link to this heading">¶</a></h2>
+<p>The cost monitoring system includes robust error handling:</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">get_cost_monitor</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;unsupported_provider&#39;</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">ValueError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Provider not supported: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">cost_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;invalid_instance&#39;</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+<span class="k">except</span> <span class="ne">KeyError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Instance type not found: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</section>
+<section id="best-practices">
+<h2>Best Practices<a class="headerlink" href="#best-practices" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p><strong>Use Decorators</strong>: For automatic tracking of cluster functions</p></li>
+<li><p><strong>Monitor Long Jobs</strong>: Use manual monitoring for jobs over 1 hour</p></li>
+<li><p><strong>Check Recommendations</strong>: Review cost optimization suggestions regularly</p></li>
+<li><p><strong>Compare Pricing</strong>: Use regional and instance type comparisons</p></li>
+<li><p><strong>Track Trends</strong>: Save reports to analyze cost trends over time</p></li>
+</ol>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Cost estimates are based on current public pricing and may vary</p></li>
+<li><p>Resource utilization requires appropriate permissions on the target system</p></li>
+<li><p>GPU monitoring requires nvidia-sml on the target system</p></li>
+<li><p>Some cloud providers may have rate limits on pricing API calls</p></li>
+<li><p>Spot/preemptible instance availability and pricing can change frequently</p></li>
+</ul>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="notebook_magic.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Notebook Magic Commands
+    </a>
+    <a class="float-right" href="local_executor.html" title="Next">
+        Local Executor API <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">Cost Monitoring</a><ul>
+<li><a class="reference internal" href="#overview">Overview</a></li>
+<li><a class="reference internal" href="#core-classes">Core Classes</a><ul>
+<li><a class="reference internal" href="#resourceusage">ResourceUsage</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage"><code class="docutils literal notranslate"><span class="pre">ResourceUsage</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.cpu_percent"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.cpu_percent</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.memory_used_mb"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.memory_used_mb</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.memory_total_mb"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.memory_total_mb</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.memory_percent"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.memory_percent</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.gpu_stats"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.gpu_stats</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.network_io_mb"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.network_io_mb</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.disk_io_mb"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.disk_io_mb</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.ResourceUsage.__init__"><code class="docutils literal notranslate"><span class="pre">ResourceUsage.__init__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#costestimate">CostEstimate</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate"><code class="docutils literal notranslate"><span class="pre">CostEstimate</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.instance_type"><code class="docutils literal notranslate"><span class="pre">CostEstimate.instance_type</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.hourly_rate"><code class="docutils literal notranslate"><span class="pre">CostEstimate.hourly_rate</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.hours_used"><code class="docutils literal notranslate"><span class="pre">CostEstimate.hours_used</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.estimated_cost"><code class="docutils literal notranslate"><span class="pre">CostEstimate.estimated_cost</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.currency"><code class="docutils literal notranslate"><span class="pre">CostEstimate.currency</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.last_updated"><code class="docutils literal notranslate"><span class="pre">CostEstimate.last_updated</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostEstimate.__init__"><code class="docutils literal notranslate"><span class="pre">CostEstimate.__init__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#costreport">CostReport</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport"><code class="docutils literal notranslate"><span class="pre">CostReport</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.timestamp"><code class="docutils literal notranslate"><span class="pre">CostReport.timestamp</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.duration_seconds"><code class="docutils literal notranslate"><span class="pre">CostReport.duration_seconds</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.resource_usage"><code class="docutils literal notranslate"><span class="pre">CostReport.resource_usage</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.cost_estimate"><code class="docutils literal notranslate"><span class="pre">CostReport.cost_estimate</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.provider"><code class="docutils literal notranslate"><span class="pre">CostReport.provider</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.region"><code class="docutils literal notranslate"><span class="pre">CostReport.region</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.recommendations"><code class="docutils literal notranslate"><span class="pre">CostReport.recommendations</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.metadata"><code class="docutils literal notranslate"><span class="pre">CostReport.metadata</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.CostReport.__init__"><code class="docutils literal notranslate"><span class="pre">CostReport.__init__()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#base-monitor-class">Base Monitor Class</a><ul>
+<li><a class="reference internal" href="#basecostmonitor">BaseCostMonitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.__init__"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.get_resource_usage"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.get_resource_usage()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.estimate_cost"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.estimate_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.get_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.start_monitoring"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.start_monitoring()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.stop_monitoring"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.stop_monitoring()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.get_cost_optimization_recommendations"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.get_cost_optimization_recommendations()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.get_gpu_utilization"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.get_gpu_utilization()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.BaseCostMonitor.get_cpu_memory_usage"><code class="docutils literal notranslate"><span class="pre">BaseCostMonitor.get_cpu_memory_usage()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#decorators-and-utilities">Decorators and Utilities</a><ul>
+<li><a class="reference internal" href="#cost-tracking-decorator">cost_tracking_decorator</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.cost_tracking_decorator"><code class="docutils literal notranslate"><span class="pre">cost_tracking_decorator()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#utility-functions">Utility Functions</a><ul>
+<li><a class="reference internal" href="#get-cost-monitor">get_cost_monitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.get_cost_monitor"><code class="docutils literal notranslate"><span class="pre">get_cost_monitor()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#start-cost-monitoring">start_cost_monitoring</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.start_cost_monitoring"><code class="docutils literal notranslate"><span class="pre">start_cost_monitoring()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#generate-cost-report">generate_cost_report</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.generate_cost_report"><code class="docutils literal notranslate"><span class="pre">generate_cost_report()</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#get-pricing-info">get_pricing_info</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_monitoring.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">get_pricing_info()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#cloud-provider-monitors">Cloud Provider Monitors</a><ul>
+<li><a class="reference internal" href="#lambda-cloud-monitor">Lambda Cloud Monitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.__init__"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_resource_usage"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.get_resource_usage()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_cost"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.estimate_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.get_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_instance_recommendations"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.get_instance_recommendations()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_cost_optimization_tips"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.get_cost_optimization_tips()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_performance_metrics"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.get_performance_metrics()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_monthly_cost"><code class="docutils literal notranslate"><span class="pre">LambdaCostMonitor.estimate_monthly_cost()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#aws-cost-monitor">AWS Cost Monitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.__init__"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_resource_usage"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_resource_usage()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.estimate_cost"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.estimate_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_spot_pricing_info"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_spot_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_cost_optimization_recommendations"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_cost_optimization_recommendations()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.estimate_batch_cost"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.estimate_batch_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_region_pricing_comparison"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_region_pricing_comparison()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.aws.AWSCostMonitor.get_aws_specific_metrics"><code class="docutils literal notranslate"><span class="pre">AWSCostMonitor.get_aws_specific_metrics()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#azure-cost-monitor">Azure Cost Monitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.__init__"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_resource_usage"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_resource_usage()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.estimate_cost"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.estimate_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_spot_pricing_info"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_spot_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_cost_optimization_recommendations"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_cost_optimization_recommendations()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.estimate_batch_cost"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.estimate_batch_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_region_pricing_comparison"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_region_pricing_comparison()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_specific_metrics"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_azure_specific_metrics()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_consumption_api_integration"><code class="docutils literal notranslate"><span class="pre">AzureCostMonitor.get_azure_consumption_api_integration()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#gcp-cost-monitor">GCP Cost Monitor</a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.__init__"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.__init__()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_resource_usage"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_resource_usage()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_cost"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.estimate_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_pricing_info"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_preemptible_pricing_info"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_preemptible_pricing_info()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_cost_optimization_recommendations"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_cost_optimization_recommendations()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_sustained_use_discount"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.estimate_sustained_use_discount()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_region_pricing_comparison"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_region_pricing_comparison()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_batch_cost"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.estimate_batch_cost()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_gcp_specific_metrics"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_gcp_specific_metrics()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.cost_providers.gcp.GCPCostMonitor.get_billing_api_integration"><code class="docutils literal notranslate"><span class="pre">GCPCostMonitor.get_billing_api_integration()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#usage-examples">Usage Examples</a><ul>
+<li><a class="reference internal" href="#basic-cost-monitoring">Basic Cost Monitoring</a></li>
+<li><a class="reference internal" href="#automatic-cost-tracking">Automatic Cost Tracking</a></li>
+<li><a class="reference internal" href="#manual-session-monitoring">Manual Session Monitoring</a></li>
+<li><a class="reference internal" href="#cost-optimization">Cost Optimization</a></li>
+<li><a class="reference internal" href="#regional-pricing-comparison">Regional Pricing Comparison</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#error-handling">Error Handling</a></li>
+<li><a class="reference internal" href="#best-practices">Best Practices</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 27, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

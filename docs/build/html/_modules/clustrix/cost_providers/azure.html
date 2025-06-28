@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../../../">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>clustrix.cost_providers.azure &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../../../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../../../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../../../genindex.html" />
+            <link rel="search" title="Search" href="../../../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="up" title="Module code" href="../../index.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../../../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../../../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../../../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../../../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/cost_monitoring.html">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../../../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../../../index.html">Docs</a></li>
+            <li class="breadcrumb-item"><a href="../../index.html">Module code</a></li>
+        <li class="breadcrumb-item active" aria-current="page">clustrix.cost_providers.azure</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/_modules/clustrix/cost_providers/azure" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <h1>Source code for clustrix.cost_providers.azure</h1><div class="highlight"><pre>
+<span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Azure cost monitoring implementation.</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+<span class="kn">import</span> <span class="nn">logging</span>
+<span class="kn">from</span> <span class="nn">datetime</span> <span class="kn">import</span> <span class="n">datetime</span>
+<span class="kn">from</span> <span class="nn">typing</span> <span class="kn">import</span> <span class="n">Dict</span><span class="p">,</span> <span class="n">List</span><span class="p">,</span> <span class="n">Any</span>
+
+<span class="kn">from</span> <span class="nn">..cost_monitoring</span> <span class="kn">import</span> <span class="n">BaseCostMonitor</span><span class="p">,</span> <span class="n">ResourceUsage</span><span class="p">,</span> <span class="n">CostEstimate</span>
+
+<span class="n">logger</span> <span class="o">=</span> <span class="n">logging</span><span class="o">.</span><span class="n">getLogger</span><span class="p">(</span><span class="vm">__name__</span><span class="p">)</span>
+
+
+<div class="viewcode-block" id="AzureCostMonitor">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor">[docs]</a>
+<span class="k">class</span> <span class="nc">AzureCostMonitor</span><span class="p">(</span><span class="n">BaseCostMonitor</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Cost monitoring for Azure Virtual Machines and Batch.&quot;&quot;&quot;</span>
+
+<div class="viewcode-block" id="AzureCostMonitor.__init__">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.__init__">[docs]</a>
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">region</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;East US&quot;</span><span class="p">):</span>
+        <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="s2">&quot;Azure&quot;</span><span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">region</span> <span class="o">=</span> <span class="n">region</span>
+
+        <span class="c1"># Azure VM pricing (East US, as of 2025, approximate rates in USD/hour)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="c1"># B-series (Burstable)</span>
+            <span class="s2">&quot;Standard_B1s&quot;</span><span class="p">:</span> <span class="mf">0.0104</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_B1ms&quot;</span><span class="p">:</span> <span class="mf">0.0208</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_B2s&quot;</span><span class="p">:</span> <span class="mf">0.0416</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_B2ms&quot;</span><span class="p">:</span> <span class="mf">0.0832</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_B4ms&quot;</span><span class="p">:</span> <span class="mf">0.1664</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_B8ms&quot;</span><span class="p">:</span> <span class="mf">0.3328</span><span class="p">,</span>
+            <span class="c1"># D-series (General Purpose)</span>
+            <span class="s2">&quot;Standard_D2s_v3&quot;</span><span class="p">:</span> <span class="mf">0.096</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_D4s_v3&quot;</span><span class="p">:</span> <span class="mf">0.192</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_D8s_v3&quot;</span><span class="p">:</span> <span class="mf">0.384</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_D16s_v3&quot;</span><span class="p">:</span> <span class="mf">0.768</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_D32s_v3&quot;</span><span class="p">:</span> <span class="mf">1.536</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_D64s_v3&quot;</span><span class="p">:</span> <span class="mf">3.072</span><span class="p">,</span>
+            <span class="c1"># F-series (Compute Optimized)</span>
+            <span class="s2">&quot;Standard_F2s_v2&quot;</span><span class="p">:</span> <span class="mf">0.085</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_F4s_v2&quot;</span><span class="p">:</span> <span class="mf">0.169</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_F8s_v2&quot;</span><span class="p">:</span> <span class="mf">0.338</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_F16s_v2&quot;</span><span class="p">:</span> <span class="mf">0.676</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_F32s_v2&quot;</span><span class="p">:</span> <span class="mf">1.352</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_F64s_v2&quot;</span><span class="p">:</span> <span class="mf">2.704</span><span class="p">,</span>
+            <span class="c1"># E-series (Memory Optimized)</span>
+            <span class="s2">&quot;Standard_E2s_v3&quot;</span><span class="p">:</span> <span class="mf">0.126</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_E4s_v3&quot;</span><span class="p">:</span> <span class="mf">0.252</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_E8s_v3&quot;</span><span class="p">:</span> <span class="mf">0.504</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_E16s_v3&quot;</span><span class="p">:</span> <span class="mf">1.008</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_E32s_v3&quot;</span><span class="p">:</span> <span class="mf">2.016</span><span class="p">,</span>
+            <span class="s2">&quot;Standard_E64s_v3&quot;</span><span class="p">:</span> <span class="mf">4.032</span><span class="p">,</span>
+            <span class="c1"># GPU VMs</span>
+            <span class="s2">&quot;Standard_NC6s_v3&quot;</span><span class="p">:</span> <span class="mf">3.06</span><span class="p">,</span>  <span class="c1"># 1 V100</span>
+            <span class="s2">&quot;Standard_NC12s_v3&quot;</span><span class="p">:</span> <span class="mf">6.12</span><span class="p">,</span>  <span class="c1"># 2 V100</span>
+            <span class="s2">&quot;Standard_NC24s_v3&quot;</span><span class="p">:</span> <span class="mf">12.24</span><span class="p">,</span>  <span class="c1"># 4 V100</span>
+            <span class="s2">&quot;Standard_ND40rs_v2&quot;</span><span class="p">:</span> <span class="mf">22.0</span><span class="p">,</span>  <span class="c1"># 8 V100</span>
+            <span class="s2">&quot;Standard_NC6s_v2&quot;</span><span class="p">:</span> <span class="mf">0.90</span><span class="p">,</span>  <span class="c1"># 1 P100</span>
+            <span class="s2">&quot;Standard_NC12s_v2&quot;</span><span class="p">:</span> <span class="mf">1.80</span><span class="p">,</span>  <span class="c1"># 2 P100</span>
+            <span class="s2">&quot;Standard_NC24s_v2&quot;</span><span class="p">:</span> <span class="mf">3.60</span><span class="p">,</span>  <span class="c1"># 4 P100</span>
+            <span class="c1"># Default fallback</span>
+            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="mf">0.10</span><span class="p">,</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Spot VM discount factors (approximate)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">spot_discounts</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;Standard_B&quot;</span><span class="p">:</span> <span class="mf">0.8</span><span class="p">,</span>  <span class="c1"># ~20% discount</span>
+            <span class="s2">&quot;Standard_D&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>  <span class="c1"># ~30% discount</span>
+            <span class="s2">&quot;Standard_F&quot;</span><span class="p">:</span> <span class="mf">0.65</span><span class="p">,</span>  <span class="c1"># ~35% discount</span>
+            <span class="s2">&quot;Standard_E&quot;</span><span class="p">:</span> <span class="mf">0.6</span><span class="p">,</span>  <span class="c1"># ~40% discount</span>
+            <span class="s2">&quot;Standard_NC&quot;</span><span class="p">:</span> <span class="mf">0.3</span><span class="p">,</span>  <span class="c1"># ~70% discount</span>
+            <span class="s2">&quot;Standard_ND&quot;</span><span class="p">:</span> <span class="mf">0.35</span><span class="p">,</span>  <span class="c1"># ~65% discount</span>
+            <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="mf">0.7</span><span class="p">,</span>  <span class="c1"># ~30% discount</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Instance metadata</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">instance_metadata</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;Standard_NC6s_v3&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_type&quot;</span><span class="p">:</span> <span class="s2">&quot;V100&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;16GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;112GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;Standard_NC12s_v3&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_type&quot;</span><span class="p">:</span> <span class="s2">&quot;V100&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;32GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;224GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;Standard_NC24s_v3&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_type&quot;</span><span class="p">:</span> <span class="s2">&quot;V100&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;64GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">24</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;448GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;Standard_ND40rs_v2&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_type&quot;</span><span class="p">:</span> <span class="s2">&quot;V100&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;128GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">40</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;672GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;Standard_NC6s_v2&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;gpus&quot;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_type&quot;</span><span class="p">:</span> <span class="s2">&quot;P100&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;gpu_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;16GB&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;cpu_cores&quot;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span>
+                <span class="s2">&quot;ram&quot;</span><span class="p">:</span> <span class="s2">&quot;112GB&quot;</span><span class="p">,</span>
+            <span class="p">},</span>
+        <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_resource_usage">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_resource_usage">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_resource_usage</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">ResourceUsage</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get current resource utilization for Azure VM.&quot;&quot;&quot;</span>
+        <span class="c1"># Get CPU and memory usage</span>
+        <span class="n">cpu_percent</span><span class="p">,</span> <span class="n">mem_used_mb</span><span class="p">,</span> <span class="n">mem_total_mb</span><span class="p">,</span> <span class="n">mem_percent</span> <span class="o">=</span> <span class="p">(</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">get_cpu_memory_usage</span><span class="p">()</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Get GPU utilization (if available)</span>
+        <span class="n">gpu_stats</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">get_gpu_utilization</span><span class="p">()</span>
+
+        <span class="k">return</span> <span class="n">ResourceUsage</span><span class="p">(</span>
+            <span class="n">cpu_percent</span><span class="o">=</span><span class="n">cpu_percent</span><span class="p">,</span>
+            <span class="n">memory_used_mb</span><span class="o">=</span><span class="n">mem_used_mb</span><span class="p">,</span>
+            <span class="n">memory_total_mb</span><span class="o">=</span><span class="n">mem_total_mb</span><span class="p">,</span>
+            <span class="n">memory_percent</span><span class="o">=</span><span class="n">mem_percent</span><span class="p">,</span>
+            <span class="n">gpu_stats</span><span class="o">=</span><span class="n">gpu_stats</span><span class="p">,</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.estimate_cost">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.estimate_cost">[docs]</a>
+    <span class="k">def</span> <span class="nf">estimate_cost</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">hours_used</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">use_spot</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">CostEstimate</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Estimate cost for Azure VM usage.&quot;&quot;&quot;</span>
+        <span class="c1"># Get base hourly rate</span>
+        <span class="n">hourly_rate</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Apply spot discount if requested</span>
+        <span class="k">if</span> <span class="n">use_spot</span><span class="p">:</span>
+            <span class="n">instance_family</span> <span class="o">=</span> <span class="p">(</span>
+                <span class="n">instance_type</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">in</span> <span class="n">instance_type</span> <span class="k">else</span> <span class="n">instance_type</span>
+            <span class="p">)</span>
+            <span class="c1"># Match instance family prefix</span>
+            <span class="n">discount_key</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span>
+                <span class="p">(</span>
+                    <span class="n">k</span>
+                    <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">spot_discounts</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="n">instance_family</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">k</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;Standard_&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+                <span class="p">),</span>
+                <span class="s2">&quot;default&quot;</span><span class="p">,</span>
+            <span class="p">)</span>
+            <span class="n">discount_factor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">spot_discounts</span><span class="p">[</span><span class="n">discount_key</span><span class="p">]</span>
+            <span class="n">hourly_rate</span> <span class="o">*=</span> <span class="n">discount_factor</span>
+
+        <span class="c1"># Calculate estimated cost</span>
+        <span class="n">estimated_cost</span> <span class="o">=</span> <span class="n">hourly_rate</span> <span class="o">*</span> <span class="n">hours_used</span>
+
+        <span class="n">pricing_type</span> <span class="o">=</span> <span class="s2">&quot;Spot&quot;</span> <span class="k">if</span> <span class="n">use_spot</span> <span class="k">else</span> <span class="s2">&quot;Pay-as-you-go&quot;</span>
+
+        <span class="k">return</span> <span class="n">CostEstimate</span><span class="p">(</span>
+            <span class="n">instance_type</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance_type</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">pricing_type</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">,</span>
+            <span class="n">hourly_rate</span><span class="o">=</span><span class="n">hourly_rate</span><span class="p">,</span>
+            <span class="n">hours_used</span><span class="o">=</span><span class="n">hours_used</span><span class="p">,</span>
+            <span class="n">estimated_cost</span><span class="o">=</span><span class="n">estimated_cost</span><span class="p">,</span>
+            <span class="n">currency</span><span class="o">=</span><span class="s2">&quot;USD&quot;</span><span class="p">,</span>
+            <span class="n">last_updated</span><span class="o">=</span><span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">(),</span>
+        <span class="p">)</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_pricing_info">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_pricing_info">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_pricing_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get Azure VM pricing information.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_spot_pricing_info">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_spot_pricing_info">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_spot_pricing_info</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">float</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get estimated Azure Spot VM pricing.&quot;&quot;&quot;</span>
+        <span class="n">spot_pricing</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">on_demand_price</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">instance_type</span> <span class="o">!=</span> <span class="s2">&quot;default&quot;</span><span class="p">:</span>
+                <span class="n">instance_family</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">instance_type</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot;_&quot;</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span>
+                    <span class="k">if</span> <span class="s2">&quot;_&quot;</span> <span class="ow">in</span> <span class="n">instance_type</span>
+                    <span class="k">else</span> <span class="n">instance_type</span>
+                <span class="p">)</span>
+                <span class="n">discount_key</span> <span class="o">=</span> <span class="nb">next</span><span class="p">(</span>
+                    <span class="p">(</span>
+                        <span class="n">k</span>
+                        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">spot_discounts</span><span class="o">.</span><span class="n">keys</span><span class="p">()</span>
+                        <span class="k">if</span> <span class="n">instance_family</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">k</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;Standard_&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">))</span>
+                    <span class="p">),</span>
+                    <span class="s2">&quot;default&quot;</span><span class="p">,</span>
+                <span class="p">)</span>
+                <span class="n">discount_factor</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">spot_discounts</span><span class="p">[</span><span class="n">discount_key</span><span class="p">]</span>
+                <span class="n">spot_pricing</span><span class="p">[</span><span class="n">instance_type</span><span class="p">]</span> <span class="o">=</span> <span class="n">on_demand_price</span> <span class="o">*</span> <span class="n">discount_factor</span>
+        <span class="k">return</span> <span class="n">spot_pricing</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_cost_optimization_recommendations">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_cost_optimization_recommendations">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_cost_optimization_recommendations</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">resource_usage</span><span class="p">:</span> <span class="n">ResourceUsage</span><span class="p">,</span> <span class="n">cost_estimate</span><span class="p">:</span> <span class="n">CostEstimate</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get Azure-specific cost optimization recommendations.&quot;&quot;&quot;</span>
+        <span class="n">recommendations</span> <span class="o">=</span> <span class="nb">super</span><span class="p">()</span><span class="o">.</span><span class="n">get_cost_optimization_recommendations</span><span class="p">(</span>
+            <span class="n">resource_usage</span><span class="p">,</span> <span class="n">cost_estimate</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Azure-specific recommendations</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span>
+            <span class="p">[</span>
+                <span class="s2">&quot;Consider using Azure Spot VMs for fault-tolerant workloads (up to 90</span><span class="si">% s</span><span class="s2">avings)&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Use Reserved VM Instances for predictable workloads (up to 72</span><span class="si">% s</span><span class="s2">avings)&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Consider Azure Batch for large-scale parallel processing&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Use Azure CycleCloud for HPC workloads and cluster management&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Enable auto-shutdown for development VMs to avoid unnecessary costs&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Use Azure Monitor for detailed cost tracking and alerts&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Consider B-series burstable VMs for variable workloads&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Use managed disks with appropriate performance tiers&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Implement lifecycle policies for blob storage to reduce storage costs&quot;</span><span class="p">,</span>
+            <span class="p">]</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Instance-specific recommendations</span>
+        <span class="n">current_instance</span> <span class="o">=</span> <span class="n">cost_estimate</span><span class="o">.</span><span class="n">instance_type</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s2">&quot; &quot;</span><span class="p">)[</span>
+            <span class="mi">0</span>
+        <span class="p">]</span>  <span class="c1"># Remove pricing type</span>
+        <span class="k">if</span> <span class="n">current_instance</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s2">&quot;Standard_NC&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="n">current_instance</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span>
+            <span class="s2">&quot;Standard_ND&quot;</span>
+        <span class="p">):</span>
+            <span class="k">if</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">:</span>
+                <span class="n">avg_gpu_util</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span>
+                    <span class="n">gpu</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;utilization_percent&quot;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+                    <span class="k">for</span> <span class="n">gpu</span> <span class="ow">in</span> <span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span>
+                <span class="p">)</span> <span class="o">/</span> <span class="nb">len</span><span class="p">(</span><span class="n">resource_usage</span><span class="o">.</span><span class="n">gpu_stats</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">avg_gpu_util</span> <span class="o">&lt;</span> <span class="mi">50</span><span class="p">:</span>
+                    <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+                        <span class="s2">&quot;Low GPU utilization on expensive GPU VM. Consider Standard_D or Standard_F series VMs.&quot;</span>
+                    <span class="p">)</span>
+
+        <span class="k">return</span> <span class="n">recommendations</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.estimate_batch_cost">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.estimate_batch_cost">[docs]</a>
+    <span class="k">def</span> <span class="nf">estimate_batch_cost</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span>
+        <span class="n">pool_name</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">vm_size</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>
+        <span class="n">target_nodes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">estimated_duration_hours</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Estimate costs for Azure Batch workloads.&quot;&quot;&quot;</span>
+        <span class="c1"># Get VM hourly cost</span>
+        <span class="n">vm_hourly_cost</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">vm_size</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">])</span>
+
+        <span class="c1"># Calculate total cost</span>
+        <span class="n">total_compute_hours</span> <span class="o">=</span> <span class="n">target_nodes</span> <span class="o">*</span> <span class="n">estimated_duration_hours</span>
+        <span class="n">estimated_cost</span> <span class="o">=</span> <span class="n">total_compute_hours</span> <span class="o">*</span> <span class="n">vm_hourly_cost</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;pool_name&quot;</span><span class="p">:</span> <span class="n">pool_name</span><span class="p">,</span>
+            <span class="s2">&quot;vm_size&quot;</span><span class="p">:</span> <span class="n">vm_size</span><span class="p">,</span>
+            <span class="s2">&quot;target_nodes&quot;</span><span class="p">:</span> <span class="n">target_nodes</span><span class="p">,</span>
+            <span class="s2">&quot;estimated_duration_hours&quot;</span><span class="p">:</span> <span class="n">estimated_duration_hours</span><span class="p">,</span>
+            <span class="s2">&quot;total_compute_hours&quot;</span><span class="p">:</span> <span class="n">total_compute_hours</span><span class="p">,</span>
+            <span class="s2">&quot;vm_hourly_cost&quot;</span><span class="p">:</span> <span class="n">vm_hourly_cost</span><span class="p">,</span>
+            <span class="s2">&quot;estimated_cost&quot;</span><span class="p">:</span> <span class="n">estimated_cost</span><span class="p">,</span>
+            <span class="s2">&quot;cost_per_node_hour&quot;</span><span class="p">:</span> <span class="n">vm_hourly_cost</span><span class="p">,</span>
+            <span class="s2">&quot;recommendations&quot;</span><span class="p">:</span> <span class="p">[</span>
+                <span class="s2">&quot;Use Low Priority VMs in Batch pools for additional savings&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Implement auto-scaling to optimize node utilization&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Use appropriate VM sizes for different task characteristics&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Monitor task efficiency and optimize task packaging&quot;</span><span class="p">,</span>
+                <span class="s2">&quot;Consider using VMSS (Virtual Machine Scale Sets) for flexibility&quot;</span><span class="p">,</span>
+            <span class="p">],</span>
+        <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_region_pricing_comparison">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_region_pricing_comparison">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_region_pricing_comparison</span><span class="p">(</span>
+        <span class="bp">self</span><span class="p">,</span> <span class="n">instance_type</span><span class="p">:</span> <span class="nb">str</span>
+    <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Compare pricing across Azure regions (simplified).&quot;&quot;&quot;</span>
+        <span class="c1"># Regional pricing multipliers (approximate)</span>
+        <span class="n">region_multipliers</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s2">&quot;East US&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># Baseline</span>
+            <span class="s2">&quot;West US 2&quot;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>  <span class="c1"># Same as East US</span>
+            <span class="s2">&quot;Central US&quot;</span><span class="p">:</span> <span class="mf">0.95</span><span class="p">,</span>  <span class="c1"># Slightly cheaper</span>
+            <span class="s2">&quot;West Europe&quot;</span><span class="p">:</span> <span class="mf">1.1</span><span class="p">,</span>  <span class="c1"># ~10% more expensive</span>
+            <span class="s2">&quot;Southeast Asia&quot;</span><span class="p">:</span> <span class="mf">1.15</span><span class="p">,</span>  <span class="c1"># ~15% more expensive</span>
+            <span class="s2">&quot;Japan East&quot;</span><span class="p">:</span> <span class="mf">1.2</span><span class="p">,</span>  <span class="c1"># ~20% more expensive</span>
+        <span class="p">}</span>
+
+        <span class="n">base_price</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">vm_pricing</span><span class="p">[</span><span class="s2">&quot;default&quot;</span><span class="p">])</span>
+
+        <span class="n">regional_pricing</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">region</span><span class="p">,</span> <span class="n">multiplier</span> <span class="ow">in</span> <span class="n">region_multipliers</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="n">regional_pricing</span><span class="p">[</span><span class="n">region</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s2">&quot;pay_as_you_go_hourly&quot;</span><span class="p">:</span> <span class="n">base_price</span> <span class="o">*</span> <span class="n">multiplier</span><span class="p">,</span>
+                <span class="s2">&quot;estimated_spot_hourly&quot;</span><span class="p">:</span> <span class="n">base_price</span>
+                <span class="o">*</span> <span class="n">multiplier</span>
+                <span class="o">*</span> <span class="mf">0.7</span><span class="p">,</span>  <span class="c1"># Rough spot estimate</span>
+                <span class="s2">&quot;region_name&quot;</span><span class="p">:</span> <span class="n">region</span><span class="p">,</span>
+            <span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">regional_pricing</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_azure_specific_metrics">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_specific_metrics">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_azure_specific_metrics</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Get Azure-specific cost and performance metrics.&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;region&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">region</span><span class="p">,</span>
+            <span class="s2">&quot;availability_zone&quot;</span><span class="p">:</span> <span class="s2">&quot;auto-detect&quot;</span><span class="p">,</span>  <span class="c1"># Would detect from instance metadata</span>
+            <span class="s2">&quot;vm_lifecycle&quot;</span><span class="p">:</span> <span class="s2">&quot;pay-as-you-go&quot;</span><span class="p">,</span>  <span class="c1"># or &#39;spot&#39; or &#39;reserved&#39;</span>
+            <span class="s2">&quot;managed_disks&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;accelerated_networking&quot;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+            <span class="s2">&quot;proximity_placement_group&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>
+            <span class="s2">&quot;cost_optimization_score&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">_calculate_cost_optimization_score</span><span class="p">(),</span>
+        <span class="p">}</span></div>
+
+
+<div class="viewcode-block" id="AzureCostMonitor.get_azure_consumption_api_integration">
+<a class="viewcode-back" href="../../../api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_consumption_api_integration">[docs]</a>
+    <span class="k">def</span> <span class="nf">get_azure_consumption_api_integration</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Framework for Azure Consumption API integration.&quot;&quot;&quot;</span>
+        <span class="c1"># This would integrate with Azure Consumption APIs for real billing data</span>
+        <span class="c1"># For now, provide a framework structure</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s2">&quot;billing_period&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">strftime</span><span class="p">(</span><span class="s2">&quot;%Y-%m&quot;</span><span class="p">),</span>
+            <span class="s2">&quot;subscription_id&quot;</span><span class="p">:</span> <span class="s2">&quot;auto-detect&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;resource_group&quot;</span><span class="p">:</span> <span class="s2">&quot;auto-detect&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;cost_to_date&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># Would fetch from API</span>
+            <span class="s2">&quot;forecasted_cost&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>  <span class="c1"># Would calculate based on usage</span>
+            <span class="s2">&quot;budget_alerts&quot;</span><span class="p">:</span> <span class="p">[],</span>  <span class="c1"># Would fetch configured alerts</span>
+            <span class="s2">&quot;cost_breakdown&quot;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s2">&quot;compute&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                <span class="s2">&quot;storage&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                <span class="s2">&quot;networking&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+                <span class="s2">&quot;other&quot;</span><span class="p">:</span> <span class="mf">0.0</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="s2">&quot;api_available&quot;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>  <span class="c1"># Would check API connectivity</span>
+            <span class="s2">&quot;last_updated&quot;</span><span class="p">:</span> <span class="n">datetime</span><span class="o">.</span><span class="n">now</span><span class="p">()</span><span class="o">.</span><span class="n">isoformat</span><span class="p">(),</span>
+        <span class="p">}</span></div>
+
+
+    <span class="k">def</span> <span class="nf">_calculate_cost_optimization_score</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span><span class="p">:</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate a cost optimization score (0-100).&quot;&quot;&quot;</span>
+        <span class="c1"># This would analyze various factors:</span>
+        <span class="c1"># - Resource utilization</span>
+        <span class="c1"># - VM size appropriateness</span>
+        <span class="c1"># - Spot vs pay-as-you-go usage</span>
+        <span class="c1"># - Reserved instance coverage</span>
+        <span class="c1"># - Auto-shutdown configurations</span>
+        <span class="c1"># For now, return a placeholder</span>
+        <span class="k">return</span> <span class="mf">72.0</span></div>
+
+</pre></div>
+</main>
+                        
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 27, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../../../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../../../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../../../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../../../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../../../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script type="text/javascript" src="../../../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../../../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../../../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../../../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../../../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

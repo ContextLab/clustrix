@@ -1,0 +1,516 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>Notebook Magic Commands &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Cost Monitoring" href="cost_monitoring.html" />
+            <link rel="prev" title="Configuration API" href="config.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="config.html">Configuration API</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring.html">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Notebook Magic Commands</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/api/notebook_magic.rst" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/api/notebook_magic.rst.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="notebook-magic-commands">
+<h1>Notebook Magic Commands<a class="headerlink" href="#notebook-magic-commands" title="Link to this heading">¶</a></h1>
+<p>Clustrix provides seamless integration with Jupyter notebooks through IPython magic commands and interactive widgets.</p>
+<section id="magic-commands">
+<h2>Magic Commands<a class="headerlink" href="#magic-commands" title="Link to this heading">¶</a></h2>
+<section id="clusterfy">
+<h3>%%clusterfy<a class="headerlink" href="#clusterfy" title="Link to this heading">¶</a></h3>
+<p>The <code class="docutils literal notranslate"><span class="pre">%%clusterfy</span></code> magic command creates an interactive widget interface for managing cluster configurations directly in Jupyter notebooks.</p>
+<p><strong>Usage:</strong></p>
+<div class="highlight-jupyter notranslate"><div class="highlight"><pre><span></span>%%clusterfy
+# Interactive widget appears with full configuration interface
+</pre></div>
+</div>
+<p><strong>Features:</strong></p>
+<ul class="simple">
+<li><p><strong>Configuration Management</strong>: Create, edit, and delete cluster configurations</p></li>
+<li><p><strong>Pre-built Templates</strong>: Default configurations for major cloud providers</p></li>
+<li><p><strong>Interactive Forms</strong>: GUI elements for all configuration options</p></li>
+<li><p><strong>Save/Load</strong>: Export/import configurations as YAML or JSON files</p></li>
+<li><p><strong>One-click Application</strong>: Apply configurations to current session instantly</p></li>
+</ul>
+<p><strong>Default Templates Include:</strong></p>
+<ul class="simple">
+<li><p>Local development environment</p></li>
+<li><p>AWS GPU instances (small/large)</p></li>
+<li><p>Google Cloud CPU instances</p></li>
+<li><p>Azure GPU instances</p></li>
+<li><p>SLURM HPC clusters</p></li>
+<li><p>Kubernetes clusters</p></li>
+</ul>
+</section>
+</section>
+<section id="widget-interface">
+<h2>Widget Interface<a class="headerlink" href="#widget-interface" title="Link to this heading">¶</a></h2>
+<section id="clusterconfigwidget">
+<h3>ClusterConfigWidget<a class="headerlink" href="#clusterconfigwidget" title="Link to this heading">¶</a></h3>
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.ClusterConfigWidget">
+<span class="sig-prename descclassname"><span class="pre">clustrix.notebook_magic.</span></span><span class="sig-name descname"><span class="pre">ClusterConfigWidget</span></span><a class="headerlink" href="#clustrix.notebook_magic.ClusterConfigWidget" title="Link to this definition">¶</a></dt>
+<dd><p>alias of <code class="xref py py-class docutils literal notranslate"><span class="pre">EnhancedClusterConfigWidget</span></code></p>
+</dd></dl>
+
+</section>
+<section id="clusterfymagics">
+<h3>ClusterfyMagics<a class="headerlink" href="#clusterfymagics" title="Link to this heading">¶</a></h3>
+<dl class="py class">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.ClusterfyMagics">
+<em class="property"><span class="pre">class</span><span class="w"> </span></em><span class="sig-prename descclassname"><span class="pre">clustrix.notebook_magic.</span></span><span class="sig-name descname"><span class="pre">ClusterfyMagics</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="o"><span class="pre">**</span></span><span class="n"><span class="pre">kwargs</span></span><span class="p"><span class="pre">:</span></span><span class="w"> </span><span class="n"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><span class="pre">Any</span></a></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/notebook_magic.html#ClusterfyMagics"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.notebook_magic.ClusterfyMagics" title="Link to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">Magics</span></code></p>
+<p>IPython magic commands for Clustrix.</p>
+<p>IPython magic command class for the <code class="docutils literal notranslate"><span class="pre">%%clusterfy</span></code> command.</p>
+<dl class="py method">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.ClusterfyMagics.clusterfy">
+<span class="sig-name descname"><span class="pre">clusterfy</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">line</span></span></em>, <em class="sig-param"><span class="n"><span class="pre">cell</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/notebook_magic.html#ClusterfyMagics.clusterfy"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.notebook_magic.ClusterfyMagics.clusterfy" title="Link to this definition">¶</a></dt>
+<dd><p>Create an interactive widget for managing Clustrix configurations.
+Usage:</p>
+<blockquote>
+<div><p>%%clusterfy</p>
+</div></blockquote>
+<p>This creates a widget interface that allows you to:
+- Select and manage cluster configurations
+- Create new configurations with validation
+- Save/load configurations from files
+- Apply configurations to the current session</p>
+</dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.ClusterfyMagics.magics">
+<span class="sig-name descname"><span class="pre">magics</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{'cell':</span> <span class="pre">{'clusterfy':</span> <span class="pre">'clusterfy'},</span> <span class="pre">'line':</span> <span class="pre">{}}</span></em><a class="headerlink" href="#clustrix.notebook_magic.ClusterfyMagics.magics" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.ClusterfyMagics.registered">
+<span class="sig-name descname"><span class="pre">registered</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">True</span></em><a class="headerlink" href="#clustrix.notebook_magic.ClusterfyMagics.registered" title="Link to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+</section>
+</section>
+<section id="configuration-defaults">
+<h2>Configuration Defaults<a class="headerlink" href="#configuration-defaults" title="Link to this heading">¶</a></h2>
+<section id="default-configs">
+<h3>DEFAULT_CONFIGS<a class="headerlink" href="#default-configs" title="Link to this heading">¶</a></h3>
+<dl class="py data">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.DEFAULT_CONFIGS">
+<span class="sig-prename descclassname"><span class="pre">clustrix.notebook_magic.</span></span><span class="sig-name descname"><span class="pre">DEFAULT_CONFIGS</span></span><em class="property"><span class="w"> </span><span class="p"><span class="pre">=</span></span><span class="w"> </span><span class="pre">{'local':</span> <span class="pre">{'cluster_type':</span> <span class="pre">'local',</span> <span class="pre">'default_cores':</span> <span class="pre">4,</span> <span class="pre">'default_memory':</span> <span class="pre">'8GB',</span> <span class="pre">'description':</span> <span class="pre">'Local</span> <span class="pre">machine</span> <span class="pre">for</span> <span class="pre">development</span> <span class="pre">and</span> <span class="pre">testing',</span> <span class="pre">'name':</span> <span class="pre">'Local</span> <span class="pre">Development'},</span> <span class="pre">'local_multicore':</span> <span class="pre">{'cluster_type':</span> <span class="pre">'local',</span> <span class="pre">'default_cores':</span> <span class="pre">-1,</span> <span class="pre">'default_memory':</span> <span class="pre">'16GB',</span> <span class="pre">'description':</span> <span class="pre">'Local</span> <span class="pre">machine</span> <span class="pre">using</span> <span class="pre">all</span> <span class="pre">available</span> <span class="pre">cores',</span> <span class="pre">'name':</span> <span class="pre">'Local</span> <span class="pre">Multi-core'}}</span></em><a class="headerlink" href="#clustrix.notebook_magic.DEFAULT_CONFIGS" title="Link to this definition">¶</a></dt>
+<dd><p>dict() -&gt; new empty dictionary
+dict(mapping) -&gt; new dictionary initialized from a mapping object’s</p>
+<blockquote>
+<div><p>(key, value) pairs</p>
+</div></blockquote>
+<dl>
+<dt>dict(iterable) -&gt; new dictionary initialized as if via:</dt><dd><p>d = {}
+for k, v in iterable:</p>
+<blockquote>
+<div><p>d[k] = v</p>
+</div></blockquote>
+</dd>
+<dt>dict(<a href="#id1"><span class="problematic" id="id2">**</span></a>kwargs) -&gt; new dictionary initialized with the name=value pairs</dt><dd><p>in the keyword argument list.  For example:  dict(one=1, two=2)</p>
+</dd>
+</dl>
+<p>Dictionary containing pre-built cluster configuration templates.</p>
+<p><strong>Available Templates:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="p">{</span>
+    <span class="s2">&quot;local_dev&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;Local Development&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;cluster_type&quot;</span><span class="p">:</span> <span class="s2">&quot;local&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;default_cores&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
+        <span class="s2">&quot;default_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;8GB&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;Local machine for development and testing&quot;</span>
+    <span class="p">},</span>
+    <span class="s2">&quot;aws_gpu_small&quot;</span><span class="p">:</span> <span class="p">{</span>
+        <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;AWS GPU Small&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;cluster_type&quot;</span><span class="p">:</span> <span class="s2">&quot;ssh&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;cluster_host&quot;</span><span class="p">:</span> <span class="s2">&quot;aws-instance-ip&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;username&quot;</span><span class="p">:</span> <span class="s2">&quot;ubuntu&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;key_file&quot;</span><span class="p">:</span> <span class="s2">&quot;~/.ssh/aws_key.pem&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;default_cores&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+        <span class="s2">&quot;default_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;60GB&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;AWS p3.2xlarge instance (1 V100 GPU)&quot;</span>
+    <span class="p">},</span>
+    <span class="c1"># ... more templates</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+</section>
+<section id="extension-loading">
+<h2>Extension Loading<a class="headerlink" href="#extension-loading" title="Link to this heading">¶</a></h2>
+<section id="load-ipython-extension">
+<h3>load_ipython_extension<a class="headerlink" href="#load-ipython-extension" title="Link to this heading">¶</a></h3>
+<dl class="py function">
+<dt class="sig sig-object py" id="clustrix.notebook_magic.load_ipython_extension">
+<span class="sig-prename descclassname"><span class="pre">clustrix.notebook_magic.</span></span><span class="sig-name descname"><span class="pre">load_ipython_extension</span></span><span class="sig-paren">(</span><em class="sig-param"><span class="n"><span class="pre">ipython</span></span></em><span class="sig-paren">)</span><a class="reference internal" href="../_modules/clustrix/notebook_magic.html#load_ipython_extension"><span class="viewcode-link"><span class="pre">[source]</span></span></a><a class="headerlink" href="#clustrix.notebook_magic.load_ipython_extension" title="Link to this definition">¶</a></dt>
+<dd><p>Load the extension in IPython.</p>
+<p>Automatically loads the magic command when Clustrix is imported in a Jupyter environment.</p>
+<p><strong>Parameters:</strong></p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">ipython</span></code>: The IPython instance to register the magic command with</p></li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="c1"># Magic command is automatically registered when importing clustrix</span>
+<span class="kn">import</span> <span class="nn">clustrix</span>
+
+<span class="c1"># Use the magic command</span>
+<span class="o">%%</span><span class="n">clusterfy</span>
+</pre></div>
+</div>
+</dd></dl>
+
+</section>
+</section>
+<section id="requirements">
+<h2>Requirements<a class="headerlink" href="#requirements" title="Link to this heading">¶</a></h2>
+<p>The notebook magic functionality requires:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">IPython</span></code> - For magic command support</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">ipywidgets</span></code> - For the interactive widget interface</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">PyYAML</span></code> - For YAML configuration file support</p></li>
+</ul>
+<p><strong>Installation:</strong></p>
+<div class="highlight-bash notranslate"><div class="highlight"><pre><span></span>pip<span class="w"> </span>install<span class="w"> </span>clustrix<span class="o">[</span>notebook<span class="o">]</span>
+<span class="c1"># or</span>
+pip<span class="w"> </span>install<span class="w"> </span>ipywidgets<span class="w"> </span>pyyaml
+</pre></div>
+</div>
+</section>
+<section id="usage-examples">
+<h2>Usage Examples<a class="headerlink" href="#usage-examples" title="Link to this heading">¶</a></h2>
+<section id="basic-widget-usage">
+<h3>Basic Widget Usage<a class="headerlink" href="#basic-widget-usage" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span> <span class="nn">clustrix</span>
+
+<span class="c1"># Widget appears automatically with magic command</span>
+<span class="o">%%</span><span class="n">clusterfy</span>
+</pre></div>
+</div>
+</section>
+<section id="programmatic-access">
+<h3>Programmatic Access<a class="headerlink" href="#programmatic-access" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix.notebook_magic</span> <span class="kn">import</span> <span class="n">ClusterConfigWidget</span>
+
+<span class="c1"># Create widget programmatically</span>
+<span class="n">widget</span> <span class="o">=</span> <span class="n">ClusterConfigWidget</span><span class="p">()</span>
+<span class="n">widget</span><span class="o">.</span><span class="n">display</span><span class="p">()</span>
+</pre></div>
+</div>
+</section>
+<section id="custom-configuration-templates">
+<h3>Custom Configuration Templates<a class="headerlink" href="#custom-configuration-templates" title="Link to this heading">¶</a></h3>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix.notebook_magic</span> <span class="kn">import</span> <span class="n">DEFAULT_CONFIGS</span>
+
+<span class="c1"># View available templates</span>
+<span class="k">for</span> <span class="n">name</span><span class="p">,</span> <span class="n">config</span> <span class="ow">in</span> <span class="n">DEFAULT_CONFIGS</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Customize templates</span>
+<span class="n">custom_config</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="s2">&quot;My Custom Cluster&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cluster_type&quot;</span><span class="p">:</span> <span class="s2">&quot;slurm&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;cluster_host&quot;</span><span class="p">:</span> <span class="s2">&quot;my-cluster.edu&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;username&quot;</span><span class="p">:</span> <span class="s2">&quot;myuser&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;default_cores&quot;</span><span class="p">:</span> <span class="mi">32</span><span class="p">,</span>
+    <span class="s2">&quot;default_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;128GB&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;description&quot;</span><span class="p">:</span> <span class="s2">&quot;Custom high-memory cluster&quot;</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+</section>
+<section id="save-and-load-configurations">
+<h3>Save and Load Configurations<a class="headerlink" href="#save-and-load-configurations" title="Link to this heading">¶</a></h3>
+<p>The widget provides built-in save/load functionality:</p>
+<ol class="arabic simple">
+<li><p><strong>Save</strong>: Use the “Save Configs” button to export configurations</p></li>
+<li><p><strong>Load</strong>: Use the “Load Configs” button to import configurations</p></li>
+<li><p><strong>File Formats</strong>: Supports both YAML and JSON formats</p></li>
+<li><p><strong>File Naming</strong>: Automatically detects format from file extension</p></li>
+</ol>
+</section>
+</section>
+<section id="error-handling">
+<h2>Error Handling<a class="headerlink" href="#error-handling" title="Link to this heading">¶</a></h2>
+<p>The widget includes comprehensive error handling:</p>
+<ul class="simple">
+<li><p><strong>Import Errors</strong>: Graceful fallback when IPython/ipywidgets unavailable</p></li>
+<li><p><strong>File Errors</strong>: Clear error messages for save/load operations</p></li>
+<li><p><strong>Validation</strong>: Configuration validation before application</p></li>
+<li><p><strong>Connection Testing</strong>: Basic connectivity checks for remote clusters</p></li>
+</ul>
+</section>
+<section id="notes">
+<h2>Notes<a class="headerlink" href="#notes" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>The magic command is automatically registered when importing clustrix in a Jupyter environment</p></li>
+<li><p>Widget state is preserved during the notebook session</p></li>
+<li><p>Configurations can be shared between team members via saved files</p></li>
+<li><p>The widget works in both Jupyter Lab and Jupyter Notebook environments</p></li>
+</ul>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="config.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Configuration API
+    </a>
+    <a class="float-right" href="cost_monitoring.html" title="Next">
+        Cost Monitoring <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">Notebook Magic Commands</a><ul>
+<li><a class="reference internal" href="#magic-commands">Magic Commands</a><ul>
+<li><a class="reference internal" href="#clusterfy">%%clusterfy</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#widget-interface">Widget Interface</a><ul>
+<li><a class="reference internal" href="#clusterconfigwidget">ClusterConfigWidget</a><ul>
+<li><a class="reference internal" href="#clustrix.notebook_magic.ClusterConfigWidget"><code class="docutils literal notranslate"><span class="pre">ClusterConfigWidget</span></code></a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#clusterfymagics">ClusterfyMagics</a><ul>
+<li><a class="reference internal" href="#clustrix.notebook_magic.ClusterfyMagics"><code class="docutils literal notranslate"><span class="pre">ClusterfyMagics</span></code></a><ul>
+<li><a class="reference internal" href="#clustrix.notebook_magic.ClusterfyMagics.clusterfy"><code class="docutils literal notranslate"><span class="pre">ClusterfyMagics.clusterfy()</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.notebook_magic.ClusterfyMagics.magics"><code class="docutils literal notranslate"><span class="pre">ClusterfyMagics.magics</span></code></a></li>
+<li><a class="reference internal" href="#clustrix.notebook_magic.ClusterfyMagics.registered"><code class="docutils literal notranslate"><span class="pre">ClusterfyMagics.registered</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#configuration-defaults">Configuration Defaults</a><ul>
+<li><a class="reference internal" href="#default-configs">DEFAULT_CONFIGS</a><ul>
+<li><a class="reference internal" href="#clustrix.notebook_magic.DEFAULT_CONFIGS"><code class="docutils literal notranslate"><span class="pre">DEFAULT_CONFIGS</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#extension-loading">Extension Loading</a><ul>
+<li><a class="reference internal" href="#load-ipython-extension">load_ipython_extension</a><ul>
+<li><a class="reference internal" href="#clustrix.notebook_magic.load_ipython_extension"><code class="docutils literal notranslate"><span class="pre">load_ipython_extension()</span></code></a></li>
+</ul>
+</li>
+</ul>
+</li>
+<li><a class="reference internal" href="#requirements">Requirements</a></li>
+<li><a class="reference internal" href="#usage-examples">Usage Examples</a><ul>
+<li><a class="reference internal" href="#basic-widget-usage">Basic Widget Usage</a></li>
+<li><a class="reference internal" href="#programmatic-access">Programmatic Access</a></li>
+<li><a class="reference internal" href="#custom-configuration-templates">Custom Configuration Templates</a></li>
+<li><a class="reference internal" href="#save-and-load-configurations">Save and Load Configurations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#error-handling">Error Handling</a></li>
+<li><a class="reference internal" href="#notes">Notes</a></li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 27, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

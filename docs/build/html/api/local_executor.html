@@ -15,7 +15,7 @@
             <link rel="index" title="Index" href="../genindex.html" />
             <link rel="search" title="Search" href="../search.html" />
             <link rel="top" title="Clustrix Documentation" href="#" />
-            <link rel="prev" title="Configuration API" href="config.html" />
+            <link rel="prev" title="Cost Monitoring" href="cost_monitoring.html" />
     </head>
 <body>
     <script type="text/javascript" src="../_static/dist/blocking.js"></script>
@@ -71,6 +71,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -86,11 +87,14 @@
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="../notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul class="current">
 <li class="toctree-l1"><a class="reference internal" href="decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1 current"><a class="current reference internal" href="#">Local Executor API</a></li>
 </ul>
 
@@ -254,7 +258,7 @@ func_args + the item as the loop_var keyword argument.</p></li>
 the iterable.</p></li>
 <li><p><strong>iterable</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Union" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Union</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#range" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">range</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.List" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">List</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a>]</span>) – Iterable to process in parallel (range, list, tuple, etc.).</p></li>
 <li><p><strong>func_args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Additional positional arguments passed to func for each call.</p></li>
-<li><p><strong>func_kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Additional keyword arguments passed to func for each call.
+<li><p><strong>func_kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span>) – Additional keyword arguments passed to func for each call.
 Note: loop_var will be added/overridden in these kwargs.</p></li>
 <li><p><strong>chunk_size</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#int" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">int</span></code></a>]</span>) – Optional size of each work chunk. If None, automatically
 calculated as len(items) // max_workers.</p></li>
@@ -387,7 +391,7 @@ to the safer option for the detected pattern.</p>
 <li><p><strong>use_threads</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/functions.html#bool" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">bool</span></code></a>]</span>) – Force thread or process usage</p></li>
 <li><p><strong>func</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Callable" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Callable</span></code></a>]</span>) – Function to analyze for executor type selection</p></li>
 <li><p><strong>args</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#tuple" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">tuple</span></code></a></span>) – Function arguments for analysis</p></li>
-<li><p><strong>kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/stdtypes.html#dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">dict</span></code></a></span>) – Function keyword arguments for analysis</p></li>
+<li><p><strong>kwargs</strong> (<span class="sphinx_autodoc_typehints-type"><a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Optional" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Optional</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Dict" title="(in Python v3.13)"><code class="xref py py-class docutils literal notranslate"><span class="pre">Dict</span></code></a>[<a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>, <a class="reference external" href="https://docs.python.org/3/library/typing.html#typing.Any" title="(in Python v3.13)"><code class="xref py py-data docutils literal notranslate"><span class="pre">Any</span></code></a>]]</span>) – Function keyword arguments for analysis</p></li>
 </ul>
 </dd>
 <dt class="field-even">Return type<span class="colon">:</span></dt>
@@ -502,8 +506,8 @@ to the safer option for the detected pattern.</p>
 
 </main>
                         <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
-    <a class="float-left" href="config.html" title="Previous">
-        <span aria-hidden="true">←&nbsp;</span>Configuration API
+    <a class="float-left" href="cost_monitoring.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Cost Monitoring
     </a>
 </nav>
                     </div>
@@ -562,7 +566,7 @@ to the safer option for the detected pattern.</p>
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

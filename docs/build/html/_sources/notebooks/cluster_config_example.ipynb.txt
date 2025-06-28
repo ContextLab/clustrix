@@ -1,0 +1,176 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "title",
+   "metadata": {},
+   "source": [
+    "# Clustrix Configuration Manager Example\n",
+    "\n",
+    "This notebook demonstrates how to use the `%%clusterfy` magic command to manage cluster configurations interactively."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "import",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Import clustrix - this automatically loads the magic command\n",
+    "import clustrix"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "usage",
+   "metadata": {},
+   "source": [
+    "## Using the Configuration Widget\n",
+    "\n",
+    "The `%%clusterfy` magic command creates an interactive widget for managing cluster configurations:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "widget",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "%%clusterfy\n",
+    "# The widget interface will appear above this cell\n",
+    "# You can interact with it to:\n",
+    "# - Create new configurations\n",
+    "# - Edit existing configurations  \n",
+    "# - Apply configurations to your session\n",
+    "# - Save/load configurations to/from files"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "features",
+   "metadata": {},
+   "source": [
+    "## Widget Features\n",
+    "\n",
+    "### 1. **Configuration Selection**\n",
+    "- Use the dropdown to select between different configurations\n",
+    "- Default configurations include local, AWS, GCP, Azure, SLURM, and Kubernetes options\n",
+    "\n",
+    "### 2. **Configuration Management**\n",
+    "- **New Config**: Create a new configuration\n",
+    "- **Delete Config**: Remove the selected configuration\n",
+    "- **Apply Config**: Apply the selected configuration to your current session\n",
+    "\n",
+    "### 3. **Configuration Fields**\n",
+    "- **Name**: Friendly name for the configuration\n",
+    "- **Description**: Detailed description of the cluster\n",
+    "- **Cluster Type**: local, ssh, slurm, pbs, sge, or kubernetes\n",
+    "- **Host**: Hostname or IP address (for remote clusters)\n",
+    "- **Username**: SSH username (for remote clusters)\n",
+    "- **SSH Key**: Path to SSH private key\n",
+    "- **Work Dir**: Remote working directory\n",
+    "- **Default Cores**: Default number of CPU cores\n",
+    "- **Default Memory**: Default memory allocation\n",
+    "- **Default Time**: Default time limit\n",
+    "\n",
+    "### 4. **Save/Load Configurations**\n",
+    "- Save configurations to YAML or JSON files\n",
+    "- Load configurations from files\n",
+    "- Share configurations with team members"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "example",
+   "metadata": {},
+   "source": [
+    "## Example: Using a Configuration\n",
+    "\n",
+    "After applying a configuration using the widget, you can use it with the `@cluster` decorator:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "example-code",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from clustrix import cluster\n",
+    "import numpy as np\n",
+    "\n",
+    "@cluster(cores=4, memory=\"8GB\")\n",
+    "def matrix_computation(size=1000):\n",
+    "    \"\"\"Example computation that will run on the configured cluster.\"\"\"\n",
+    "    A = np.random.rand(size, size)\n",
+    "    B = np.random.rand(size, size)\n",
+    "    C = np.dot(A, B)\n",
+    "    return np.mean(C)\n",
+    "\n",
+    "# This will run on whatever cluster configuration is currently active\n",
+    "# result = matrix_computation(2000)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "programmatic",
+   "metadata": {},
+   "source": [
+    "## Programmatic Configuration\n",
+    "\n",
+    "You can also check and modify configurations programmatically:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "check-config",
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Check current configuration\n",
+    "current_config = clustrix.get_config()\n",
+    "print(f\"Current cluster type: {current_config.cluster_type}\")\n",
+    "print(f\"Default cores: {current_config.default_cores}\")\n",
+    "print(f\"Default memory: {current_config.default_memory}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "tips",
+   "metadata": {},
+   "source": [
+    "## Tips\n",
+    "\n",
+    "1. **Save your configurations** to a file for easy sharing and version control\n",
+    "2. **Use descriptive names** for your configurations to easily identify them\n",
+    "3. **Test configurations** with small jobs before running large computations\n",
+    "4. **Keep SSH keys secure** and use appropriate file permissions\n",
+    "5. **Document cluster-specific requirements** in the description field"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}

@@ -68,6 +68,7 @@
 </ul>
 <p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
 <ul>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
 <li class="toctree-l1"><a class="reference internal" href="notebooks/complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
 <li class="toctree-l1"><a class="reference internal" href="notebooks/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="notebooks/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
@@ -83,11 +84,14 @@
 <li class="toctree-l1"><a class="reference internal" href="notebooks/gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="notebooks/huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
 <li class="toctree-l1"><a class="reference internal" href="notebooks/lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="notebooks/cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
 </ul>
 <p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
 <ul>
 <li class="toctree-l1"><a class="reference internal" href="api/decorator.html">Decorator API</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="api/cost_monitoring.html">Cost Monitoring</a></li>
 <li class="toctree-l1"><a class="reference internal" href="api/local_executor.html">Local Executor API</a></li>
 </ul>
 
@@ -140,17 +144,22 @@
     <div class="genindex-jumpbox">
         <a href="#_"><strong>_</strong></a>
             | <a href="#A"><strong>A</strong></a>
+            | <a href="#B"><strong>B</strong></a>
             | <a href="#C"><strong>C</strong></a>
             | <a href="#D"><strong>D</strong></a>
             | <a href="#E"><strong>E</strong></a>
             | <a href="#G"><strong>G</strong></a>
+            | <a href="#H"><strong>H</strong></a>
+            | <a href="#I"><strong>I</strong></a>
             | <a href="#J"><strong>J</strong></a>
             | <a href="#K"><strong>K</strong></a>
             | <a href="#L"><strong>L</strong></a>
             | <a href="#M"><strong>M</strong></a>
+            | <a href="#N"><strong>N</strong></a>
             | <a href="#P"><strong>P</strong></a>
             | <a href="#R"><strong>R</strong></a>
             | <a href="#S"><strong>S</strong></a>
+            | <a href="#T"><strong>T</strong></a>
             | <a href="#U"><strong>U</strong></a>
             
     </div>
@@ -165,14 +174,26 @@
                                 <li>
                                     <a href="api/local_executor.html#clustrix.local_executor.LocalExecutor.__exit__">__exit__() (clustrix.local_executor.LocalExecutor method)</a>
 </li>
-                        </ul>
-                    </td>
-                    <td>
-                        <ul>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.__init__">__init__() (clustrix.config.ClusterConfig method)</a>
 
                                         <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.__init__">(clustrix.cost_monitoring.BaseCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.__init__">(clustrix.cost_monitoring.CostEstimate method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.__init__">(clustrix.cost_monitoring.CostReport method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.__init__">(clustrix.cost_monitoring.ResourceUsage method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.__init__">(clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.__init__">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.__init__">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.__init__">(clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
                                                 <li><a href="api/local_executor.html#clustrix.local_executor.LocalExecutor.__init__">(clustrix.local_executor.LocalExecutor method)</a>
 </li>
                                         </ul></li>
@@ -198,15 +219,18 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.aws_access_key_id">aws_access_key_id (clustrix.config.ClusterConfig attribute)</a>
 </li>
+                                <li>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.aws_profile">aws_profile (clustrix.config.ClusterConfig attribute)</a>
+</li>
                         </ul>
                     </td>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.aws_profile">aws_profile (clustrix.config.ClusterConfig attribute)</a>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.aws_secret_access_key">aws_secret_access_key (clustrix.config.ClusterConfig attribute)</a>
 </li>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.aws_secret_access_key">aws_secret_access_key (clustrix.config.ClusterConfig attribute)</a>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor">AWSCostMonitor (class in clustrix.cost_providers.aws)</a>
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.azure_resource_group">azure_resource_group (clustrix.config.ClusterConfig attribute)</a>
@@ -216,6 +240,22 @@
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.azure_tenant_id">azure_tenant_id (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor">AzureCostMonitor (class in clustrix.cost_providers.azure)</a>
+</li>
+                        </ul>
+                    </td>
+            </tr>
+        </table>
+    
+        <h2 id="B">B</h2>
+        <table class="indextable genindextable">
+            <tr>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor">BaseCostMonitor (class in clustrix.cost_monitoring)</a>
 </li>
                         </ul>
                     </td>
@@ -254,12 +294,17 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.cluster_type">cluster_type (clustrix.config.ClusterConfig attribute)</a>
 </li>
-                        </ul>
-                    </td>
-                    <td>
-                        <ul>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig">ClusterConfig (class in clustrix.config)</a>
+</li>
+                                <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.ClusterConfigWidget">ClusterConfigWidget (in module clustrix.notebook_magic)</a>
+</li>
+                                <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.ClusterfyMagics.clusterfy">clusterfy() (clustrix.notebook_magic.ClusterfyMagics method)</a>
+</li>
+                                <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.ClusterfyMagics">ClusterfyMagics (class in clustrix.notebook_magic)</a>
 </li>
                                 <li>
                                     
@@ -269,6 +314,10 @@
                                                 <li><a href="api/config.html#module-clustrix.config">module</a>
 </li>
                                         </ul></li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
                                 <li>
                                     
         clustrix.decorator
@@ -292,7 +341,25 @@
                                     <a href="api/config.html#clustrix.config.configure">configure() (in module clustrix.config)</a>
 </li>
                                 <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.cost_estimate">cost_estimate (clustrix.cost_monitoring.CostReport attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.cost_tracking_decorator">cost_tracking_decorator() (in module clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate">CostEstimate (class in clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport">CostReport (class in clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.cpu_percent">cpu_percent (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                                <li>
                                     <a href="api/local_executor.html#clustrix.local_executor.create_local_executor">create_local_executor() (in module clustrix.local_executor)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.currency">currency (clustrix.cost_monitoring.CostEstimate attribute)</a>
 </li>
                         </ul>
                     </td>
@@ -305,23 +372,32 @@
                     <td>
                         <ul>
                                 <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.DEFAULT_CONFIGS">DEFAULT_CONFIGS (in module clustrix.notebook_magic)</a>
+</li>
+                                <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.default_cores">default_cores (clustrix.config.ClusterConfig attribute)</a>
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.default_memory">default_memory (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.default_partition">default_partition (clustrix.config.ClusterConfig attribute)</a>
 </li>
                         </ul>
                     </td>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.default_partition">default_partition (clustrix.config.ClusterConfig attribute)</a>
-</li>
-                                <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.default_queue">default_queue (clustrix.config.ClusterConfig attribute)</a>
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.default_time">default_time (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.disk_io_mb">disk_io_mb (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.duration_seconds">duration_seconds (clustrix.cost_monitoring.CostReport attribute)</a>
 </li>
                         </ul>
                     </td>
@@ -339,10 +415,41 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.environment_variables">environment_variables (clustrix.config.ClusterConfig attribute)</a>
 </li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.estimate_batch_cost">estimate_batch_cost() (clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.estimate_batch_cost">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_batch_cost">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                        </ul></li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.estimate_cost">estimate_cost() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.estimate_cost">(clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.estimate_cost">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_cost">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_cost">(clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                        </ul></li>
                         </ul>
                     </td>
                     <td>
                         <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.estimate_monthly_cost">estimate_monthly_cost() (clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.estimate_sustained_use_discount">estimate_sustained_use_discount() (clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.estimated_cost">estimated_cost (clustrix.cost_monitoring.CostEstimate attribute)</a>
+</li>
                                 <li>
                                     <a href="api/local_executor.html#clustrix.local_executor.LocalExecutor.execute_loop_parallel">execute_loop_parallel() (clustrix.local_executor.LocalExecutor method)</a>
 </li>
@@ -368,18 +475,151 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.gcp_service_account_key">gcp_service_account_key (clustrix.config.ClusterConfig attribute)</a>
 </li>
-                        </ul>
-                    </td>
-                    <td>
-                        <ul>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.gcp_zone">gcp_zone (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor">GCPCostMonitor (class in clustrix.cost_providers.gcp)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.generate_cost_report">generate_cost_report() (in module clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_aws_specific_metrics">get_aws_specific_metrics() (clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_consumption_api_integration">get_azure_consumption_api_integration() (clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_azure_specific_metrics">get_azure_specific_metrics() (clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_billing_api_integration">get_billing_api_integration() (clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.get_config">get_config() (in module clustrix.config)</a>
 </li>
                                 <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.get_cost_monitor">get_cost_monitor() (in module clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.get_cost_optimization_recommendations">get_cost_optimization_recommendations() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_cost_optimization_recommendations">(clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_cost_optimization_recommendations">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_cost_optimization_recommendations">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                        </ul></li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_cost_optimization_tips">get_cost_optimization_tips() (clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.get_cpu_memory_usage">get_cpu_memory_usage() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_gcp_specific_metrics">get_gcp_specific_metrics() (clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.get_gpu_utilization">get_gpu_utilization() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_instance_recommendations">get_instance_recommendations() (clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_performance_metrics">get_performance_metrics() (clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_preemptible_pricing_info">get_preemptible_pricing_info() (clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.get_pricing_info">get_pricing_info() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_pricing_info">(clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_pricing_info">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_pricing_info">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_pricing_info">(clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_monitoring.get_pricing_info">(in module clustrix.cost_monitoring)</a>
+</li>
+                                        </ul></li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_region_pricing_comparison">get_region_pricing_comparison() (clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_region_pricing_comparison">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_region_pricing_comparison">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                        </ul></li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.get_resource_usage">get_resource_usage() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_resource_usage">(clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_resource_usage">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.gcp.GCPCostMonitor.get_resource_usage">(clustrix.cost_providers.gcp.GCPCostMonitor method)</a>
+</li>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor.get_resource_usage">(clustrix.cost_providers.lambda_cloud.LambdaCostMonitor method)</a>
+</li>
+                                        </ul></li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.aws.AWSCostMonitor.get_spot_pricing_info">get_spot_pricing_info() (clustrix.cost_providers.aws.AWSCostMonitor method)</a>
+
+                                        <ul>
+                                                <li><a href="api/cost_monitoring.html#clustrix.cost_providers.azure.AzureCostMonitor.get_spot_pricing_info">(clustrix.cost_providers.azure.AzureCostMonitor method)</a>
+</li>
+                                        </ul></li>
+                                <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.gke_cluster_name">gke_cluster_name (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.gpu_stats">gpu_stats (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                        </ul>
+                    </td>
+            </tr>
+        </table>
+    
+        <h2 id="H">H</h2>
+        <table class="indextable genindextable">
+            <tr>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.hourly_rate">hourly_rate (clustrix.cost_monitoring.CostEstimate attribute)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.hours_used">hours_used (clustrix.cost_monitoring.CostEstimate attribute)</a>
+</li>
+                        </ul>
+                    </td>
+            </tr>
+        </table>
+    
+        <h2 id="I">I</h2>
+        <table class="indextable genindextable">
+            <tr>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.instance_type">instance_type (clustrix.cost_monitoring.CostEstimate attribute)</a>
 </li>
                         </ul>
                     </td>
@@ -440,6 +680,12 @@
                     <td>
                         <ul>
                                 <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_providers.lambda_cloud.LambdaCostMonitor">LambdaCostMonitor (class in clustrix.cost_providers.lambda_cloud)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostEstimate.last_updated">last_updated (clustrix.cost_monitoring.CostEstimate attribute)</a>
+</li>
+                                <li>
                                     <a href="api/config.html#clustrix.config.load_config">load_config() (in module clustrix.config)</a>
 </li>
                                 <li>
@@ -449,6 +695,9 @@
                     </td>
                     <td>
                         <ul>
+                                <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.load_ipython_extension">load_ipython_extension() (in module clustrix.notebook_magic)</a>
+</li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.local_cache_dir">local_cache_dir (clustrix.config.ClusterConfig attribute)</a>
 </li>
@@ -469,7 +718,26 @@
                     <td>
                         <ul>
                                 <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.ClusterfyMagics.magics">magics (clustrix.notebook_magic.ClusterfyMagics attribute)</a>
+</li>
+                                <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.max_parallel_jobs">max_parallel_jobs (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.memory_percent">memory_percent (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.memory_total_mb">memory_total_mb (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.memory_used_mb">memory_used_mb (clustrix.cost_monitoring.ResourceUsage attribute)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.metadata">metadata (clustrix.cost_monitoring.CostReport attribute)</a>
 </li>
                                 <li>
                                     
@@ -483,12 +751,21 @@
                                                 <li><a href="api/local_executor.html#module-clustrix.local_executor">clustrix.local_executor</a>
 </li>
                                         </ul></li>
+                                <li>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.module_loads">module_loads (clustrix.config.ClusterConfig attribute)</a>
+</li>
                         </ul>
                     </td>
+            </tr>
+        </table>
+    
+        <h2 id="N">N</h2>
+        <table class="indextable genindextable">
+            <tr>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.module_loads">module_loads (clustrix.config.ClusterConfig attribute)</a>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage.network_io_mb">network_io_mb (clustrix.cost_monitoring.ResourceUsage attribute)</a>
 </li>
                         </ul>
                     </td>
@@ -506,15 +783,18 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.password">password (clustrix.config.ClusterConfig attribute)</a>
 </li>
+                                <li>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.pre_execution_commands">pre_execution_commands (clustrix.config.ClusterConfig attribute)</a>
+</li>
                         </ul>
                     </td>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.pre_execution_commands">pre_execution_commands (clustrix.config.ClusterConfig attribute)</a>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.prefer_local_parallel">prefer_local_parallel (clustrix.config.ClusterConfig attribute)</a>
 </li>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.prefer_local_parallel">prefer_local_parallel (clustrix.config.ClusterConfig attribute)</a>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.provider">provider (clustrix.cost_monitoring.CostReport attribute)</a>
 </li>
                                 <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.python_executable">python_executable (clustrix.config.ClusterConfig attribute)</a>
@@ -530,7 +810,26 @@
                     <td>
                         <ul>
                                 <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.recommendations">recommendations (clustrix.cost_monitoring.CostReport attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.region">region (clustrix.cost_monitoring.CostReport attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/notebook_magic.html#clustrix.notebook_magic.ClusterfyMagics.registered">registered (clustrix.notebook_magic.ClusterfyMagics attribute)</a>
+</li>
+                        </ul>
+                    </td>
+                    <td>
+                        <ul>
+                                <li>
                                     <a href="api/config.html#clustrix.config.ClusterConfig.remote_work_dir">remote_work_dir (clustrix.config.ClusterConfig attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.resource_usage">resource_usage (clustrix.cost_monitoring.CostReport attribute)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.ResourceUsage">ResourceUsage (class in clustrix.cost_monitoring)</a>
 </li>
                         </ul>
                     </td>
@@ -545,12 +844,34 @@
                                 <li>
                                     <a href="api/config.html#clustrix.config.save_config">save_config() (in module clustrix.config)</a>
 </li>
+                                <li>
+                                    <a href="api/config.html#clustrix.config.ClusterConfig.save_to_file">save_to_file() (clustrix.config.ClusterConfig method)</a>
+</li>
                         </ul>
                     </td>
                     <td>
                         <ul>
                                 <li>
-                                    <a href="api/config.html#clustrix.config.ClusterConfig.save_to_file">save_to_file() (clustrix.config.ClusterConfig method)</a>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.start_cost_monitoring">start_cost_monitoring() (in module clustrix.cost_monitoring)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.start_monitoring">start_monitoring() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+</li>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.BaseCostMonitor.stop_monitoring">stop_monitoring() (clustrix.cost_monitoring.BaseCostMonitor method)</a>
+</li>
+                        </ul>
+                    </td>
+            </tr>
+        </table>
+    
+        <h2 id="T">T</h2>
+        <table class="indextable genindextable">
+            <tr>
+                    <td>
+                        <ul>
+                                <li>
+                                    <a href="api/cost_monitoring.html#clustrix.cost_monitoring.CostReport.timestamp">timestamp (clustrix.cost_monitoring.CostReport attribute)</a>
 </li>
                         </ul>
                     </td>
@@ -597,7 +918,7 @@
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 26, 2025</small>
+                <small>Last updated: Jun 27, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
