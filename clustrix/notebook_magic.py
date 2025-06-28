@@ -525,10 +525,14 @@ class EnhancedClusterConfigWidget:
         # Status output with proper sizing
         self.status_output = widgets.Output(
             layout=widgets.Layout(
-                height="80px",
+                height="120px",  # Increased height for better visibility
                 width="100%",
-                overflow_y="scroll",
-                border="1px solid #ccc",
+                overflow_y="auto",
+                border="1px solid #ddd",
+                border_radius="4px",
+                padding="8px",
+                margin="10px 0px",
+                background_color="#f8f9fa",
             )
         )
         # Update dropdown and load initial configuration
@@ -1925,8 +1929,9 @@ class EnhancedClusterConfigWidget:
                 save_section,
                 widgets.HTML("<hr>"),
                 action_buttons,
-                widgets.HTML("<hr>"),
+                widgets.HTML("<br><h6>Status Messages</h6>"),
                 self.status_output,
+                widgets.HTML("<br>"),  # Add spacing at bottom
             ]
         )
         display(main_layout)
