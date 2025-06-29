@@ -109,6 +109,172 @@ class AWSProvider(CloudProvider):
         except Exception:
             return False
 
+    def _create_or_get_eks_cluster_role(self) -> str:
+        """Create or get IAM role for EKS cluster."""
+        role_name = "clustrix-eks-cluster-role"
+
+        try:
+            # Try to get existing role
+            response = self.iam_client.get_role(RoleName=role_name)
+            return response["Role"]["Arn"]
+        except ClientError:
+            # Role doesn't exist, create it
+            pass
+
+        # Create EKS cluster service role
+        trust_policy = {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Effect": "Allow",
+                    "Principal": {"Service": "eks.amazonaws.com"},
+                    "Action": "sts:AssumeRole",
+                }
+            ],
+        }
+
+        response = self.iam_client.create_role(
+            RoleName=role_name,
+            AssumeRolePolicyDocument=str(trust_policy).replace("'", '"'),
+            Description="IAM role for EKS cluster created by Clustrix",
+        )
+
+        role_arn = response["Role"]["Arn"]
+
+        # Attach required policies
+        policies = [
+            "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy",
+        ]
+
+        for policy_arn in policies:
+            self.iam_client.attach_role_policy(RoleName=role_name, PolicyArn=policy_arn)
+
+        logger.info(f"Created EKS cluster role: {role_arn}")
+        return role_arn
+
+    def _create_or_get_vpc_for_eks(self, cluster_name: str) -> Dict[str, Any]:
+        """Create or get VPC configuration for EKS cluster."""
+        vpc_name = f"clustrix-eks-vpc-{cluster_name}"
+
+        try:
+            # Check for existing VPC with our tag
+            vpcs = self.ec2_client.describe_vpcs(
+                Filters=[
+                    {"Name": "tag:Name", "Values": [vpc_name]},
+                    {"Name": "tag:created_by", "Values": ["clustrix"]},
+                ]
+            )
+
+            if vpcs["Vpcs"]:
+                vpc_id = vpcs["Vpcs"][0]["VpcId"]
+                logger.info(f"Using existing VPC: {vpc_id}")
+            else:
+                # Create new VPC
+                vpc_response = self.ec2_client.create_vpc(CidrBlock="10.0.0.0/16")
+                vpc_id = vpc_response["Vpc"]["VpcId"]
+
+                # Tag the VPC
+                self.ec2_client.create_tags(
+                    Resources=[vpc_id],
+                    Tags=[
+                        {"Key": "Name", "Value": vpc_name},
+                        {"Key": "created_by", "Value": "clustrix"},
+                        {"Key": "cluster_name", "Value": cluster_name},
+                    ],
+                )
+                logger.info(f"Created VPC: {vpc_id}")
+
+            # Create subnets and security groups
+            subnet_ids = self._create_eks_subnets(vpc_id, cluster_name)
+            security_group_ids = self._create_eks_security_groups(vpc_id, cluster_name)
+
+            return {
+                "vpc_id": vpc_id,
+                "subnet_ids": subnet_ids,
+                "security_group_ids": security_group_ids,
+            }
+
+        except ClientError as e:
+            logger.error(f"Failed to create VPC for EKS: {e}")
+            raise
+
+    def _create_eks_subnets(self, vpc_id: str, cluster_name: str) -> List[str]:
+        """Create subnets for EKS cluster."""
+        subnet_configs = [
+            {"cidr": "10.0.1.0/24", "az_suffix": "a"},
+            {"cidr": "10.0.2.0/24", "az_suffix": "b"},
+        ]
+
+        subnet_ids = []
+        for i, config in enumerate(subnet_configs):
+            az = f"{self.region}{config['az_suffix']}"
+            subnet_name = f"clustrix-eks-subnet-{cluster_name}-{i + 1}"
+
+            # Check if subnet exists
+            subnets = self.ec2_client.describe_subnets(
+                Filters=[
+                    {"Name": "tag:Name", "Values": [subnet_name]},
+                    {"Name": "vpc-id", "Values": [vpc_id]},
+                ]
+            )
+
+            if subnets["Subnets"]:
+                subnet_id = subnets["Subnets"][0]["SubnetId"]
+            else:
+                # Create subnet
+                subnet_response = self.ec2_client.create_subnet(
+                    VpcId=vpc_id, CidrBlock=config["cidr"], AvailabilityZone=az
+                )
+                subnet_id = subnet_response["Subnet"]["SubnetId"]
+
+                # Tag subnet
+                self.ec2_client.create_tags(
+                    Resources=[subnet_id],
+                    Tags=[
+                        {"Key": "Name", "Value": subnet_name},
+                        {"Key": "created_by", "Value": "clustrix"},
+                        {"Key": "kubernetes.io/role/elb", "Value": "1"},
+                    ],
+                )
+
+            subnet_ids.append(subnet_id)
+
+        return subnet_ids
+
+    def _create_eks_security_groups(self, vpc_id: str, cluster_name: str) -> List[str]:
+        """Create security groups for EKS cluster."""
+        sg_name = f"clustrix-eks-sg-{cluster_name}"
+
+        # Check if security group exists
+        sgs = self.ec2_client.describe_security_groups(
+            Filters=[
+                {"Name": "group-name", "Values": [sg_name]},
+                {"Name": "vpc-id", "Values": [vpc_id]},
+            ]
+        )
+
+        if sgs["SecurityGroups"]:
+            sg_id = sgs["SecurityGroups"][0]["GroupId"]
+        else:
+            # Create security group
+            sg_response = self.ec2_client.create_security_group(
+                GroupName=sg_name,
+                Description=f"Security group for EKS cluster {cluster_name}",
+                VpcId=vpc_id,
+            )
+            sg_id = sg_response["GroupId"]
+
+            # Tag security group
+            self.ec2_client.create_tags(
+                Resources=[sg_id],
+                Tags=[
+                    {"Key": "Name", "Value": sg_name},
+                    {"Key": "created_by", "Value": "clustrix"},
+                ],
+            )
+
+        return [sg_id]
+
     def create_eks_cluster(
         self,
         cluster_name: str,
@@ -132,24 +298,47 @@ class AWSProvider(CloudProvider):
             raise RuntimeError("Not authenticated with AWS")
 
         try:
-            # This is a simplified version - real implementation would need:
-            # 1. VPC creation/selection
-            # 2. IAM role creation
-            # 3. Security group setup
-            # 4. Node group creation
+            logger.info(f"Creating EKS cluster '{cluster_name}' in {self.region}...")
 
-            logger.info(f"Creating EKS cluster '{cluster_name}'...")
+            # Step 1: Create or get EKS service role
+            cluster_role_arn = self._create_or_get_eks_cluster_role()
 
-            # For now, return a placeholder
-            # TODO: Implement full EKS creation
+            # Step 2: Create or get VPC and subnets
+            vpc_config = self._create_or_get_vpc_for_eks(cluster_name)
+
+            # Step 3: Create EKS cluster
+            cluster_response = self.eks_client.create_cluster(
+                name=cluster_name,
+                version=kubernetes_version,
+                roleArn=cluster_role_arn,
+                resourcesVpcConfig={
+                    "subnetIds": vpc_config["subnet_ids"],
+                    "securityGroupIds": vpc_config["security_group_ids"],
+                },
+                tags={
+                    "created_by": "clustrix",
+                    "cluster_name": cluster_name,
+                    "environment": "clustrix",
+                },
+            )
+
+            cluster_info = cluster_response["cluster"]
+
+            # Step 4: Create node group (after cluster is active - this will be async)
+            logger.info(f"EKS cluster '{cluster_name}' creation initiated...")
+
             return {
                 "cluster_name": cluster_name,
-                "status": "CREATING",
-                "endpoint": f"https://{cluster_name}.eks.{self.region}.amazonaws.com",
+                "status": cluster_info["status"],
+                "endpoint": cluster_info.get("endpoint", ""),
+                "arn": cluster_info["arn"],
+                "version": cluster_info["version"],
                 "node_count": node_count,
                 "instance_type": instance_type,
                 "region": self.region,
-                "created_at": datetime.now(timezone.utc).isoformat(),
+                "role_arn": cluster_role_arn,
+                "vpc_config": vpc_config,
+                "created_at": cluster_info["createdAt"].isoformat(),
             }
 
         except ClientError as e:
@@ -273,9 +462,32 @@ class AWSProvider(CloudProvider):
 
         try:
             if cluster_type == "eks":
-                # TODO: Implement EKS deletion
                 logger.info(f"Deleting EKS cluster '{cluster_identifier}'...")
-                return True
+
+                try:
+                    # First delete any node groups
+                    nodegroups = self.eks_client.list_nodegroups(
+                        clusterName=cluster_identifier
+                    )
+
+                    for nodegroup_name in nodegroups.get("nodegroups", []):
+                        logger.info(f"Deleting node group: {nodegroup_name}")
+                        self.eks_client.delete_nodegroup(
+                            clusterName=cluster_identifier,
+                            nodegroupName=nodegroup_name
+                        )
+
+                    # Delete the cluster itself
+                    self.eks_client.delete_cluster(name=cluster_identifier)
+                    logger.info(f"EKS cluster '{cluster_identifier}' deletion initiated")
+                    return True
+
+                except ClientError as e:
+                    if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                        logger.warning(f"EKS cluster '{cluster_identifier}' not found")
+                        return True  # Consider this success
+                    else:
+                        raise
             elif cluster_type == "ec2":
                 self.ec2_client.terminate_instances(InstanceIds=[cluster_identifier])
                 logger.info(f"Terminated EC2 instance '{cluster_identifier}'")
@@ -296,12 +508,46 @@ class AWSProvider(CloudProvider):
 
         try:
             if cluster_type == "eks":
-                # TODO: Implement real EKS status check
-                return {
-                    "cluster_name": cluster_identifier,
-                    "status": "ACTIVE",
-                    "cluster_type": "eks",
-                }
+                try:
+                    cluster_response = self.eks_client.describe_cluster(
+                        name=cluster_identifier
+                    )
+                    cluster = cluster_response["cluster"]
+
+                    # Get node group information
+                    nodegroups = self.eks_client.list_nodegroups(
+                        clusterName=cluster_identifier
+                    )
+
+                    node_count = 0
+                    if nodegroups.get("nodegroups"):
+                        # Get details of first node group for node count
+                        ng_response = self.eks_client.describe_nodegroup(
+                            clusterName=cluster_identifier,
+                            nodegroupName=nodegroups["nodegroups"][0]
+                        )
+                        node_count = ng_response["nodegroup"].get("scalingConfig", {}).get("desiredSize", 0)
+
+                    return {
+                        "cluster_name": cluster_identifier,
+                        "status": cluster["status"],
+                        "endpoint": cluster.get("endpoint", ""),
+                        "version": cluster.get("version", ""),
+                        "arn": cluster.get("arn", ""),
+                        "node_count": node_count,
+                        "created_at": cluster.get("createdAt", ""),
+                        "cluster_type": "eks",
+                        "region": self.region,
+                    }
+                except ClientError as e:
+                    if e.response["Error"]["Code"] == "ResourceNotFoundException":
+                        return {
+                            "cluster_name": cluster_identifier,
+                            "status": "NOT_FOUND",
+                            "cluster_type": "eks",
+                        }
+                    else:
+                        raise
             elif cluster_type == "ec2":
                 response = self.ec2_client.describe_instances(
                     InstanceIds=[cluster_identifier]
