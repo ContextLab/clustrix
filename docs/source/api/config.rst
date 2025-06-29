@@ -9,10 +9,10 @@ Clustrix provides flexible configuration management for cluster settings, authen
    :show-inheritance:
 
 Configuration Methods
---------------------
+---------------------
 
 Programmatic Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -79,8 +79,8 @@ Authentication
 - ``password``: SSH password (not recommended)
 - ``key_file``: Path to SSH private key file
 
-Cluster Settings  
-~~~~~~~~~~~~~~~
+Cluster Settings
+~~~~~~~~~~~~~~~~
 
 - ``cluster_type``: Type of cluster (slurm, pbs, sge, kubernetes, ssh)
 - ``cluster_host``: Hostname of cluster head node

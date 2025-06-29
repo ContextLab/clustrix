@@ -185,7 +185,11 @@ except ImportError:
 from .config import configure, get_config
 
 logger = logging.getLogger(__name__)
-# Default cluster configurations
+
+#: Default cluster configurations available in the widget.
+#: 
+#: This dictionary contains pre-configured cluster templates for common use cases.
+#: Each configuration is a dictionary with cluster-specific settings.
 DEFAULT_CONFIGS = {
     "Local Single-core": {
         "cluster_type": "local",
@@ -2363,9 +2367,13 @@ class ClusterfyMagics(Magics):
     def clusterfy(self, line, cell):
         """
         Create an interactive widget for managing Clustrix configurations.
-        Usage:
+        
+        Usage::
+        
             %%clusterfy
+            
         This creates a widget interface that allows you to:
+        
         - Select and manage cluster configurations
         - Create new configurations with validation
         - Save/load configurations from files

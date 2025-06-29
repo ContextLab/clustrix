@@ -257,7 +257,8 @@ def cost_tracking_decorator(provider: str, instance_type: str = "default"):
         provider: Cloud provider name (e.g., 'lambda', 'aws', 'azure', 'gcp')
         instance_type: Instance type for cost estimation
 
-    Example:
+    Example::
+
         @cost_tracking_decorator('lambda', 'a100_40gb')
         @cluster(cores=8, memory="32GB")
         def my_training_function():
