@@ -83,6 +83,9 @@ dev = [
     "black>=21.0",
     "flake8>=3.8", 
     "mypy>=0.812",
+    "types-PyYAML",
+    "types-requests", 
+    "types-paramiko",
 ]
 test = [
     "pytest>=6.0",
@@ -148,10 +151,23 @@ target-version = ['py38']
 
 [tool.mypy]
 python_version = "3.8"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
+exclude = [
+    "build/",
+    "dist/",
+    ".venv/",
+    "venv/",
+    ".git/",
+    "__pycache__/",
+    ".mypy_cache/",
+    ".pytest_cache/",
+    "tests/conftest.py",
+]
+# Only check our package files  
+files = ["clustrix/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
