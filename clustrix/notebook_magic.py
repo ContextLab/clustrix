@@ -303,7 +303,7 @@ DEFAULT_CONFIGS = {
         "cost_monitoring": True,
         "environment_variables": {
             "CUDA_VISIBLE_DEVICES": "0",
-            "NVIDIA_VISIBLE_DEVICES": "all"
+            "NVIDIA_VISIBLE_DEVICES": "all",
         },
     },
     "HuggingFace Space": {
