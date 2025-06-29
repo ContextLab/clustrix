@@ -570,23 +570,13 @@ class EnhancedClusterConfigWidget:
             return
             
         if self.current_config_name and self.current_config_name in self.configs:
-            # Only allow renaming for non-default configs
-            if self.current_config_name not in DEFAULT_CONFIGS:
-                # Check if this is actually a name change (not just loading)
-                current_display_name = self.configs[self.current_config_name].get("name", self.current_config_name)
-                if new_name != current_display_name:
-                    # Update the name in the current configuration
-                    self.configs[self.current_config_name]["name"] = new_name
-                    # Update the dropdown to reflect the new display name
-                    self._update_config_dropdown()
-            else:
-                # For default configs, revert the name change
-                default_name = self.configs[self.current_config_name].get("name", self.current_config_name)
-                if new_name != default_name:
-                    # Silently revert to original name
-                    self.config_name.unobserve(self._on_config_name_change, names="value")
-                    self.config_name.value = default_name
-                    self.config_name.observe(self._on_config_name_change, names="value")
+            # Check if this is actually a name change (not just loading)
+            current_display_name = self.configs[self.current_config_name].get("name", self.current_config_name)
+            if new_name != current_display_name:
+                # Update the name in the current configuration
+                self.configs[self.current_config_name]["name"] = new_name
+                # Update the dropdown to reflect the new display name
+                self._update_config_dropdown()
 
     def _create_dynamic_fields(self):
         """Create dynamic fields that change based on cluster type."""
@@ -2571,6 +2561,9 @@ class EnhancedClusterConfigWidget:
                     print(f"   Private key: {updated_config.key_file}")
                     print(f"   Public key: {updated_config.key_file}.pub")
                     print(f"   SSH config updated for alias: {cluster_alias}")
+                    print()
+                    print("ℹ️  Note: If connection tests fail initially, the SSH server")
+                    print("   may need a few moments to recognize the new key.")
                     print()
                     print("🔧 You can now test the configuration or apply it")
                     print("   The SSH key field has been updated automatically")

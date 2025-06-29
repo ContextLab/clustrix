@@ -48,10 +48,12 @@ try:
     if ipython is not None:
         from .notebook_magic import load_ipython_extension, auto_display_on_import
 
-        # Load the magic command
-        load_ipython_extension(ipython)
+        # Load the magic command (only register once)
+        if not hasattr(ipython, '_clustrix_magic_loaded'):
+            load_ipython_extension(ipython)
+            ipython._clustrix_magic_loaded = True
 
-        # Auto-display widget if in notebook
+        # Always auto-display widget if in notebook (even on re-imports)
         auto_display_on_import()
 except (ImportError, AttributeError):
     # Not in IPython/Jupyter environment
