@@ -512,6 +512,14 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="auto"),
         )
         self.test_btn.on_click(self._on_test_config)
+
+        self.ssh_setup_btn = widgets.Button(
+            description="Setup SSH Keys",
+            button_style="warning",
+            icon="key",
+            layout=widgets.Layout(width="auto"),
+        )
+        self.ssh_setup_btn.on_click(self._on_setup_ssh_keys)
         # Status output with proper sizing
         self.status_output = widgets.Output(
             layout=widgets.Layout(
@@ -2442,6 +2450,106 @@ class EnhancedClusterConfigWidget:
             except Exception as e:
                 print(f"❌ Error testing configuration: {str(e)}")
 
+    def _on_setup_ssh_keys(self, button):
+        """Set up SSH keys for the current configuration."""
+        with self.status_output:
+            self.status_output.clear_output()
+
+            try:
+                # Get current widget configuration
+                config = self._save_config_from_widgets()
+                cluster_type = config.get("cluster_type", "local")
+
+                # SSH key setup only applies to remote clusters
+                if cluster_type == "local":
+                    print("ℹ️  SSH keys are not needed for local execution")
+                    return
+
+                if cluster_type not in ["ssh", "slurm", "pbs", "sge"]:
+                    print(f"ℹ️  SSH key setup not supported for {cluster_type} clusters")
+                    print("   Cloud providers use API authentication instead")
+                    return
+
+                # Validate required fields
+                host = config.get("cluster_host", "").strip()
+                username = config.get("username", "").strip()
+                port = config.get("cluster_port", 22)
+
+                if not host:
+                    print("❌ Host/Address is required for SSH key setup")
+                    return
+                if not username:
+                    print("❌ Username is required for SSH key setup")
+                    return
+
+                print(f"🔐 Setting up SSH keys for {cluster_type} cluster:")
+                print(f"   Host: {host}:{port}")
+                print(f"   Username: {username}")
+                print()
+
+                # Import SSH utilities
+                from .ssh_utils import setup_ssh_keys, detect_existing_ssh_key
+                from .config import ClusterConfig
+
+                # Create a ClusterConfig object
+                cluster_config = ClusterConfig(
+                    cluster_type=cluster_type,
+                    cluster_host=host,
+                    username=username,
+                    port=port,
+                )
+
+                # Check for existing SSH keys first
+                print("🔍 Checking for existing SSH keys...")
+                existing_key = detect_existing_ssh_key(host, username, port)
+
+                if existing_key:
+                    print(f"✅ Found working SSH key: {existing_key}")
+                    # Update the widget with the found key
+                    self.ssh_key_field.value = existing_key
+                    print("   SSH key field has been updated automatically")
+                    return
+
+                # Set up cluster alias for SSH config
+                cluster_alias = config.get(
+                    "config_name", f"{cluster_type}_{host.replace('.', '_')}"
+                )
+
+                print("🔧 No existing SSH keys found, generating new key pair...")
+                print(f"   Key will be saved for cluster alias: {cluster_alias}")
+                print("   This may take a moment...")
+
+                # Generate and deploy SSH keys
+                updated_config = setup_ssh_keys(
+                    cluster_config,
+                    cluster_alias=cluster_alias,
+                    auto_generate=True,
+                    key_type="ed25519",  # Use modern Ed25519 keys
+                    passphrase="",  # No passphrase for automation
+                )
+
+                # Update the widget with the new key
+                if updated_config.key_file:
+                    self.ssh_key_field.value = updated_config.key_file
+                    print()
+                    print("✅ SSH key setup completed successfully!")
+                    print(f"   Private key: {updated_config.key_file}")
+                    print(f"   Public key: {updated_config.key_file}.pub")
+                    print(f"   SSH config updated for alias: {cluster_alias}")
+                    print()
+                    print("🔧 You can now test the configuration or apply it")
+                    print("   The SSH key field has been updated automatically")
+                else:
+                    print("❌ SSH key setup failed - no key file path returned")
+
+            except ImportError as e:
+                print(f"❌ SSH utilities not available: {e}")
+                print("   Please ensure paramiko is installed: pip install paramiko")
+            except Exception as e:
+                print(f"❌ Error setting up SSH keys: {str(e)}")
+                print("   You may need to set up SSH keys manually")
+                print("   Check the troubleshooting documentation for guidance")
+
     def display(self):
         """Display the enhanced widget interface."""
         # Title
@@ -2485,6 +2593,7 @@ class EnhancedClusterConfigWidget:
             [
                 self.apply_btn,
                 self.test_btn,
+                self.ssh_setup_btn,
                 self.delete_btn,
             ]
         )
