@@ -473,13 +473,14 @@ class AWSProvider(CloudProvider):
                     for nodegroup_name in nodegroups.get("nodegroups", []):
                         logger.info(f"Deleting node group: {nodegroup_name}")
                         self.eks_client.delete_nodegroup(
-                            clusterName=cluster_identifier,
-                            nodegroupName=nodegroup_name
+                            clusterName=cluster_identifier, nodegroupName=nodegroup_name
                         )
 
                     # Delete the cluster itself
                     self.eks_client.delete_cluster(name=cluster_identifier)
-                    logger.info(f"EKS cluster '{cluster_identifier}' deletion initiated")
+                    logger.info(
+                        f"EKS cluster '{cluster_identifier}' deletion initiated"
+                    )
                     return True
 
                 except ClientError as e:
@@ -524,9 +525,13 @@ class AWSProvider(CloudProvider):
                         # Get details of first node group for node count
                         ng_response = self.eks_client.describe_nodegroup(
                             clusterName=cluster_identifier,
-                            nodegroupName=nodegroups["nodegroups"][0]
+                            nodegroupName=nodegroups["nodegroups"][0],
                         )
-                        node_count = ng_response["nodegroup"].get("scalingConfig", {}).get("desiredSize", 0)
+                        node_count = (
+                            ng_response["nodegroup"]
+                            .get("scalingConfig", {})
+                            .get("desiredSize", 0)
+                        )
 
                     return {
                         "cluster_name": cluster_identifier,

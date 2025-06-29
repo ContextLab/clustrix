@@ -456,9 +456,11 @@ class AzureProvider(CloudProvider):
                 # Delete AKS cluster
                 operation = self.container_client.managed_clusters.begin_delete(
                     resource_group_name=self.resource_group,
-                    resource_name=cluster_identifier
+                    resource_name=cluster_identifier,
                 )
-                logger.info(f"Deleting AKS cluster '{cluster_identifier}' - operation: {operation}")
+                logger.info(
+                    f"Deleting AKS cluster '{cluster_identifier}' - operation: {operation}"
+                )
                 return True
             else:
                 raise ValueError(f"Unknown cluster type: {cluster_type}")
@@ -500,7 +502,7 @@ class AzureProvider(CloudProvider):
                 # Get AKS cluster status
                 cluster = self.container_client.managed_clusters.get(
                     resource_group_name=self.resource_group,
-                    resource_name=cluster_identifier
+                    resource_name=cluster_identifier,
                 )
 
                 return {
@@ -563,8 +565,10 @@ class AzureProvider(CloudProvider):
 
         # List AKS clusters
         try:
-            aks_clusters = self.container_client.managed_clusters.list_by_resource_group(
-                resource_group_name=self.resource_group
+            aks_clusters = (
+                self.container_client.managed_clusters.list_by_resource_group(
+                    resource_group_name=self.resource_group
+                )
             )
 
             for cluster in aks_clusters:

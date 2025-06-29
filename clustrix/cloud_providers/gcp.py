@@ -274,16 +274,10 @@ class GCPProvider(CloudProvider):
                     },
                 },
                 "master_auth": {
-                    "client_certificate_config": {
-                        "issue_client_certificate": False
-                    }
+                    "client_certificate_config": {"issue_client_certificate": False}
                 },
-                "ip_allocation_policy": {
-                    "use_ip_aliases": True
-                },
-                "network_policy": {
-                    "enabled": False
-                },
+                "ip_allocation_policy": {"use_ip_aliases": True},
+                "network_policy": {"enabled": False},
                 "addons_config": {
                     "http_load_balancing": {"disabled": False},
                     "horizontal_pod_autoscaling": {"disabled": False},
@@ -361,7 +355,9 @@ class GCPProvider(CloudProvider):
                 request = container_v1.DeleteClusterRequest(name=name)
                 operation = self.container_client.delete_cluster(request=request)
 
-                logger.info(f"Deleting GKE cluster '{cluster_identifier}' - operation: {operation.name}")
+                logger.info(
+                    f"Deleting GKE cluster '{cluster_identifier}' - operation: {operation.name}"
+                )
                 return True
             else:
                 raise ValueError(f"Unknown cluster type: {cluster_type}")

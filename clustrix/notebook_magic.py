@@ -480,8 +480,10 @@ class EnhancedClusterConfigWidget:
                 "huggingface",
             ],
             description="Cluster Type:",
-            tooltip=("Choose where to run your jobs: local machine, remote servers "
-                     "(SSH/SLURM/PBS/SGE), Kubernetes clusters, or cloud providers"),
+            tooltip=(
+                "Choose where to run your jobs: local machine, remote servers "
+                "(SSH/SLURM/PBS/SGE), Kubernetes clusters, or cloud providers"
+            ),
             style=style,
             layout=full_layout,
         )
@@ -492,8 +494,10 @@ class EnhancedClusterConfigWidget:
         self.config_name = widgets.Text(
             description="Config Name:",
             placeholder="Enter configuration name",
-            tooltip=("Give this configuration a descriptive name "
-                     "(e.g., 'AWS Production', 'Local Testing', 'HPC Cluster')"),
+            tooltip=(
+                "Give this configuration a descriptive name "
+                "(e.g., 'AWS Production', 'Local Testing', 'HPC Cluster')"
+            ),
             style=style,
             layout=full_layout,
         )
@@ -586,8 +590,10 @@ class EnhancedClusterConfigWidget:
         self.host_field = widgets.Text(
             description="Host/Address:",
             placeholder="hostname or IP address",
-            tooltip=("Enter the hostname or IP address of your remote cluster "
-                     "(e.g., cluster.example.com or 192.168.1.100)"),
+            tooltip=(
+                "Enter the hostname or IP address of your remote cluster "
+                "(e.g., cluster.example.com or 192.168.1.100)"
+            ),
             style=style,
             layout=full_layout,
         )
@@ -604,8 +610,10 @@ class EnhancedClusterConfigWidget:
         self.ssh_key_field = widgets.Text(
             description="SSH Key:",
             placeholder="~/.ssh/id_rsa",
-            tooltip=("Path to your SSH private key file for passwordless authentication "
-                     "(generate with 'ssh-keygen -t rsa')"),
+            tooltip=(
+                "Path to your SSH private key file for passwordless authentication "
+                "(generate with 'ssh-keygen -t rsa')"
+            ),
             style=style,
             layout=half_layout,
         )
@@ -629,8 +637,10 @@ class EnhancedClusterConfigWidget:
             value="8GB",
             description="Memory:",
             placeholder="e.g., 8GB, 16GB",
-            tooltip=("Amount of RAM to request for each job (e.g., '8GB', '16GB'). "
-                     "Higher memory allows processing larger datasets"),
+            tooltip=(
+                "Amount of RAM to request for each job (e.g., '8GB', '16GB'). "
+                "Higher memory allows processing larger datasets"
+            ),
             style=style,
             layout=widgets.Layout(width="200px"),
         )
@@ -646,8 +656,10 @@ class EnhancedClusterConfigWidget:
         self.k8s_namespace = widgets.Text(
             value="default",
             description="Namespace:",
-            tooltip=("Kubernetes namespace for job pods (default: 'default'). "
-                     "Contact your cluster admin for appropriate namespace"),
+            tooltip=(
+                "Kubernetes namespace for job pods (default: 'default'). "
+                "Contact your cluster admin for appropriate namespace"
+            ),
             style=style,
             layout=half_layout,
         )
@@ -756,16 +768,20 @@ class EnhancedClusterConfigWidget:
         self.azure_client_id = widgets.Text(
             description="Client ID:",
             placeholder="Azure service principal client ID",
-            tooltip=("Azure service principal application ID (UUID format). "
-                     "Create in Azure AD > App registrations"),
+            tooltip=(
+                "Azure service principal application ID (UUID format). "
+                "Create in Azure AD > App registrations"
+            ),
             style=style,
             layout=half_layout,
         )
         self.azure_client_secret = widgets.Password(
             description="Client Secret:",
             placeholder="Azure service principal secret",
-            tooltip=("Azure service principal secret (keep secure!). Generated in Azure AD > "
-                     "App registrations > Certificates & secrets"),
+            tooltip=(
+                "Azure service principal secret (keep secure!). Generated in Azure AD > "
+                "App registrations > Certificates & secrets"
+            ),
             style=style,
             layout=half_layout,
         )
@@ -782,8 +798,10 @@ class EnhancedClusterConfigWidget:
             options=["us-central1"],  # Will be populated dynamically
             value="us-central1",
             description="GCP Region:",
-            tooltip=("Google Cloud region for resources (affects latency and pricing). "
-                     "Choose region closest to your location"),
+            tooltip=(
+                "Google Cloud region for resources (affects latency and pricing). "
+                "Choose region closest to your location"
+            ),
             style=style,
             layout=half_layout,
         )
@@ -800,8 +818,10 @@ class EnhancedClusterConfigWidget:
         self.gcp_service_account_key = widgets.Textarea(
             description="Service Account Key:",
             placeholder="Paste your GCP service account JSON key here",
-            tooltip=("Google Cloud service account key in JSON format (keep secure!). "
-                     "Create in GCP Console > IAM & Admin > Service Accounts"),
+            tooltip=(
+                "Google Cloud service account key in JSON format (keep secure!). "
+                "Create in GCP Console > IAM & Admin > Service Accounts"
+            ),
             style=style,
             layout=full_layout,
         )
@@ -818,8 +838,10 @@ class EnhancedClusterConfigWidget:
             options=["gpu_1x_a10"],  # Will be populated dynamically
             value="gpu_1x_a10",
             description="Instance Type:",
-            tooltip=("Lambda Cloud GPU instance type (affects GPU model, RAM, and cost). "
-                     "gpu_1x_a10 = 1x NVIDIA A10 + 30GB RAM"),
+            tooltip=(
+                "Lambda Cloud GPU instance type (affects GPU model, RAM, and cost). "
+                "gpu_1x_a10 = 1x NVIDIA A10 + 30GB RAM"
+            ),
             style=style,
             layout=half_layout,
         )
@@ -828,8 +850,10 @@ class EnhancedClusterConfigWidget:
         self.hf_token = widgets.Password(
             description="HF Token:",
             placeholder="Your HuggingFace API token",
-            tooltip=("HuggingFace API token for Spaces access (keep secure!). "
-                     "Get from HuggingFace Settings > Access Tokens"),
+            tooltip=(
+                "HuggingFace API token for Spaces access (keep secure!). "
+                "Get from HuggingFace Settings > Access Tokens"
+            ),
             style=style,
             layout=half_layout,
         )
