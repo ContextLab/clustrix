@@ -536,7 +536,9 @@ class TestMagicCommands:
                 # Should have printed error messages
                 assert mock_print.call_count >= 1
                 print_calls = [call[0][0] for call in mock_print.call_args_list]
-                assert any("IPython and ipywidgets" in msg for msg in print_calls)
+                # Convert to string to handle HTML objects and other types
+                print_messages = [str(msg) for msg in print_calls]
+                assert any("IPython and ipywidgets" in msg for msg in print_messages)
 
                 # Should return None (graceful failure)
                 assert result is None

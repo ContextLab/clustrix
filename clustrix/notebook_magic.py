@@ -2560,7 +2560,7 @@ class ClusterfyMagics(Magics):
         if not IPYTHON_AVAILABLE:
             print("❌ This magic command requires IPython and ipywidgets")
             print("Install with: pip install ipywidgets")
-            return
+            return None
         # Create and display the widget (not auto-display)
         display_config_widget(auto_display=False)
         # Execute any code in the cell (if provided)
