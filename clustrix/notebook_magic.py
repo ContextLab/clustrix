@@ -313,7 +313,7 @@ DEFAULT_CONFIGS = {
     },
     "Lambda Cloud GPU": {
         "name": "Lambda Cloud GPU",
-        "cluster_type": "lambda",
+        "cluster_type": "lambda_cloud",
         "lambda_instance_type": "gpu_1x_a10",
         "default_cores": 8,
         "default_memory": "32GB",
@@ -324,7 +324,7 @@ DEFAULT_CONFIGS = {
     },
     "HuggingFace Space": {
         "name": "HuggingFace Space",
-        "cluster_type": "huggingface",
+        "cluster_type": "huggingface_spaces",
         "hf_hardware": "cpu-basic",
         "hf_sdk": "gradio",
         "default_cores": 2,
@@ -476,8 +476,8 @@ class EnhancedClusterConfigWidget:
                 "aws",
                 "azure",
                 "gcp",
-                "lambda",
-                "huggingface",
+                "lambda_cloud",
+                "huggingface_spaces",
             ],
             description="Cluster Type:",
             tooltip=(
@@ -1161,12 +1161,12 @@ class EnhancedClusterConfigWidget:
             self.gcp_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
             self._populate_cloud_provider_options("gcp")
-        elif cluster_type == "lambda":
+        elif cluster_type == "lambda_cloud":
             # Show Lambda Cloud provider fields only
             self.lambda_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
             self._populate_cloud_provider_options("lambda")
-        elif cluster_type == "huggingface":
+        elif cluster_type == "huggingface_spaces":
             # Show HuggingFace Spaces provider fields only
             self.hf_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
@@ -1464,8 +1464,8 @@ class EnhancedClusterConfigWidget:
                 "aws",
                 "azure",
                 "gcp",
-                "lambda",
-                "huggingface",
+                "lambda_cloud",
+                "huggingface_spaces",
             ]:
                 # Cloud provider configurations
                 config["remote_work_dir"] = self.work_dir_field.value
@@ -1502,12 +1502,12 @@ class EnhancedClusterConfigWidget:
                             self.gcp_service_account_key.value
                         )
 
-                elif self.cluster_type.value == "lambda":
+                elif self.cluster_type.value == "lambda_cloud":
                     config["lambda_instance_type"] = self.lambda_instance_type.value
                     if self.lambda_api_key.value:
                         config["lambda_api_key"] = self.lambda_api_key.value
 
-                elif self.cluster_type.value == "huggingface":
+                elif self.cluster_type.value == "huggingface_spaces":
                     config["hf_hardware"] = self.hf_hardware.value
                     config["hf_sdk"] = self.hf_sdk.value
                     if self.hf_token.value:

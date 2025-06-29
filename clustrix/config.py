@@ -74,6 +74,9 @@ class ClusterConfig:
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
     async_submit: bool = False  # Use asynchronous job submission
 
+    # Monitoring settings
+    cost_monitoring: bool = False  # Enable cost monitoring for cloud providers
+
     # Advanced settings
     environment_variables: Optional[Dict[str, str]] = None
     module_loads: Optional[list] = None
