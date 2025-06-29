@@ -301,6 +301,10 @@ DEFAULT_CONFIGS = {
         "remote_work_dir": "/home/ubuntu/clustrix",
         "package_manager": "conda",
         "cost_monitoring": True,
+        "environment_variables": {
+            "CUDA_VISIBLE_DEVICES": "0",
+            "NVIDIA_VISIBLE_DEVICES": "all"
+        },
     },
     "HuggingFace Space": {
         "cluster_type": "huggingface_spaces",
