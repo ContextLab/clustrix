@@ -1824,6 +1824,146 @@ class EnhancedClusterConfigWidget:
             except Exception as e:
                 print(f"❌ Error loading configuration: {str(e)}")
 
+    def _test_remote_connectivity(self, host, port, timeout=5):
+        """Test basic network connectivity to a remote host."""
+        import socket
+
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(timeout)
+            result = sock.connect_ex((host, port))
+            sock.close()
+            return result == 0
+        except Exception:
+            return False
+
+    def _test_ssh_connectivity(self, config, timeout=10):
+        """Test SSH connectivity with provided credentials."""
+        try:
+            import paramiko
+
+            ssh_client = paramiko.SSHClient()
+            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            connect_kwargs = {
+                "hostname": config.get("cluster_host"),
+                "port": config.get("cluster_port", 22),
+                "username": config.get("username"),
+                "timeout": timeout,
+            }
+
+            # Use key file if provided
+            key_file = config.get("key_file")
+            if key_file:
+                from pathlib import Path
+
+                key_path = Path(key_file).expanduser()
+                if key_path.exists():
+                    connect_kwargs["key_filename"] = str(key_path)
+                else:
+                    return False
+            elif config.get("password"):
+                connect_kwargs["password"] = config.get("password")
+            else:
+                # Try with no authentication (for testing purposes)
+                pass
+
+            ssh_client.connect(**connect_kwargs)
+
+            # Test a simple command
+            stdin, stdout, stderr = ssh_client.exec_command("echo 'test'", timeout=5)
+            output = stdout.read().decode().strip()
+            ssh_client.close()
+
+            return output == "test"
+
+        except ImportError:
+            print("ℹ️  paramiko not available for SSH testing")
+            return False
+        except Exception:
+            return False
+
+    def _test_cloud_connectivity(self, cluster_type, config):
+        """Test cloud provider API connectivity."""
+        try:
+            if cluster_type == "aws":
+                return self._test_aws_connectivity(config)
+            elif cluster_type == "azure":
+                return self._test_azure_connectivity(config)
+            elif cluster_type == "gcp":
+                return self._test_gcp_connectivity(config)
+            else:
+                return False
+        except Exception:
+            return False
+
+    def _test_aws_connectivity(self, config):
+        """Test AWS API connectivity."""
+        try:
+            import boto3
+            from botocore.exceptions import NoCredentialsError, ClientError
+
+            # Try to create a session and list regions (minimal API call)
+            session = boto3.Session(profile_name=config.get("aws_profile"))
+            ec2 = session.client(
+                "ec2", region_name=config.get("aws_region", "us-east-1")
+            )
+
+            # Simple API call to test connectivity
+            ec2.describe_regions(MaxResults=1)
+            return True
+
+        except ImportError:
+            print("ℹ️  boto3 not available for AWS testing")
+            return False
+        except (NoCredentialsError, ClientError):
+            return False
+        except Exception:
+            return False
+
+    def _test_azure_connectivity(self, config):
+        """Test Azure API connectivity."""
+        try:
+            from azure.identity import DefaultAzureCredential
+            from azure.mgmt.resource import ResourceManagementClient
+
+            credential = DefaultAzureCredential()
+            subscription_id = config.get("azure_subscription_id")
+
+            if not subscription_id:
+                return False
+
+            # Try to create a resource client and list resource groups
+            resource_client = ResourceManagementClient(credential, subscription_id)
+            list(resource_client.resource_groups.list(top=1))
+            return True
+
+        except ImportError:
+            print("ℹ️  Azure SDK not available for Azure testing")
+            return False
+        except Exception:
+            return False
+
+    def _test_gcp_connectivity(self, config):
+        """Test GCP API connectivity."""
+        try:
+            from google.cloud import resource_manager
+
+            project_id = config.get("gcp_project_id")
+            if not project_id:
+                return False
+
+            # Try to get project information
+            client = resource_manager.Client()
+            project = client.fetch_project(project_id)
+            return project is not None
+
+        except ImportError:
+            print("ℹ️  Google Cloud SDK not available for GCP testing")
+            return False
+        except Exception:
+            return False
+
     def _on_test_config(self, button):
         """Test the current configuration."""
         with self.status_output:
@@ -1860,7 +2000,7 @@ class EnhancedClusterConfigWidget:
                     print(f"- Username: {username}")
                     print(f"- Cluster type: {cluster_type}")
 
-                    # Basic validation - in a real implementation, we might try to connect
+                    # Basic validation
                     if validate_hostname(host) or validate_ip_address(host):
                         print("✅ Host format is valid")
                     else:
@@ -1879,7 +2019,21 @@ class EnhancedClusterConfigWidget:
                     else:
                         print("ℹ️  No SSH key specified (will use password auth)")
 
-                    print("ℹ️  Configuration appears valid (connection not tested)")
+                    # Attempt connectivity test
+                    print("🔌 Testing connectivity...")
+                    if self._test_remote_connectivity(host, port):
+                        print("✅ Host is reachable")
+
+                        # For SSH-based clusters, try a basic SSH connection test
+                        if cluster_type == "ssh":
+                            if self._test_ssh_connectivity(config):
+                                print("✅ SSH connection successful")
+                            else:
+                                print("⚠️  SSH connection failed (check credentials)")
+                        else:
+                            print("✅ Basic connectivity confirmed")
+                    else:
+                        print("❌ Host is not reachable or connection timed out")
 
                 elif cluster_type == "kubernetes":
                     # Test Kubernetes configuration
@@ -1905,8 +2059,152 @@ class EnhancedClusterConfigWidget:
 
                     print("✅ Kubernetes configuration appears valid")
 
+                elif cluster_type == "aws":
+                    # Test AWS configuration
+                    region = config.get("aws_region", "us-east-1")
+                    cluster_sub_type = config.get("aws_cluster_type", "ec2")
+
+                    print("- Provider: Amazon Web Services")
+                    print(f"- Region: {region}")
+                    print(f"- Service: {cluster_sub_type.upper()}")
+
+                    if cluster_sub_type == "eks":
+                        cluster_name = config.get("eks_cluster_name", "")
+                        if cluster_name:
+                            print(f"- EKS Cluster: {cluster_name}")
+                        else:
+                            print("⚠️  EKS cluster name not specified")
+
+                    # Check if AWS credentials might be available
+                    import os
+
+                    if os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("AWS_PROFILE"):
+                        print("✅ AWS credentials detected in environment")
+                    else:
+                        print(
+                            "ℹ️  No AWS credentials detected (may use IAM roles or config files)"
+                        )
+
+                    # Test AWS API connectivity
+                    print("🔌 Testing AWS API connectivity...")
+                    if self._test_cloud_connectivity("aws", config):
+                        print("✅ AWS API connection successful")
+                    else:
+                        print(
+                            "⚠️  AWS API connection failed (check credentials and region)"
+                        )
+
+                    print("✅ AWS configuration appears valid")
+
+                elif cluster_type == "azure":
+                    # Test Azure configuration
+                    region = config.get("azure_region", "eastus")
+                    cluster_sub_type = config.get("azure_cluster_type", "vm")
+
+                    print("- Provider: Microsoft Azure")
+                    print(f"- Region: {region}")
+                    print(f"- Service: {cluster_sub_type.upper()}")
+
+                    if cluster_sub_type == "aks":
+                        cluster_name = config.get("aks_cluster_name", "")
+                        resource_group = config.get("azure_resource_group", "")
+                        if cluster_name and resource_group:
+                            print(f"- AKS Cluster: {cluster_name}")
+                            print(f"- Resource Group: {resource_group}")
+                        else:
+                            print("⚠️  AKS cluster name and resource group required")
+
+                    # Check if Azure credentials might be available
+                    import os
+
+                    if os.getenv("AZURE_CLIENT_ID") or os.getenv(
+                        "AZURE_SUBSCRIPTION_ID"
+                    ):
+                        print("✅ Azure credentials detected in environment")
+                    else:
+                        print(
+                            "ℹ️  No Azure credentials detected (may use Azure CLI or managed identity)"
+                        )
+
+                    # Test Azure API connectivity
+                    print("🔌 Testing Azure API connectivity...")
+                    if self._test_cloud_connectivity("azure", config):
+                        print("✅ Azure API connection successful")
+                    else:
+                        print(
+                            "⚠️  Azure API connection failed (check credentials and subscription)"
+                        )
+
+                    print("✅ Azure configuration appears valid")
+
+                elif cluster_type == "gcp":
+                    # Test GCP configuration
+                    region = config.get("gcp_region", "us-central1")
+                    cluster_sub_type = config.get("gcp_cluster_type", "compute")
+                    project_id = config.get("gcp_project_id", "")
+
+                    print("- Provider: Google Cloud Platform")
+                    print(f"- Region: {region}")
+                    print(f"- Service: {cluster_sub_type.upper()}")
+
+                    if project_id:
+                        print(f"- Project ID: {project_id}")
+                    else:
+                        print("⚠️  GCP project ID not specified")
+
+                    if cluster_sub_type == "gke":
+                        cluster_name = config.get("gke_cluster_name", "")
+                        zone = config.get("gcp_zone", "")
+                        if cluster_name:
+                            print(f"- GKE Cluster: {cluster_name}")
+                            if zone:
+                                print(f"- Zone: {zone}")
+                        else:
+                            print("⚠️  GKE cluster name not specified")
+
+                    # Check if GCP credentials might be available
+                    import os
+
+                    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv(
+                        "GCLOUD_PROJECT"
+                    ):
+                        print("✅ GCP credentials detected in environment")
+                    else:
+                        print(
+                            "ℹ️  No GCP credentials detected (may use gcloud auth or service account)"
+                        )
+
+                    # Test GCP API connectivity
+                    print("🔌 Testing GCP API connectivity...")
+                    if self._test_cloud_connectivity("gcp", config):
+                        print("✅ GCP API connection successful")
+                    else:
+                        print(
+                            "⚠️  GCP API connection failed (check credentials and project)"
+                        )
+
+                    print("✅ GCP configuration appears valid")
+
+                elif cluster_type in ["lambda_cloud", "huggingface_spaces"]:
+                    # Test other cloud providers
+                    provider_name = cluster_type.replace("_", " ").title()
+                    print(f"- Provider: {provider_name}")
+
+                    # Basic validation for these providers
+                    api_key = config.get("api_key", "")
+                    if api_key:
+                        print("✅ API key provided")
+                    else:
+                        print("⚠️  API key may be required")
+
+                    print(f"✅ {provider_name} configuration appears valid")
+
                 else:
                     print(f"⚠️  Unknown cluster type: {cluster_type}")
+                    print(
+                        "ℹ️  Supported types: local, ssh, slurm, pbs, sge, kubernetes, "
+                        "aws, azure, gcp, lambda_cloud, huggingface_spaces"
+                    )
 
                 # Test resource configuration
                 cores = config.get("default_cores", 4)
