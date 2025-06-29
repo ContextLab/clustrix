@@ -1,10 +1,16 @@
-Metadata-Version: 2.1
+Metadata-Version: 2.4
 Name: clustrix
 Version: 0.1.1
 Summary: Seamless distributed computing for Python functions
 Home-page: https://github.com/ContextLab/clustrix
 Author: Contextual Dynamics Laboratory
-Author-email: contextualdynamics@gmail.com
+Author-email: Contextual Dynamics Laboratory <contextualdynamics@gmail.com>
+License: MIT
+Project-URL: Homepage, https://github.com/ContextLab/clustrix
+Project-URL: Repository, https://github.com/ContextLab/clustrix
+Project-URL: Documentation, https://clustrix.readthedocs.io
+Project-URL: Bug Tracker, https://github.com/ContextLab/clustrix/issues
+Keywords: distributed-computing,cluster,slurm,kubernetes,parallel
 Classifier: Development Status :: 4 - Beta
 Classifier: Intended Audience :: Developers
 Classifier: Intended Audience :: Science/Research
@@ -101,6 +107,10 @@ Requires-Dist: sphinx>=4.0; extra == "all"
 Requires-Dist: sphinx-wagtail-theme>=6.0.0; extra == "all"
 Requires-Dist: sphinx-autodoc-typehints>=1.12; extra == "all"
 Requires-Dist: nbsphinx>=0.8; extra == "all"
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-python
 
 # Clustrix
 
