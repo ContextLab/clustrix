@@ -6,7 +6,6 @@ to catch issues that only appear in CI but not in local development.
 """
 
 import sys
-import unittest.mock
 from unittest.mock import patch, MagicMock
 import pytest
 

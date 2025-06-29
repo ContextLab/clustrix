@@ -2,6 +2,7 @@ LICENSE
 README.md
 setup.py
 clustrix/__init__.py
+clustrix/async_executor_simple.py
 clustrix/cli.py
 clustrix/cloud_providers.py
 clustrix/config.py
@@ -20,6 +21,13 @@ clustrix.egg-info/entry_points.txt
 clustrix.egg-info/not-zip-safe
 clustrix.egg-info/requires.txt
 clustrix.egg-info/top_level.txt
+clustrix/cloud_providers/__init__.py
+clustrix/cloud_providers/aws.py
+clustrix/cloud_providers/azure.py
+clustrix/cloud_providers/base.py
+clustrix/cloud_providers/gcp.py
+clustrix/cloud_providers/huggingface_spaces.py
+clustrix/cloud_providers/lambda_cloud.py
 clustrix/cost_providers/__init__.py
 clustrix/cost_providers/aws.py
 clustrix/cost_providers/azure.py
@@ -27,6 +35,7 @@ clustrix/cost_providers/gcp.py
 clustrix/cost_providers/lambda_cloud.py
 tests/__init__.py
 tests/conftest.py
+tests/test_async_execution.py
 tests/test_cli.py
 tests/test_cloud_providers.py
 tests/test_config.py

@@ -148,6 +148,7 @@
 
 <span class="kn">from</span> <span class="nn">.config</span> <span class="kn">import</span> <span class="n">get_config</span>
 <span class="kn">from</span> <span class="nn">.executor</span> <span class="kn">import</span> <span class="n">ClusterExecutor</span>
+<span class="kn">from</span> <span class="nn">.async_executor_simple</span> <span class="kn">import</span> <span class="n">AsyncClusterExecutor</span>
 <span class="kn">from</span> <span class="nn">.local_executor</span> <span class="kn">import</span> <span class="n">create_local_executor</span>
 <span class="kn">from</span> <span class="nn">.loop_analysis</span> <span class="kn">import</span> <span class="n">find_parallelizable_loops</span>
 <span class="kn">from</span> <span class="nn">.utils</span> <span class="kn">import</span> <span class="n">detect_loops</span><span class="p">,</span> <span class="n">serialize_function</span>
@@ -165,6 +166,7 @@
     <span class="n">queue</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">parallel</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">environment</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">async_submit</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">kwargs</span><span class="p">,</span>
 <span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
@@ -178,10 +180,12 @@
 <span class="sd">        queue: Queue to submit to</span>
 <span class="sd">        parallel: Whether to parallelize loops automatically</span>
 <span class="sd">        environment: Conda environment name</span>
+<span class="sd">        async_submit: Whether to submit jobs asynchronously (non-blocking)</span>
 <span class="sd">        **kwargs: Additional job parameters</span>
 
 <span class="sd">    Returns:</span>
 <span class="sd">        Decorated function that executes on cluster</span>
+<span class="sd">        If async_submit=True, returns AsyncJobResult for non-blocking execution</span>
 <span class="sd">    &quot;&quot;&quot;</span>
 
     <span class="k">def</span> <span class="nf">decorator</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">Callable</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Callable</span><span class="p">:</span>
@@ -209,29 +213,56 @@
             <span class="p">)</span>
 
             <span class="k">if</span> <span class="n">execution_mode</span> <span class="o">==</span> <span class="s2">&quot;local&quot;</span><span class="p">:</span>
-                <span class="k">if</span> <span class="n">should_parallelize</span><span class="p">:</span>
+                <span class="n">use_async</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">async_submit</span>
+                    <span class="k">if</span> <span class="n">async_submit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="k">else</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s2">&quot;async_submit&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+                <span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">use_async</span><span class="p">:</span>
+                    <span class="c1"># Async local execution</span>
+                    <span class="n">async_executor</span> <span class="o">=</span> <span class="n">AsyncClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">async_executor</span><span class="o">.</span><span class="n">submit_job_async</span><span class="p">(</span>
+                        <span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span>
+                    <span class="p">)</span>
+                <span class="k">elif</span> <span class="n">should_parallelize</span><span class="p">:</span>
                     <span class="k">return</span> <span class="n">_execute_local_parallel</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span><span class="p">)</span>
                 <span class="k">else</span><span class="p">:</span>
                     <span class="c1"># Execute locally without parallelization</span>
                     <span class="k">return</span> <span class="n">func</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">,</span> <span class="o">**</span><span class="n">func_kwargs</span><span class="p">)</span>
             <span class="k">else</span><span class="p">:</span>
                 <span class="c1"># Remote execution</span>
-                <span class="n">executor</span> <span class="o">=</span> <span class="n">ClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+                <span class="n">use_async</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="n">async_submit</span>
+                    <span class="k">if</span> <span class="n">async_submit</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span>
+                    <span class="k">else</span> <span class="nb">getattr</span><span class="p">(</span><span class="n">config</span><span class="p">,</span> <span class="s2">&quot;async_submit&quot;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+                <span class="p">)</span>
+                <span class="k">if</span> <span class="n">use_async</span><span class="p">:</span>
+                    <span class="c1"># Async execution</span>
+                    <span class="n">async_executor</span> <span class="o">=</span> <span class="n">AsyncClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+                    <span class="k">return</span> <span class="n">async_executor</span><span class="o">.</span><span class="n">submit_job_async</span><span class="p">(</span>
+                        <span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="c1"># Synchronous execution (original behavior)</span>
+                    <span class="n">executor</span> <span class="o">=</span> <span class="n">ClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
 
-                <span class="k">if</span> <span class="n">should_parallelize</span><span class="p">:</span>
-                    <span class="n">loop_info</span> <span class="o">=</span> <span class="n">detect_loops</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">)</span>
-                    <span class="k">if</span> <span class="n">loop_info</span><span class="p">:</span>
-                        <span class="k">return</span> <span class="n">_execute_parallel</span><span class="p">(</span>
-                            <span class="n">executor</span><span class="p">,</span>
-                            <span class="n">func</span><span class="p">,</span>
-                            <span class="n">args</span><span class="p">,</span>
-                            <span class="n">func_kwargs</span><span class="p">,</span>
-                            <span class="n">job_config</span><span class="p">,</span>
-                            <span class="n">loop_info</span><span class="p">,</span>
-                        <span class="p">)</span>
+                    <span class="k">if</span> <span class="n">should_parallelize</span><span class="p">:</span>
+                        <span class="n">loop_info</span> <span class="o">=</span> <span class="n">detect_loops</span><span class="p">(</span><span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">)</span>
+                        <span class="k">if</span> <span class="n">loop_info</span><span class="p">:</span>
+                            <span class="k">return</span> <span class="n">_execute_parallel</span><span class="p">(</span>
+                                <span class="n">executor</span><span class="p">,</span>
+                                <span class="n">func</span><span class="p">,</span>
+                                <span class="n">args</span><span class="p">,</span>
+                                <span class="n">func_kwargs</span><span class="p">,</span>
+                                <span class="n">job_config</span><span class="p">,</span>
+                                <span class="n">loop_info</span><span class="p">,</span>
+                            <span class="p">)</span>
 
-                <span class="c1"># Execute normally on cluster</span>
-                <span class="k">return</span> <span class="n">_execute_single</span><span class="p">(</span><span class="n">executor</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span><span class="p">)</span>
+                    <span class="c1"># Execute normally on cluster</span>
+                    <span class="k">return</span> <span class="n">_execute_single</span><span class="p">(</span>
+                        <span class="n">executor</span><span class="p">,</span> <span class="n">func</span><span class="p">,</span> <span class="n">args</span><span class="p">,</span> <span class="n">func_kwargs</span><span class="p">,</span> <span class="n">job_config</span>
+                    <span class="p">)</span>
 
         <span class="c1"># Store cluster config for access outside execution</span>
         <span class="n">cluster_config</span> <span class="o">=</span> <span class="p">{</span>
@@ -242,6 +273,7 @@
             <span class="s2">&quot;queue&quot;</span><span class="p">:</span> <span class="n">queue</span><span class="p">,</span>
             <span class="s2">&quot;parallel&quot;</span><span class="p">:</span> <span class="n">parallel</span><span class="p">,</span>
             <span class="s2">&quot;environment&quot;</span><span class="p">:</span> <span class="n">environment</span><span class="p">,</span>
+            <span class="s2">&quot;async_submit&quot;</span><span class="p">:</span> <span class="n">async_submit</span><span class="p">,</span>
         <span class="p">}</span>
         <span class="n">cluster_config</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">kwargs</span><span class="p">)</span>
         <span class="nb">setattr</span><span class="p">(</span><span class="n">wrapper</span><span class="p">,</span> <span class="s2">&quot;_cluster_config&quot;</span><span class="p">,</span> <span class="n">cluster_config</span><span class="p">)</span>
@@ -562,7 +594,7 @@
                     &copy; Copyright 2025, Contextual Dynamics Laboratory
             </div>
             <div class="text-center text-white-50 font-italic mt-3">
-                <small>Last updated: Jun 27, 2025</small>
+                <small>Last updated: Jun 28, 2025</small>
                 <small>
                     Created using
                     <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">

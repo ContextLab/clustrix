@@ -99,11 +99,14 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
 - **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
-- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH
+- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
+- **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Native Cost Monitoring**: Built-in cost tracking for all major cloud providers
+- **Kubernetes Support**: Deploy to EKS, GKE, AKS, or any Kubernetes cluster
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
 - **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
+- **Dynamic Instance Selection**: Auto-populated dropdowns for cloud instance types and regions
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
 ## Quick Start
@@ -167,13 +170,88 @@ import clustrix  # Auto-loads the magic command
 # - Save/load configurations to files
 ```
 
+#### Interactive Configuration Widget
+
+The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks. Here's what you'll see when you use the `%%clusterfy` magic command:
+
+##### Default View
+When the widget first loads, it displays the "Local Single-core" configuration for quick testing:
+
+![Default widget view showing Local Single-core configuration](https://github.com/user-attachments/assets/44baefd7-9dd7-452d-bc43-ef53136d13a4)
+
+##### Configuration Dropdown
+The dropdown menu includes pre-built templates for various cluster types and cloud providers:
+
+![Configuration dropdown showing available templates](https://github.com/user-attachments/assets/744e2eef-e03e-46bd-9bb1-e0ed2c11cf45)
+
 The widget includes pre-built templates for:
-- **Local Development**: Run jobs on your local machine
-- **AWS GPU Instances**: p3.2xlarge, p3.8xlarge templates
-- **Google Cloud**: CPU and GPU instance configurations
-- **Azure**: Virtual machine templates with GPU support
-- **SLURM HPC**: University cluster configurations
-- **Kubernetes**: Container-based execution
+- **Local Development**: 
+  - Local Single-core: Run jobs on one CPU core
+  - Local Multi-core: Utilize all available CPU cores
+- **HPC Clusters**:
+  - SLURM: University and research cluster support
+  - PBS/SGE: Traditional HPC schedulers
+- **Cloud Providers**:
+  - **AWS**: EC2 instances and EKS Kubernetes clusters
+  - **Google Cloud**: Compute Engine VMs and GKE clusters
+  - **Azure**: Virtual Machines and AKS Kubernetes clusters
+  - **Lambda Cloud**: GPU-optimized instances for ML/AI
+  - **HuggingFace Spaces**: Deploy to HF Spaces infrastructure
+- **Kubernetes**: Native container orchestration support
+
+##### Cluster Configuration Examples
+
+###### SLURM Cluster Configuration
+For traditional HPC clusters, the widget provides all essential fields:
+
+![SLURM configuration with basic settings](https://github.com/user-attachments/assets/994a803d-485e-4d14-bf93-2f0223066510)
+
+The advanced settings accordion reveals additional options:
+
+![SLURM advanced configuration options](https://github.com/user-attachments/assets/0930eee0-ee52-4d53-9165-81e907c7d962)
+
+Advanced options include:
+- Module loads (e.g., `python/3.9`, `cuda/11.2`)
+- Environment variables
+- Pre-execution commands
+- Custom SSH key paths
+- Cost monitoring toggles
+
+###### Cloud Provider Configuration
+
+**Google Cloud Platform:**
+When selecting a cloud provider, only relevant fields are displayed:
+
+![GCP VM configuration interface](https://github.com/user-attachments/assets/53acb782-65cd-4b65-93a0-98286144f223)
+
+**Lambda Cloud GPU Instances:**
+The widget dynamically populates instance type dropdowns based on the selected provider:
+
+![Lambda Cloud with GPU instance dropdown](https://github.com/user-attachments/assets/4bd0e176-d5f3-430e-86af-ddbfff827d77)
+
+##### Key Widget Features
+
+1. **Dynamic Field Visibility**: Only shows fields relevant to the selected cluster type
+2. **Provider-Specific Options**: 
+   - AWS: Region selection, instance types, EKS cluster options
+   - Azure: Resource groups, VM sizes, AKS configuration
+   - GCP: Projects, zones, machine types, GKE options
+   - Lambda Cloud: GPU instance selection with live pricing
+3. **Input Validation**: Real-time validation for hostnames, IP addresses, and configuration values
+4. **Tooltips**: Hover over any field label to see detailed help text
+5. **Configuration Management**:
+   - Save configurations to YAML/JSON files
+   - Load existing configurations
+   - Test configurations before applying
+   - Add/delete custom configurations
+
+##### Using the Widget
+
+1. **Select a Configuration**: Choose from the dropdown or create a new one
+2. **Edit Settings**: Modify cluster connection details and resource requirements
+3. **Advanced Options**: Expand the accordion for environment setup and additional settings
+4. **Apply Configuration**: Click "Apply Configuration" to use these settings for subsequent `@cluster` decorated functions
+5. **Save for Later**: Use "Save Configuration" to persist settings to a file
 
 ### Configuration File
 
@@ -280,6 +358,116 @@ clustrix.configure(cluster_type='kubernetes')
 
 # Simple SSH execution (no scheduler)
 clustrix.configure(cluster_type='ssh', cluster_host='server.example.com')
+```
+
+### Cloud Provider Integration
+
+Clustrix provides native integration with major cloud providers for both VM and Kubernetes deployments:
+
+#### AWS Integration
+
+```python
+# Configure AWS credentials and region
+clustrix.configure(
+    cluster_type='aws',
+    access_key_id='YOUR_ACCESS_KEY',
+    secret_access_key='YOUR_SECRET_KEY',
+    region='us-west-2'
+)
+
+# Run on EC2 instance
+@cluster(provider='aws', instance_type='p3.2xlarge', cores=8, memory='61GB')
+def train_on_aws():
+    # GPU-accelerated training on AWS
+    pass
+
+# Run on EKS Kubernetes cluster
+@cluster(provider='aws', cluster_type='kubernetes', cluster_name='my-eks-cluster')
+def distributed_training():
+    # Runs on Amazon EKS
+    pass
+```
+
+#### Google Cloud Integration
+
+```python
+# Configure GCP with service account
+clustrix.configure(
+    cluster_type='gcp',
+    project_id='your-project-id',
+    service_account_key='path/to/service-account-key.json',
+    region='us-central1'
+)
+
+# Run on Compute Engine
+@cluster(provider='gcp', machine_type='n1-highmem-8', cores=8, memory='52GB')
+def analyze_data():
+    # High-memory computation on GCP
+    pass
+
+# Run on GKE cluster
+@cluster(provider='gcp', cluster_type='kubernetes', cluster_name='my-gke-cluster')
+def kubernetes_job():
+    # Runs on Google Kubernetes Engine
+    pass
+```
+
+#### Azure Integration
+
+```python
+# Configure Azure with service principal
+clustrix.configure(
+    cluster_type='azure',
+    subscription_id='YOUR_SUBSCRIPTION_ID',
+    client_id='YOUR_CLIENT_ID',
+    client_secret='YOUR_CLIENT_SECRET',
+    tenant_id='YOUR_TENANT_ID',
+    region='eastus'
+)
+
+# Run on Azure VM
+@cluster(provider='azure', vm_size='Standard_NC6', cores=6, memory='56GB')
+def gpu_workload():
+    # GPU computation on Azure
+    pass
+
+# Run on AKS cluster
+@cluster(provider='azure', cluster_type='kubernetes', cluster_name='my-aks-cluster')
+def container_workload():
+    # Runs on Azure Kubernetes Service
+    pass
+```
+
+#### Lambda Cloud Integration
+
+```python
+# Configure Lambda Cloud for GPU workloads
+clustrix.configure(
+    cluster_type='lambda_cloud',
+    api_key='YOUR_LAMBDA_API_KEY'
+)
+
+# Run on Lambda GPU instance
+@cluster(provider='lambda_cloud', instance_type='gpu_1x_a100', cores=30, memory='200GB')
+def train_large_model():
+    # A100 GPU training on Lambda Cloud
+    pass
+```
+
+#### HuggingFace Spaces Integration
+
+```python
+# Configure HuggingFace Spaces
+clustrix.configure(
+    cluster_type='huggingface_spaces',
+    token='YOUR_HF_TOKEN'
+)
+
+# Deploy to HuggingFace Spaces
+@cluster(provider='huggingface_spaces', space_hardware='gpu-t4-medium')
+def inference_endpoint():
+    # Runs on HuggingFace infrastructure
+    pass
 ```
 
 ## Command Line Interface
