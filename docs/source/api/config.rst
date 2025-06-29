@@ -28,7 +28,7 @@ Programmatic Configuration
    )
 
 Configuration File
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 Create a ``clustrix.yml`` file:
 
@@ -59,7 +59,7 @@ Create a ``clustrix.yml`` file:
      CUDA_VISIBLE_DEVICES: "0,1"
 
 Environment Variables
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Set configuration via environment variables:
 
@@ -70,10 +70,10 @@ Set configuration via environment variables:
    export CLUSTRIX_USERNAME=myuser
 
 Configuration Options
---------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 Authentication
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 - ``username``: SSH username
 - ``password``: SSH password (not recommended)
@@ -87,7 +87,7 @@ Cluster Settings
 - ``cluster_port``: SSH port (default: 22)
 
 Resource Defaults
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~
 
 - ``default_cores``: Default number of CPU cores
 - ``default_memory``: Default memory allocation
@@ -95,7 +95,7 @@ Resource Defaults
 - ``default_partition``: Default partition/queue
 
 Execution Preferences
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 - ``auto_parallel``: Enable automatic loop parallelization
 - ``max_parallel_jobs``: Maximum number of parallel jobs

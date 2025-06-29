@@ -13,7 +13,7 @@ Install Clustrix using pip:
    pip install clustrix
 
 Development Installation
------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 For development or to get the latest features:
 
@@ -24,7 +24,7 @@ For development or to get the latest features:
    pip install -e ".[dev]"
 
 Optional Dependencies
---------------------
+~~~~~~~~~~~~~~~~~~~~~
 
 Jupyter Notebook Support
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -40,7 +40,7 @@ For Jupyter notebook integration with interactive widgets:
 This enables the ``%%clusterfy`` magic command for interactive configuration.
 
 Kubernetes Support
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 For Kubernetes cluster support:
 
@@ -51,7 +51,7 @@ For Kubernetes cluster support:
    pip install clustrix kubernetes
 
 Documentation and Tutorials
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To build documentation locally:
 
@@ -62,7 +62,7 @@ To build documentation locally:
    make html
 
 All Optional Dependencies
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install everything:
 
@@ -71,14 +71,14 @@ Install everything:
    pip install clustrix[all]
 
 Requirements
------------
+~~~~~~~~~~~~
 
 - Python 3.8 or higher
 - SSH access to target clusters (for remote execution)
 - Appropriate cluster scheduler tools (SLURM, PBS, SGE) on target systems
 
 Verification
------------
+~~~~~~~~~~~~
 
 Verify your installation:
 

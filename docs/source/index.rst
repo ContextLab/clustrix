@@ -147,11 +147,7 @@ Table of Contents
    :caption: User Guide
 
    installation
-   quickstart
-   configuration
    ssh_setup
-   examples
-   local_parallel
 
 .. toctree::
    :maxdepth: 2
@@ -160,9 +156,6 @@ Table of Contents
    tutorials/slurm_tutorial
    tutorials/pbs_tutorial
    tutorials/kubernetes_tutorial
-   tutorials/basic_usage
-   tutorials/machine_learning
-   tutorials/scientific_computing
 
 .. toctree::
    :maxdepth: 2
@@ -196,18 +189,7 @@ Table of Contents
    api/config
    api/notebook_magic
    api/cost_monitoring
-   api/executor
    api/local_executor
-   api/loop_analysis
-   api/utils
-   api/cli
-
-.. toctree::
-   :maxdepth: 1
-   :caption: Development
-
-   contributing
-   changelog
 
 Supported Cluster Types
 -----------------------

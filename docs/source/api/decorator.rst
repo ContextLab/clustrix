@@ -52,7 +52,7 @@ Parallel Loop Execution
        return results
 
 Local Parallelization
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 

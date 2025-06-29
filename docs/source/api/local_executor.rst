@@ -55,7 +55,7 @@ Auto-Detection of Executor Type
    cpu_executor = create_local_executor(func=compute_heavy)
 
 Loop Parallelization
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -101,7 +101,7 @@ You can override the auto-detection:
    process_executor = LocalExecutor(use_threads=False)
 
 Performance Considerations
--------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **Process Pool Overhead:**
 - Higher memory usage (separate Python interpreters)
