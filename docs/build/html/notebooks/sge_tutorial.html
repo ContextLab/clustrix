@@ -1,0 +1,1300 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>SGE (Sun Grid Engine) Tutorial &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Kubernetes Tutorial" href="kubernetes_tutorial.html" />
+            <link rel="prev" title="PBS/Torque Cluster Tutorial" href="pbs_tutorial.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="cost_monitoring_tutorial.html">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">SGE (Sun Grid Engine) Tutorial</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/notebooks/sge_tutorial.ipynb" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/notebooks/sge_tutorial.ipynb.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="SGE-(Sun-Grid-Engine)-Tutorial">
+<h1>SGE (Sun Grid Engine) Tutorial<a class="headerlink" href="#SGE-(Sun-Grid-Engine)-Tutorial" title="Link to this heading">¶</a></h1>
+<p><a class="reference external" href="https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/notebooks/sge_tutorial.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
+<p>This tutorial demonstrates how to use Clustrix with SGE (Sun Grid Engine) clusters, including Open Grid Scheduler and other SGE-compatible systems.</p>
+<section id="Prerequisites">
+<h2>Prerequisites<a class="headerlink" href="#Prerequisites" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p>Access to an SGE cluster</p></li>
+<li><p>SSH key configured for the cluster</p></li>
+<li><p>Clustrix installed: <code class="docutils literal notranslate"><span class="pre">pip</span> <span class="pre">install</span> <span class="pre">clustrix</span></code></p></li>
+</ul>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install Clustrix (uncomment if needed)</span>
+<span class="c1"># !pip install clustrix</span>
+
+<span class="kn">import</span> <span class="nn">clustrix</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">cluster</span><span class="p">,</span> <span class="n">configure</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SGE-Configuration">
+<h2>SGE Configuration<a class="headerlink" href="#SGE-Configuration" title="Link to this heading">¶</a></h2>
+<p>Configure Clustrix for your SGE cluster:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Configure for SGE cluster</span>
+<span class="n">configure</span><span class="p">(</span>
+    <span class="n">cluster_type</span><span class="o">=</span><span class="s2">&quot;sge&quot;</span><span class="p">,</span>
+    <span class="n">cluster_host</span><span class="o">=</span><span class="s2">&quot;sge-cluster.org&quot;</span><span class="p">,</span>           <span class="c1"># Replace with your cluster</span>
+    <span class="n">username</span><span class="o">=</span><span class="s2">&quot;your-username&quot;</span><span class="p">,</span>                 <span class="c1"># Replace with your username</span>
+    <span class="n">key_file</span><span class="o">=</span><span class="s2">&quot;~/.ssh/id_rsa&quot;</span><span class="p">,</span>                <span class="c1"># SSH key path</span>
+
+    <span class="c1"># SGE resource defaults</span>
+    <span class="n">default_cores</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
+    <span class="n">default_memory</span><span class="o">=</span><span class="s2">&quot;8GB&quot;</span><span class="p">,</span>
+    <span class="n">default_time</span><span class="o">=</span><span class="s2">&quot;02:00:00&quot;</span><span class="p">,</span>
+    <span class="n">default_queue</span><span class="o">=</span><span class="s2">&quot;all.q&quot;</span><span class="p">,</span>                    <span class="c1"># Common SGE queue name</span>
+
+    <span class="c1"># SGE-specific settings</span>
+    <span class="n">remote_work_dir</span><span class="o">=</span><span class="s2">&quot;/home/your-username/clustrix&quot;</span><span class="p">,</span>
+
+    <span class="c1"># Environment modules</span>
+    <span class="n">module_loads</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;python/3.9&quot;</span><span class="p">],</span>
+
+    <span class="c1"># Job management</span>
+    <span class="n">cleanup_on_success</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+    <span class="n">max_parallel_jobs</span><span class="o">=</span><span class="mi">30</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SGE cluster configured successfully!&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-1:-Mathematical-Optimization">
+<h2>Example 1: Mathematical Optimization<a class="headerlink" href="#Example-1:-Mathematical-Optimization" title="Link to this heading">¶</a></h2>
+<p>SGE clusters are often used for optimization problems:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;16GB&quot;</span><span class="p">,</span>
+    <span class="n">time</span><span class="o">=</span><span class="s2">&quot;01:30:00&quot;</span><span class="p">,</span>
+    <span class="n">queue</span><span class="o">=</span><span class="s2">&quot;all.q&quot;</span><span class="p">,</span>
+    <span class="n">pe</span><span class="o">=</span><span class="s2">&quot;smp 8&quot;</span>  <span class="c1"># SGE parallel environment</span>
+<span class="p">)</span>
+<span class="k">def</span> <span class="nf">genetic_algorithm_optimization</span><span class="p">(</span><span class="n">problem_size</span><span class="o">=</span><span class="mi">1000</span><span class="p">,</span> <span class="n">generations</span><span class="o">=</span><span class="mi">500</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Genetic Algorithm optimization on SGE cluster.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">random</span>
+    <span class="kn">from</span> <span class="nn">functools</span> <span class="kn">import</span> <span class="n">partial</span>
+
+    <span class="k">def</span> <span class="nf">rastrigin_function</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Rastrigin function - a multimodal optimization benchmark&quot;&quot;&quot;</span>
+        <span class="n">A</span> <span class="o">=</span> <span class="mi">10</span>
+        <span class="n">n</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">A</span> <span class="o">*</span> <span class="n">n</span> <span class="o">+</span> <span class="nb">sum</span><span class="p">(</span><span class="n">xi</span><span class="o">**</span><span class="mi">2</span> <span class="o">-</span> <span class="n">A</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">cos</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">pi</span> <span class="o">*</span> <span class="n">xi</span><span class="p">)</span> <span class="k">for</span> <span class="n">xi</span> <span class="ow">in</span> <span class="n">x</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">rosenbrock_function</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Rosenbrock function - another optimization benchmark&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">100</span> <span class="o">*</span> <span class="p">(</span><span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span> <span class="o">-</span> <span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">x</span><span class="p">[</span><span class="n">i</span><span class="p">])</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">x</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span>
+
+    <span class="k">def</span> <span class="nf">sphere_function</span><span class="p">(</span><span class="n">x</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Simple sphere function&quot;&quot;&quot;</span>
+        <span class="k">return</span> <span class="nb">sum</span><span class="p">(</span><span class="n">xi</span><span class="o">**</span><span class="mi">2</span> <span class="k">for</span> <span class="n">xi</span> <span class="ow">in</span> <span class="n">x</span><span class="p">)</span>
+
+    <span class="c1"># Choose objective function</span>
+    <span class="n">objective_functions</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;rastrigin&#39;</span><span class="p">:</span> <span class="n">rastrigin_function</span><span class="p">,</span>
+        <span class="s1">&#39;rosenbrock&#39;</span><span class="p">:</span> <span class="n">rosenbrock_function</span><span class="p">,</span>
+        <span class="s1">&#39;sphere&#39;</span><span class="p">:</span> <span class="n">sphere_function</span>
+    <span class="p">}</span>
+
+    <span class="n">objective_name</span> <span class="o">=</span> <span class="s1">&#39;rastrigin&#39;</span>  <span class="c1"># Can be parameterized</span>
+    <span class="n">objective_func</span> <span class="o">=</span> <span class="n">objective_functions</span><span class="p">[</span><span class="n">objective_name</span><span class="p">]</span>
+
+    <span class="c1"># Problem dimensions</span>
+    <span class="n">dimensions</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mi">50</span><span class="p">,</span> <span class="n">problem_size</span> <span class="o">//</span> <span class="mi">20</span><span class="p">)</span>  <span class="c1"># Scale dimensions with problem size</span>
+    <span class="n">bounds</span> <span class="o">=</span> <span class="p">(</span><span class="o">-</span><span class="mf">5.12</span><span class="p">,</span> <span class="mf">5.12</span><span class="p">)</span> <span class="k">if</span> <span class="n">objective_name</span> <span class="o">==</span> <span class="s1">&#39;rastrigin&#39;</span> <span class="k">else</span> <span class="p">(</span><span class="o">-</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">2.0</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Optimizing </span><span class="si">{</span><span class="n">objective_name</span><span class="si">}</span><span class="s2"> function in </span><span class="si">{</span><span class="n">dimensions</span><span class="si">}</span><span class="s2"> dimensions&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Population size: </span><span class="si">{</span><span class="n">problem_size</span><span class="si">}</span><span class="s2">, Generations: </span><span class="si">{</span><span class="n">generations</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">class</span> <span class="nc">Individual</span><span class="p">:</span>
+        <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">genes</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">genes</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">genes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">dimensions</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">genes</span> <span class="o">=</span> <span class="n">genes</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">fitness</span> <span class="o">=</span> <span class="kc">None</span>
+
+        <span class="k">def</span> <span class="nf">evaluate</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitness</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fitness</span> <span class="o">=</span> <span class="n">objective_func</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span>
+            <span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">fitness</span>
+
+        <span class="k">def</span> <span class="nf">mutate</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">mutation_rate</span><span class="o">=</span><span class="mf">0.1</span><span class="p">,</span> <span class="n">mutation_strength</span><span class="o">=</span><span class="mf">0.1</span><span class="p">):</span>
+            <span class="k">if</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">&lt;</span> <span class="n">mutation_rate</span><span class="p">:</span>
+                <span class="c1"># Add Gaussian noise</span>
+                <span class="n">mutation</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">mutation_strength</span><span class="p">,</span> <span class="n">dimensions</span><span class="p">)</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">genes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">genes</span> <span class="o">+</span> <span class="n">mutation</span><span class="p">,</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">bounds</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">fitness</span> <span class="o">=</span> <span class="kc">None</span>  <span class="c1"># Reset fitness</span>
+
+        <span class="k">def</span> <span class="nf">crossover</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">other</span><span class="p">):</span>
+            <span class="c1"># Uniform crossover</span>
+            <span class="n">mask</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">(</span><span class="n">dimensions</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">0.5</span>
+            <span class="n">child1_genes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">genes</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span>
+            <span class="n">child2_genes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">mask</span><span class="p">,</span> <span class="n">other</span><span class="o">.</span><span class="n">genes</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">Individual</span><span class="p">(</span><span class="n">child1_genes</span><span class="p">),</span> <span class="n">Individual</span><span class="p">(</span><span class="n">child2_genes</span><span class="p">)</span>
+
+    <span class="c1"># Initialize population</span>
+    <span class="n">population</span> <span class="o">=</span> <span class="p">[</span><span class="n">Individual</span><span class="p">()</span> <span class="k">for</span> <span class="n">_</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">problem_size</span><span class="p">)]</span>
+
+    <span class="c1"># Evaluate initial population</span>
+    <span class="k">for</span> <span class="n">individual</span> <span class="ow">in</span> <span class="n">population</span><span class="p">:</span>
+        <span class="n">individual</span><span class="o">.</span><span class="n">evaluate</span><span class="p">()</span>
+
+    <span class="c1"># Evolution statistics</span>
+    <span class="n">best_fitness_history</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">average_fitness_history</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="n">diversity_history</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="c1"># Main evolution loop</span>
+    <span class="k">for</span> <span class="n">generation</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">generations</span><span class="p">):</span>
+        <span class="k">if</span> <span class="n">generation</span> <span class="o">%</span> <span class="p">(</span><span class="n">generations</span> <span class="o">//</span> <span class="mi">10</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generation </span><span class="si">{</span><span class="n">generation</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">generations</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Selection (tournament selection)</span>
+        <span class="k">def</span> <span class="nf">tournament_selection</span><span class="p">(</span><span class="n">pop</span><span class="p">,</span> <span class="n">tournament_size</span><span class="o">=</span><span class="mi">3</span><span class="p">):</span>
+            <span class="n">tournament</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">pop</span><span class="p">,</span> <span class="n">tournament_size</span><span class="p">)</span>
+            <span class="k">return</span> <span class="nb">min</span><span class="p">(</span><span class="n">tournament</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ind</span><span class="p">:</span> <span class="n">ind</span><span class="o">.</span><span class="n">evaluate</span><span class="p">())</span>
+
+        <span class="c1"># Create new population</span>
+        <span class="n">new_population</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Elitism - keep best 10%</span>
+        <span class="n">elite_size</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">problem_size</span> <span class="o">//</span> <span class="mi">10</span><span class="p">)</span>
+        <span class="n">elite</span> <span class="o">=</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">population</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ind</span><span class="p">:</span> <span class="n">ind</span><span class="o">.</span><span class="n">evaluate</span><span class="p">())[:</span><span class="n">elite_size</span><span class="p">]</span>
+        <span class="n">new_population</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">Individual</span><span class="p">(</span><span class="n">ind</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span> <span class="k">for</span> <span class="n">ind</span> <span class="ow">in</span> <span class="n">elite</span><span class="p">])</span>
+
+        <span class="c1"># Generate offspring</span>
+        <span class="k">while</span> <span class="nb">len</span><span class="p">(</span><span class="n">new_population</span><span class="p">)</span> <span class="o">&lt;</span> <span class="n">problem_size</span><span class="p">:</span>
+            <span class="n">parent1</span> <span class="o">=</span> <span class="n">tournament_selection</span><span class="p">(</span><span class="n">population</span><span class="p">)</span>
+            <span class="n">parent2</span> <span class="o">=</span> <span class="n">tournament_selection</span><span class="p">(</span><span class="n">population</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">&lt;</span> <span class="mf">0.8</span><span class="p">:</span>  <span class="c1"># Crossover probability</span>
+                <span class="n">child1</span><span class="p">,</span> <span class="n">child2</span> <span class="o">=</span> <span class="n">parent1</span><span class="o">.</span><span class="n">crossover</span><span class="p">(</span><span class="n">parent2</span><span class="p">)</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">child1</span><span class="p">,</span> <span class="n">child2</span> <span class="o">=</span> <span class="n">Individual</span><span class="p">(</span><span class="n">parent1</span><span class="o">.</span><span class="n">genes</span><span class="p">),</span> <span class="n">Individual</span><span class="p">(</span><span class="n">parent2</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span>
+
+            <span class="c1"># Adaptive mutation rate</span>
+            <span class="n">mutation_rate</span> <span class="o">=</span> <span class="mf">0.1</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="n">generation</span> <span class="o">/</span> <span class="n">generations</span><span class="p">)</span>
+            <span class="n">child1</span><span class="o">.</span><span class="n">mutate</span><span class="p">(</span><span class="n">mutation_rate</span><span class="o">=</span><span class="n">mutation_rate</span><span class="p">)</span>
+            <span class="n">child2</span><span class="o">.</span><span class="n">mutate</span><span class="p">(</span><span class="n">mutation_rate</span><span class="o">=</span><span class="n">mutation_rate</span><span class="p">)</span>
+
+            <span class="n">new_population</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">child1</span><span class="p">,</span> <span class="n">child2</span><span class="p">])</span>
+
+        <span class="c1"># Trim to exact population size</span>
+        <span class="n">new_population</span> <span class="o">=</span> <span class="n">new_population</span><span class="p">[:</span><span class="n">problem_size</span><span class="p">]</span>
+        <span class="n">population</span> <span class="o">=</span> <span class="n">new_population</span>
+
+        <span class="c1"># Evaluate new population</span>
+        <span class="k">for</span> <span class="n">individual</span> <span class="ow">in</span> <span class="n">population</span><span class="p">:</span>
+            <span class="n">individual</span><span class="o">.</span><span class="n">evaluate</span><span class="p">()</span>
+
+        <span class="c1"># Statistics</span>
+        <span class="n">fitnesses</span> <span class="o">=</span> <span class="p">[</span><span class="n">ind</span><span class="o">.</span><span class="n">fitness</span> <span class="k">for</span> <span class="n">ind</span> <span class="ow">in</span> <span class="n">population</span><span class="p">]</span>
+        <span class="n">best_fitness</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">)</span>
+        <span class="n">average_fitness</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">)</span>
+
+        <span class="c1"># Population diversity (average pairwise distance)</span>
+        <span class="k">if</span> <span class="n">generation</span> <span class="o">%</span> <span class="mi">10</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># Calculate diversity every 10 generations</span>
+            <span class="n">sample_size</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="mi">100</span><span class="p">,</span> <span class="n">problem_size</span><span class="p">)</span>
+            <span class="n">sample_pop</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">sample</span><span class="p">(</span><span class="n">population</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">)</span>
+            <span class="n">distances</span> <span class="o">=</span> <span class="p">[]</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">sample_pop</span><span class="p">)):</span>
+                <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">sample_pop</span><span class="p">)):</span>
+                    <span class="n">dist</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">norm</span><span class="p">(</span><span class="n">sample_pop</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">.</span><span class="n">genes</span> <span class="o">-</span> <span class="n">sample_pop</span><span class="p">[</span><span class="n">j</span><span class="p">]</span><span class="o">.</span><span class="n">genes</span><span class="p">)</span>
+                    <span class="n">distances</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">dist</span><span class="p">)</span>
+            <span class="n">diversity</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">distances</span><span class="p">)</span> <span class="k">if</span> <span class="n">distances</span> <span class="k">else</span> <span class="mi">0</span>
+            <span class="n">diversity_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">diversity</span><span class="p">)</span>
+
+        <span class="n">best_fitness_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">best_fitness</span><span class="p">)</span>
+        <span class="n">average_fitness_history</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">average_fitness</span><span class="p">)</span>
+
+    <span class="c1"># Final results</span>
+    <span class="n">best_individual</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">population</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">ind</span><span class="p">:</span> <span class="n">ind</span><span class="o">.</span><span class="n">evaluate</span><span class="p">())</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;objective_function&#39;</span><span class="p">:</span> <span class="n">objective_name</span><span class="p">,</span>
+        <span class="s1">&#39;dimensions&#39;</span><span class="p">:</span> <span class="n">dimensions</span><span class="p">,</span>
+        <span class="s1">&#39;population_size&#39;</span><span class="p">:</span> <span class="n">problem_size</span><span class="p">,</span>
+        <span class="s1">&#39;generations&#39;</span><span class="p">:</span> <span class="n">generations</span><span class="p">,</span>
+        <span class="s1">&#39;best_fitness&#39;</span><span class="p">:</span> <span class="n">best_individual</span><span class="o">.</span><span class="n">fitness</span><span class="p">,</span>
+        <span class="s1">&#39;best_solution&#39;</span><span class="p">:</span> <span class="n">best_individual</span><span class="o">.</span><span class="n">genes</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+        <span class="s1">&#39;convergence_history&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;best_fitness&#39;</span><span class="p">:</span> <span class="n">best_fitness_history</span><span class="p">[::</span><span class="mi">10</span><span class="p">],</span>  <span class="c1"># Every 10th generation</span>
+            <span class="s1">&#39;average_fitness&#39;</span><span class="p">:</span> <span class="n">average_fitness_history</span><span class="p">[::</span><span class="mi">10</span><span class="p">],</span>
+            <span class="s1">&#39;diversity&#39;</span><span class="p">:</span> <span class="n">diversity_history</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;final_population_stats&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;best_fitness&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">),</span>
+            <span class="s1">&#39;worst_fitness&#39;</span><span class="p">:</span> <span class="nb">max</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">),</span>
+            <span class="s1">&#39;average_fitness&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">),</span>
+            <span class="s1">&#39;fitness_std&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">fitnesses</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+<span class="c1"># Run genetic algorithm optimization</span>
+<span class="n">ga_results</span> <span class="o">=</span> <span class="n">genetic_algorithm_optimization</span><span class="p">(</span><span class="n">problem_size</span><span class="o">=</span><span class="mi">500</span><span class="p">,</span> <span class="n">generations</span><span class="o">=</span><span class="mi">200</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GENETIC ALGORITHM OPTIMIZATION COMPLETE&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Function: </span><span class="si">{</span><span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;objective_function&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Dimensions: </span><span class="si">{</span><span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;dimensions&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Best fitness: </span><span class="si">{</span><span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;best_fitness&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Population size: </span><span class="si">{</span><span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;population_size&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Generations: </span><span class="si">{</span><span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;generations&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">final_stats</span> <span class="o">=</span> <span class="n">ga_results</span><span class="p">[</span><span class="s1">&#39;final_population_stats&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Final population statistics:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Best: </span><span class="si">{</span><span class="n">final_stats</span><span class="p">[</span><span class="s1">&#39;best_fitness&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Average: </span><span class="si">{</span><span class="n">final_stats</span><span class="p">[</span><span class="s1">&#39;average_fitness&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Worst: </span><span class="si">{</span><span class="n">final_stats</span><span class="p">[</span><span class="s1">&#39;worst_fitness&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Std Dev: </span><span class="si">{</span><span class="n">final_stats</span><span class="p">[</span><span class="s1">&#39;fitness_std&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-2:-Engineering-Simulation">
+<h2>Example 2: Engineering Simulation<a class="headerlink" href="#Example-2:-Engineering-Simulation" title="Link to this heading">¶</a></h2>
+<p>Finite element analysis commonly run on SGE clusters:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">12</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;32GB&quot;</span><span class="p">,</span>
+    <span class="n">time</span><span class="o">=</span><span class="s2">&quot;04:00:00&quot;</span><span class="p">,</span>
+    <span class="n">queue</span><span class="o">=</span><span class="s2">&quot;all.q&quot;</span><span class="p">,</span>
+    <span class="n">pe</span><span class="o">=</span><span class="s2">&quot;mpi 12&quot;</span>  <span class="c1"># MPI parallel environment</span>
+<span class="p">)</span>
+<span class="k">def</span> <span class="nf">finite_element_stress_analysis</span><span class="p">(</span><span class="n">mesh_density</span><span class="o">=</span><span class="s2">&quot;medium&quot;</span><span class="p">,</span> <span class="n">material</span><span class="o">=</span><span class="s2">&quot;steel&quot;</span><span class="p">,</span> <span class="n">load_cases</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Simplified finite element stress analysis simulation.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">from</span> <span class="nn">scipy.sparse</span> <span class="kn">import</span> <span class="n">csr_matrix</span>
+    <span class="kn">from</span> <span class="nn">scipy.sparse.linalg</span> <span class="kn">import</span> <span class="n">spsolve</span>
+    <span class="kn">import</span> <span class="nn">math</span>
+
+    <span class="c1"># Material properties</span>
+    <span class="n">materials</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;steel&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;E&#39;</span><span class="p">:</span> <span class="mf">200e9</span><span class="p">,</span> <span class="s1">&#39;nu&#39;</span><span class="p">:</span> <span class="mf">0.3</span><span class="p">,</span> <span class="s1">&#39;yield_strength&#39;</span><span class="p">:</span> <span class="mf">250e6</span><span class="p">,</span> <span class="s1">&#39;density&#39;</span><span class="p">:</span> <span class="mi">7850</span><span class="p">},</span>
+        <span class="s1">&#39;aluminum&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;E&#39;</span><span class="p">:</span> <span class="mf">70e9</span><span class="p">,</span> <span class="s1">&#39;nu&#39;</span><span class="p">:</span> <span class="mf">0.33</span><span class="p">,</span> <span class="s1">&#39;yield_strength&#39;</span><span class="p">:</span> <span class="mf">276e6</span><span class="p">,</span> <span class="s1">&#39;density&#39;</span><span class="p">:</span> <span class="mi">2700</span><span class="p">},</span>
+        <span class="s1">&#39;titanium&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;E&#39;</span><span class="p">:</span> <span class="mf">114e9</span><span class="p">,</span> <span class="s1">&#39;nu&#39;</span><span class="p">:</span> <span class="mf">0.32</span><span class="p">,</span> <span class="s1">&#39;yield_strength&#39;</span><span class="p">:</span> <span class="mf">880e6</span><span class="p">,</span> <span class="s1">&#39;density&#39;</span><span class="p">:</span> <span class="mi">4500</span><span class="p">},</span>
+        <span class="s1">&#39;concrete&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;E&#39;</span><span class="p">:</span> <span class="mf">30e9</span><span class="p">,</span> <span class="s1">&#39;nu&#39;</span><span class="p">:</span> <span class="mf">0.2</span><span class="p">,</span> <span class="s1">&#39;yield_strength&#39;</span><span class="p">:</span> <span class="mf">30e6</span><span class="p">,</span> <span class="s1">&#39;density&#39;</span><span class="p">:</span> <span class="mi">2400</span><span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">mat_props</span> <span class="o">=</span> <span class="n">materials</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">material</span><span class="p">,</span> <span class="n">materials</span><span class="p">[</span><span class="s1">&#39;steel&#39;</span><span class="p">])</span>
+    <span class="n">E</span> <span class="o">=</span> <span class="n">mat_props</span><span class="p">[</span><span class="s1">&#39;E&#39;</span><span class="p">]</span>  <span class="c1"># Young&#39;s modulus</span>
+    <span class="n">nu</span> <span class="o">=</span> <span class="n">mat_props</span><span class="p">[</span><span class="s1">&#39;nu&#39;</span><span class="p">]</span>  <span class="c1"># Poisson&#39;s ratio</span>
+    <span class="n">yield_strength</span> <span class="o">=</span> <span class="n">mat_props</span><span class="p">[</span><span class="s1">&#39;yield_strength&#39;</span><span class="p">]</span>
+    <span class="n">density</span> <span class="o">=</span> <span class="n">mat_props</span><span class="p">[</span><span class="s1">&#39;density&#39;</span><span class="p">]</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;FEA Analysis - Material: </span><span class="si">{</span><span class="n">material</span><span class="si">}</span><span class="s2">, Mesh: </span><span class="si">{</span><span class="n">mesh_density</span><span class="si">}</span><span class="s2">, Load cases: </span><span class="si">{</span><span class="n">load_cases</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Mesh generation parameters</span>
+    <span class="n">mesh_sizes</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;coarse&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;nx&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span> <span class="s1">&#39;ny&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">,</span> <span class="s1">&#39;nz&#39;</span><span class="p">:</span> <span class="mi">10</span><span class="p">},</span>
+        <span class="s1">&#39;medium&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;nx&#39;</span><span class="p">:</span> <span class="mi">40</span><span class="p">,</span> <span class="s1">&#39;ny&#39;</span><span class="p">:</span> <span class="mi">40</span><span class="p">,</span> <span class="s1">&#39;nz&#39;</span><span class="p">:</span> <span class="mi">20</span><span class="p">},</span>
+        <span class="s1">&#39;fine&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;nx&#39;</span><span class="p">:</span> <span class="mi">80</span><span class="p">,</span> <span class="s1">&#39;ny&#39;</span><span class="p">:</span> <span class="mi">80</span><span class="p">,</span> <span class="s1">&#39;nz&#39;</span><span class="p">:</span> <span class="mi">40</span><span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">mesh_params</span> <span class="o">=</span> <span class="n">mesh_sizes</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">mesh_density</span><span class="p">,</span> <span class="n">mesh_sizes</span><span class="p">[</span><span class="s1">&#39;medium&#39;</span><span class="p">])</span>
+    <span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">nz</span> <span class="o">=</span> <span class="n">mesh_params</span><span class="p">[</span><span class="s1">&#39;nx&#39;</span><span class="p">],</span> <span class="n">mesh_params</span><span class="p">[</span><span class="s1">&#39;ny&#39;</span><span class="p">],</span> <span class="n">mesh_params</span><span class="p">[</span><span class="s1">&#39;nz&#39;</span><span class="p">]</span>
+
+    <span class="c1"># Geometry (simple beam)</span>
+    <span class="n">length</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">height</span> <span class="o">=</span> <span class="mf">2.0</span><span class="p">,</span> <span class="mf">0.2</span><span class="p">,</span> <span class="mf">0.1</span>  <span class="c1"># meters</span>
+
+    <span class="c1"># Generate mesh</span>
+    <span class="k">def</span> <span class="nf">generate_3d_mesh</span><span class="p">(</span><span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">nz</span><span class="p">,</span> <span class="n">length</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Generate 3D hexahedral mesh&quot;&quot;&quot;</span>
+        <span class="n">nodes</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="n">elements</span> <span class="o">=</span> <span class="p">[]</span>
+
+        <span class="c1"># Generate nodes</span>
+        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nz</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+                    <span class="n">x</span> <span class="o">=</span> <span class="n">i</span> <span class="o">*</span> <span class="n">length</span> <span class="o">/</span> <span class="n">nx</span>
+                    <span class="n">y</span> <span class="o">=</span> <span class="n">j</span> <span class="o">*</span> <span class="n">width</span> <span class="o">/</span> <span class="n">ny</span>
+                    <span class="n">z</span> <span class="o">=</span> <span class="n">k</span> <span class="o">*</span> <span class="n">height</span> <span class="o">/</span> <span class="n">nz</span>
+                    <span class="n">nodes</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">z</span><span class="p">])</span>
+
+        <span class="c1"># Generate elements (hexahedral)</span>
+        <span class="k">for</span> <span class="n">k</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nz</span><span class="p">):</span>
+            <span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">ny</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">nx</span><span class="p">):</span>
+                    <span class="c1"># Node indices for hexahedral element</span>
+                    <span class="n">n1</span> <span class="o">=</span> <span class="n">k</span> <span class="o">*</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">j</span> <span class="o">*</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="n">i</span>
+                    <span class="n">n2</span> <span class="o">=</span> <span class="n">n1</span> <span class="o">+</span> <span class="mi">1</span>
+                    <span class="n">n3</span> <span class="o">=</span> <span class="n">n1</span> <span class="o">+</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+                    <span class="n">n4</span> <span class="o">=</span> <span class="n">n1</span> <span class="o">+</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="n">n5</span> <span class="o">=</span> <span class="n">n1</span> <span class="o">+</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="n">ny</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                    <span class="n">n6</span> <span class="o">=</span> <span class="n">n5</span> <span class="o">+</span> <span class="mi">1</span>
+                    <span class="n">n7</span> <span class="o">=</span> <span class="n">n5</span> <span class="o">+</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="mi">1</span>
+                    <span class="n">n8</span> <span class="o">=</span> <span class="n">n5</span> <span class="o">+</span> <span class="p">(</span><span class="n">nx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+                    <span class="n">elements</span><span class="o">.</span><span class="n">append</span><span class="p">([</span><span class="n">n1</span><span class="p">,</span> <span class="n">n2</span><span class="p">,</span> <span class="n">n3</span><span class="p">,</span> <span class="n">n4</span><span class="p">,</span> <span class="n">n5</span><span class="p">,</span> <span class="n">n6</span><span class="p">,</span> <span class="n">n7</span><span class="p">,</span> <span class="n">n8</span><span class="p">])</span>
+
+        <span class="k">return</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">nodes</span><span class="p">),</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="n">elements</span><span class="p">)</span>
+
+    <span class="n">nodes</span><span class="p">,</span> <span class="n">elements</span> <span class="o">=</span> <span class="n">generate_3d_mesh</span><span class="p">(</span><span class="n">nx</span><span class="p">,</span> <span class="n">ny</span><span class="p">,</span> <span class="n">nz</span><span class="p">,</span> <span class="n">length</span><span class="p">,</span> <span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">)</span>
+    <span class="n">n_nodes</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">nodes</span><span class="p">)</span>
+    <span class="n">n_elements</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">elements</span><span class="p">)</span>
+    <span class="n">n_dof</span> <span class="o">=</span> <span class="n">n_nodes</span> <span class="o">*</span> <span class="mi">3</span>  <span class="c1"># 3 DOF per node (x, y, z displacements)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mesh generated: </span><span class="si">{</span><span class="n">n_nodes</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> nodes, </span><span class="si">{</span><span class="n">n_elements</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> elements, </span><span class="si">{</span><span class="n">n_dof</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> DOF&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Material matrix (isotropic elasticity)</span>
+    <span class="k">def</span> <span class="nf">material_matrix_3d</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">nu</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;3D elasticity matrix&quot;&quot;&quot;</span>
+        <span class="n">factor</span> <span class="o">=</span> <span class="n">E</span> <span class="o">/</span> <span class="p">((</span><span class="mi">1</span> <span class="o">+</span> <span class="n">nu</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">nu</span><span class="p">))</span>
+        <span class="n">D</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="mi">6</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+        <span class="c1"># Diagonal terms</span>
+        <span class="n">D</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">factor</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">nu</span><span class="p">)</span>
+        <span class="n">D</span><span class="p">[</span><span class="mi">3</span><span class="p">,</span> <span class="mi">3</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">4</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">5</span><span class="p">,</span> <span class="mi">5</span><span class="p">]</span> <span class="o">=</span> <span class="n">factor</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">nu</span><span class="p">)</span> <span class="o">/</span> <span class="mi">2</span>
+
+        <span class="c1"># Off-diagonal terms</span>
+        <span class="n">D</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">0</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">=</span> <span class="n">D</span><span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="n">factor</span> <span class="o">*</span> <span class="n">nu</span>
+
+        <span class="k">return</span> <span class="n">D</span>
+
+    <span class="n">D_matrix</span> <span class="o">=</span> <span class="n">material_matrix_3d</span><span class="p">(</span><span class="n">E</span><span class="p">,</span> <span class="n">nu</span><span class="p">)</span>
+
+    <span class="c1"># Simplified stiffness matrix assembly</span>
+    <span class="k">def</span> <span class="nf">assemble_stiffness_matrix</span><span class="p">(</span><span class="n">nodes</span><span class="p">,</span> <span class="n">elements</span><span class="p">,</span> <span class="n">D_matrix</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Assemble global stiffness matrix (simplified)&quot;&quot;&quot;</span>
+        <span class="n">K_global</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">n_dof</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">))</span>
+
+        <span class="k">for</span> <span class="n">elem_idx</span><span class="p">,</span> <span class="n">element</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">elements</span><span class="p">[:</span><span class="nb">min</span><span class="p">(</span><span class="mi">1000</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">elements</span><span class="p">))]):</span>  <span class="c1"># Limit for demo</span>
+            <span class="k">if</span> <span class="n">elem_idx</span> <span class="o">%</span> <span class="mi">200</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Assembling element </span><span class="si">{</span><span class="n">elem_idx</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">elements</span><span class="p">)</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+            <span class="c1"># Element nodes</span>
+            <span class="n">elem_nodes</span> <span class="o">=</span> <span class="n">nodes</span><span class="p">[</span><span class="n">element</span><span class="p">]</span>
+
+            <span class="c1"># Simplified element stiffness (using average properties)</span>
+            <span class="n">volume</span> <span class="o">=</span> <span class="n">length</span> <span class="o">*</span> <span class="n">width</span> <span class="o">*</span> <span class="n">height</span> <span class="o">/</span> <span class="n">n_elements</span>
+            <span class="n">k_elem</span> <span class="o">=</span> <span class="n">volume</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="mi">24</span><span class="p">)</span> <span class="o">*</span> <span class="n">E</span> <span class="o">/</span> <span class="p">(</span><span class="n">length</span><span class="o">**</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># Simplified</span>
+
+            <span class="c1"># Assembly</span>
+            <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">node_i</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">element</span><span class="p">):</span>
+                <span class="k">for</span> <span class="n">j</span><span class="p">,</span> <span class="n">node_j</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">element</span><span class="p">):</span>
+                    <span class="k">for</span> <span class="n">di</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+                        <span class="k">for</span> <span class="n">dj</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">3</span><span class="p">):</span>
+                            <span class="n">row</span> <span class="o">=</span> <span class="n">node_i</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="n">di</span>
+                            <span class="n">col</span> <span class="o">=</span> <span class="n">node_j</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="n">dj</span>
+                            <span class="k">if</span> <span class="n">row</span> <span class="o">&lt;</span> <span class="n">n_dof</span> <span class="ow">and</span> <span class="n">col</span> <span class="o">&lt;</span> <span class="n">n_dof</span><span class="p">:</span>
+                                <span class="n">K_global</span><span class="p">[</span><span class="n">row</span><span class="p">,</span> <span class="n">col</span><span class="p">]</span> <span class="o">+=</span> <span class="n">k_elem</span><span class="p">[</span><span class="n">i</span><span class="o">*</span><span class="mi">3</span><span class="o">+</span><span class="n">di</span><span class="p">,</span> <span class="n">j</span><span class="o">*</span><span class="mi">3</span><span class="o">+</span><span class="n">dj</span><span class="p">]</span>
+
+        <span class="k">return</span> <span class="n">csr_matrix</span><span class="p">(</span><span class="n">K_global</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Assembling stiffness matrix...&quot;</span><span class="p">)</span>
+    <span class="n">K</span> <span class="o">=</span> <span class="n">assemble_stiffness_matrix</span><span class="p">(</span><span class="n">nodes</span><span class="p">,</span> <span class="n">elements</span><span class="p">,</span> <span class="n">D_matrix</span><span class="p">)</span>
+
+    <span class="c1"># Load case analysis</span>
+    <span class="n">load_case_results</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">load_cases</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Analyzing load case </span><span class="si">{</span><span class="n">case</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="mi">1</span><span class="si">}</span><span class="s2">/</span><span class="si">{</span><span class="n">load_cases</span><span class="si">}</span><span class="s2">...&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Define load case</span>
+        <span class="n">F</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_dof</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="n">case</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>  <span class="c1"># Point load at free end</span>
+            <span class="c1"># Find nodes at free end (x = length)</span>
+            <span class="n">free_end_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">nodes</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">length</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-6</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">free_end_nodes</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">center_node</span> <span class="o">=</span> <span class="n">free_end_nodes</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">free_end_nodes</span><span class="p">)</span><span class="o">//</span><span class="mi">2</span><span class="p">]</span>
+                <span class="n">F</span><span class="p">[</span><span class="n">center_node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1000</span>  <span class="c1"># 1kN downward</span>
+
+        <span class="k">elif</span> <span class="n">case</span> <span class="o">==</span> <span class="mi">1</span><span class="p">:</span>  <span class="c1"># Distributed load</span>
+            <span class="c1"># Apply distributed load to top surface</span>
+            <span class="n">top_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">nodes</span><span class="p">[:,</span> <span class="mi">2</span><span class="p">]</span> <span class="o">-</span> <span class="n">height</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-6</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="n">load_per_node</span> <span class="o">=</span> <span class="o">-</span><span class="mi">100</span>  <span class="c1"># N per node</span>
+            <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">top_nodes</span><span class="p">:</span>
+                <span class="n">F</span><span class="p">[</span><span class="n">node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="n">load_per_node</span>
+
+        <span class="k">elif</span> <span class="n">case</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>  <span class="c1"># Torsional load</span>
+            <span class="c1"># Apply moments at free end</span>
+            <span class="n">free_end_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">nodes</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">]</span> <span class="o">-</span> <span class="n">length</span><span class="p">)</span> <span class="o">&lt;</span> <span class="mf">1e-6</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+            <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">free_end_nodes</span><span class="p">:</span>
+                <span class="n">y</span><span class="p">,</span> <span class="n">z</span> <span class="o">=</span> <span class="n">nodes</span><span class="p">[</span><span class="n">node</span><span class="p">,</span> <span class="mi">1</span><span class="p">],</span> <span class="n">nodes</span><span class="p">[</span><span class="n">node</span><span class="p">,</span> <span class="mi">2</span><span class="p">]</span>
+                <span class="c1"># Simplified torsion as equivalent forces</span>
+                <span class="n">F</span><span class="p">[</span><span class="n">node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span><span class="p">]</span> <span class="o">=</span> <span class="mi">500</span> <span class="o">*</span> <span class="p">(</span><span class="n">z</span> <span class="o">-</span> <span class="n">height</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span>  <span class="c1"># Simplified</span>
+                <span class="n">F</span><span class="p">[</span><span class="n">node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">2</span><span class="p">]</span> <span class="o">=</span> <span class="o">-</span><span class="mi">500</span> <span class="o">*</span> <span class="p">(</span><span class="n">y</span> <span class="o">-</span> <span class="n">width</span><span class="o">/</span><span class="mi">2</span><span class="p">)</span>
+
+        <span class="k">elif</span> <span class="n">case</span> <span class="o">==</span> <span class="mi">3</span><span class="p">:</span>  <span class="c1"># Thermal expansion</span>
+            <span class="c1"># Simplified thermal load (equivalent forces)</span>
+            <span class="n">alpha</span> <span class="o">=</span> <span class="mf">12e-6</span>  <span class="c1"># Thermal expansion coefficient</span>
+            <span class="n">delta_T</span> <span class="o">=</span> <span class="mi">100</span>  <span class="c1"># Temperature change (K)</span>
+            <span class="n">thermal_strain</span> <span class="o">=</span> <span class="n">alpha</span> <span class="o">*</span> <span class="n">delta_T</span>
+            <span class="c1"># Apply as equivalent forces (simplified)</span>
+            <span class="n">F</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">E</span> <span class="o">*</span> <span class="n">thermal_strain</span> <span class="o">/</span> <span class="mi">1000</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">)</span>
+
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># Dynamic/random load</span>
+            <span class="c1"># Random distributed forces</span>
+            <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">case</span> <span class="o">*</span> <span class="mi">123</span><span class="p">)</span>
+            <span class="n">F</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">normal</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="n">n_dof</span><span class="p">)</span>
+
+        <span class="c1"># Boundary conditions (fixed end)</span>
+        <span class="n">fixed_nodes</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">where</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">nodes</span><span class="p">[:,</span> <span class="mi">0</span><span class="p">])</span> <span class="o">&lt;</span> <span class="mf">1e-6</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+        <span class="n">fixed_dofs</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">node</span> <span class="ow">in</span> <span class="n">fixed_nodes</span><span class="p">:</span>
+            <span class="n">fixed_dofs</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span><span class="n">node</span> <span class="o">*</span> <span class="mi">3</span><span class="p">,</span> <span class="n">node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="n">node</span> <span class="o">*</span> <span class="mi">3</span> <span class="o">+</span> <span class="mi">2</span><span class="p">])</span>
+
+        <span class="c1"># Apply boundary conditions</span>
+        <span class="n">K_reduced</span> <span class="o">=</span> <span class="n">K</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+        <span class="n">F_reduced</span> <span class="o">=</span> <span class="n">F</span><span class="o">.</span><span class="n">copy</span><span class="p">()</span>
+
+        <span class="c1"># Zero out fixed DOFs</span>
+        <span class="k">for</span> <span class="n">dof</span> <span class="ow">in</span> <span class="n">fixed_dofs</span><span class="p">:</span>
+            <span class="k">if</span> <span class="n">dof</span> <span class="o">&lt;</span> <span class="n">n_dof</span><span class="p">:</span>
+                <span class="n">K_reduced</span><span class="p">[</span><span class="n">dof</span><span class="p">,</span> <span class="p">:]</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">K_reduced</span><span class="p">[:,</span> <span class="n">dof</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+                <span class="n">K_reduced</span><span class="p">[</span><span class="n">dof</span><span class="p">,</span> <span class="n">dof</span><span class="p">]</span> <span class="o">=</span> <span class="mi">1</span>
+                <span class="n">F_reduced</span><span class="p">[</span><span class="n">dof</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span>
+
+        <span class="c1"># Solve for displacements</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Solving linear system...&quot;</span><span class="p">)</span>
+        <span class="k">try</span><span class="p">:</span>
+            <span class="n">displacements</span> <span class="o">=</span> <span class="n">spsolve</span><span class="p">(</span><span class="n">K_reduced</span><span class="p">,</span> <span class="n">F_reduced</span><span class="p">)</span>
+        <span class="k">except</span><span class="p">:</span>
+            <span class="c1"># Fallback for singular matrices</span>
+            <span class="n">displacements</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">(</span><span class="n">n_dof</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;  Warning: Singular matrix, using zero displacements&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Calculate stresses (simplified)</span>
+        <span class="n">max_displacement</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">displacements</span><span class="p">))</span>
+        <span class="n">displacement_magnitude</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">sqrt</span><span class="p">(</span>
+            <span class="n">displacements</span><span class="p">[::</span><span class="mi">3</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">displacements</span><span class="p">[</span><span class="mi">1</span><span class="p">::</span><span class="mi">3</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span> <span class="o">+</span> <span class="n">displacements</span><span class="p">[</span><span class="mi">2</span><span class="p">::</span><span class="mi">3</span><span class="p">]</span><span class="o">**</span><span class="mi">2</span>
+        <span class="p">)</span>
+
+        <span class="c1"># Simplified stress calculation</span>
+        <span class="n">max_stress</span> <span class="o">=</span> <span class="n">E</span> <span class="o">*</span> <span class="n">max_displacement</span> <span class="o">/</span> <span class="n">length</span>  <span class="c1"># Rough estimate</span>
+
+        <span class="c1"># Safety factor</span>
+        <span class="n">safety_factor</span> <span class="o">=</span> <span class="n">yield_strength</span> <span class="o">/</span> <span class="n">max_stress</span> <span class="k">if</span> <span class="n">max_stress</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="k">else</span> <span class="nb">float</span><span class="p">(</span><span class="s1">&#39;inf&#39;</span><span class="p">)</span>
+
+        <span class="n">case_result</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;case_id&#39;</span><span class="p">:</span> <span class="n">case</span><span class="p">,</span>
+            <span class="s1">&#39;load_type&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;point_load&#39;</span><span class="p">,</span> <span class="s1">&#39;distributed&#39;</span><span class="p">,</span> <span class="s1">&#39;torsion&#39;</span><span class="p">,</span> <span class="s1">&#39;thermal&#39;</span><span class="p">,</span> <span class="s1">&#39;dynamic&#39;</span><span class="p">][</span><span class="n">case</span><span class="p">],</span>
+            <span class="s1">&#39;max_displacement_m&#39;</span><span class="p">:</span> <span class="n">max_displacement</span><span class="p">,</span>
+            <span class="s1">&#39;max_stress_Pa&#39;</span><span class="p">:</span> <span class="n">max_stress</span><span class="p">,</span>
+            <span class="s1">&#39;safety_factor&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">safety_factor</span><span class="p">,</span> <span class="mi">1000</span><span class="p">),</span>  <span class="c1"># Cap at 1000</span>
+            <span class="s1">&#39;total_force_N&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">abs</span><span class="p">(</span><span class="n">F</span><span class="p">)),</span>
+            <span class="s1">&#39;displacement_distribution&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;mean&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">displacement_magnitude</span><span class="p">),</span>
+                <span class="s1">&#39;std&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">std</span><span class="p">(</span><span class="n">displacement_magnitude</span><span class="p">),</span>
+                <span class="s1">&#39;max&#39;</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">max</span><span class="p">(</span><span class="n">displacement_magnitude</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+
+        <span class="n">load_case_results</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">case_result</span><span class="p">)</span>
+
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Max displacement: </span><span class="si">{</span><span class="n">max_displacement</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> m&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Max stress: </span><span class="si">{</span><span class="n">max_stress</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> Pa&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Safety factor: </span><span class="si">{</span><span class="n">safety_factor</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Summary analysis</span>
+    <span class="n">max_displacement_overall</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">case</span><span class="p">[</span><span class="s1">&#39;max_displacement_m&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="n">load_case_results</span><span class="p">)</span>
+    <span class="n">max_stress_overall</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">case</span><span class="p">[</span><span class="s1">&#39;max_stress_Pa&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="n">load_case_results</span><span class="p">)</span>
+    <span class="n">min_safety_factor</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">case</span><span class="p">[</span><span class="s1">&#39;safety_factor&#39;</span><span class="p">]</span> <span class="k">for</span> <span class="n">case</span> <span class="ow">in</span> <span class="n">load_case_results</span><span class="p">)</span>
+
+    <span class="n">analysis_results</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;model_info&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;material&#39;</span><span class="p">:</span> <span class="n">material</span><span class="p">,</span>
+            <span class="s1">&#39;mesh_density&#39;</span><span class="p">:</span> <span class="n">mesh_density</span><span class="p">,</span>
+            <span class="s1">&#39;nodes&#39;</span><span class="p">:</span> <span class="n">n_nodes</span><span class="p">,</span>
+            <span class="s1">&#39;elements&#39;</span><span class="p">:</span> <span class="n">n_elements</span><span class="p">,</span>
+            <span class="s1">&#39;dof&#39;</span><span class="p">:</span> <span class="n">n_dof</span><span class="p">,</span>
+            <span class="s1">&#39;geometry&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;length&#39;</span><span class="p">:</span> <span class="n">length</span><span class="p">,</span> <span class="s1">&#39;width&#39;</span><span class="p">:</span> <span class="n">width</span><span class="p">,</span> <span class="s1">&#39;height&#39;</span><span class="p">:</span> <span class="n">height</span><span class="p">}</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;material_properties&#39;</span><span class="p">:</span> <span class="n">mat_props</span><span class="p">,</span>
+        <span class="s1">&#39;load_cases&#39;</span><span class="p">:</span> <span class="n">load_case_results</span><span class="p">,</span>
+        <span class="s1">&#39;summary&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;max_displacement_m&#39;</span><span class="p">:</span> <span class="n">max_displacement_overall</span><span class="p">,</span>
+            <span class="s1">&#39;max_stress_Pa&#39;</span><span class="p">:</span> <span class="n">max_stress_overall</span><span class="p">,</span>
+            <span class="s1">&#39;min_safety_factor&#39;</span><span class="p">:</span> <span class="n">min_safety_factor</span><span class="p">,</span>
+            <span class="s1">&#39;critical_load_case&#39;</span><span class="p">:</span> <span class="nb">min</span><span class="p">(</span><span class="n">load_case_results</span><span class="p">,</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="s1">&#39;safety_factor&#39;</span><span class="p">])[</span><span class="s1">&#39;load_type&#39;</span><span class="p">],</span>
+            <span class="s1">&#39;passes_safety_check&#39;</span><span class="p">:</span> <span class="n">min_safety_factor</span> <span class="o">&gt;</span> <span class="mf">2.0</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">analysis_results</span>
+
+<span class="c1"># Run FEA stress analysis</span>
+<span class="n">fea_results</span> <span class="o">=</span> <span class="n">finite_element_stress_analysis</span><span class="p">(</span>
+    <span class="n">mesh_density</span><span class="o">=</span><span class="s2">&quot;medium&quot;</span><span class="p">,</span>
+    <span class="n">material</span><span class="o">=</span><span class="s2">&quot;steel&quot;</span><span class="p">,</span>
+    <span class="n">load_cases</span><span class="o">=</span><span class="mi">3</span>
+<span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">FINITE ELEMENT ANALYSIS COMPLETE&quot;</span><span class="p">)</span>
+<span class="n">model_info</span> <span class="o">=</span> <span class="n">fea_results</span><span class="p">[</span><span class="s1">&#39;model_info&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Material: </span><span class="si">{</span><span class="n">model_info</span><span class="p">[</span><span class="s1">&#39;material&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Mesh: </span><span class="si">{</span><span class="n">model_info</span><span class="p">[</span><span class="s1">&#39;nodes&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> nodes, </span><span class="si">{</span><span class="n">model_info</span><span class="p">[</span><span class="s1">&#39;elements&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> elements&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;DOF: </span><span class="si">{</span><span class="n">model_info</span><span class="p">[</span><span class="s1">&#39;dof&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">summary</span> <span class="o">=</span> <span class="n">fea_results</span><span class="p">[</span><span class="s1">&#39;summary&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Summary Results:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Max displacement: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;max_displacement_m&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> m&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Max stress: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;max_stress_Pa&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2"> Pa&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Min safety factor: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;min_safety_factor&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Critical load case: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;critical_load_case&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Passes safety check: </span><span class="si">{</span><span class="n">summary</span><span class="p">[</span><span class="s1">&#39;passes_safety_check&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Example-3:-Multi-Objective-Engineering-Design">
+<h2>Example 3: Multi-Objective Engineering Design<a class="headerlink" href="#Example-3:-Multi-Objective-Engineering-Design" title="Link to this heading">¶</a></h2>
+<p>Use SGE task arrays for design optimization:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="nd">@cluster</span><span class="p">(</span>
+    <span class="n">cores</span><span class="o">=</span><span class="mi">6</span><span class="p">,</span>
+    <span class="n">memory</span><span class="o">=</span><span class="s2">&quot;24GB&quot;</span><span class="p">,</span>
+    <span class="n">time</span><span class="o">=</span><span class="s2">&quot;02:00:00&quot;</span><span class="p">,</span>
+    <span class="n">queue</span><span class="o">=</span><span class="s2">&quot;all.q&quot;</span><span class="p">,</span>
+    <span class="n">sge_array</span><span class="o">=</span><span class="s2">&quot;1-25&quot;</span>  <span class="c1"># SGE task array</span>
+<span class="p">)</span>
+<span class="k">def</span> <span class="nf">multi_objective_design_optimization</span><span class="p">(</span><span class="n">design_problem</span><span class="o">=</span><span class="s2">&quot;beam_design&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Multi-objective design optimization using SGE task arrays.</span>
+<span class="sd">    Each task evaluates different design parameters.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">os</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">random</span>
+    <span class="kn">from</span> <span class="nn">math</span> <span class="kn">import</span> <span class="n">pi</span><span class="p">,</span> <span class="n">sqrt</span>
+
+    <span class="c1"># Get SGE task array index</span>
+    <span class="n">task_id</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;SGE_TASK_ID&#39;</span><span class="p">,</span> <span class="s1">&#39;1&#39;</span><span class="p">))</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Design optimization task </span><span class="si">{</span><span class="n">task_id</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">def</span> <span class="nf">beam_design_objectives</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">length</span><span class="p">,</span> <span class="n">material_density</span><span class="o">=</span><span class="mi">7850</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate beam design objectives&quot;&quot;&quot;</span>
+        <span class="c1"># Geometry constraints</span>
+        <span class="n">area</span> <span class="o">=</span> <span class="n">width</span> <span class="o">*</span> <span class="n">height</span>
+        <span class="n">moment_of_inertia</span> <span class="o">=</span> <span class="n">width</span> <span class="o">*</span> <span class="n">height</span><span class="o">**</span><span class="mi">3</span> <span class="o">/</span> <span class="mi">12</span>
+        <span class="n">volume</span> <span class="o">=</span> <span class="n">area</span> <span class="o">*</span> <span class="n">length</span>
+        <span class="n">mass</span> <span class="o">=</span> <span class="n">volume</span> <span class="o">*</span> <span class="n">material_density</span>
+
+        <span class="c1"># Structural performance</span>
+        <span class="n">E</span> <span class="o">=</span> <span class="mf">200e9</span>  <span class="c1"># Young&#39;s modulus (Pa)</span>
+        <span class="n">max_load</span> <span class="o">=</span> <span class="mi">10000</span>  <span class="c1"># Maximum load (N)</span>
+
+        <span class="c1"># Deflection calculation (simply supported beam)</span>
+        <span class="n">max_deflection</span> <span class="o">=</span> <span class="p">(</span><span class="mi">5</span> <span class="o">*</span> <span class="n">max_load</span> <span class="o">*</span> <span class="n">length</span><span class="o">**</span><span class="mi">4</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">384</span> <span class="o">*</span> <span class="n">E</span> <span class="o">*</span> <span class="n">moment_of_inertia</span><span class="p">)</span>
+
+        <span class="c1"># Stress calculation</span>
+        <span class="n">max_moment</span> <span class="o">=</span> <span class="n">max_load</span> <span class="o">*</span> <span class="n">length</span> <span class="o">/</span> <span class="mi">4</span>  <span class="c1"># For simply supported beam</span>
+        <span class="n">max_stress</span> <span class="o">=</span> <span class="n">max_moment</span> <span class="o">*</span> <span class="p">(</span><span class="n">height</span> <span class="o">/</span> <span class="mi">2</span><span class="p">)</span> <span class="o">/</span> <span class="n">moment_of_inertia</span>
+
+        <span class="c1"># Objectives to minimize</span>
+        <span class="n">objectives</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;mass&#39;</span><span class="p">:</span> <span class="n">mass</span><span class="p">,</span>                    <span class="c1"># Minimize weight</span>
+            <span class="s1">&#39;deflection&#39;</span><span class="p">:</span> <span class="n">max_deflection</span><span class="p">,</span>    <span class="c1"># Minimize deflection</span>
+            <span class="s1">&#39;stress&#39;</span><span class="p">:</span> <span class="n">max_stress</span><span class="p">,</span>           <span class="c1"># Minimize stress</span>
+            <span class="s1">&#39;cost&#39;</span><span class="p">:</span> <span class="n">mass</span> <span class="o">*</span> <span class="mf">2.5</span> <span class="o">+</span> <span class="n">area</span> <span class="o">*</span> <span class="mi">10</span>  <span class="c1"># Material + manufacturing cost</span>
+        <span class="p">}</span>
+
+        <span class="c1"># Constraints</span>
+        <span class="n">constraints</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;deflection_limit&#39;</span><span class="p">:</span> <span class="n">max_deflection</span> <span class="o">&lt;</span> <span class="n">length</span> <span class="o">/</span> <span class="mi">250</span><span class="p">,</span>  <span class="c1"># L/250 deflection limit</span>
+            <span class="s1">&#39;stress_limit&#39;</span><span class="p">:</span> <span class="n">max_stress</span> <span class="o">&lt;</span> <span class="mf">250e6</span><span class="p">,</span>                <span class="c1"># Yield stress limit</span>
+            <span class="s1">&#39;aspect_ratio&#39;</span><span class="p">:</span> <span class="n">height</span> <span class="o">/</span> <span class="n">width</span> <span class="o">&lt;</span> <span class="mi">5</span><span class="p">,</span>               <span class="c1"># Practical aspect ratio</span>
+            <span class="s1">&#39;minimum_thickness&#39;</span><span class="p">:</span> <span class="n">width</span> <span class="o">&gt;</span> <span class="mf">0.01</span> <span class="ow">and</span> <span class="n">height</span> <span class="o">&gt;</span> <span class="mf">0.01</span>  <span class="c1"># Minimum thickness</span>
+        <span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">objectives</span><span class="p">,</span> <span class="n">constraints</span>
+
+    <span class="k">def</span> <span class="nf">truss_design_objectives</span><span class="p">(</span><span class="n">member_areas</span><span class="p">,</span> <span class="n">topology</span><span class="p">,</span> <span class="n">material_density</span><span class="o">=</span><span class="mi">2700</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Calculate truss design objectives&quot;&quot;&quot;</span>
+        <span class="c1"># Simplified truss analysis</span>
+        <span class="n">n_members</span> <span class="o">=</span> <span class="nb">len</span><span class="p">(</span><span class="n">member_areas</span><span class="p">)</span>
+        <span class="n">total_length</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">topology</span><span class="p">)</span>  <span class="c1"># Simplified total length</span>
+        <span class="n">total_volume</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">area</span> <span class="o">*</span> <span class="n">length</span> <span class="k">for</span> <span class="n">area</span><span class="p">,</span> <span class="n">length</span> <span class="ow">in</span> <span class="nb">zip</span><span class="p">(</span><span class="n">member_areas</span><span class="p">,</span> <span class="n">topology</span><span class="p">))</span>
+        <span class="n">total_mass</span> <span class="o">=</span> <span class="n">total_volume</span> <span class="o">*</span> <span class="n">material_density</span>
+
+        <span class="c1"># Simplified stiffness calculation</span>
+        <span class="n">E</span> <span class="o">=</span> <span class="mf">70e9</span>  <span class="c1"># Aluminum Young&#39;s modulus</span>
+        <span class="n">avg_stiffness</span> <span class="o">=</span> <span class="n">E</span> <span class="o">*</span> <span class="nb">sum</span><span class="p">(</span><span class="n">member_areas</span><span class="p">)</span> <span class="o">/</span> <span class="n">n_members</span>
+
+        <span class="c1"># Simplified stress analysis</span>
+        <span class="n">applied_load</span> <span class="o">=</span> <span class="mi">5000</span>  <span class="c1"># N</span>
+        <span class="n">avg_stress</span> <span class="o">=</span> <span class="n">applied_load</span> <span class="o">/</span> <span class="nb">sum</span><span class="p">(</span><span class="n">member_areas</span><span class="p">)</span>
+
+        <span class="n">objectives</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;mass&#39;</span><span class="p">:</span> <span class="n">total_mass</span><span class="p">,</span>
+            <span class="s1">&#39;compliance&#39;</span><span class="p">:</span> <span class="mi">1</span> <span class="o">/</span> <span class="n">avg_stiffness</span><span class="p">,</span>  <span class="c1"># Inverse of stiffness</span>
+            <span class="s1">&#39;max_stress&#39;</span><span class="p">:</span> <span class="n">avg_stress</span><span class="p">,</span>
+            <span class="s1">&#39;cost&#39;</span><span class="p">:</span> <span class="n">total_mass</span> <span class="o">*</span> <span class="mf">3.0</span> <span class="o">+</span> <span class="n">n_members</span> <span class="o">*</span> <span class="mi">50</span>  <span class="c1"># Material + connection cost</span>
+        <span class="p">}</span>
+
+        <span class="n">constraints</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;stress_limit&#39;</span><span class="p">:</span> <span class="n">avg_stress</span> <span class="o">&lt;</span> <span class="mf">276e6</span><span class="p">,</span>  <span class="c1"># Aluminum yield</span>
+            <span class="s1">&#39;buckling_check&#39;</span><span class="p">:</span> <span class="nb">all</span><span class="p">(</span><span class="n">area</span> <span class="o">&gt;</span> <span class="mf">1e-4</span> <span class="k">for</span> <span class="n">area</span> <span class="ow">in</span> <span class="n">member_areas</span><span class="p">),</span>  <span class="c1"># Min area</span>
+            <span class="s1">&#39;geometric_feasibility&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">member_areas</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">3</span>  <span class="c1"># Minimum members</span>
+        <span class="p">}</span>
+
+        <span class="k">return</span> <span class="n">objectives</span><span class="p">,</span> <span class="n">constraints</span>
+
+    <span class="c1"># Set up design space for this task</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">task_id</span> <span class="o">*</span> <span class="mi">42</span><span class="p">)</span>  <span class="c1"># Reproducible but different per task</span>
+
+    <span class="k">if</span> <span class="n">design_problem</span> <span class="o">==</span> <span class="s2">&quot;beam_design&quot;</span><span class="p">:</span>
+        <span class="c1"># Generate design variables for beam</span>
+        <span class="n">width</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.05</span><span class="p">,</span> <span class="mf">0.5</span><span class="p">)</span>     <span class="c1"># 5cm to 50cm</span>
+        <span class="n">height</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.1</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>     <span class="c1"># 10cm to 100cm</span>
+        <span class="n">length</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">2.0</span><span class="p">,</span> <span class="mf">10.0</span><span class="p">)</span>    <span class="c1"># 2m to 10m</span>
+
+        <span class="n">objectives</span><span class="p">,</span> <span class="n">constraints</span> <span class="o">=</span> <span class="n">beam_design_objectives</span><span class="p">(</span><span class="n">width</span><span class="p">,</span> <span class="n">height</span><span class="p">,</span> <span class="n">length</span><span class="p">)</span>
+        <span class="n">design_vars</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;width&#39;</span><span class="p">:</span> <span class="n">width</span><span class="p">,</span> <span class="s1">&#39;height&#39;</span><span class="p">:</span> <span class="n">height</span><span class="p">,</span> <span class="s1">&#39;length&#39;</span><span class="p">:</span> <span class="n">length</span><span class="p">}</span>
+
+    <span class="k">elif</span> <span class="n">design_problem</span> <span class="o">==</span> <span class="s2">&quot;truss_design&quot;</span><span class="p">:</span>
+        <span class="c1"># Generate design variables for truss</span>
+        <span class="n">n_members</span> <span class="o">=</span> <span class="n">random</span><span class="o">.</span><span class="n">randint</span><span class="p">(</span><span class="mi">5</span><span class="p">,</span> <span class="mi">15</span><span class="p">)</span>
+        <span class="n">member_areas</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">1e-4</span><span class="p">,</span> <span class="mf">1e-2</span><span class="p">,</span> <span class="n">n_members</span><span class="p">)</span>  <span class="c1"># 1cm² to 100cm²</span>
+        <span class="n">topology</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">uniform</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="mf">3.0</span><span class="p">,</span> <span class="n">n_members</span><span class="p">)</span>       <span class="c1"># Member lengths</span>
+
+        <span class="n">objectives</span><span class="p">,</span> <span class="n">constraints</span> <span class="o">=</span> <span class="n">truss_design_objectives</span><span class="p">(</span><span class="n">member_areas</span><span class="p">,</span> <span class="n">topology</span><span class="p">)</span>
+        <span class="n">design_vars</span> <span class="o">=</span> <span class="p">{</span>
+            <span class="s1">&#39;n_members&#39;</span><span class="p">:</span> <span class="n">n_members</span><span class="p">,</span>
+            <span class="s1">&#39;member_areas&#39;</span><span class="p">:</span> <span class="n">member_areas</span><span class="o">.</span><span class="n">tolist</span><span class="p">(),</span>
+            <span class="s1">&#39;topology&#39;</span><span class="p">:</span> <span class="n">topology</span><span class="o">.</span><span class="n">tolist</span><span class="p">()</span>
+        <span class="p">}</span>
+
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unknown design problem: </span><span class="si">{</span><span class="n">design_problem</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check constraint feasibility</span>
+    <span class="n">feasible</span> <span class="o">=</span> <span class="nb">all</span><span class="p">(</span><span class="n">constraints</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+    <span class="n">n_violated_constraints</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="mi">1</span> <span class="k">for</span> <span class="n">satisfied</span> <span class="ow">in</span> <span class="n">constraints</span><span class="o">.</span><span class="n">values</span><span class="p">()</span> <span class="k">if</span> <span class="ow">not</span> <span class="n">satisfied</span><span class="p">)</span>
+
+    <span class="c1"># Calculate Pareto performance metrics</span>
+    <span class="k">def</span> <span class="nf">normalize_objectives</span><span class="p">(</span><span class="n">objectives</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Normalize objectives for multi-objective comparison&quot;&quot;&quot;</span>
+        <span class="c1"># Reference values for normalization (approximate)</span>
+        <span class="k">if</span> <span class="n">design_problem</span> <span class="o">==</span> <span class="s2">&quot;beam_design&quot;</span><span class="p">:</span>
+            <span class="n">ref_values</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;mass&#39;</span><span class="p">:</span> <span class="mi">1000</span><span class="p">,</span>        <span class="c1"># kg</span>
+                <span class="s1">&#39;deflection&#39;</span><span class="p">:</span> <span class="mf">0.01</span><span class="p">,</span>  <span class="c1"># m</span>
+                <span class="s1">&#39;stress&#39;</span><span class="p">:</span> <span class="mf">100e6</span><span class="p">,</span>     <span class="c1"># Pa</span>
+                <span class="s1">&#39;cost&#39;</span><span class="p">:</span> <span class="mi">5000</span>         <span class="c1"># currency units</span>
+            <span class="p">}</span>
+        <span class="k">else</span><span class="p">:</span>  <span class="c1"># truss_design</span>
+            <span class="n">ref_values</span> <span class="o">=</span> <span class="p">{</span>
+                <span class="s1">&#39;mass&#39;</span><span class="p">:</span> <span class="mi">500</span><span class="p">,</span>           <span class="c1"># kg</span>
+                <span class="s1">&#39;compliance&#39;</span><span class="p">:</span> <span class="mf">1e-9</span><span class="p">,</span>    <span class="c1"># 1/N</span>
+                <span class="s1">&#39;max_stress&#39;</span><span class="p">:</span> <span class="mf">100e6</span><span class="p">,</span>   <span class="c1"># Pa</span>
+                <span class="s1">&#39;cost&#39;</span><span class="p">:</span> <span class="mi">3000</span>           <span class="c1"># currency units</span>
+            <span class="p">}</span>
+
+        <span class="n">normalized</span> <span class="o">=</span> <span class="p">{}</span>
+        <span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">objectives</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="k">if</span> <span class="n">obj</span> <span class="ow">in</span> <span class="n">ref_values</span><span class="p">:</span>
+                <span class="n">normalized</span><span class="p">[</span><span class="n">obj</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span> <span class="o">/</span> <span class="n">ref_values</span><span class="p">[</span><span class="n">obj</span><span class="p">]</span>
+            <span class="k">else</span><span class="p">:</span>
+                <span class="n">normalized</span><span class="p">[</span><span class="n">obj</span><span class="p">]</span> <span class="o">=</span> <span class="n">value</span>
+
+        <span class="k">return</span> <span class="n">normalized</span>
+
+    <span class="n">normalized_objectives</span> <span class="o">=</span> <span class="n">normalize_objectives</span><span class="p">(</span><span class="n">objectives</span><span class="p">)</span>
+
+    <span class="c1"># Calculate aggregate performance metrics</span>
+    <span class="n">weighted_sum</span> <span class="o">=</span> <span class="nb">sum</span><span class="p">(</span><span class="n">normalized_objectives</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>  <span class="c1"># Equal weights</span>
+    <span class="n">max_objective</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="n">normalized_objectives</span><span class="o">.</span><span class="n">values</span><span class="p">())</span>
+
+    <span class="c1"># Performance score (lower is better)</span>
+    <span class="k">if</span> <span class="n">feasible</span><span class="p">:</span>
+        <span class="n">performance_score</span> <span class="o">=</span> <span class="n">weighted_sum</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="c1"># Penalty for infeasible designs</span>
+        <span class="n">performance_score</span> <span class="o">=</span> <span class="n">weighted_sum</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="mi">10</span> <span class="o">*</span> <span class="n">n_violated_constraints</span><span class="p">)</span>
+
+    <span class="c1"># Compile results</span>
+    <span class="n">design_result</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;task_id&#39;</span><span class="p">:</span> <span class="n">task_id</span><span class="p">,</span>
+        <span class="s1">&#39;design_problem&#39;</span><span class="p">:</span> <span class="n">design_problem</span><span class="p">,</span>
+        <span class="s1">&#39;design_variables&#39;</span><span class="p">:</span> <span class="n">design_vars</span><span class="p">,</span>
+        <span class="s1">&#39;objectives&#39;</span><span class="p">:</span> <span class="n">objectives</span><span class="p">,</span>
+        <span class="s1">&#39;normalized_objectives&#39;</span><span class="p">:</span> <span class="n">normalized_objectives</span><span class="p">,</span>
+        <span class="s1">&#39;constraints&#39;</span><span class="p">:</span> <span class="n">constraints</span><span class="p">,</span>
+        <span class="s1">&#39;feasible&#39;</span><span class="p">:</span> <span class="n">feasible</span><span class="p">,</span>
+        <span class="s1">&#39;constraints_violated&#39;</span><span class="p">:</span> <span class="n">n_violated_constraints</span><span class="p">,</span>
+        <span class="s1">&#39;performance_metrics&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;weighted_sum&#39;</span><span class="p">:</span> <span class="n">weighted_sum</span><span class="p">,</span>
+            <span class="s1">&#39;max_objective&#39;</span><span class="p">:</span> <span class="n">max_objective</span><span class="p">,</span>
+            <span class="s1">&#39;performance_score&#39;</span><span class="p">:</span> <span class="n">performance_score</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;design_quality&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;excellent&#39;</span><span class="p">:</span> <span class="n">performance_score</span> <span class="o">&lt;</span> <span class="mf">2.0</span> <span class="ow">and</span> <span class="n">feasible</span><span class="p">,</span>
+            <span class="s1">&#39;good&#39;</span><span class="p">:</span> <span class="n">performance_score</span> <span class="o">&lt;</span> <span class="mf">4.0</span> <span class="ow">and</span> <span class="n">feasible</span><span class="p">,</span>
+            <span class="s1">&#39;acceptable&#39;</span><span class="p">:</span> <span class="n">performance_score</span> <span class="o">&lt;</span> <span class="mf">8.0</span> <span class="ow">and</span> <span class="n">feasible</span><span class="p">,</span>
+            <span class="s1">&#39;poor&#39;</span><span class="p">:</span> <span class="ow">not</span> <span class="n">feasible</span> <span class="ow">or</span> <span class="n">performance_score</span> <span class="o">&gt;=</span> <span class="mf">8.0</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">design_result</span>
+
+<span class="c1"># Run design optimization (this would be one task of the SGE array)</span>
+<span class="n">design_result</span> <span class="o">=</span> <span class="n">multi_objective_design_optimization</span><span class="p">(</span><span class="s2">&quot;beam_design&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">DESIGN OPTIMIZATION - Task </span><span class="si">{</span><span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;task_id&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Problem: </span><span class="si">{</span><span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;design_problem&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Feasible: </span><span class="si">{</span><span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;feasible&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="k">if</span> <span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;design_problem&#39;</span><span class="p">]</span> <span class="o">==</span> <span class="s1">&#39;beam_design&#39;</span><span class="p">:</span>
+    <span class="nb">vars</span> <span class="o">=</span> <span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;design_variables&#39;</span><span class="p">]</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Design Variables:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Width: </span><span class="si">{</span><span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;width&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> m&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Height: </span><span class="si">{</span><span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;height&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> m&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Length: </span><span class="si">{</span><span class="nb">vars</span><span class="p">[</span><span class="s1">&#39;length&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.3f</span><span class="si">}</span><span class="s2"> m&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Objectives:&quot;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">obj</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;objectives&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="k">if</span> <span class="s1">&#39;stress&#39;</span> <span class="ow">in</span> <span class="n">obj</span> <span class="ow">or</span> <span class="s1">&#39;deflection&#39;</span> <span class="ow">in</span> <span class="n">obj</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">obj</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">:</span><span class="s2">.2e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">obj</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">perf</span> <span class="o">=</span> <span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;performance_metrics&#39;</span><span class="p">]</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Performance Score: </span><span class="si">{</span><span class="n">perf</span><span class="p">[</span><span class="s1">&#39;performance_score&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">quality</span> <span class="o">=</span> <span class="n">design_result</span><span class="p">[</span><span class="s1">&#39;design_quality&#39;</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">level</span><span class="p">,</span> <span class="n">is_level</span> <span class="ow">in</span> <span class="n">quality</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="k">if</span> <span class="n">is_level</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Design Quality: </span><span class="si">{</span><span class="n">level</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">break</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SGE-Parallel-Environments-and-Resource-Management">
+<h2>SGE Parallel Environments and Resource Management<a class="headerlink" href="#SGE-Parallel-Environments-and-Resource-Management" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">configure_sge_parallel_environments</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Examples of different SGE parallel environment configurations.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Common SGE parallel environments</span>
+    <span class="n">pe_configs</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;smp&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Symmetric Multi-Processing (shared memory)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Multi-threaded applications on single node&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;example_cores&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">],</span>
+            <span class="s1">&#39;clustrix_config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span>
+                <span class="s1">&#39;pe&#39;</span><span class="p">:</span> <span class="s1">&#39;smp 8&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;32GB&#39;</span>
+            <span class="p">}</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;mpi&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Message Passing Interface (distributed memory)&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Distributed parallel applications across nodes&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;example_cores&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">8</span><span class="p">,</span> <span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">,</span> <span class="mi">128</span><span class="p">],</span>
+            <span class="s1">&#39;clustrix_config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">32</span><span class="p">,</span>
+                <span class="s1">&#39;pe&#39;</span><span class="p">:</span> <span class="s1">&#39;mpi 32&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;128GB&#39;</span>
+            <span class="p">}</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;openmp&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;OpenMP parallel environment&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;OpenMP applications with thread parallelism&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;example_cores&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">,</span> <span class="mi">12</span><span class="p">,</span> <span class="mi">16</span><span class="p">],</span>
+            <span class="s1">&#39;clustrix_config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span>
+                <span class="s1">&#39;pe&#39;</span><span class="p">:</span> <span class="s1">&#39;openmp 12&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;48GB&#39;</span>
+            <span class="p">}</span>
+        <span class="p">},</span>
+        <span class="s1">&#39;hybrid&#39;</span><span class="p">:</span> <span class="p">{</span>
+            <span class="s1">&#39;description&#39;</span><span class="p">:</span> <span class="s1">&#39;Hybrid MPI+OpenMP&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;use_case&#39;</span><span class="p">:</span> <span class="s1">&#39;Applications using both MPI and OpenMP&#39;</span><span class="p">,</span>
+            <span class="s1">&#39;example_cores&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">],</span>
+            <span class="s1">&#39;clustrix_config&#39;</span><span class="p">:</span> <span class="p">{</span>
+                <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="mi">32</span><span class="p">,</span>
+                <span class="s1">&#39;pe&#39;</span><span class="p">:</span> <span class="s1">&#39;hybrid 32&#39;</span><span class="p">,</span>
+                <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="s1">&#39;128GB&#39;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;SGE Parallel Environment Configurations:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="n">pe_name</span><span class="p">,</span> <span class="n">config</span> <span class="ow">in</span> <span class="n">pe_configs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">pe_name</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Description: </span><span class="si">{</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;description&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Use case: </span><span class="si">{</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;use_case&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Common core counts: </span><span class="si">{</span><span class="n">config</span><span class="p">[</span><span class="s1">&#39;example_cores&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Clustrix configuration:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">config</span><span class="p">[</span><span class="s1">&#39;clustrix_config&#39;</span><span class="p">]</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;    </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">pe_configs</span>
+
+<span class="c1"># SGE resource selection helper</span>
+<span class="k">def</span> <span class="nf">select_sge_resources</span><span class="p">(</span><span class="n">application_type</span><span class="p">,</span> <span class="n">problem_size</span><span class="p">,</span> <span class="n">parallelization</span><span class="o">=</span><span class="s2">&quot;smp&quot;</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Select appropriate SGE resources based on application characteristics.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+
+    <span class="c1"># Base resource requirements by application type</span>
+    <span class="n">app_requirements</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;optimization&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;base_cores&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span> <span class="s1">&#39;memory_per_core&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="s1">&#39;time_factor&#39;</span><span class="p">:</span> <span class="mf">1.5</span><span class="p">},</span>
+        <span class="s1">&#39;simulation&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;base_cores&#39;</span><span class="p">:</span> <span class="mi">16</span><span class="p">,</span> <span class="s1">&#39;memory_per_core&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span> <span class="s1">&#39;time_factor&#39;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">},</span>
+        <span class="s1">&#39;ml_training&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;base_cores&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="s1">&#39;memory_per_core&#39;</span><span class="p">:</span> <span class="mi">8</span><span class="p">,</span> <span class="s1">&#39;time_factor&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">},</span>
+        <span class="s1">&#39;data_analysis&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;base_cores&#39;</span><span class="p">:</span> <span class="mi">6</span><span class="p">,</span> <span class="s1">&#39;memory_per_core&#39;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span> <span class="s1">&#39;time_factor&#39;</span><span class="p">:</span> <span class="mf">0.8</span><span class="p">},</span>
+        <span class="s1">&#39;engineering&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;base_cores&#39;</span><span class="p">:</span> <span class="mi">12</span><span class="p">,</span> <span class="s1">&#39;memory_per_core&#39;</span><span class="p">:</span> <span class="mi">5</span><span class="p">,</span> <span class="s1">&#39;time_factor&#39;</span><span class="p">:</span> <span class="mf">1.8</span><span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="n">application_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">app_requirements</span><span class="p">:</span>
+        <span class="n">application_type</span> <span class="o">=</span> <span class="s1">&#39;simulation&#39;</span>  <span class="c1"># Default</span>
+
+    <span class="n">req</span> <span class="o">=</span> <span class="n">app_requirements</span><span class="p">[</span><span class="n">application_type</span><span class="p">]</span>
+
+    <span class="c1"># Scale resources based on problem size</span>
+    <span class="n">size_multipliers</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;small&#39;</span><span class="p">:</span> <span class="mf">0.5</span><span class="p">,</span>
+        <span class="s1">&#39;medium&#39;</span><span class="p">:</span> <span class="mf">1.0</span><span class="p">,</span>
+        <span class="s1">&#39;large&#39;</span><span class="p">:</span> <span class="mf">2.0</span><span class="p">,</span>
+        <span class="s1">&#39;xlarge&#39;</span><span class="p">:</span> <span class="mf">4.0</span>
+    <span class="p">}</span>
+
+    <span class="n">multiplier</span> <span class="o">=</span> <span class="n">size_multipliers</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">problem_size</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+
+    <span class="n">cores</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">req</span><span class="p">[</span><span class="s1">&#39;base_cores&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">multiplier</span><span class="p">))</span>
+    <span class="n">memory_gb</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mi">4</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="n">cores</span> <span class="o">*</span> <span class="n">req</span><span class="p">[</span><span class="s1">&#39;memory_per_core&#39;</span><span class="p">]))</span>
+
+    <span class="c1"># Time estimation (hours)</span>
+    <span class="n">base_time</span> <span class="o">=</span> <span class="mf">2.0</span>  <span class="c1"># hours</span>
+    <span class="n">time_hours</span> <span class="o">=</span> <span class="nb">max</span><span class="p">(</span><span class="mf">0.5</span><span class="p">,</span> <span class="n">base_time</span> <span class="o">*</span> <span class="n">req</span><span class="p">[</span><span class="s1">&#39;time_factor&#39;</span><span class="p">]</span> <span class="o">*</span> <span class="n">multiplier</span><span class="p">)</span>
+
+    <span class="c1"># Format time as HH:MM:SS</span>
+    <span class="n">hours</span> <span class="o">=</span> <span class="nb">int</span><span class="p">(</span><span class="n">time_hours</span><span class="p">)</span>
+    <span class="n">minutes</span> <span class="o">=</span> <span class="nb">int</span><span class="p">((</span><span class="n">time_hours</span> <span class="o">-</span> <span class="n">hours</span><span class="p">)</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+    <span class="n">time_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">hours</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">minutes</span><span class="si">:</span><span class="s2">02d</span><span class="si">}</span><span class="s2">:00&quot;</span>
+
+    <span class="c1"># Queue selection</span>
+    <span class="k">if</span> <span class="n">time_hours</span> <span class="o">&lt;=</span> <span class="mi">1</span><span class="p">:</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="s2">&quot;short.q&quot;</span>
+    <span class="k">elif</span> <span class="n">time_hours</span> <span class="o">&lt;=</span> <span class="mi">8</span><span class="p">:</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="s2">&quot;all.q&quot;</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">queue</span> <span class="o">=</span> <span class="s2">&quot;long.q&quot;</span>
+
+    <span class="n">sge_config</span> <span class="o">=</span> <span class="p">{</span>
+        <span class="s1">&#39;cores&#39;</span><span class="p">:</span> <span class="n">cores</span><span class="p">,</span>
+        <span class="s1">&#39;memory&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">memory_gb</span><span class="si">}</span><span class="s2">GB&quot;</span><span class="p">,</span>
+        <span class="s1">&#39;time&#39;</span><span class="p">:</span> <span class="n">time_str</span><span class="p">,</span>
+        <span class="s1">&#39;queue&#39;</span><span class="p">:</span> <span class="n">queue</span><span class="p">,</span>
+        <span class="s1">&#39;pe&#39;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">parallelization</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">cores</span><span class="si">}</span><span class="s2">&quot;</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="n">sge_config</span>
+
+<span class="c1"># Display PE configurations</span>
+<span class="n">pe_configs</span> <span class="o">=</span> <span class="n">configure_sge_parallel_environments</span><span class="p">()</span>
+
+<span class="c1"># Example resource selections</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n\n</span><span class="s2">SGE Resource Selection Examples:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=&quot;</span> <span class="o">*</span> <span class="mi">60</span><span class="p">)</span>
+
+<span class="n">examples</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s1">&#39;optimization&#39;</span><span class="p">,</span> <span class="s1">&#39;medium&#39;</span><span class="p">,</span> <span class="s1">&#39;smp&#39;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s1">&#39;simulation&#39;</span><span class="p">,</span> <span class="s1">&#39;large&#39;</span><span class="p">,</span> <span class="s1">&#39;mpi&#39;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s1">&#39;ml_training&#39;</span><span class="p">,</span> <span class="s1">&#39;small&#39;</span><span class="p">,</span> <span class="s1">&#39;openmp&#39;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s1">&#39;engineering&#39;</span><span class="p">,</span> <span class="s1">&#39;xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;hybrid&#39;</span><span class="p">)</span>
+<span class="p">]</span>
+
+<span class="k">for</span> <span class="n">app_type</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">parallel</span> <span class="ow">in</span> <span class="n">examples</span><span class="p">:</span>
+    <span class="n">config</span> <span class="o">=</span> <span class="n">select_sge_resources</span><span class="p">(</span><span class="n">app_type</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">parallel</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">app_type</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">size</span><span class="si">}</span><span class="s2">, </span><span class="si">{</span><span class="n">parallel</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="ow">in</span> <span class="n">config</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">key</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">value</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="SGE-Job-Monitoring-and-Management">
+<h2>SGE Job Monitoring and Management<a class="headerlink" href="#SGE-Job-Monitoring-and-Management" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="n">ClusterExecutor</span>
+
+<span class="c1"># Connect to SGE cluster and check status</span>
+<span class="n">config</span> <span class="o">=</span> <span class="n">clustrix</span><span class="o">.</span><span class="n">get_config</span><span class="p">()</span>
+<span class="n">executor</span> <span class="o">=</span> <span class="n">ClusterExecutor</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+
+<span class="k">try</span><span class="p">:</span>
+    <span class="n">executor</span><span class="o">.</span><span class="n">connect</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ Successfully connected to SGE cluster&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check SGE version and configuration</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;qconf -sconf&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="s2">&quot;SGE&quot;</span> <span class="ow">in</span> <span class="n">stdout</span> <span class="ow">or</span> <span class="s2">&quot;Grid Engine&quot;</span> <span class="ow">in</span> <span class="n">stdout</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✓ SGE/Grid Engine detected&quot;</span><span class="p">)</span>
+
+    <span class="c1"># List available queues</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;qconf -sql&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+        <span class="n">queues</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Available queues (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">queues</span><span class="p">)</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">queue</span> <span class="ow">in</span> <span class="n">queues</span><span class="p">[:</span><span class="mi">10</span><span class="p">]:</span>  <span class="c1"># Show first 10</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">queue</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">queues</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">10</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  ... and </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">queues</span><span class="p">)</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">10</span><span class="si">}</span><span class="s2"> more&quot;</span><span class="p">)</span>
+
+    <span class="c1"># List parallel environments</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;qconf -spl&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+        <span class="n">pes</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Parallel environments (</span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">pes</span><span class="p">)</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">pe</span> <span class="ow">in</span> <span class="n">pes</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">pe</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check queue status</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;qstat -g c&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Cluster queue summary:&quot;</span><span class="p">)</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">[:</span><span class="mi">15</span><span class="p">]:</span>  <span class="c1"># Show header and first few lines</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check user&#39;s jobs</span>
+    <span class="n">username</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">username</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;qstat -u </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stdout</span> <span class="ow">and</span> <span class="nb">len</span><span class="p">(</span><span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">))</span> <span class="o">&gt;</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Your current jobs:&quot;</span><span class="p">)</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✓ No jobs currently running for user </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="c1"># Check host information</span>
+    <span class="n">stdout</span><span class="p">,</span> <span class="n">stderr</span> <span class="o">=</span> <span class="n">executor</span><span class="o">.</span><span class="n">_execute_command</span><span class="p">(</span><span class="s2">&quot;qhost | head -20&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">stdout</span><span class="p">:</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Host information (sample):&quot;</span><span class="p">)</span>
+        <span class="n">lines</span> <span class="o">=</span> <span class="n">stdout</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;</span><span class="se">\n</span><span class="s1">&#39;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">lines</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">line</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+    <span class="n">executor</span><span class="o">.</span><span class="n">disconnect</span><span class="p">()</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✓ SGE cluster monitoring completed successfully&quot;</span><span class="p">)</span>
+
+<span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✗ Connection or monitoring failed: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Please check your SGE cluster configuration&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Summary">
+<h2>Summary<a class="headerlink" href="#Summary" title="Link to this heading">¶</a></h2>
+<p>This tutorial covered SGE cluster usage with Clustrix:</p>
+<ol class="arabic simple">
+<li><p><strong>SGE Configuration</strong> - Setting up Clustrix for SGE/Grid Engine clusters</p></li>
+<li><p><strong>Mathematical Optimization</strong> - Genetic algorithms and complex optimization</p></li>
+<li><p><strong>Engineering Simulation</strong> - Finite element analysis and structural design</p></li>
+<li><p><strong>Multi-Objective Design</strong> - Engineering design optimization with task arrays</p></li>
+<li><p><strong>Parallel Environments</strong> - SMP, MPI, OpenMP, and hybrid configurations</p></li>
+<li><p><strong>Resource Management</strong> - Intelligent resource selection and queue management</p></li>
+<li><p><strong>Job Monitoring</strong> - SGE cluster status and job management</p></li>
+</ol>
+<section id="Key-SGE-Features:">
+<h3>Key SGE Features:<a class="headerlink" href="#Key-SGE-Features:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Parallel Environments</strong>: Use <code class="docutils literal notranslate"><span class="pre">pe</span></code> parameter for SMP, MPI, OpenMP configurations</p></li>
+<li><p><strong>Task Arrays</strong>: Efficient parameter sweeps with <code class="docutils literal notranslate"><span class="pre">sge_array</span></code> parameter</p></li>
+<li><p><strong>Queue Selection</strong>: Choose appropriate queues based on runtime requirements</p></li>
+<li><p><strong>Resource Specification</strong>: Flexible core, memory, and time allocation</p></li>
+<li><p><strong>Job Dependencies</strong>: Chain jobs with SGE dependency mechanisms</p></li>
+<li><p><strong>Advanced Scheduling</strong>: Priority, reservation, and resource policies</p></li>
+</ul>
+</section>
+<section id="Best-Practices:">
+<h3>Best Practices:<a class="headerlink" href="#Best-Practices:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><strong>Parallel Environment Selection</strong>: Choose PE based on application parallelization model</p></li>
+<li><p><strong>Resource Estimation</strong>: Use application profiling to estimate requirements accurately</p></li>
+<li><p><strong>Queue Strategy</strong>: Match job characteristics to appropriate queue policies</p></li>
+<li><p><strong>Array Jobs</strong>: Use task arrays for embarrassingly parallel workloads</p></li>
+<li><p><strong>Monitoring</strong>: Regular cluster status checks for optimal resource utilization</p></li>
+</ul>
+</section>
+<section id="Next-Steps:">
+<h3>Next Steps:<a class="headerlink" href="#Next-Steps:" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Try <a class="reference internal" href="slurm_tutorial.html"><span class="doc">SLURM Tutorial</span></a> for SLURM-specific features</p></li>
+<li><p>Explore <a class="reference internal" href="pbs_tutorial.html"><span class="doc">PBS Tutorial</span></a> for PBS/Torque clusters</p></li>
+<li><p>Check <a class="reference internal" href="kubernetes_tutorial.html"><span class="doc">Kubernetes Tutorial</span></a> for containerized computing</p></li>
+<li><p>Review <a class="reference internal" href="ssh_tutorial.html"><span class="doc">SSH Tutorial</span></a> for simple remote execution</p></li>
+</ul>
+<p>For more information, visit the <a class="reference external" href="https://clustrix.readthedocs.io">Clustrix Documentation</a>.</p>
+</section>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="pbs_tutorial.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>PBS/Torque Cluster Tutorial
+    </a>
+    <a class="float-right" href="kubernetes_tutorial.html" title="Next">
+        Kubernetes Tutorial <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">SGE (Sun Grid Engine) Tutorial</a><ul>
+<li><a class="reference internal" href="#Prerequisites">Prerequisites</a></li>
+<li><a class="reference internal" href="#SGE-Configuration">SGE Configuration</a></li>
+<li><a class="reference internal" href="#Example-1:-Mathematical-Optimization">Example 1: Mathematical Optimization</a></li>
+<li><a class="reference internal" href="#Example-2:-Engineering-Simulation">Example 2: Engineering Simulation</a></li>
+<li><a class="reference internal" href="#Example-3:-Multi-Objective-Engineering-Design">Example 3: Multi-Objective Engineering Design</a></li>
+<li><a class="reference internal" href="#SGE-Parallel-Environments-and-Resource-Management">SGE Parallel Environments and Resource Management</a></li>
+<li><a class="reference internal" href="#SGE-Job-Monitoring-and-Management">SGE Job Monitoring and Management</a></li>
+<li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Key-SGE-Features:">Key SGE Features:</a></li>
+<li><a class="reference internal" href="#Best-Practices:">Best Practices:</a></li>
+<li><a class="reference internal" href="#Next-Steps:">Next Steps:</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 29, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>

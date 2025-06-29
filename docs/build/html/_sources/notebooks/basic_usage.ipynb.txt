@@ -1,0 +1,354 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": "# Clustrix Basic Usage Tutorial\n\n[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/notebooks/basic_usage.ipynb)\n\nThis notebook demonstrates the basic usage of Clustrix for distributed computing.\n\n## Installation\n\nFirst, let's install Clustrix:",
+   "outputs": [],
+   "id": "cell-0"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Install Clustrix (uncomment if running in Colab)\n",
+    "# !pip install clustrix"
+   ],
+   "id": "cell-1"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": "## Configuration Options\n\n### Interactive Widget Configuration (Recommended for Jupyter)\n\nClustrix provides an interactive widget for easy configuration management in Jupyter notebooks:\n\n```python\n%%clusterfy\n# This creates an interactive widget with:\n# - Pre-built cluster templates (AWS, GCP, Azure, SLURM, etc.)\n# - Forms to create and edit configurations\n# - One-click configuration application\n# - Save/load configurations to files\n```\n\n**Widget Features:**\n- **Default Templates**: Pre-configured setups for major cloud providers\n- **Interactive Forms**: GUI elements for all configuration options  \n- **Configuration Management**: Create, edit, delete, and apply configurations\n- **File I/O**: Save/load configurations as YAML or JSON files\n\n### Programmatic Configuration\n\nFor programmatic setup, use the `configure()` function:",
+   "id": "cell-2",
+   "outputs": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import clustrix\n",
+    "import numpy as np\n",
+    "import time\n",
+    "\n",
+    "# Configure for local execution\n",
+    "clustrix.configure(\n",
+    "    cluster_host=None,  # Use local execution\n",
+    "    default_cores=4,\n",
+    "    auto_parallel=True\n",
+    ")\n",
+    "\n",
+    "# Get current configuration\n",
+    "config = clustrix.get_config()\n",
+    "\n",
+    "print(\"Current configuration:\")\n",
+    "print(f\"  Cluster type: {config.cluster_type}\")\n",
+    "print(f\"  Cluster host: {config.cluster_host}\")\n",
+    "print(f\"  Default cores: {config.default_cores}\")\n",
+    "print(f\"  Default memory: {config.default_memory}\")\n",
+    "print(f\"  Auto parallel: {config.auto_parallel}\")\n",
+    "print(f\"  Max parallel jobs: {config.max_parallel_jobs}\")"
+   ],
+   "id": "cell-3"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Simple Function Decoration\n",
+    "\n",
+    "The simplest way to use Clustrix is with the `@cluster` decorator:"
+   ],
+   "id": "cell-4"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "@clustrix.cluster(cores=2)\n",
+    "def simple_computation(x, y):\n",
+    "    \"\"\"A simple function that adds two numbers.\"\"\"\n",
+    "    result = x + y\n",
+    "    print(f\"Computing {x} + {y} = {result}\")\n",
+    "    return result\n",
+    "\n",
+    "# Execute the function\n",
+    "result = simple_computation(10, 20)\n",
+    "print(f\"Result: {result}\")"
+   ],
+   "id": "cell-5"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## CPU-Intensive Computation\n",
+    "\n",
+    "Let's try a more computational task that benefits from parallelization:"
+   ],
+   "id": "cell-6"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "@clustrix.cluster(cores=4, parallel=True)\n",
+    "def monte_carlo_pi(n_samples):\n",
+    "    \"\"\"Estimate π using Monte Carlo method.\"\"\"\n",
+    "    import random\n",
+    "    \n",
+    "    count_inside = 0\n",
+    "    \n",
+    "    # This loop could be parallelized automatically\n",
+    "    for i in range(n_samples):\n",
+    "        x = random.random()\n",
+    "        y = random.random()\n",
+    "        \n",
+    "        if x*x + y*y <= 1:\n",
+    "            count_inside += 1\n",
+    "    \n",
+    "    pi_estimate = 4.0 * count_inside / n_samples\n",
+    "    return pi_estimate\n",
+    "\n",
+    "# Run with different sample sizes\n",
+    "for n in [1000, 10000, 100000]:\n",
+    "    start_time = time.time()\n",
+    "    pi_est = monte_carlo_pi(n)\n",
+    "    elapsed = time.time() - start_time\n",
+    "    \n",
+    "    print(f\"n={n:6d}: π ≈ {pi_est:.6f} (error: {abs(pi_est - np.pi):.6f}, time: {elapsed:.3f}s)\")"
+   ],
+   "id": "cell-7"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Array Processing\n",
+    "\n",
+    "Clustrix works well with NumPy arrays and scientific computing:"
+   ],
+   "id": "cell-8"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "@clustrix.cluster(cores=4, memory=\"2GB\")\n",
+    "def matrix_computation(size):\n",
+    "    \"\"\"Perform matrix operations.\"\"\"\n",
+    "    import numpy as np\n",
+    "    \n",
+    "    # Create random matrices\n",
+    "    A = np.random.random((size, size))\n",
+    "    B = np.random.random((size, size))\n",
+    "    \n",
+    "    # Matrix multiplication\n",
+    "    C = np.dot(A, B)\n",
+    "    \n",
+    "    # Some statistics\n",
+    "    return {\n",
+    "        'shape': C.shape,\n",
+    "        'mean': np.mean(C),\n",
+    "        'std': np.std(C),\n",
+    "        'max': np.max(C),\n",
+    "        'min': np.min(C)\n",
+    "    }\n",
+    "\n",
+    "# Test with different matrix sizes\n",
+    "sizes = [100, 200, 300]\n",
+    "\n",
+    "for size in sizes:\n",
+    "    start_time = time.time()\n",
+    "    stats = matrix_computation(size)\n",
+    "    elapsed = time.time() - start_time\n",
+    "    \n",
+    "    print(f\"Size {size}x{size}: mean={stats['mean']:.4f}, std={stats['std']:.4f}, time={elapsed:.3f}s\")"
+   ],
+   "id": "cell-9"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Data Processing Pipeline\n",
+    "\n",
+    "Let's create a more realistic data processing example:"
+   ],
+   "id": "cell-10"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "@clustrix.cluster(cores=4, parallel=True)\n",
+    "def process_dataset(data, operations):\n",
+    "    \"\"\"Process a dataset with multiple operations.\"\"\"\n",
+    "    import numpy as np\n",
+    "    \n",
+    "    results = []\n",
+    "    \n",
+    "    # This loop could be parallelized\n",
+    "    for item in data:\n",
+    "        processed = item\n",
+    "        \n",
+    "        # Apply operations\n",
+    "        for op in operations:\n",
+    "            if op == 'square':\n",
+    "                processed = processed ** 2\n",
+    "            elif op == 'sqrt':\n",
+    "                processed = np.sqrt(abs(processed))\n",
+    "            elif op == 'log':\n",
+    "                processed = np.log(abs(processed) + 1)\n",
+    "            elif op == 'normalize':\n",
+    "                processed = processed / (1 + abs(processed))\n",
+    "        \n",
+    "        results.append(processed)\n",
+    "    \n",
+    "    return results\n",
+    "\n",
+    "# Create test data\n",
+    "test_data = np.random.randn(1000) * 10\n",
+    "operations = ['square', 'sqrt', 'normalize']\n",
+    "\n",
+    "# Process the data\n",
+    "start_time = time.time()\n",
+    "processed_data = process_dataset(test_data, operations)\n",
+    "elapsed = time.time() - start_time\n",
+    "\n",
+    "print(f\"Processed {len(test_data)} items in {elapsed:.3f} seconds\")\n",
+    "print(f\"Input range: [{np.min(test_data):.2f}, {np.max(test_data):.2f}]\")\n",
+    "print(f\"Output range: [{np.min(processed_data):.2f}, {np.max(processed_data):.2f}]\")"
+   ],
+   "id": "cell-11"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Performance Comparison\n",
+    "\n",
+    "Let's compare parallel vs sequential execution:"
+   ],
+   "id": "cell-12"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def cpu_intensive_task(n):\n",
+    "    \"\"\"A CPU-intensive task for benchmarking.\"\"\"\n",
+    "    result = 0\n",
+    "    for i in range(n):\n",
+    "        result += i ** 0.5\n",
+    "    return result\n",
+    "\n",
+    "# Sequential version\n",
+    "@clustrix.cluster(parallel=False)\n",
+    "def sequential_processing(data):\n",
+    "    results = []\n",
+    "    for item in data:\n",
+    "        results.append(cpu_intensive_task(item))\n",
+    "    return results\n",
+    "\n",
+    "# Parallel version\n",
+    "@clustrix.cluster(cores=4, parallel=True)\n",
+    "def parallel_processing(data):\n",
+    "    results = []\n",
+    "    for item in data:\n",
+    "        results.append(cpu_intensive_task(item))\n",
+    "    return results\n",
+    "\n",
+    "# Test data\n",
+    "test_sizes = [10000] * 8  # 8 tasks of 10k iterations each\n",
+    "\n",
+    "# Time sequential execution\n",
+    "start_time = time.time()\n",
+    "seq_results = sequential_processing(test_sizes)\n",
+    "seq_time = time.time() - start_time\n",
+    "\n",
+    "# Time parallel execution\n",
+    "start_time = time.time()\n",
+    "par_results = parallel_processing(test_sizes)\n",
+    "par_time = time.time() - start_time\n",
+    "\n",
+    "print(f\"Sequential execution: {seq_time:.3f} seconds\")\n",
+    "print(f\"Parallel execution: {par_time:.3f} seconds\")\n",
+    "print(f\"Speedup: {seq_time/par_time:.2f}x\")\n",
+    "print(f\"Results match: {seq_results == par_results}\")"
+   ],
+   "id": "cell-13"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Configuration Options\n",
+    "\n",
+    "Clustrix provides many configuration options:"
+   ],
+   "id": "cell-14"
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Get current configuration\n",
+    "config = clustrix.get_config()\n",
+    "\n",
+    "print(\"Current configuration:\")\n",
+    "print(f\"  Cluster type: {config.cluster_type}\")\n",
+    "print(f\"  Cluster host: {config.cluster_host}\")\n",
+    "print(f\"  Default cores: {config.default_cores}\")\n",
+    "print(f\"  Default memory: {config.default_memory}\")\n",
+    "print(f\"  Auto parallel: {config.auto_parallel}\")\n",
+    "print(f\"  Max parallel jobs: {config.max_parallel_jobs}\")"
+   ],
+   "id": "cell-15"
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": "## Cost Monitoring\n\nClustrix includes built-in cost monitoring for cloud providers:\n\n```python\nfrom clustrix import cost_tracking_decorator\n\n# Automatic cost tracking\n@cost_tracking_decorator('aws', 'p3.2xlarge')\n@clustrix.cluster(cores=8, memory='60GB')\ndef expensive_training():\n    # Your training code here\n    pass\n\n# Execution includes cost reporting\nresult = expensive_training()\nprint(f\"Training cost: ${result['cost_report']['cost_estimate']['estimated_cost']:.2f}\")\n```\n\n## Next Steps\n\nThis tutorial covered the basics of Clustrix usage. For more advanced topics, check out:\n\n- **Interactive Widget**: Use `%%clusterfy` for GUI-based configuration management\n- **Cost Monitoring**: Track expenses with built-in cost monitoring for AWS, GCP, Azure, Lambda Cloud\n- **Remote Cluster Configuration**: Setting up SLURM, PBS, or SSH clusters\n- **Advanced Parallelization**: Custom loop detection and optimization\n- **Machine Learning Workflows**: Using Clustrix with scikit-learn, TensorFlow, or PyTorch\n- **Scientific Computing**: Integration with SciPy, pandas, and other scientific libraries\n\nVisit the [Clustrix documentation](https://clustrix.readthedocs.io) for detailed guides and API reference.",
+   "id": "cell-16",
+   "outputs": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.8.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}

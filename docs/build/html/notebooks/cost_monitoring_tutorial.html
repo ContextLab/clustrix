@@ -1,0 +1,1132 @@
+<!DOCTYPE html>
+<html class="no-js" lang="en" data-content_root="../">
+<head>
+    <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    
+        <title>Cloud Cost Monitoring and Optimization &mdash; Clustrix Documentation</title>
+    
+    <link rel="stylesheet" type="text/css" href="../_static/dist/fontawesome.css" />
+      <link rel="stylesheet" type="text/css" href="../_static/dist/theme.css?v=310cf088" />
+      <link rel="stylesheet" type="text/css" href="../_static/copybutton.css?v=76b2166b" />
+      <link rel="stylesheet" type="text/css" href="../_static/nbsphinx-code-cells.css?v=2aa19091" />
+      <link rel="stylesheet" type="text/css" href="../_static/custom.css?v=554e4187" />
+            <link rel="index" title="Index" href="../genindex.html" />
+            <link rel="search" title="Search" href="../search.html" />
+            <link rel="top" title="Clustrix Documentation" href="#" />
+            <link rel="next" title="Decorator API" href="../api/decorator.html" />
+            <link rel="prev" title="Lambda Cloud Tutorial" href="lambda_cloud_tutorial.html" />
+    </head>
+<body>
+    <script type="text/javascript" src="../_static/dist/blocking.js"></script>
+    <header class="container-fluid bg-primary">
+        <a class="btn btn-sm btn-light skip-to-content-link" href="#main">Skip to content</a>
+        <div class="container-fluid">
+            <div class="navbar navbar-expand-lg navbar-dark font-weight-bold">
+                    <a href="../index.html"
+                        title="Wagtail"
+                        class="logo navbar-brand"
+                    >
+                        <img src="../_static/img/wagtail-logo-circle.svg" width="45" height="59" alt="Wagtail"
+                            class="logo-img"
+                        />
+                        Clustrix
+                    </a>
+                
+                
+                <button class="navbar-toggler btn btn-primary d-lg-none" type="button" data-toggle="collapse" data-target="#collapseSidebar" aria-expanded="false" aria-controls="collapseExample">
+                    <span class="navbar-toggler-icon"></span>
+                    <span class="sr-only">menu</span>
+                </button>
+            </div>
+        </div>
+    </header>
+    <div class="container-fluid">
+        <div class="row">
+            <aside class="col-12 col-lg-3 sidebar-container">
+                <div id="collapseSidebar" class="collapse sticky-top d-lg-block pt-5 pr-lg-4">
+<div id="searchbox" class="searchbox mb-6 px-1" role="search">
+    <form id="search-form" action="../search.html" autocomplete="off" method="get" role="search">
+        <div class="input-group">
+            <div class="input-group-prepend">
+                <div class="input-group-text border-right-0 bg-white py-3 pl-3 pr-2"><span class="fas fa-search"></span></div>
+            </div>
+            <input class="form-control py-3 pr-3 pl-1 h-100 border-left-0" type="search" name="q" placeholder="Search documentation" aria-label="Search documentation" id="searchinput" />
+        </div>
+        <input type="hidden" name="check_keywords" value="yes" />
+        <input type="hidden" name="area" value="default" />
+    </form>
+</div><div class="site-toc">
+    <nav class="toc mt-3" aria-label="Main menu">
+        <p class="caption" role="heading"><span class="caption-text">User Guide</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../installation.html">Installation</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../ssh_setup.html">SSH Key Setup for Remote Clusters</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Tutorials</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../tutorials/kubernetes_tutorial.html">Kubernetes Cluster Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Interactive Notebooks</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="cluster_config_example.html">Clustrix Configuration Manager Example</a></li>
+<li class="toctree-l1"><a class="reference internal" href="complete_api_demo.html">Complete Clustrix API Demonstration</a></li>
+<li class="toctree-l1"><a class="reference internal" href="slurm_tutorial.html">SLURM Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="pbs_tutorial.html">PBS/Torque Cluster Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="sge_tutorial.html">SGE (Sun Grid Engine) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="kubernetes_tutorial.html">Kubernetes Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="ssh_tutorial.html">SSH Remote Execution Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="basic_usage.html">Clustrix Basic Usage Tutorial</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">Cloud Platform Tutorials</span></p>
+<ul class="current">
+<li class="toctree-l1"><a class="reference internal" href="aws_cloud_tutorial.html">Amazon Web Services (AWS) Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="azure_cloud_tutorial.html">Microsoft Azure Cloud Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="gcp_cloud_tutorial.html">Google Cloud Platform (GCP) Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="huggingface_spaces_tutorial.html">HuggingFace Spaces Tutorial</a></li>
+<li class="toctree-l1"><a class="reference internal" href="lambda_cloud_tutorial.html">Lambda Cloud Tutorial</a></li>
+<li class="toctree-l1 current"><a class="current reference internal" href="#">Cloud Cost Monitoring and Optimization</a></li>
+</ul>
+<p class="caption" role="heading"><span class="caption-text">API Reference</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="../api/decorator.html">Decorator API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/config.html">Configuration API</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/notebook_magic.html">Notebook Magic Commands</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/cost_monitoring.html">Cost Monitoring</a></li>
+<li class="toctree-l1"><a class="reference internal" href="../api/local_executor.html">Local Executor API</a></li>
+</ul>
+
+    </nav>
+    <template data-toggle-item-template>
+        <button class="btn btn-sm btn-link toctree-expand" type="button">
+            <span class="sr-only">Toggle menu contents</span>
+        </button>
+    </template>
+</div>
+                    <div class="d-lg-none border-bottom">
+                        
+                    </div>
+                </div>
+            </aside>
+            <div class="col-12 col-lg-9 pt-5">
+                <header class="row align-items-baseline">
+                    <div class="col">
+                        <nav aria-label="breadcrumb">
+    <ol class="breadcrumb m-0 p-0 bg-transparent">
+        <li class="breadcrumb-item"><a href="../index.html">Docs</a></li>
+        <li class="breadcrumb-item active" aria-current="page">Cloud Cost Monitoring and Optimization</li>
+    </ol>
+</nav>
+                    </div>
+                    <div class="col-sm-12 col-lg-auto mt-3 mt-lg-3">
+                        <noscript>
+                            <p>JavaScript is required to toggle light/dark mode..</p>
+                        </noscript>
+                        <button id="wagtail-theme" class="btn btn-sm btn-light text-decoration-none" type="button">
+                            <span class="dark-only"><i class="fas fa-sun"></i> Light mode</span>
+                            <span class="light-only"><i class="fas fa-moon"></i> Dark mode</span>
+                        </button>
+    <a class="btn btn-sm btn-light text-decoration-none" href="https://github.com/ContextLab/clustrix/blob/master/docs/source/notebooks/cost_monitoring_tutorial.ipynb" rel="nofollow">
+        <span class="btn-icon"><span class="fab fa-github"></span></span>
+        <span class="btn-text">Edit on GitHub</span>
+    </a>
+    <a class="btn btn-sm btn-light text-decoration-none" href="../_sources/notebooks/cost_monitoring_tutorial.ipynb.txt" rel="nofollow">
+        <span class="btn-icon"><span class="fas fa-code"></span></span>
+        <span class="btn-text">View source</span>
+    </a>
+                        
+                    </div>
+                </header>
+                <div class="row" >
+                    <div class="col-12">
+                        <hr class="w-100 my-4">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-12 col-lg-9 order-last order-lg-first rst-content">
+                        <main role="main" id="main">
+    <section id="Cloud-Cost-Monitoring-and-Optimization">
+<h1>Cloud Cost Monitoring and Optimization<a class="headerlink" href="#Cloud-Cost-Monitoring-and-Optimization" title="Link to this heading">¶</a></h1>
+<p>This tutorial demonstrates Clustrix’s comprehensive cost monitoring features for cloud platforms. Learn how to track expenses, optimize resource usage, and make informed decisions about cloud infrastructure.</p>
+<p><a class="reference external" href="https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/source/notebooks/cost_monitoring_tutorial.ipynb"><img alt="Open In Colab" src="https://colab.research.google.com/assets/colab-badge.svg" /></a></p>
+<section id="Overview">
+<h2>Overview<a class="headerlink" href="#Overview" title="Link to this heading">¶</a></h2>
+<p>Clustrix provides built-in cost monitoring for multiple cloud platforms:</p>
+<ul class="simple">
+<li><p><strong>Amazon Web Services (AWS)</strong>: EC2, ECS, Batch, Lambda, SageMaker</p></li>
+<li><p><strong>Google Cloud Platform (GCP)</strong>: Compute Engine, GKE, Cloud Batch, Vertex AI</p></li>
+<li><p><strong>Microsoft Azure</strong>: Virtual Machines, AKS, Batch, ML Compute</p></li>
+<li><p><strong>Lambda Cloud</strong>: GPU instances for ML workloads</p></li>
+<li><p><strong>Hugging Face Spaces</strong>: Inference endpoints and Spaces hardware</p></li>
+</ul>
+</section>
+<section id="Key-Features">
+<h2>Key Features<a class="headerlink" href="#Key-Features" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><strong>Automatic Cost Tracking</strong>: Decorator-based cost monitoring</p></li>
+<li><p><strong>Real-time Pricing</strong>: Up-to-date pricing information</p></li>
+<li><p><strong>Regional Comparisons</strong>: Find the most cost-effective regions</p></li>
+<li><p><strong>Optimization Recommendations</strong>: Automatic suggestions for cost savings</p></li>
+<li><p><strong>Multi-cloud Support</strong>: Compare costs across different providers</p></li>
+</ul>
+</section>
+<section id="Installation">
+<h2>Installation<a class="headerlink" href="#Installation" title="Link to this heading">¶</a></h2>
+<p>Install Clustrix with cost monitoring support:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Install Clustrix</span>
+<span class="o">!</span>pip<span class="w"> </span>install<span class="w"> </span>clustrix
+
+<span class="c1"># Import cost monitoring functions</span>
+<span class="kn">from</span> <span class="nn">clustrix</span> <span class="kn">import</span> <span class="p">(</span>
+    <span class="n">cost_tracking_decorator</span><span class="p">,</span>
+    <span class="n">get_cost_monitor</span><span class="p">,</span>
+    <span class="n">start_cost_monitoring</span><span class="p">,</span>
+    <span class="n">generate_cost_report</span><span class="p">,</span>
+    <span class="n">get_pricing_info</span>
+<span class="p">)</span>
+
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+<span class="kn">import</span> <span class="nn">pandas</span> <span class="k">as</span> <span class="nn">pd</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">time</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Basic-Cost-Monitoring">
+<h2>Basic Cost Monitoring<a class="headerlink" href="#Basic-Cost-Monitoring" title="Link to this heading">¶</a></h2>
+<section id="Getting-Pricing-Information">
+<h3>Getting Pricing Information<a class="headerlink" href="#Getting-Pricing-Information" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Get pricing information for different cloud providers</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== AWS EC2 Pricing (Top 10 Instance Types) ===&quot;</span><span class="p">)</span>
+<span class="n">aws_pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">aws_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">())[:</span><span class="mi">10</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance_type</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== GCP Compute Engine Pricing (Top 10 Instance Types) ===&quot;</span><span class="p">)</span>
+<span class="n">gcp_pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">gcp_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">())[:</span><span class="mi">10</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance_type</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== Azure VM Pricing (Top 10 Instance Types) ===&quot;</span><span class="p">)</span>
+<span class="n">azure_pricing</span> <span class="o">=</span> <span class="n">get_pricing_info</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">instance_type</span><span class="p">,</span> <span class="n">price</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">azure_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">())[:</span><span class="mi">10</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance_type</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Total instance types available:&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  AWS: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">aws_pricing</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  GCP: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">gcp_pricing</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Azure: </span><span class="si">{</span><span class="nb">len</span><span class="p">(</span><span class="n">azure_pricing</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Manual-Cost-Monitoring">
+<h3>Manual Cost Monitoring<a class="headerlink" href="#Manual-Cost-Monitoring" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example: Manual cost monitoring for a computation</span>
+<span class="k">def</span> <span class="nf">simulate_computation</span><span class="p">(</span><span class="n">duration_seconds</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Simulate a computation that takes some time.&quot;&quot;&quot;</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Simulate CPU-intensive work</span>
+    <span class="n">result</span> <span class="o">=</span> <span class="mi">0</span>
+    <span class="k">while</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span> <span class="o">&lt;</span> <span class="n">duration_seconds</span><span class="p">:</span>
+        <span class="n">result</span> <span class="o">+=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">((</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">1000</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span>
+
+    <span class="k">return</span> <span class="n">result</span>
+
+<span class="c1"># Monitor cost for AWS</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== AWS Cost Monitoring Example ===&quot;</span><span class="p">)</span>
+<span class="n">monitor</span> <span class="o">=</span> <span class="n">start_cost_monitoring</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+
+<span class="c1"># Run computation</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">simulate_computation</span><span class="p">(</span><span class="mi">3</span><span class="p">)</span>
+
+<span class="c1"># Generate cost report</span>
+<span class="n">cost_report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.medium&#39;</span><span class="p">,</span> <span class="n">duration_seconds</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Instance Type: </span><span class="si">{</span><span class="n">cost_report</span><span class="p">[</span><span class="s1">&#39;instance_type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Duration: </span><span class="si">{</span><span class="n">cost_report</span><span class="p">[</span><span class="s1">&#39;duration_seconds&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> seconds&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Hourly Rate: $</span><span class="si">{</span><span class="n">cost_report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;hourly_rate&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Estimated Cost: $</span><span class="si">{</span><span class="n">cost_report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Compare costs across providers for same duration</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== Cost Comparison Across Providers (3 seconds) ===&quot;</span><span class="p">)</span>
+<span class="n">providers_and_instances</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.medium&#39;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-2&#39;</span><span class="p">),</span>
+    <span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D2s_v3&#39;</span><span class="p">)</span>
+<span class="p">]</span>
+
+<span class="k">for</span> <span class="n">provider</span><span class="p">,</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">providers_and_instances</span><span class="p">:</span>
+    <span class="n">report</span> <span class="o">=</span> <span class="n">generate_cost_report</span><span class="p">(</span><span class="n">provider</span><span class="p">,</span> <span class="n">instance</span><span class="p">,</span> <span class="n">duration_seconds</span><span class="o">=</span><span class="mi">3</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">provider</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">:</span><span class="s2">5</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">report</span><span class="p">[</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Automatic-Cost-Tracking-with-Decorators">
+<h2>Automatic Cost Tracking with Decorators<a class="headerlink" href="#Automatic-Cost-Tracking-with-Decorators" title="Link to this heading">¶</a></h2>
+<p>The easiest way to track costs is using the <code class="docutils literal notranslate"><span class="pre">&#64;cost_tracking_decorator</span></code>:</p>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Example 1: AWS Cost Tracking</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.xlarge&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">aws_ml_training</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example ML training with automatic AWS cost tracking.&quot;&quot;&quot;</span>
+    <span class="kn">from</span> <span class="nn">sklearn.ensemble</span> <span class="kn">import</span> <span class="n">RandomForestClassifier</span>
+    <span class="kn">from</span> <span class="nn">sklearn.datasets</span> <span class="kn">import</span> <span class="n">make_classification</span>
+    <span class="kn">from</span> <span class="nn">sklearn.model_selection</span> <span class="kn">import</span> <span class="n">train_test_split</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="c1"># Generate dataset</span>
+    <span class="n">X</span><span class="p">,</span> <span class="n">y</span> <span class="o">=</span> <span class="n">make_classification</span><span class="p">(</span><span class="n">n_samples</span><span class="o">=</span><span class="mi">10000</span><span class="p">,</span> <span class="n">n_features</span><span class="o">=</span><span class="mi">20</span><span class="p">,</span> <span class="n">n_classes</span><span class="o">=</span><span class="mi">3</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+    <span class="n">X_train</span><span class="p">,</span> <span class="n">X_test</span><span class="p">,</span> <span class="n">y_train</span><span class="p">,</span> <span class="n">y_test</span> <span class="o">=</span> <span class="n">train_test_split</span><span class="p">(</span><span class="n">X</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">test_size</span><span class="o">=</span><span class="mf">0.2</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">)</span>
+
+    <span class="c1"># Train model</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+    <span class="n">model</span> <span class="o">=</span> <span class="n">RandomForestClassifier</span><span class="p">(</span><span class="n">n_estimators</span><span class="o">=</span><span class="mi">100</span><span class="p">,</span> <span class="n">random_state</span><span class="o">=</span><span class="mi">42</span><span class="p">,</span> <span class="n">n_jobs</span><span class="o">=-</span><span class="mi">1</span><span class="p">)</span>
+    <span class="n">model</span><span class="o">.</span><span class="n">fit</span><span class="p">(</span><span class="n">X_train</span><span class="p">,</span> <span class="n">y_train</span><span class="p">)</span>
+    <span class="n">training_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="c1"># Evaluate</span>
+    <span class="n">accuracy</span> <span class="o">=</span> <span class="n">model</span><span class="o">.</span><span class="n">score</span><span class="p">(</span><span class="n">X_test</span><span class="p">,</span> <span class="n">y_test</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;accuracy&#39;</span><span class="p">:</span> <span class="n">accuracy</span><span class="p">,</span>
+        <span class="s1">&#39;training_time&#39;</span><span class="p">:</span> <span class="n">training_time</span><span class="p">,</span>
+        <span class="s1">&#39;samples_trained&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">X_train</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="c1"># Example 2: GCP Cost Tracking</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">,</span> <span class="s1">&#39;a2-highgpu-1g&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">gcp_gpu_computation</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example GPU computation with automatic GCP cost tracking.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Simulate GPU-intensive work</span>
+    <span class="n">matrices</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">10</span><span class="p">):</span>
+        <span class="n">A</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+        <span class="n">B</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="mi">1000</span><span class="p">,</span> <span class="mi">1000</span><span class="p">)</span>
+        <span class="n">C</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">dot</span><span class="p">(</span><span class="n">A</span><span class="p">,</span> <span class="n">B</span><span class="p">)</span>
+        <span class="n">matrices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">C</span><span class="p">)</span>
+
+    <span class="n">result</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">([</span><span class="n">m</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="k">for</span> <span class="n">m</span> <span class="ow">in</span> <span class="n">matrices</span><span class="p">])</span>
+    <span class="n">computation_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;result&#39;</span><span class="p">:</span> <span class="n">result</span><span class="p">,</span>
+        <span class="s1">&#39;computation_time&#39;</span><span class="p">:</span> <span class="n">computation_time</span><span class="p">,</span>
+        <span class="s1">&#39;matrices_processed&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">matrices</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="c1"># Example 3: Azure Cost Tracking</span>
+<span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_NC6&#39;</span><span class="p">)</span>
+<span class="k">def</span> <span class="nf">azure_deep_learning</span><span class="p">():</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example deep learning with automatic Azure cost tracking.&quot;&quot;&quot;</span>
+    <span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+    <span class="kn">import</span> <span class="nn">time</span>
+
+    <span class="c1"># Simulate neural network training</span>
+    <span class="n">start_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span>
+
+    <span class="c1"># Simulate epochs</span>
+    <span class="n">losses</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">epoch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">5</span><span class="p">):</span>
+        <span class="c1"># Simulate batch processing</span>
+        <span class="n">batch_losses</span> <span class="o">=</span> <span class="p">[]</span>
+        <span class="k">for</span> <span class="n">batch</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">100</span><span class="p">):</span>
+            <span class="c1"># Simulate forward and backward pass</span>
+            <span class="n">loss</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">exponential</span><span class="p">(</span><span class="mf">1.0</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">exp</span><span class="p">(</span><span class="o">-</span><span class="n">epoch</span> <span class="o">*</span> <span class="mf">0.1</span><span class="p">)</span>
+            <span class="n">batch_losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">loss</span><span class="p">)</span>
+
+        <span class="n">epoch_loss</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">mean</span><span class="p">(</span><span class="n">batch_losses</span><span class="p">)</span>
+        <span class="n">losses</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">epoch_loss</span><span class="p">)</span>
+
+    <span class="n">training_time</span> <span class="o">=</span> <span class="n">time</span><span class="o">.</span><span class="n">time</span><span class="p">()</span> <span class="o">-</span> <span class="n">start_time</span>
+
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s1">&#39;final_loss&#39;</span><span class="p">:</span> <span class="n">losses</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">],</span>
+        <span class="s1">&#39;all_losses&#39;</span><span class="p">:</span> <span class="n">losses</span><span class="p">,</span>
+        <span class="s1">&#39;training_time&#39;</span><span class="p">:</span> <span class="n">training_time</span><span class="p">,</span>
+        <span class="s1">&#39;epochs&#39;</span><span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="n">losses</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="c1"># Run examples and display costs</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== Running Cost-Tracked Functions ===&quot;</span><span class="p">)</span>
+
+<span class="c1"># AWS Example</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">1. AWS ML Training:&quot;</span><span class="p">)</span>
+<span class="n">aws_result</span> <span class="o">=</span> <span class="n">aws_ml_training</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">aws_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Accuracy: </span><span class="si">{</span><span class="n">aws_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;accuracy&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Duration: </span><span class="si">{</span><span class="n">aws_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;duration_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">aws_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># GCP Example</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. GCP GPU Computation:&quot;</span><span class="p">)</span>
+<span class="n">gcp_result</span> <span class="o">=</span> <span class="n">gcp_gpu_computation</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">gcp_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Matrices Processed: </span><span class="si">{</span><span class="n">gcp_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;matrices_processed&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Duration: </span><span class="si">{</span><span class="n">gcp_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;duration_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">gcp_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Azure Example</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3. Azure Deep Learning:&quot;</span><span class="p">)</span>
+<span class="n">azure_result</span> <span class="o">=</span> <span class="n">azure_deep_learning</span><span class="p">()</span>
+<span class="k">if</span> <span class="n">azure_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Final Loss: </span><span class="si">{</span><span class="n">azure_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;final_loss&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Duration: </span><span class="si">{</span><span class="n">azure_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;duration_seconds&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">s&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">azure_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.6f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Advanced-Cost-Analysis">
+<h2>Advanced Cost Analysis<a class="headerlink" href="#Advanced-Cost-Analysis" title="Link to this heading">¶</a></h2>
+<section id="Regional-Pricing-Comparison">
+<h3>Regional Pricing Comparison<a class="headerlink" href="#Regional-Pricing-Comparison" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># AWS Regional Pricing Comparison</span>
+<span class="n">aws_monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== AWS Regional Pricing Comparison (t3.large) ===&quot;</span><span class="p">)</span>
+<span class="n">instance_type</span> <span class="o">=</span> <span class="s1">&#39;t3.large&#39;</span>
+<span class="n">regions</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;us-east-1&#39;</span><span class="p">,</span> <span class="s1">&#39;us-west-2&#39;</span><span class="p">,</span> <span class="s1">&#39;eu-west-1&#39;</span><span class="p">,</span> <span class="s1">&#39;ap-southeast-1&#39;</span><span class="p">,</span> <span class="s1">&#39;sa-east-1&#39;</span><span class="p">]</span>
+
+<span class="n">regional_prices</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">region</span> <span class="ow">in</span> <span class="n">regions</span><span class="p">:</span>
+    <span class="n">pricing</span> <span class="o">=</span> <span class="n">aws_monitor</span><span class="o">.</span><span class="n">get_region_pricing</span><span class="p">(</span><span class="n">region</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">instance_type</span> <span class="ow">in</span> <span class="n">pricing</span><span class="p">:</span>
+        <span class="n">price</span> <span class="o">=</span> <span class="n">pricing</span><span class="p">[</span><span class="n">instance_type</span><span class="p">]</span>
+        <span class="n">regional_prices</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">region</span><span class="p">,</span> <span class="n">price</span><span class="p">))</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">region</span><span class="si">:</span><span class="s2">15</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">price</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour&quot;</span><span class="p">)</span>
+
+<span class="c1"># Find cheapest and most expensive regions</span>
+<span class="n">regional_prices</span><span class="o">.</span><span class="n">sort</span><span class="p">(</span><span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Cheapest: </span><span class="si">{</span><span class="n">regional_prices</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> ($</span><span class="si">{</span><span class="n">regional_prices</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Most Expensive: </span><span class="si">{</span><span class="n">regional_prices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span><span class="si">}</span><span class="s2"> ($</span><span class="si">{</span><span class="n">regional_prices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hour)&quot;</span><span class="p">)</span>
+<span class="n">savings</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">regional_prices</span><span class="p">[</span><span class="mi">0</span><span class="p">][</span><span class="mi">1</span><span class="p">]</span> <span class="o">/</span> <span class="n">regional_prices</span><span class="p">[</span><span class="o">-</span><span class="mi">1</span><span class="p">][</span><span class="mi">1</span><span class="p">])</span> <span class="o">*</span> <span class="mi">100</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Potential Savings: </span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%&quot;</span><span class="p">)</span>
+
+<span class="c1"># GCP Regional Pricing Comparison</span>
+<span class="n">gcp_monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;gcp&#39;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== GCP Regional Pricing Comparison (n2-standard-4) ===&quot;</span><span class="p">)</span>
+<span class="n">gcp_regional_pricing</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">get_region_pricing_comparison</span><span class="p">(</span><span class="s1">&#39;n2-standard-4&#39;</span><span class="p">)</span>
+<span class="k">for</span> <span class="n">region</span><span class="p">,</span> <span class="n">pricing</span> <span class="ow">in</span> <span class="nb">list</span><span class="p">(</span><span class="n">gcp_regional_pricing</span><span class="o">.</span><span class="n">items</span><span class="p">())[:</span><span class="mi">5</span><span class="p">]:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">region</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> On-Demand: $</span><span class="si">{</span><span class="n">pricing</span><span class="p">[</span><span class="s1">&#39;on_demand_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Preemptible: $</span><span class="si">{</span><span class="n">pricing</span><span class="p">[</span><span class="s1">&#39;preemptible_hourly&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Spot/Preemptible-Instance-Savings">
+<h3>Spot/Preemptible Instance Savings<a class="headerlink" href="#Spot/Preemptible-Instance-Savings" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Compare on-demand vs spot/preemptible pricing</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== On-Demand vs Spot/Preemptible Pricing Comparison ===&quot;</span><span class="p">)</span>
+
+<span class="c1"># AWS Spot Instances</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">AWS Spot Instances:&quot;</span><span class="p">)</span>
+<span class="n">aws_instances</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;t3.large&#39;</span><span class="p">,</span> <span class="s1">&#39;m5.xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;c5.2xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;r5.large&#39;</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">aws_instances</span><span class="p">:</span>
+    <span class="n">on_demand</span> <span class="o">=</span> <span class="n">aws_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">spot</span> <span class="o">=</span> <span class="n">aws_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">savings</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">/</span> <span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">15</span><span class="si">}</span><span class="s2"> On-Demand: $</span><span class="si">{</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Spot: $</span><span class="si">{</span><span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr (</span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">% savings)&quot;</span><span class="p">)</span>
+
+<span class="c1"># GCP Preemptible VMs</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">GCP Preemptible VMs:&quot;</span><span class="p">)</span>
+<span class="n">gcp_instances</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;n2-standard-4&#39;</span><span class="p">,</span> <span class="s1">&#39;c2-standard-4&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-highmem-4&#39;</span><span class="p">,</span> <span class="s1">&#39;a2-highgpu-1g&#39;</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">gcp_instances</span><span class="p">:</span>
+    <span class="n">on_demand</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">preemptible</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_preemptible</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">savings</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">preemptible</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">/</span> <span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> On-Demand: $</span><span class="si">{</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Preemptible: $</span><span class="si">{</span><span class="n">preemptible</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr (</span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">% savings)&quot;</span><span class="p">)</span>
+
+<span class="c1"># Azure Spot VMs</span>
+<span class="n">azure_monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="s1">&#39;azure&#39;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Azure Spot VMs:&quot;</span><span class="p">)</span>
+<span class="n">azure_instances</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;Standard_D4s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_E4s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_F4s_v2&#39;</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">azure_instances</span><span class="p">:</span>
+    <span class="n">on_demand</span> <span class="o">=</span> <span class="n">azure_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+    <span class="n">spot</span> <span class="o">=</span> <span class="n">azure_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">,</span> <span class="n">use_spot</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+    <span class="n">savings</span> <span class="o">=</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span> <span class="o">/</span> <span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">instance</span><span class="si">:</span><span class="s2">20</span><span class="si">}</span><span class="s2"> On-Demand: $</span><span class="si">{</span><span class="n">on_demand</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;Spot: $</span><span class="si">{</span><span class="n">spot</span><span class="o">.</span><span class="n">hourly_rate</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">/hr (</span><span class="si">{</span><span class="n">savings</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">% savings)&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Batch-Job-Cost-Estimation">
+<h3>Batch Job Cost Estimation<a class="headerlink" href="#Batch-Job-Cost-Estimation" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Estimate costs for batch processing jobs</span>
+<span class="k">def</span> <span class="nf">estimate_batch_job_costs</span><span class="p">(</span><span class="n">job_config</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Estimate costs for a batch processing job across multiple providers.&quot;&quot;&quot;</span>
+    <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+
+    <span class="c1"># AWS Batch</span>
+    <span class="n">aws_batch_cost</span> <span class="o">=</span> <span class="n">aws_monitor</span><span class="o">.</span><span class="n">estimate_batch_cost</span><span class="p">(</span>
+        <span class="n">job_name</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span>
+        <span class="n">machine_type</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;aws_instance&#39;</span><span class="p">],</span>
+        <span class="n">instance_count</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;instance_count&#39;</span><span class="p">],</span>
+        <span class="n">estimated_duration_hours</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;duration_hours&#39;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s1">&#39;aws&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">aws_batch_cost</span>
+
+    <span class="c1"># GCP Batch</span>
+    <span class="n">gcp_batch_cost</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">estimate_batch_cost</span><span class="p">(</span>
+        <span class="n">job_name</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span>
+        <span class="n">machine_type</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;gcp_instance&#39;</span><span class="p">],</span>
+        <span class="n">instance_count</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;instance_count&#39;</span><span class="p">],</span>
+        <span class="n">estimated_duration_hours</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;duration_hours&#39;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s1">&#39;gcp&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">gcp_batch_cost</span>
+
+    <span class="c1"># Azure Batch</span>
+    <span class="n">azure_batch_cost</span> <span class="o">=</span> <span class="n">azure_monitor</span><span class="o">.</span><span class="n">estimate_batch_cost</span><span class="p">(</span>
+        <span class="n">job_name</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">],</span>
+        <span class="n">machine_type</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;azure_instance&#39;</span><span class="p">],</span>
+        <span class="n">instance_count</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;instance_count&#39;</span><span class="p">],</span>
+        <span class="n">estimated_duration_hours</span><span class="o">=</span><span class="n">job_config</span><span class="p">[</span><span class="s1">&#39;duration_hours&#39;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="n">results</span><span class="p">[</span><span class="s1">&#39;azure&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">azure_batch_cost</span>
+
+    <span class="k">return</span> <span class="n">results</span>
+
+<span class="c1"># Example batch job configuration</span>
+<span class="n">batch_job</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;large-scale-data-processing&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;instance_count&#39;</span><span class="p">:</span> <span class="mi">50</span><span class="p">,</span>
+    <span class="s1">&#39;duration_hours&#39;</span><span class="p">:</span> <span class="mf">4.5</span><span class="p">,</span>
+    <span class="s1">&#39;aws_instance&#39;</span><span class="p">:</span> <span class="s1">&#39;c5.4xlarge&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;gcp_instance&#39;</span><span class="p">:</span> <span class="s1">&#39;c2-standard-16&#39;</span><span class="p">,</span>
+    <span class="s1">&#39;azure_instance&#39;</span><span class="p">:</span> <span class="s1">&#39;Standard_F16s_v2&#39;</span>
+<span class="p">}</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== Batch Job Cost Estimation ===&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Job: </span><span class="si">{</span><span class="n">batch_job</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Instances: </span><span class="si">{</span><span class="n">batch_job</span><span class="p">[</span><span class="s1">&#39;instance_count&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Duration: </span><span class="si">{</span><span class="n">batch_job</span><span class="p">[</span><span class="s1">&#39;duration_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> hours</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="n">batch_costs</span> <span class="o">=</span> <span class="n">estimate_batch_job_costs</span><span class="p">(</span><span class="n">batch_job</span><span class="p">)</span>
+
+<span class="k">for</span> <span class="n">provider</span><span class="p">,</span> <span class="n">cost_info</span> <span class="ow">in</span> <span class="n">batch_costs</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">provider</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2">:&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Instance Type: </span><span class="si">{</span><span class="n">cost_info</span><span class="p">[</span><span class="s1">&#39;machine_type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Total Compute Hours: </span><span class="si">{</span><span class="n">cost_info</span><span class="p">[</span><span class="s1">&#39;total_compute_hours&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Estimated Cost: $</span><span class="si">{</span><span class="n">cost_info</span><span class="p">[</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  Cost per Instance-Hour: $</span><span class="si">{</span><span class="n">cost_info</span><span class="p">[</span><span class="s1">&#39;cost_per_instance_hour&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">()</span>
+
+<span class="c1"># Find most cost-effective provider</span>
+<span class="n">cheapest</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">batch_costs</span><span class="o">.</span><span class="n">items</span><span class="p">(),</span> <span class="n">key</span><span class="o">=</span><span class="k">lambda</span> <span class="n">x</span><span class="p">:</span> <span class="n">x</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Most cost-effective: </span><span class="si">{</span><span class="n">cheapest</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span><span class="o">.</span><span class="n">upper</span><span class="p">()</span><span class="si">}</span><span class="s2"> ($</span><span class="si">{</span><span class="n">cheapest</span><span class="p">[</span><span class="mi">1</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Cost-Optimization-Strategies">
+<h2>Cost Optimization Strategies<a class="headerlink" href="#Cost-Optimization-Strategies" title="Link to this heading">¶</a></h2>
+<section id="Sustained-Use-and-Reserved-Instance-Analysis">
+<h3>Sustained Use and Reserved Instance Analysis<a class="headerlink" href="#Sustained-Use-and-Reserved-Instance-Analysis" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># AWS Reserved Instance Savings</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== AWS Reserved Instance Savings Analysis ===&quot;</span><span class="p">)</span>
+<span class="n">instance_type</span> <span class="o">=</span> <span class="s1">&#39;m5.xlarge&#39;</span>
+<span class="n">monthly_hours</span> <span class="o">=</span> <span class="mi">720</span>  <span class="c1"># Full month</span>
+
+<span class="c1"># Calculate costs for different commitment levels</span>
+<span class="n">on_demand_monthly</span> <span class="o">=</span> <span class="n">aws_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance_type</span><span class="p">,</span> <span class="n">monthly_hours</span><span class="p">)</span><span class="o">.</span><span class="n">total_cost</span>
+<span class="n">ri_1yr_no_upfront</span> <span class="o">=</span> <span class="n">on_demand_monthly</span> <span class="o">*</span> <span class="mf">0.62</span>  <span class="c1"># ~38% discount</span>
+<span class="n">ri_3yr_no_upfront</span> <span class="o">=</span> <span class="n">on_demand_monthly</span> <span class="o">*</span> <span class="mf">0.50</span>  <span class="c1"># ~50% discount</span>
+<span class="n">ri_3yr_all_upfront</span> <span class="o">=</span> <span class="n">on_demand_monthly</span> <span class="o">*</span> <span class="mf">0.38</span>  <span class="c1"># ~62% discount</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Instance Type: </span><span class="si">{</span><span class="n">instance_type</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Monthly Usage: </span><span class="si">{</span><span class="n">monthly_hours</span><span class="si">}</span><span class="s2"> hours</span><span class="se">\n</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;On-Demand:           $</span><span class="si">{</span><span class="n">on_demand_monthly</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;1-Year RI (No Up):   $</span><span class="si">{</span><span class="n">ri_1yr_no_upfront</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month (38% savings)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;3-Year RI (No Up):   $</span><span class="si">{</span><span class="n">ri_3yr_no_upfront</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month (50% savings)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;3-Year RI (All Up):  $</span><span class="si">{</span><span class="n">ri_3yr_all_upfront</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month (62% savings)&quot;</span><span class="p">)</span>
+
+<span class="c1"># GCP Sustained Use Discounts</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== GCP Sustained Use Discount Analysis ===&quot;</span><span class="p">)</span>
+<span class="n">usage_levels</span> <span class="o">=</span> <span class="p">[</span><span class="mi">25</span><span class="p">,</span> <span class="mi">50</span><span class="p">,</span> <span class="mi">75</span><span class="p">,</span> <span class="mi">100</span><span class="p">]</span>  <span class="c1"># Percentage of month</span>
+
+<span class="k">for</span> <span class="n">usage_pct</span> <span class="ow">in</span> <span class="n">usage_levels</span><span class="p">:</span>
+    <span class="n">hours</span> <span class="o">=</span> <span class="p">(</span><span class="n">usage_pct</span> <span class="o">/</span> <span class="mi">100</span><span class="p">)</span> <span class="o">*</span> <span class="n">monthly_hours</span>
+    <span class="n">discount_info</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">estimate_sustained_use_discount</span><span class="p">(</span><span class="n">hours</span><span class="p">)</span>
+
+    <span class="n">base_cost</span> <span class="o">=</span> <span class="n">gcp_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="s1">&#39;n2-standard-4&#39;</span><span class="p">,</span> <span class="n">hours</span><span class="p">)</span><span class="o">.</span><span class="n">total_cost</span>
+    <span class="n">discounted_cost</span> <span class="o">=</span> <span class="n">base_cost</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">discount_info</span><span class="p">[</span><span class="s1">&#39;discount_percentage&#39;</span><span class="p">]</span> <span class="o">/</span> <span class="mi">100</span><span class="p">)</span>
+
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">usage_pct</span><span class="si">}</span><span class="s2">% usage (</span><span class="si">{</span><span class="n">hours</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2"> hours): &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">discount_info</span><span class="p">[</span><span class="s1">&#39;discount_percentage&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.0f</span><span class="si">}</span><span class="s2">% discount, &quot;</span>
+          <span class="sa">f</span><span class="s2">&quot;$</span><span class="si">{</span><span class="n">base_cost</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2"> → $</span><span class="si">{</span><span class="n">discounted_cost</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+
+<span class="c1"># Azure Reserved Instance Analysis</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== Azure Reserved Instance Savings ===&quot;</span><span class="p">)</span>
+<span class="n">azure_instance</span> <span class="o">=</span> <span class="s1">&#39;Standard_D4s_v3&#39;</span>
+<span class="n">azure_on_demand</span> <span class="o">=</span> <span class="n">azure_monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">azure_instance</span><span class="p">,</span> <span class="n">monthly_hours</span><span class="p">)</span><span class="o">.</span><span class="n">total_cost</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Instance Type: </span><span class="si">{</span><span class="n">azure_instance</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;On-Demand:        $</span><span class="si">{</span><span class="n">azure_on_demand</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;1-Year Reserved:  $</span><span class="si">{</span><span class="n">azure_on_demand</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.62</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month (38% savings)&quot;</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;3-Year Reserved:  $</span><span class="si">{</span><span class="n">azure_on_demand</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">0.42</span><span class="si">:</span><span class="s2">.2f</span><span class="si">}</span><span class="s2">/month (58% savings)&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Workload-Specific-Recommendations">
+<h3>Workload-Specific Recommendations<a class="headerlink" href="#Workload-Specific-Recommendations" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="k">def</span> <span class="nf">get_cost_optimization_recommendations</span><span class="p">(</span><span class="n">workload_type</span><span class="p">,</span> <span class="n">requirements</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Get cost optimization recommendations based on workload characteristics.&quot;&quot;&quot;</span>
+    <span class="n">recommendations</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="k">if</span> <span class="n">workload_type</span> <span class="o">==</span> <span class="s1">&#39;batch_processing&#39;</span><span class="p">:</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span>
+            <span class="s2">&quot;Use spot/preemptible instances for up to 80</span><span class="si">% s</span><span class="s2">avings&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Implement checkpointing to handle instance termination&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Consider time-flexible scheduling for lowest spot prices&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use auto-scaling to optimize resource utilization&quot;</span>
+        <span class="p">])</span>
+
+    <span class="k">elif</span> <span class="n">workload_type</span> <span class="o">==</span> <span class="s1">&#39;ml_training&#39;</span><span class="p">:</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span>
+            <span class="s2">&quot;Use GPU instances only when necessary&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Consider using preemptible GPUs for experimentation&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Implement gradient checkpointing for long training runs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use mixed precision training to reduce memory usage&quot;</span>
+        <span class="p">])</span>
+
+    <span class="k">elif</span> <span class="n">workload_type</span> <span class="o">==</span> <span class="s1">&#39;web_service&#39;</span><span class="p">:</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span>
+            <span class="s2">&quot;Use reserved instances for predictable base load&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Implement auto-scaling for variable traffic&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Consider serverless options for sporadic workloads&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use CDN to reduce compute requirements&quot;</span>
+        <span class="p">])</span>
+
+    <span class="k">elif</span> <span class="n">workload_type</span> <span class="o">==</span> <span class="s1">&#39;data_processing&#39;</span><span class="p">:</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">extend</span><span class="p">([</span>
+            <span class="s2">&quot;Use memory-optimized instances for in-memory processing&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Consider data locality to reduce transfer costs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Implement data compression to reduce storage costs&quot;</span><span class="p">,</span>
+            <span class="s2">&quot;Use lifecycle policies to archive old data&quot;</span>
+        <span class="p">])</span>
+
+    <span class="c1"># Add requirement-specific recommendations</span>
+    <span class="k">if</span> <span class="n">requirements</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;fault_tolerant&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;Leverage spot/preemptible instances aggressively&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">requirements</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;gpu_required&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;Compare GPU instance prices across regions and providers&quot;</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="n">requirements</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;long_running&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">):</span>
+        <span class="n">recommendations</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="s2">&quot;Use reserved instances or committed use discounts&quot;</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">recommendations</span>
+
+<span class="c1"># Example workload analysis</span>
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;=== Workload-Specific Cost Optimization Recommendations ===&quot;</span><span class="p">)</span>
+
+<span class="n">workloads</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="p">{</span>
+        <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;batch_processing&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Nightly Data Pipeline&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;requirements&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;fault_tolerant&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;gpu_required&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">}</span>
+    <span class="p">},</span>
+    <span class="p">{</span>
+        <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;ml_training&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;Deep Learning Model Training&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;requirements&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;gpu_required&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s1">&#39;long_running&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="p">},</span>
+    <span class="p">{</span>
+        <span class="s1">&#39;type&#39;</span><span class="p">:</span> <span class="s1">&#39;web_service&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;name&#39;</span><span class="p">:</span> <span class="s1">&#39;API Backend Service&#39;</span><span class="p">,</span>
+        <span class="s1">&#39;requirements&#39;</span><span class="p">:</span> <span class="p">{</span><span class="s1">&#39;fault_tolerant&#39;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span> <span class="s1">&#39;long_running&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">]</span>
+
+<span class="k">for</span> <span class="n">workload</span> <span class="ow">in</span> <span class="n">workloads</span><span class="p">:</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="si">{</span><span class="n">workload</span><span class="p">[</span><span class="s1">&#39;name&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">workload</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">]</span><span class="si">}</span><span class="s2">):&quot;</span><span class="p">)</span>
+    <span class="n">recommendations</span> <span class="o">=</span> <span class="n">get_cost_optimization_recommendations</span><span class="p">(</span>
+        <span class="n">workload</span><span class="p">[</span><span class="s1">&#39;type&#39;</span><span class="p">],</span>
+        <span class="n">workload</span><span class="p">[</span><span class="s1">&#39;requirements&#39;</span><span class="p">]</span>
+    <span class="p">)</span>
+    <span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">rec</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">recommendations</span><span class="p">,</span> <span class="mi">1</span><span class="p">):</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">i</span><span class="si">}</span><span class="s2">. </span><span class="si">{</span><span class="n">rec</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Visualizing-Cost-Data">
+<h2>Visualizing Cost Data<a class="headerlink" href="#Visualizing-Cost-Data" title="Link to this heading">¶</a></h2>
+<section id="Cost-Comparison-Charts">
+<h3>Cost Comparison Charts<a class="headerlink" href="#Cost-Comparison-Charts" title="Link to this heading">¶</a></h3>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Create cost comparison visualizations</span>
+<span class="kn">import</span> <span class="nn">matplotlib.pyplot</span> <span class="k">as</span> <span class="nn">plt</span>
+<span class="kn">import</span> <span class="nn">numpy</span> <span class="k">as</span> <span class="nn">np</span>
+
+<span class="c1"># Prepare data for visualization</span>
+<span class="n">providers</span> <span class="o">=</span> <span class="p">[</span><span class="s1">&#39;AWS&#39;</span><span class="p">,</span> <span class="s1">&#39;GCP&#39;</span><span class="p">,</span> <span class="s1">&#39;Azure&#39;</span><span class="p">]</span>
+<span class="n">instance_types</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;AWS&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;t3.medium&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.large&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.xlarge&#39;</span><span class="p">,</span> <span class="s1">&#39;m5.large&#39;</span><span class="p">,</span> <span class="s1">&#39;m5.xlarge&#39;</span><span class="p">],</span>
+    <span class="s1">&#39;GCP&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;n2-standard-2&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-4&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-8&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-16&#39;</span><span class="p">,</span> <span class="s1">&#39;n2-standard-32&#39;</span><span class="p">],</span>
+    <span class="s1">&#39;Azure&#39;</span><span class="p">:</span> <span class="p">[</span><span class="s1">&#39;Standard_D2s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D4s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D8s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D16s_v3&#39;</span><span class="p">,</span> <span class="s1">&#39;Standard_D32s_v3&#39;</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="c1"># Collect pricing data</span>
+<span class="n">pricing_data</span> <span class="o">=</span> <span class="p">{}</span>
+<span class="k">for</span> <span class="n">provider</span> <span class="ow">in</span> <span class="n">providers</span><span class="p">:</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="n">provider</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+    <span class="n">prices</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">instance</span> <span class="ow">in</span> <span class="n">instance_types</span><span class="p">[</span><span class="n">provider</span><span class="p">]:</span>
+        <span class="n">cost_estimate</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>
+        <span class="n">prices</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cost_estimate</span><span class="o">.</span><span class="n">hourly_rate</span><span class="p">)</span>
+    <span class="n">pricing_data</span><span class="p">[</span><span class="n">provider</span><span class="p">]</span> <span class="o">=</span> <span class="n">prices</span>
+
+<span class="c1"># Create comparison chart</span>
+<span class="n">fig</span><span class="p">,</span> <span class="p">(</span><span class="n">ax1</span><span class="p">,</span> <span class="n">ax2</span><span class="p">)</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">15</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+<span class="c1"># Bar chart comparison</span>
+<span class="n">x</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">instance_types</span><span class="p">[</span><span class="s1">&#39;AWS&#39;</span><span class="p">]))</span>
+<span class="n">width</span> <span class="o">=</span> <span class="mf">0.25</span>
+
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">provider</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">providers</span><span class="p">):</span>
+    <span class="n">ax1</span><span class="o">.</span><span class="n">bar</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">i</span><span class="o">*</span><span class="n">width</span><span class="p">,</span> <span class="n">pricing_data</span><span class="p">[</span><span class="n">provider</span><span class="p">],</span> <span class="n">width</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="n">provider</span><span class="p">)</span>
+
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Instance Size&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Cost per Hour ($)&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Cloud Provider Cost Comparison by Instance Size&#39;</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_xticks</span><span class="p">(</span><span class="n">x</span> <span class="o">+</span> <span class="n">width</span><span class="p">)</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="s1">&#39;Small&#39;</span><span class="p">,</span> <span class="s1">&#39;Medium&#39;</span><span class="p">,</span> <span class="s1">&#39;Large&#39;</span><span class="p">,</span> <span class="s1">&#39;XLarge&#39;</span><span class="p">,</span> <span class="s1">&#39;2XLarge&#39;</span><span class="p">])</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">ax1</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="c1"># Spot vs On-Demand savings visualization</span>
+<span class="n">spot_savings</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="s1">&#39;AWS&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">65</span><span class="p">,</span> <span class="mi">70</span><span class="p">,</span> <span class="mi">72</span><span class="p">,</span> <span class="mi">68</span><span class="p">,</span> <span class="mi">71</span><span class="p">],</span>
+    <span class="s1">&#39;GCP&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">60</span><span class="p">,</span> <span class="mi">65</span><span class="p">,</span> <span class="mi">68</span><span class="p">,</span> <span class="mi">70</span><span class="p">,</span> <span class="mi">72</span><span class="p">],</span>
+    <span class="s1">&#39;Azure&#39;</span><span class="p">:</span> <span class="p">[</span><span class="mi">58</span><span class="p">,</span> <span class="mi">62</span><span class="p">,</span> <span class="mi">65</span><span class="p">,</span> <span class="mi">67</span><span class="p">,</span> <span class="mi">70</span><span class="p">]</span>
+<span class="p">}</span>
+
+<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">provider</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">providers</span><span class="p">):</span>
+    <span class="n">ax2</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">instance_types</span><span class="p">[</span><span class="n">provider</span><span class="p">],</span> <span class="n">spot_savings</span><span class="p">[</span><span class="n">provider</span><span class="p">],</span>
+             <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;o&#39;</span><span class="p">,</span> <span class="n">linewidth</span><span class="o">=</span><span class="mi">2</span><span class="p">,</span> <span class="n">markersize</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="n">provider</span><span class="p">)</span>
+
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Instance Type&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Spot/Preemptible Savings (%)&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Spot Instance Savings by Provider&#39;</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+<span class="n">ax2</span><span class="o">.</span><span class="n">set_xticklabels</span><span class="p">([</span><span class="s1">&#39;Small&#39;</span><span class="p">,</span> <span class="s1">&#39;Medium&#39;</span><span class="p">,</span> <span class="s1">&#39;Large&#39;</span><span class="p">,</span> <span class="s1">&#39;XLarge&#39;</span><span class="p">,</span> <span class="s1">&#39;2XLarge&#39;</span><span class="p">])</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+
+<span class="c1"># Monthly cost projection</span>
+<span class="n">fig</span><span class="p">,</span> <span class="n">ax</span> <span class="o">=</span> <span class="n">plt</span><span class="o">.</span><span class="n">subplots</span><span class="p">(</span><span class="n">figsize</span><span class="o">=</span><span class="p">(</span><span class="mi">10</span><span class="p">,</span> <span class="mi">6</span><span class="p">))</span>
+
+<span class="n">hours_per_day</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">25</span><span class="p">)</span>
+<span class="n">days_per_month</span> <span class="o">=</span> <span class="mi">30</span>
+
+<span class="k">for</span> <span class="n">provider</span> <span class="ow">in</span> <span class="n">providers</span><span class="p">:</span>
+    <span class="n">monitor</span> <span class="o">=</span> <span class="n">get_cost_monitor</span><span class="p">(</span><span class="n">provider</span><span class="o">.</span><span class="n">lower</span><span class="p">())</span>
+    <span class="n">instance</span> <span class="o">=</span> <span class="n">instance_types</span><span class="p">[</span><span class="n">provider</span><span class="p">][</span><span class="mi">2</span><span class="p">]</span>  <span class="c1"># Large instance</span>
+
+    <span class="n">monthly_costs</span> <span class="o">=</span> <span class="p">[]</span>
+    <span class="k">for</span> <span class="n">hours</span> <span class="ow">in</span> <span class="n">hours_per_day</span><span class="p">:</span>
+        <span class="n">total_hours</span> <span class="o">=</span> <span class="n">hours</span> <span class="o">*</span> <span class="n">days_per_month</span>
+        <span class="n">cost</span> <span class="o">=</span> <span class="n">monitor</span><span class="o">.</span><span class="n">estimate_cost</span><span class="p">(</span><span class="n">instance</span><span class="p">,</span> <span class="n">total_hours</span><span class="p">)</span><span class="o">.</span><span class="n">total_cost</span>
+        <span class="n">monthly_costs</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">cost</span><span class="p">)</span>
+
+    <span class="n">ax</span><span class="o">.</span><span class="n">plot</span><span class="p">(</span><span class="n">hours_per_day</span><span class="p">,</span> <span class="n">monthly_costs</span><span class="p">,</span> <span class="n">marker</span><span class="o">=</span><span class="s1">&#39;o&#39;</span><span class="p">,</span> <span class="n">label</span><span class="o">=</span><span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">provider</span><span class="si">}</span><span class="s1"> (</span><span class="si">{</span><span class="n">instance</span><span class="si">}</span><span class="s1">)&#39;</span><span class="p">)</span>
+
+<span class="n">ax</span><span class="o">.</span><span class="n">set_xlabel</span><span class="p">(</span><span class="s1">&#39;Hours per Day&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_ylabel</span><span class="p">(</span><span class="s1">&#39;Monthly Cost ($)&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">set_title</span><span class="p">(</span><span class="s1">&#39;Monthly Cost Projection by Daily Usage&#39;</span><span class="p">)</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">legend</span><span class="p">()</span>
+<span class="n">ax</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="kc">True</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.3</span><span class="p">)</span>
+
+<span class="c1"># Add cost threshold lines</span>
+<span class="n">budget_levels</span> <span class="o">=</span> <span class="p">[</span><span class="mi">100</span><span class="p">,</span> <span class="mi">500</span><span class="p">,</span> <span class="mi">1000</span><span class="p">,</span> <span class="mi">2000</span><span class="p">]</span>
+<span class="k">for</span> <span class="n">budget</span> <span class="ow">in</span> <span class="n">budget_levels</span><span class="p">:</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">axhline</span><span class="p">(</span><span class="n">y</span><span class="o">=</span><span class="n">budget</span><span class="p">,</span> <span class="n">color</span><span class="o">=</span><span class="s1">&#39;red&#39;</span><span class="p">,</span> <span class="n">linestyle</span><span class="o">=</span><span class="s1">&#39;--&#39;</span><span class="p">,</span> <span class="n">alpha</span><span class="o">=</span><span class="mf">0.5</span><span class="p">)</span>
+    <span class="n">ax</span><span class="o">.</span><span class="n">text</span><span class="p">(</span><span class="mf">24.5</span><span class="p">,</span> <span class="n">budget</span><span class="p">,</span> <span class="sa">f</span><span class="s1">&#39;$</span><span class="si">{</span><span class="n">budget</span><span class="si">}</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">va</span><span class="o">=</span><span class="s1">&#39;center&#39;</span><span class="p">)</span>
+
+<span class="n">plt</span><span class="o">.</span><span class="n">tight_layout</span><span class="p">()</span>
+<span class="n">plt</span><span class="o">.</span><span class="n">show</span><span class="p">()</span>
+</pre></div>
+</div>
+</div>
+</section>
+</section>
+<section id="Best-Practices-for-Cost-Optimization">
+<h2>Best Practices for Cost Optimization<a class="headerlink" href="#Best-Practices-for-Cost-Optimization" title="Link to this heading">¶</a></h2>
+<section id="1.-Choose-the-Right-Instance-Type">
+<h3>1. Choose the Right Instance Type<a class="headerlink" href="#1.-Choose-the-Right-Instance-Type" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Match instance specifications to workload requirements</p></li>
+<li><p>Avoid over-provisioning resources</p></li>
+<li><p>Use burstable instances for variable workloads</p></li>
+</ul>
+</section>
+<section id="2.-Leverage-Spot/Preemptible-Instances">
+<h3>2. Leverage Spot/Preemptible Instances<a class="headerlink" href="#2.-Leverage-Spot/Preemptible-Instances" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Use for fault-tolerant batch processing</p></li>
+<li><p>Implement checkpointing for long-running jobs</p></li>
+<li><p>Mix on-demand and spot for reliability</p></li>
+</ul>
+</section>
+<section id="3.-Optimize-for-Your-Usage-Pattern">
+<h3>3. Optimize for Your Usage Pattern<a class="headerlink" href="#3.-Optimize-for-Your-Usage-Pattern" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Reserved instances for steady-state workloads</p></li>
+<li><p>Auto-scaling for variable demand</p></li>
+<li><p>Scheduled scaling for predictable patterns</p></li>
+</ul>
+</section>
+<section id="4.-Monitor-and-Alert">
+<h3>4. Monitor and Alert<a class="headerlink" href="#4.-Monitor-and-Alert" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Set up budget alerts</p></li>
+<li><p>Use Clustrix cost tracking decorators</p></li>
+<li><p>Regular cost reviews and optimization</p></li>
+</ul>
+</section>
+<section id="5.-Multi-Cloud-Strategy">
+<h3>5. Multi-Cloud Strategy<a class="headerlink" href="#5.-Multi-Cloud-Strategy" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Compare prices across providers</p></li>
+<li><p>Use each cloud’s strengths</p></li>
+<li><p>Avoid vendor lock-in</p></li>
+</ul>
+</section>
+</section>
+<section id="Real-World-Example:-Cost-Optimized-ML-Pipeline">
+<h2>Real-World Example: Cost-Optimized ML Pipeline<a class="headerlink" href="#Real-World-Example:-Cost-Optimized-ML-Pipeline" title="Link to this heading">¶</a></h2>
+<div class="nbinput nblast docutils container">
+<div class="prompt highlight-none notranslate"><div class="highlight"><pre><span></span>[ ]:
+</pre></div>
+</div>
+<div class="input_area highlight-ipython3 notranslate"><div class="highlight"><pre><span></span><span class="c1"># Complete cost-optimized ML pipeline example</span>
+<span class="k">class</span> <span class="nc">CostOptimizedMLPipeline</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;Example of a cost-aware ML pipeline using Clustrix.&quot;&quot;&quot;</span>
+
+    <span class="k">def</span> <span class="fm">__init__</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">budget_limit</span><span class="o">=</span><span class="mf">100.0</span><span class="p">):</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span> <span class="o">=</span> <span class="n">budget_limit</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">=</span> <span class="mf">0.0</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span> <span class="o">=</span> <span class="p">[]</span>
+
+    <span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.medium&#39;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">preprocess_data</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data_size_gb</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Preprocess data on cost-effective instances.&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+        <span class="n">processing_time</span> <span class="o">=</span> <span class="n">data_size_gb</span> <span class="o">*</span> <span class="mf">0.5</span>  <span class="c1"># Simulate processing</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="nb">min</span><span class="p">(</span><span class="n">processing_time</span><span class="p">,</span> <span class="mi">2</span><span class="p">))</span>  <span class="c1"># Cap at 2 seconds for demo</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;processed_records&#39;</span><span class="p">:</span> <span class="n">data_size_gb</span> <span class="o">*</span> <span class="mi">1000000</span><span class="p">}</span>
+
+    <span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;p3.2xlarge&#39;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">train_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">model_type</span><span class="o">=</span><span class="s1">&#39;small&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Train model on GPU instances.&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+        <span class="n">training_times</span> <span class="o">=</span> <span class="p">{</span><span class="s1">&#39;small&#39;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span> <span class="s1">&#39;medium&#39;</span><span class="p">:</span> <span class="mi">2</span><span class="p">,</span> <span class="s1">&#39;large&#39;</span><span class="p">:</span> <span class="mi">3</span><span class="p">}</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="n">training_times</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="n">model_type</span><span class="p">,</span> <span class="mi">1</span><span class="p">))</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;model_accuracy&#39;</span><span class="p">:</span> <span class="mf">0.85</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">*</span> <span class="mf">0.1</span><span class="p">}</span>
+
+    <span class="nd">@cost_tracking_decorator</span><span class="p">(</span><span class="s1">&#39;aws&#39;</span><span class="p">,</span> <span class="s1">&#39;t3.small&#39;</span><span class="p">)</span>
+    <span class="k">def</span> <span class="nf">evaluate_model</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">test_size</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Evaluate model on small instances.&quot;&quot;&quot;</span>
+        <span class="kn">import</span> <span class="nn">time</span>
+        <span class="n">time</span><span class="o">.</span><span class="n">sleep</span><span class="p">(</span><span class="mf">0.5</span><span class="p">)</span>
+        <span class="k">return</span> <span class="p">{</span><span class="s1">&#39;test_accuracy&#39;</span><span class="p">:</span> <span class="mf">0.82</span> <span class="o">+</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">random</span><span class="p">()</span> <span class="o">*</span> <span class="mf">0.1</span><span class="p">}</span>
+
+    <span class="k">def</span> <span class="nf">run_pipeline</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">data_size_gb</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">model_type</span><span class="o">=</span><span class="s1">&#39;small&#39;</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Run complete pipeline with cost tracking.&quot;&quot;&quot;</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Starting ML Pipeline (Budget: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+        <span class="n">results</span> <span class="o">=</span> <span class="p">{}</span>
+
+        <span class="c1"># Step 1: Preprocess data</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">1. Preprocessing data...&quot;</span><span class="p">)</span>
+        <span class="n">preprocess_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">preprocess_data</span><span class="p">(</span><span class="n">data_size_gb</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">preprocess_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+            <span class="n">cost</span> <span class="o">=</span> <span class="n">preprocess_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">+=</span> <span class="n">cost</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s1">&#39;preprocessing&#39;</span><span class="p">,</span> <span class="n">cost</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Processed </span><span class="si">{</span><span class="n">preprocess_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;processed_records&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">,</span><span class="si">}</span><span class="s2"> records&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> (Total: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Check budget</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">❌ Budget exceeded! Stopping pipeline.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">results</span>
+
+        <span class="c1"># Step 2: Train model</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">2. Training model...&quot;</span><span class="p">)</span>
+        <span class="n">train_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">train_model</span><span class="p">(</span><span class="n">model_type</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">train_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+            <span class="n">cost</span> <span class="o">=</span> <span class="n">train_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">+=</span> <span class="n">cost</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s1">&#39;training&#39;</span><span class="p">,</span> <span class="n">cost</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Model accuracy: </span><span class="si">{</span><span class="n">train_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;model_accuracy&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> (Total: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Check budget</span>
+        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">&gt;</span> <span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span><span class="p">:</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">❌ Budget exceeded! Stopping pipeline.&quot;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="n">results</span>
+
+        <span class="c1"># Step 3: Evaluate model</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">3. Evaluating model...&quot;</span><span class="p">)</span>
+        <span class="n">eval_result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">evaluate_model</span><span class="p">(</span><span class="mi">1000</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">eval_result</span><span class="p">[</span><span class="s1">&#39;success&#39;</span><span class="p">]:</span>
+            <span class="n">cost</span> <span class="o">=</span> <span class="n">eval_result</span><span class="p">[</span><span class="s1">&#39;cost_report&#39;</span><span class="p">][</span><span class="s1">&#39;cost_estimate&#39;</span><span class="p">][</span><span class="s1">&#39;estimated_cost&#39;</span><span class="p">]</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">+=</span> <span class="n">cost</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="s1">&#39;evaluation&#39;</span><span class="p">,</span> <span class="n">cost</span><span class="p">))</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   ✓ Test accuracy: </span><span class="si">{</span><span class="n">eval_result</span><span class="p">[</span><span class="s1">&#39;result&#39;</span><span class="p">][</span><span class="s1">&#39;test_accuracy&#39;</span><span class="p">]</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   💰 Cost: $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> (Total: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">)&quot;</span><span class="p">)</span>
+
+        <span class="c1"># Summary</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">=== Pipeline Summary ===&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Total Cost: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Budget Remaining: $</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+        <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">Cost Breakdown:&quot;</span><span class="p">)</span>
+        <span class="k">for</span> <span class="n">step</span><span class="p">,</span> <span class="n">cost</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span><span class="p">:</span>
+            <span class="n">pct</span> <span class="o">=</span> <span class="p">(</span><span class="n">cost</span> <span class="o">/</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="p">)</span> <span class="o">*</span> <span class="mi">100</span>
+            <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;  </span><span class="si">{</span><span class="n">step</span><span class="si">:</span><span class="s2">15</span><span class="si">}</span><span class="s2"> $</span><span class="si">{</span><span class="n">cost</span><span class="si">:</span><span class="s2">.4f</span><span class="si">}</span><span class="s2"> (</span><span class="si">{</span><span class="n">pct</span><span class="si">:</span><span class="s2">.1f</span><span class="si">}</span><span class="s2">%)&quot;</span><span class="p">)</span>
+
+        <span class="k">return</span> <span class="p">{</span>
+            <span class="s1">&#39;total_cost&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span><span class="p">,</span>
+            <span class="s1">&#39;cost_history&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">cost_history</span><span class="p">,</span>
+            <span class="s1">&#39;under_budget&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">total_cost</span> <span class="o">&lt;=</span> <span class="bp">self</span><span class="o">.</span><span class="n">budget_limit</span>
+        <span class="p">}</span>
+
+<span class="c1"># Run the cost-optimized pipeline</span>
+<span class="n">pipeline</span> <span class="o">=</span> <span class="n">CostOptimizedMLPipeline</span><span class="p">(</span><span class="n">budget_limit</span><span class="o">=</span><span class="mf">0.10</span><span class="p">)</span>  <span class="c1"># $0.10 budget for demo</span>
+<span class="n">results</span> <span class="o">=</span> <span class="n">pipeline</span><span class="o">.</span><span class="n">run_pipeline</span><span class="p">(</span><span class="n">data_size_gb</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">model_type</span><span class="o">=</span><span class="s1">&#39;small&#39;</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="s2">&quot;</span><span class="se">\n</span><span class="s2">✅ Pipeline completed successfully!&quot;</span> <span class="k">if</span> <span class="n">results</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s1">&#39;under_budget&#39;</span><span class="p">,</span> <span class="kc">False</span><span class="p">)</span>
+      <span class="k">else</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">⚠️ Pipeline stopped due to budget constraints.&quot;</span><span class="p">)</span>
+</pre></div>
+</div>
+</div>
+</section>
+<section id="Summary">
+<h2>Summary<a class="headerlink" href="#Summary" title="Link to this heading">¶</a></h2>
+<p>This tutorial covered comprehensive cost monitoring and optimization with Clustrix:</p>
+<section id="Key-Features-Demonstrated">
+<h3>Key Features Demonstrated<a class="headerlink" href="#Key-Features-Demonstrated" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p><strong>Automatic Cost Tracking</strong>: Use <code class="docutils literal notranslate"><span class="pre">&#64;cost_tracking_decorator</span></code> for seamless monitoring</p></li>
+<li><p><strong>Manual Cost Monitoring</strong>: Fine-grained control with manual monitoring functions</p></li>
+<li><p><strong>Multi-Cloud Support</strong>: Compare costs across AWS, GCP, Azure, and more</p></li>
+<li><p><strong>Regional Pricing</strong>: Find the most cost-effective regions</p></li>
+<li><p><strong>Spot/Preemptible Savings</strong>: Up to 80% cost reduction</p></li>
+<li><p><strong>Batch Job Estimation</strong>: Plan and budget for large-scale processing</p></li>
+<li><p><strong>Optimization Recommendations</strong>: Workload-specific cost-saving strategies</p></li>
+</ol>
+</section>
+<section id="Best-Practices">
+<h3>Best Practices<a class="headerlink" href="#Best-Practices" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p>Always use cost tracking decorators for production workloads</p></li>
+<li><p>Compare prices across providers and regions</p></li>
+<li><p>Leverage spot/preemptible instances for fault-tolerant workloads</p></li>
+<li><p>Use reserved instances for predictable, long-running workloads</p></li>
+<li><p>Monitor costs continuously and set up budget alerts</p></li>
+<li><p>Implement auto-scaling to match resources to demand</p></li>
+</ul>
+</section>
+<section id="Next-Steps">
+<h3>Next Steps<a class="headerlink" href="#Next-Steps" title="Link to this heading">¶</a></h3>
+<ol class="arabic simple">
+<li><p>Integrate cost monitoring into your existing workflows</p></li>
+<li><p>Set up budget alerts and cost anomaly detection</p></li>
+<li><p>Experiment with different instance types and pricing models</p></li>
+<li><p>Implement cost optimization recommendations</p></li>
+<li><p>Create cost dashboards for stakeholder visibility</p></li>
+</ol>
+</section>
+<section id="Resources">
+<h3>Resources<a class="headerlink" href="#Resources" title="Link to this heading">¶</a></h3>
+<ul class="simple">
+<li><p><a class="reference external" href="https://clustrix.readthedocs.io/">Clustrix Documentation</a></p></li>
+<li><p><a class="reference external" href="https://aws.amazon.com/pricing/">AWS Pricing</a></p></li>
+<li><p><a class="reference external" href="https://cloud.google.com/pricing">GCP Pricing</a></p></li>
+<li><p><a class="reference external" href="https://azure.microsoft.com/pricing/">Azure Pricing</a></p></li>
+</ul>
+<p>Remember: <strong>Every dollar saved on cloud costs is a dollar that can be invested in innovation!</strong></p>
+</section>
+</section>
+</section>
+
+</main>
+                        <nav aria-label="Page navigation" class="py-4 my-5 clearfix font-weight-bold border-top">
+    <a class="float-left" href="lambda_cloud_tutorial.html" title="Previous">
+        <span aria-hidden="true">←&nbsp;</span>Lambda Cloud Tutorial
+    </a>
+    <a class="float-right" href="../api/decorator.html" title="Next">
+        Decorator API <span aria-hidden="true">&nbsp;→</span>
+    </a>
+</nav>
+                    </div>
+                    
+                    <nav class="col-12 col-lg-3 pb-4">
+                        <div class="sticky-top toc page-toc" aria-labelledby="page-toc-heading">
+                            <p class="font-weight-bold" id="page-toc-heading">Page contents</p>
+                            <ul>
+<li><a class="reference internal" href="#">Cloud Cost Monitoring and Optimization</a><ul>
+<li><a class="reference internal" href="#Overview">Overview</a></li>
+<li><a class="reference internal" href="#Key-Features">Key Features</a></li>
+<li><a class="reference internal" href="#Installation">Installation</a></li>
+<li><a class="reference internal" href="#Basic-Cost-Monitoring">Basic Cost Monitoring</a><ul>
+<li><a class="reference internal" href="#Getting-Pricing-Information">Getting Pricing Information</a></li>
+<li><a class="reference internal" href="#Manual-Cost-Monitoring">Manual Cost Monitoring</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Automatic-Cost-Tracking-with-Decorators">Automatic Cost Tracking with Decorators</a></li>
+<li><a class="reference internal" href="#Advanced-Cost-Analysis">Advanced Cost Analysis</a><ul>
+<li><a class="reference internal" href="#Regional-Pricing-Comparison">Regional Pricing Comparison</a></li>
+<li><a class="reference internal" href="#Spot/Preemptible-Instance-Savings">Spot/Preemptible Instance Savings</a></li>
+<li><a class="reference internal" href="#Batch-Job-Cost-Estimation">Batch Job Cost Estimation</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Cost-Optimization-Strategies">Cost Optimization Strategies</a><ul>
+<li><a class="reference internal" href="#Sustained-Use-and-Reserved-Instance-Analysis">Sustained Use and Reserved Instance Analysis</a></li>
+<li><a class="reference internal" href="#Workload-Specific-Recommendations">Workload-Specific Recommendations</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Visualizing-Cost-Data">Visualizing Cost Data</a><ul>
+<li><a class="reference internal" href="#Cost-Comparison-Charts">Cost Comparison Charts</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Best-Practices-for-Cost-Optimization">Best Practices for Cost Optimization</a><ul>
+<li><a class="reference internal" href="#1.-Choose-the-Right-Instance-Type">1. Choose the Right Instance Type</a></li>
+<li><a class="reference internal" href="#2.-Leverage-Spot/Preemptible-Instances">2. Leverage Spot/Preemptible Instances</a></li>
+<li><a class="reference internal" href="#3.-Optimize-for-Your-Usage-Pattern">3. Optimize for Your Usage Pattern</a></li>
+<li><a class="reference internal" href="#4.-Monitor-and-Alert">4. Monitor and Alert</a></li>
+<li><a class="reference internal" href="#5.-Multi-Cloud-Strategy">5. Multi-Cloud Strategy</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#Real-World-Example:-Cost-Optimized-ML-Pipeline">Real-World Example: Cost-Optimized ML Pipeline</a></li>
+<li><a class="reference internal" href="#Summary">Summary</a><ul>
+<li><a class="reference internal" href="#Key-Features-Demonstrated">Key Features Demonstrated</a></li>
+<li><a class="reference internal" href="#Best-Practices">Best Practices</a></li>
+<li><a class="reference internal" href="#Next-Steps">Next Steps</a></li>
+<li><a class="reference internal" href="#Resources">Resources</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+
+                        </div>
+                    </nav>
+                    
+                </div>
+            </div>
+        </div>
+    </div>
+    <footer class="container-fluid bg-primary text-light">
+        <div class="container">
+            <div class="row">
+        <div class="col p-4">
+            
+                <nav aria-label="Footer">
+                    <ul class="nav justify-content-center mb-2">
+                        
+                            
+                            
+                            <li class="nav-item"><a class="nav-link text-light"  href="PyPI">GitHub</a></li>
+                        
+                    </ul>
+                </nav>
+            
+            <div class="text-center">
+                    &copy; Copyright 2025, Contextual Dynamics Laboratory
+            </div>
+            <div class="text-center text-white-50 font-italic mt-3">
+                <small>Last updated: Jun 29, 2025</small>
+                <small>
+                    Created using
+                    <a class="text-white" href="https://github.com/wagtail/sphinx_wagtail_theme" rel="nofollow" target="_blank">
+                        Sphinx Wagtail Theme 6.5.0
+                    </a>
+                    and
+                    <a class="text-white" href="https://www.sphinx-doc.org/" rel="nofollow" target="_blank">
+                        Sphinx 8.1.3
+                    </a>
+                </small>
+            </div>
+        </div>
+    </div>
+        </div>
+    </footer>
+        <script src="../_static/documentation_options.js?v=01f34227"></script>
+        <script src="../_static/doctools.js?v=9bcbadda"></script>
+        <script src="../_static/sphinx_highlight.js?v=dc90522c"></script>
+        <script src="../_static/clipboard.min.js?v=a7894cd8"></script>
+        <script src="../_static/copybutton.js?v=f281be69"></script>
+        <script crossorigin="anonymous" integrity="sha256-Ae2Vz/4ePdIu6ZyI/5ZGsYnb+m0JlOmKPjt6XZ9JJkA=" src="https://cdnjs.cloudflare.com/ajax/libs/require.js/2.3.4/require.min.js"></script>
+        <script>window.MathJax = {"tex": {"inlineMath": [["$", "$"], ["\\(", "\\)"]], "processEscapes": true}, "options": {"ignoreHtmlClass": "tex2jax_ignore|mathjax_ignore|document", "processHtmlClass": "tex2jax_process|mathjax_process|math|output_area"}}</script>
+        <script defer="defer" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+        <script type="text/javascript" src="../_static/dist/theme.js"></script>
+        <script type="text/javascript" src="../_static/dist/vendor.js"></script>
+        <script type="text/javascript" src="../_static/searchtools.js"></script>
+        <script type="text/javascript" src="../_static/language_data.js"></script>
+        <script type="text/javascript">
+            document.addEventListener('DOMContentLoaded', function() { Search.loadIndex("../searchindex.js"); });
+        </script>
+        <script type="text/javascript" id="searchindexloader"></script>
+    </body>
+</html>
