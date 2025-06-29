@@ -199,10 +199,14 @@ class TestUvPackageManagerSupport:
         assert result == "uv pip"
         mock_uv_available.assert_called_once()
 
+    @patch("clustrix.utils.is_conda_available")
     @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_auto_uv_unavailable(self, mock_uv_available):
+    def test_get_package_manager_command_auto_uv_unavailable(
+        self, mock_uv_available, mock_conda_available
+    ):
         """Test auto-detection when uv is not available."""
         mock_uv_available.return_value = False
+        mock_conda_available.return_value = False
         config = ClusterConfig(package_manager="auto")
 
         result = get_package_manager_command(config)
@@ -548,10 +552,12 @@ class TestIntegrationScenarios:
         assert "numpy" in requirements
         assert "requests" in requirements
 
+    @patch("clustrix.utils.is_conda_available")
     @patch("clustrix.utils.is_uv_available")
-    def test_graceful_degradation_no_uv(self, mock_uv_available):
+    def test_graceful_degradation_no_uv(self, mock_uv_available, mock_conda_available):
         """Test graceful degradation when uv is not available."""
         mock_uv_available.return_value = False
+        mock_conda_available.return_value = False
 
         config = ClusterConfig(package_manager="auto")
         pkg_manager = get_package_manager_command(config)
