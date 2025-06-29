@@ -48,14 +48,16 @@ class AsyncJobResult:
             RuntimeError: If job failed
         """
         try:
+            from concurrent.futures import TimeoutError as FutureTimeoutError
             return self._future.result(timeout=timeout)
+        except FutureTimeoutError:
+            # Convert concurrent.futures.TimeoutError to builtin TimeoutError
+            raise TimeoutError(
+                f"Job {self.job_id} did not complete within {timeout} seconds"
+            )
         except Exception as e:
-            if isinstance(e, TimeoutError):
-                raise TimeoutError(
-                    f"Job {self.job_id} did not complete within {timeout} seconds"
-                )
-            else:
-                raise RuntimeError(f"Job {self.job_id} failed: {e}")
+            # Handle other exceptions from the job execution
+            raise RuntimeError(f"Job {self.job_id} failed: {e}")
 
     def cancel(self) -> bool:
         """Cancel the job if still running."""

@@ -99,6 +99,24 @@ class ClusterConfig:
             self.module_loads = []
         if self.pre_execution_commands is None:
             self.pre_execution_commands = []
+        
+        # Auto-install cloud provider dependencies if needed
+        self._ensure_cloud_dependencies()
+
+    def _ensure_cloud_dependencies(self) -> None:
+        """Ensure cloud provider dependencies are available for this configuration."""
+        try:
+            from .auto_install import ensure_cloud_provider_dependencies
+            
+            ensure_cloud_provider_dependencies(
+                cluster_type=self.cluster_type,
+                cloud_provider=self.cloud_provider,
+                auto_install=True,
+                quiet=True  # Quiet in constructor to avoid spam
+            )
+        except Exception:
+            # Silently fail in constructor to avoid breaking imports
+            pass
 
     def save_to_file(self, config_path: str) -> None:
         """Save this configuration instance to a file."""
@@ -131,11 +149,12 @@ class ClusterConfig:
 _config = ClusterConfig()
 
 
-def configure(**kwargs) -> None:
+def configure(auto_install_deps: bool = True, **kwargs) -> None:
     """
     Configure Clustrix settings.
 
     Args:
+        auto_install_deps: Whether to automatically install cloud provider dependencies
         **kwargs: Configuration parameters matching ClusterConfig fields
     """
     global _config  # noqa: F824
@@ -146,6 +165,26 @@ def configure(**kwargs) -> None:
             setattr(_config, key, value)
         else:
             raise ValueError(f"Unknown configuration parameter: {key}")
+    
+    # Check if we need to install cloud provider dependencies
+    if auto_install_deps:
+        from .auto_install import ensure_cloud_provider_dependencies
+        
+        cluster_type = kwargs.get('cluster_type', _config.cluster_type)
+        cloud_provider = kwargs.get('cloud_provider', _config.cloud_provider)
+        
+        # Try to ensure dependencies, but don't fail if installation fails
+        try:
+            ensure_cloud_provider_dependencies(
+                cluster_type=cluster_type,
+                cloud_provider=cloud_provider,
+                auto_install=True,
+                quiet=False
+            )
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Could not auto-install cloud provider dependencies: {e}")
 
 
 def load_config(config_path: str) -> None:

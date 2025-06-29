@@ -3,8 +3,9 @@ README.md
 setup.py
 clustrix/__init__.py
 clustrix/async_executor_simple.py
+clustrix/auto_install.py
 clustrix/cli.py
-clustrix/cloud_providers.py
+clustrix/cloud_provider_manager.py
 clustrix/config.py
 clustrix/cost_monitoring.py
 clustrix/decorator.py
