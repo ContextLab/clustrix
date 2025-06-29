@@ -521,13 +521,16 @@ class TestMagicCommands:
         """Test magic command fails gracefully without IPython."""
         # Import the magic class directly - avoid module reloading issues
         from clustrix.notebook_magic import ClusterfyMagics
-        
+
         # Test with thorough patching to override any existing state
-        with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False), \
-             patch("builtins.print") as mock_print, \
-             patch("clustrix.notebook_magic.display_config_widget") as mock_display, \
-             patch("clustrix.notebook_magic.get_ipython", return_value=None):
-                
+        with patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False), patch(
+            "builtins.print"
+        ) as mock_print, patch(
+            "clustrix.notebook_magic.display_config_widget"
+        ) as mock_display, patch(
+            "clustrix.notebook_magic.get_ipython", return_value=None
+        ):
+
             magic = ClusterfyMagics()
             magic.shell = MagicMock()
 
@@ -537,26 +540,29 @@ class TestMagicCommands:
 
             # Call the magic method
             result = magic.clusterfy("", "")
-            
+
             # Collect all print messages
             print_messages = []
             if mock_print.call_args_list:
                 for call in mock_print.call_args_list:
                     if call[0]:  # Ensure there are positional arguments
                         print_messages.append(str(call[0][0]))
-            
+
             # Check for expected behavior patterns (robust for different environments)
             has_error_messages = any(
-                any(keyword in msg.lower() for keyword in ["ipython", "widget", "magic", "requires"])
+                any(
+                    keyword in msg.lower()
+                    for keyword in ["ipython", "widget", "magic", "requires"]
+                )
                 for msg in print_messages
             )
             display_not_called = not mock_display.called
             returned_none_or_empty = result is None or result == ""
-            
+
             # Success criteria: graceful handling of missing IPython
             # This can manifest as error messages, avoiding widget display, or returning None
             success = has_error_messages or display_not_called or returned_none_or_empty
-            
+
             # For CI debugging - provide comprehensive info if test fails
             if not success:
                 debug_info = {
@@ -566,11 +572,13 @@ class TestMagicCommands:
                     "result": result,
                     "python_version": sys.version_info[:2],
                     "mock_display_call_count": mock_display.call_count,
-                    "mock_print_call_count": mock_print.call_count
+                    "mock_print_call_count": mock_print.call_count,
                 }
                 print(f"DEBUG: Test failure details: {debug_info}")
-            
-            assert success, f"Magic command should handle missing IPython gracefully. Check debug output above."
+
+            assert (
+                success
+            ), "Magic command should handle missing IPython gracefully. Check debug output above."
 
 
 class TestConfigurationSaveLoad:
