@@ -220,7 +220,9 @@ class TestWidgetConfigurationFixes:
         assert len(widget.lambda_instance_type.options) > 0
         assert len(widget.hf_hardware.options) > 0
 
-    @pytest.mark.skip(reason="Test isolation issue - configs being contaminated by other tests")
+    @pytest.mark.skip(
+        reason="Test isolation issue - configs being contaminated by other tests"
+    )
     def test_no_name_description_in_default_configs(self):
         """Test that default configurations don't have 'name' or 'description' fields initially."""
         # Import directly from the module

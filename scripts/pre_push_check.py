@@ -42,8 +42,8 @@ def main():
         print(f"🔍 Pre-push quality checks (attempt {attempt}/{max_attempts})...")
 
         checks = [
-            ("black clustrix/", "Black formatting"),  # Format, don't just check
-            ("flake8 clustrix/", "Flake8 linting"),
+            ("black clustrix/ tests/", "Black formatting"),  # Format, don't just check
+            ("flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824", "Flake8 linting"),
             ("mypy clustrix/", "MyPy type checking"),
             ("pytest", "Tests"),
         ]

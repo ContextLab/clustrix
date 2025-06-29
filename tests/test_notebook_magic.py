@@ -365,7 +365,9 @@ class TestEnhancedClusterConfigWidget:
         widget._load_config_to_widgets("test_load")
         # Check that widget values were updated
         # Widget uses "name" field from config if present, otherwise falls back to config key
-        assert widget.config_name.value == "Test Load Config"  # Uses the "name" field from test_config
+        assert (
+            widget.config_name.value == "Test Load Config"
+        )  # Uses the "name" field from test_config
         assert widget.cluster_type.value == "kubernetes"
         assert widget.host_field.value == "k8s.example.com"
         assert widget.port_field.value == 443
@@ -476,7 +478,6 @@ class TestAutoDisplayFunctionality:
             clustrix.notebook_magic.auto_display_on_import()
             mock_display.assert_called_once_with(auto_display=True)
 
-
     def test_auto_display_no_ipython(self):
         """Test auto display when IPython not available."""
         # Import functions from the module
@@ -519,7 +520,6 @@ class TestMagicCommands:
         ) as mock_display, patch(
             "clustrix.notebook_magic.get_ipython", return_value=None
         ):
-
             magic = ClusterfyMagics()
             magic.shell = MagicMock()
 
