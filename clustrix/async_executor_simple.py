@@ -15,7 +15,9 @@ logger = logging.getLogger(__name__)
 class AsyncJobResult:
     """Represents the result of an asynchronously submitted job."""
 
-    def __init__(self, future: Future, job_id: str, executor: Optional[ClusterExecutor]):
+    def __init__(
+        self, future: Future, job_id: str, executor: Optional[ClusterExecutor]
+    ):
         self._future = future
         self.job_id = job_id
         self._executor = executor
