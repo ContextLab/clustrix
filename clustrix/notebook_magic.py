@@ -520,6 +520,15 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="auto"),
         )
         self.ssh_setup_btn.on_click(self._on_setup_ssh_keys)
+        
+        # SSH password field for initial authentication
+        self.ssh_password_field = widgets.Password(
+            description="SSH Password:",
+            placeholder="Enter password for initial SSH key deployment",
+            style={"description_width": "120px"},
+            layout=widgets.Layout(width="100%", margin="5px 0px"),
+            tooltip="Password is only used for initial SSH key deployment and is not stored"
+        )
         # Status output with proper sizing
         self.status_output = widgets.Output(
             layout=widgets.Layout(
@@ -565,13 +574,28 @@ class EnhancedClusterConfigWidget:
 
     def _on_config_name_change(self, change):
         """Handle changes to the config name field."""
+        new_name = change["new"].strip()
+        if not new_name:
+            return
+            
         if self.current_config_name and self.current_config_name in self.configs:
-            # Only add name field for non-default configs (avoid modifying DEFAULT_CONFIGS)
+            # Only allow renaming for non-default configs
             if self.current_config_name not in DEFAULT_CONFIGS:
-                # Update the name in the current configuration
-                self.configs[self.current_config_name]["name"] = change["new"]
-                # Update the dropdown to reflect the new display name
-                self._update_config_dropdown()
+                # Check if this is actually a name change (not just loading)
+                current_display_name = self.configs[self.current_config_name].get("name", self.current_config_name)
+                if new_name != current_display_name:
+                    # Update the name in the current configuration
+                    self.configs[self.current_config_name]["name"] = new_name
+                    # Update the dropdown to reflect the new display name
+                    self._update_config_dropdown()
+            else:
+                # For default configs, revert the name change
+                default_name = self.configs[self.current_config_name].get("name", self.current_config_name)
+                if new_name != default_name:
+                    # Silently revert to original name
+                    self.config_name.unobserve(self._on_config_name_change, names="value")
+                    self.config_name.value = default_name
+                    self.config_name.observe(self._on_config_name_change, names="value")
 
     def _create_dynamic_fields(self):
         """Create dynamic fields that change based on cluster type."""
@@ -1042,6 +1066,9 @@ class EnhancedClusterConfigWidget:
                 self.host_field,
                 widgets.HBox([self.username_field, self.ssh_key_field]),
                 self.port_field,
+                widgets.HTML("<h6>SSH Key Setup (Optional)</h6>"),
+                self.ssh_password_field,
+                widgets.HTML("<small><em>Password is only used for initial SSH key deployment and is not stored</em></small>"),
             ]
         )
         # Kubernetes fields
@@ -1598,7 +1625,7 @@ class EnhancedClusterConfigWidget:
             self._load_config_to_widgets(config_name)
 
     def _on_add_config(self, button):
-        """Add a new configuration."""
+        """Add a new configuration based on current values."""
         with self.status_output:
             self.status_output.clear_output()
             # Generate unique name
@@ -1608,14 +1635,10 @@ class EnhancedClusterConfigWidget:
             while config_name in self.configs:
                 config_name = f"{base_name} {counter}"
                 counter += 1
-            # Create new config
-            self.configs[config_name] = {
-                "name": config_name,  # Use the same name as the key
-                "cluster_type": "local",
-                "default_cores": 4,
-                "default_memory": "8GB",
-                "default_time": "01:00:00",
-            }
+            # Create new config based on current widget values
+            current_config = self._save_config_from_widgets()
+            current_config["name"] = config_name
+            self.configs[config_name] = current_config
             # Update dropdown
             self._update_config_dropdown()
             self.config_dropdown.value = config_name
@@ -2519,6 +2542,15 @@ class EnhancedClusterConfigWidget:
                 print(f"   Key will be saved for cluster alias: {cluster_alias}")
                 print("   This may take a moment...")
 
+                # Get password from the widget
+                password = self.ssh_password_field.value.strip() if self.ssh_password_field.value else None
+                
+                if not password:
+                    print("ℹ️  No password provided - attempting passwordless connection")
+                    print("   If this fails, please enter your SSH password above and try again")
+                else:
+                    print("🔐 Using provided password for initial authentication")
+                
                 # Generate and deploy SSH keys
                 updated_config = setup_ssh_keys(
                     cluster_config,
@@ -2526,7 +2558,11 @@ class EnhancedClusterConfigWidget:
                     auto_generate=True,
                     key_type="ed25519",  # Use modern Ed25519 keys
                     passphrase="",  # No passphrase for automation
+                    password=password,  # Use password from widget for initial auth
                 )
+                
+                # Clear password field for security after use
+                self.ssh_password_field.value = ""
 
                 # Update the widget with the new key
                 if updated_config.key_file:
