@@ -49,6 +49,7 @@ class AsyncJobResult:
         """
         try:
             from concurrent.futures import TimeoutError as FutureTimeoutError
+
             return self._future.result(timeout=timeout)
         except FutureTimeoutError:
             # Convert concurrent.futures.TimeoutError to builtin TimeoutError

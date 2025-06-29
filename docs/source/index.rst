@@ -75,7 +75,7 @@ For Jupyter notebook users, Clustrix provides an interactive configuration widge
 
 .. code-block:: python
 
-   import clustrix  # Auto-loads the magic command
+   import clustrix  # Auto-loads the magic command and displays widget
 
 .. code-block:: jupyter
 
@@ -86,7 +86,58 @@ For Jupyter notebook users, Clustrix provides an interactive configuration widge
    # - One-click configuration application
    # - Save/load configurations to files
 
-The widget includes templates for AWS, Google Cloud, Azure, SLURM, and Kubernetes.
+Interactive Configuration Widget
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks.
+
+**Default View**
+
+When you first import clustrix or use the ``%%clusterfy`` magic command, the widget displays with a default "Local Single-core" configuration:
+
+.. image:: _static/img/screenshots/widget_default.png
+   :alt: Default widget view showing Local Single-core configuration
+   :width: 600px
+
+**Configuration Templates**
+
+The dropdown menu includes pre-built templates for various cluster types and cloud providers:
+
+.. image:: _static/img/screenshots/widget_dropdown.png
+   :alt: Configuration dropdown showing available templates
+   :width: 600px
+
+**HPC Cluster Configuration**
+
+For traditional HPC clusters like SLURM, the widget provides all essential configuration fields:
+
+.. image:: _static/img/screenshots/widget_slurm_basic.png
+   :alt: SLURM configuration with basic settings
+   :width: 600px
+
+The advanced settings accordion reveals additional options for modules, environment variables, and custom commands:
+
+.. image:: _static/img/screenshots/widget_slurm_advanced.png
+   :alt: SLURM advanced configuration options
+   :width: 600px
+
+**Cloud Provider Support**
+
+Cloud providers have dynamic field visibility showing only relevant options:
+
+*Google Cloud Platform:*
+
+.. image:: _static/img/screenshots/widget_gcp.png
+   :alt: GCP VM configuration interface
+   :width: 600px
+
+*Lambda Cloud GPU Instances:*
+
+.. image:: _static/img/screenshots/widget_lambda.png
+   :alt: Lambda Cloud with GPU instance dropdown
+   :width: 600px
+
+The widget includes templates for AWS, Google Cloud, Azure, SLURM, Kubernetes, Lambda Cloud, and HuggingFace Spaces.
 
 Table of Contents
 -----------------
@@ -161,6 +212,8 @@ Table of Contents
 Supported Cluster Types
 -----------------------
 
+**Traditional HPC Schedulers**
+
 +----------------+------------------+----------------------------------+
 | Cluster Type   | Status           | Notes                            |
 +================+==================+==================================+
@@ -168,12 +221,40 @@ Supported Cluster Types
 +----------------+------------------+----------------------------------+
 | **PBS/Torque** | ✅ Full Support  | Production ready                 |
 +----------------+------------------+----------------------------------+
-| **SSH**        | ✅ Full Support  | Direct execution                 |
-+----------------+------------------+----------------------------------+
 | **SGE**        | ⚡ Nearly Ready  | Job submit works, status pending |
 +----------------+------------------+----------------------------------+
-| **Kubernetes** | ⚡ Nearly Ready  | Job submit works, status pending |
+| **SSH**        | ✅ Full Support  | Direct execution                 |
 +----------------+------------------+----------------------------------+
+
+**Container Orchestration**
+
++----------------+------------------+----------------------------------+
+| Platform       | Status           | Notes                            |
++================+==================+==================================+
+| **Kubernetes** | ✅ Full Support  | Native K8s API with auto-deps    |
++----------------+------------------+----------------------------------+
+| **AWS EKS**    | ✅ Full Support  | Kubernetes + AWS integration     |
++----------------+------------------+----------------------------------+
+| **Azure AKS**  | ✅ Full Support  | Kubernetes + Azure integration   |
++----------------+------------------+----------------------------------+
+| **Google GKE** | ✅ Full Support  | Kubernetes + GCP integration     |
++----------------+------------------+----------------------------------+
+
+**Cloud Computing Platforms**
+
++------------------+------------------+----------------------------------+
+| Platform         | Status           | Notes                            |
++==================+==================+==================================+
+| **AWS EC2**      | ✅ Full Support  | Auto-provisioning + cost monitor |
++------------------+------------------+----------------------------------+
+| **Azure VMs**    | ✅ Full Support  | Auto-provisioning + cost monitor |
++------------------+------------------+----------------------------------+
+| **Google Cloud** | ✅ Full Support  | Auto-provisioning + cost monitor |
++------------------+------------------+----------------------------------+
+| **Lambda Cloud** | ✅ Full Support  | GPU-optimized instances          |
++------------------+------------------+----------------------------------+
+| **HF Spaces**    | ✅ Full Support  | Hugging Face Spaces integration  |
++------------------+------------------+----------------------------------+
 
 Links
 -----
