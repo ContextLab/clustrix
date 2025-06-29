@@ -198,12 +198,9 @@ class TestWidgetConfigurationFixes:
     def test_no_name_description_in_default_configs(self):
         """Test that default configurations don't have 'name' or 'description' fields initially."""
         # Import DEFAULT_CONFIGS directly to avoid widget modifications
-        import clustrix.notebook_magic
-        import importlib
+        from clustrix.notebook_magic import DEFAULT_CONFIGS
 
-        importlib.reload(clustrix.notebook_magic)
-
-        for config_name, config_data in clustrix.notebook_magic.DEFAULT_CONFIGS.items():
+        for config_name, config_data in DEFAULT_CONFIGS.items():
             # Make a copy to avoid modifying the original
             test_config = config_data.copy()
             assert (

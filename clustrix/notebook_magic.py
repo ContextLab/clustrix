@@ -550,10 +550,12 @@ class EnhancedClusterConfigWidget:
     def _on_config_name_change(self, change):
         """Handle changes to the config name field."""
         if self.current_config_name and self.current_config_name in self.configs:
-            # Update the name in the current configuration
-            self.configs[self.current_config_name]["name"] = change["new"]
-            # Update the dropdown to reflect the new display name
-            self._update_config_dropdown()
+            # Only add name field for non-default configs (avoid modifying DEFAULT_CONFIGS)
+            if self.current_config_name not in DEFAULT_CONFIGS:
+                # Update the name in the current configuration
+                self.configs[self.current_config_name]["name"] = change["new"]
+                # Update the dropdown to reflect the new display name
+                self._update_config_dropdown()
 
     def _create_dynamic_fields(self):
         """Create dynamic fields that change based on cluster type."""
