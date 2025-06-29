@@ -365,6 +365,91 @@ class TestClusterExecutor:
 
         assert status == "running"
 
+    def test_check_sge_status_running(self, executor):
+        """Test SGE job status checking - running state."""
+        executor.ssh_client = Mock()
+
+        # Mock qstat -j output for running job
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b"job_state                          r"
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+
+        status = executor._check_sge_status("12345")
+
+        assert status == "running"
+
+        # Verify qstat command
+        call_args = executor.ssh_client.exec_command.call_args[0][0]
+        assert "qstat -j" in call_args
+        assert "12345" in call_args
+
+    def test_check_sge_status_queued(self, executor):
+        """Test SGE job status checking - queued state."""
+        executor.ssh_client = Mock()
+
+        # Mock qstat -j output for queued job
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b"job_state                          qw"
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+
+        status = executor._check_sge_status("12345")
+
+        assert status == "queued"
+
+    def test_check_sge_status_failed(self, executor):
+        """Test SGE job status checking - error state."""
+        executor.ssh_client = Mock()
+
+        # Mock qstat -j output for error job
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b"job_state                          Eqw"
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+
+        status = executor._check_sge_status("12345")
+
+        assert status == "failed"
+
+    def test_check_sge_status_completed(self, executor):
+        """Test SGE job status checking - completed/not found."""
+        executor.ssh_client = Mock()
+
+        # Mock qstat -j output for job not found
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b""
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b"Following jobs do not exist: 12345"
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+
+        status = executor._check_sge_status("12345")
+
+        assert status == "completed"
+
+    def test_check_sge_status_exit_status(self, executor):
+        """Test SGE job status checking - exit status indicates completion."""
+        executor.ssh_client = Mock()
+
+        # Mock qstat -j output with exit status
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b"exit_status                        0"
+        mock_stderr = Mock()
+        mock_stderr.read.return_value = b""
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+
+        status = executor._check_sge_status("12345")
+
+        assert status == "completed"
+
     def test_get_job_status_completed(self, executor):
         """Test job status when result file exists."""
         executor.ssh_client = Mock()
@@ -484,6 +569,29 @@ class TestClusterExecutor:
 
         call_args = executor.ssh_client.exec_command.call_args[0][0]
         assert "scancel 12345" in call_args
+
+    def test_cancel_job_sge(self, executor):
+        """Test canceling SGE job."""
+        executor.ssh_client = Mock()
+        executor.config.cluster_type = "sge"
+
+        mock_stdout = Mock()
+        mock_stdout.read.return_value = b""
+        mock_stdout.channel.recv_exit_status.return_value = 0
+
+        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
+
+        # Add job to active jobs
+        executor.active_jobs["12345"] = {"remote_dir": "/tmp/test_job"}
+
+        executor.cancel_job("12345")
+
+        # Verify qdel command was called
+        call_args = executor.ssh_client.exec_command.call_args[0][0]
+        assert "qdel 12345" in call_args
+
+        # Verify job was removed from active jobs
+        assert "12345" not in executor.active_jobs
 
     def test_get_error_log(self, executor):
         """Test error log retrieval."""

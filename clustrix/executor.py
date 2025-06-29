@@ -684,6 +684,21 @@ except Exception as e:
                 else:
                     return "completed"
 
+        elif self.config.cluster_type == "sge":
+            sge_status = self._check_sge_status(job_id)
+            if sge_status == "completed":
+                # Job completed but not in queue, check if result exists
+                if job_id in self.active_jobs:
+                    job_info = self.active_jobs[job_id]
+                    result_exists = self._remote_file_exists(
+                        f"{job_info['remote_dir']}/result.pkl"
+                    )
+                    return "completed" if result_exists else "failed"
+                else:
+                    return "completed"
+            else:
+                return sge_status
+
         elif self.config.cluster_type == "ssh":
             # For SSH jobs, check if result file exists
             if job_id in self.active_jobs:
@@ -992,6 +1007,8 @@ except Exception as e:
             self._execute_remote_command(f"scancel {job_id}")
         elif self.config.cluster_type == "pbs":
             self._execute_remote_command(f"qdel {job_id}")
+        elif self.config.cluster_type == "sge":
+            self._execute_remote_command(f"qdel {job_id}")
 
         if job_id in self.active_jobs:
             del self.active_jobs[job_id]
@@ -1090,6 +1107,33 @@ except Exception as e:
                 return "failed"
             else:
                 return "unknown"
+        except Exception:
+            return "unknown"
+
+    def _check_sge_status(self, job_id: str) -> str:
+        """Check SGE job status."""
+        cmd = f"qstat -j {job_id}"
+        try:
+            stdout, stderr = self._execute_remote_command(cmd)
+            if not stdout.strip() or "Following jobs do not exist" in stderr:
+                # Job not in queue, likely completed
+                return "completed"
+            else:
+                # Parse SGE job state from qstat output
+                # Common SGE states: r (running), qw (queued), Eqw (error), dr (deleting)
+                if "job_state                          r" in stdout:
+                    return "running"
+                elif "job_state                          qw" in stdout:
+                    return "queued" 
+                elif "job_state                          Eqw" in stdout:
+                    return "failed"
+                elif "job_state                          dr" in stdout:
+                    return "completed"
+                # Check for exit status indicating completion
+                elif "exit_status" in stdout:
+                    return "completed"
+                else:
+                    return "running"  # Default for unknown running states
         except Exception:
             return "unknown"
 
