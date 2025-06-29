@@ -38,6 +38,10 @@ class ClusterConfig:
     aws_profile: Optional[str] = None
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
+    aws_access_key: Optional[str] = None  # Alternative name used by widget
+    aws_secret_key: Optional[str] = None  # Alternative name used by widget
+    aws_instance_type: Optional[str] = None
+    aws_cluster_type: Optional[str] = None  # ec2 or eks
     eks_cluster_name: Optional[str] = None
     aws_region: Optional[str] = None
 
@@ -45,6 +49,9 @@ class ClusterConfig:
     azure_subscription_id: Optional[str] = None
     azure_resource_group: Optional[str] = None
     azure_tenant_id: Optional[str] = None
+    azure_client_id: Optional[str] = None
+    azure_client_secret: Optional[str] = None
+    azure_instance_type: Optional[str] = None
     aks_cluster_name: Optional[str] = None
     azure_region: Optional[str] = None
 
@@ -52,14 +59,19 @@ class ClusterConfig:
     gcp_project_id: Optional[str] = None
     gcp_zone: Optional[str] = None
     gcp_service_account_key: Optional[str] = None
+    gcp_instance_type: Optional[str] = None
     gke_cluster_name: Optional[str] = None
     gcp_region: Optional[str] = None
 
     # Lambda Cloud settings
     lambda_instance_type: Optional[str] = None
+    lambda_api_key: Optional[str] = None
 
     # Hugging Face Spaces settings
     hf_hardware: Optional[str] = None
+    hf_token: Optional[str] = None
+    hf_username: Optional[str] = None
+    hf_sdk: Optional[str] = None
 
     # Resource defaults
     default_cores: int = 4

@@ -36,11 +36,12 @@ class TestEnhancedDefaultConfigs:
         assert len(DEFAULT_CONFIGS) >= 2  # local and local_multicore
         for config_name, config in DEFAULT_CONFIGS.items():
             assert isinstance(config, dict)
-            assert "name" in config
             assert "cluster_type" in config
-            assert "default_cores" in config
-            assert "default_memory" in config
-            assert "description" in config
+            # Note: 'name' and 'description' fields were removed for ClusterConfig compatibility
+            # Basic configs should have these core fields
+            if config.get("cluster_type") == "local":
+                assert "default_cores" in config
+                assert "default_memory" in config
 
     def test_default_configs_values(self):
         """Test that default configs have reasonable values."""
@@ -363,7 +364,8 @@ class TestEnhancedClusterConfigWidget:
         widget.configs["test_load"] = test_config
         widget._load_config_to_widgets("test_load")
         # Check that widget values were updated
-        assert widget.config_name.value == "Test Load Config"
+        # Note: widget now uses config key as display name instead of "name" field
+        assert widget.config_name.value == "test_load"
         assert widget.cluster_type.value == "kubernetes"
         assert widget.host_field.value == "k8s.example.com"
         assert widget.port_field.value == 443

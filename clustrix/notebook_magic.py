@@ -188,31 +188,24 @@ logger = logging.getLogger(__name__)
 # Default cluster configurations
 DEFAULT_CONFIGS = {
     "Local Single-core": {
-        "name": "Local Single-core",
         "cluster_type": "local",
         "default_cores": 1,
         "default_memory": "16GB",
-        "description": "Local machine for development and testing",
     },
     "Local Multi-core": {
-        "name": "Local Multi-core",
         "cluster_type": "local",
         "default_cores": -1,  # Use all available cores
         "default_memory": "16GB",
-        "description": "Local machine using all available cores",
     },
     "Local Kubernetes": {
-        "name": "Local Kubernetes",
         "cluster_type": "kubernetes",
         "k8s_namespace": "default",
         "k8s_image": "python:3.11",
         "default_cores": 2,
         "default_memory": "4GB",
         "package_manager": "pip",
-        "description": "Local Kubernetes cluster (Docker Desktop/minikube)",
     },
     "University SLURM Cluster": {
-        "name": "University SLURM Cluster",
         "cluster_type": "slurm",
         "cluster_host": "login.hpc.university.edu",
         "username": "your_username",
@@ -221,10 +214,8 @@ DEFAULT_CONFIGS = {
         "default_time": "01:00:00",
         "remote_work_dir": "/scratch/your_username/clustrix",
         "package_manager": "conda",
-        "description": "Example SLURM cluster configuration for university HPC",
     },
     "Corporate PBS Cluster": {
-        "name": "Corporate PBS Cluster",
         "cluster_type": "pbs",
         "cluster_host": "hpc.company.com",
         "username": "employee_id",
@@ -233,10 +224,8 @@ DEFAULT_CONFIGS = {
         "default_time": "02:00:00",
         "remote_work_dir": "/home/employee_id/clustrix",
         "package_manager": "pip",
-        "description": "Example PBS/Torque cluster for corporate environment",
     },
     "SGE Research Cluster": {
-        "name": "SGE Research Cluster",
         "cluster_type": "sge",
         "cluster_host": "submit.research.org",
         "username": "researcher",
@@ -245,10 +234,8 @@ DEFAULT_CONFIGS = {
         "default_time": "04:00:00",
         "remote_work_dir": "/data/researcher/clustrix",
         "package_manager": "conda",
-        "description": "Example SGE cluster for research computing",
     },
     "SSH Remote Server": {
-        "name": "SSH Remote Server",
         "cluster_type": "ssh",
         "cluster_host": "remote.server.com",
         "username": "user",
@@ -257,11 +244,9 @@ DEFAULT_CONFIGS = {
         "default_memory": "16GB",
         "remote_work_dir": "/tmp/clustrix",
         "package_manager": "pip",
-        "description": "Example SSH remote server configuration",
     },
     # Cloud Provider Configurations
     "AWS EC2 Cluster": {
-        "name": "AWS EC2 Cluster",
         "cluster_type": "aws",
         "aws_region": "us-east-1",
         "aws_instance_type": "t3.medium",
@@ -271,10 +256,8 @@ DEFAULT_CONFIGS = {
         "remote_work_dir": "/home/ec2-user/clustrix",
         "package_manager": "conda",
         "cost_monitoring": True,
-        "description": "AWS EC2 instance for scalable computing",
     },
     "AWS EKS Cluster": {
-        "name": "AWS EKS Cluster",
         "cluster_type": "aws",
         "aws_region": "us-east-1",
         "aws_instance_type": "t3.medium",
@@ -285,10 +268,8 @@ DEFAULT_CONFIGS = {
         "default_memory": "4GB",
         "package_manager": "pip",
         "cost_monitoring": True,
-        "description": "AWS EKS Kubernetes cluster for containerized workloads",
     },
     "Azure VM Cluster": {
-        "name": "Azure VM Cluster",
         "cluster_type": "azure",
         "azure_region": "eastus",
         "azure_instance_type": "Standard_D2s_v3",
@@ -297,10 +278,8 @@ DEFAULT_CONFIGS = {
         "remote_work_dir": "/home/azureuser/clustrix",
         "package_manager": "conda",
         "cost_monitoring": True,
-        "description": "Azure Virtual Machine for cloud computing",
     },
     "Google Cloud VM": {
-        "name": "Google Cloud VM",
         "cluster_type": "gcp",
         "gcp_region": "us-central1",
         "gcp_instance_type": "e2-medium",
@@ -309,10 +288,8 @@ DEFAULT_CONFIGS = {
         "remote_work_dir": "/home/ubuntu/clustrix",
         "package_manager": "conda",
         "cost_monitoring": True,
-        "description": "Google Compute Engine VM for scalable processing",
     },
     "Lambda Cloud GPU": {
-        "name": "Lambda Cloud GPU",
         "cluster_type": "lambda_cloud",
         "lambda_instance_type": "gpu_1x_a10",
         "default_cores": 8,
@@ -320,17 +297,14 @@ DEFAULT_CONFIGS = {
         "remote_work_dir": "/home/ubuntu/clustrix",
         "package_manager": "conda",
         "cost_monitoring": True,
-        "description": "Lambda Cloud GPU instance for AI/ML workloads",
     },
     "HuggingFace Space": {
-        "name": "HuggingFace Space",
         "cluster_type": "huggingface_spaces",
         "hf_hardware": "cpu-basic",
         "hf_sdk": "gradio",
         "default_cores": 2,
         "default_memory": "16GB",
         "cost_monitoring": True,
-        "description": "HuggingFace Spaces for ML model deployment",
     },
 }
 
@@ -1150,26 +1124,31 @@ class EnhancedClusterConfigWidget:
             # Show AWS cloud provider fields only
             self.aws_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            self._set_default_cloud_options("aws")
             self._populate_cloud_provider_options("aws")
         elif cluster_type == "azure":
             # Show Azure cloud provider fields only
             self.azure_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            self._set_default_cloud_options("azure")
             self._populate_cloud_provider_options("azure")
         elif cluster_type == "gcp":
             # Show GCP cloud provider fields only
             self.gcp_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            self._set_default_cloud_options("gcp")
             self._populate_cloud_provider_options("gcp")
         elif cluster_type == "lambda_cloud":
             # Show Lambda Cloud provider fields only
             self.lambda_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            self._set_default_cloud_options("lambda")
             self._populate_cloud_provider_options("lambda")
         elif cluster_type == "huggingface_spaces":
             # Show HuggingFace Spaces provider fields only
             self.hf_fields.layout.display = ""
             self.work_dir_field.layout.display = ""
+            self._set_default_cloud_options("huggingface")
             self._populate_cloud_provider_options("huggingface")
         else:  # ssh, slurm, pbs, sge
             # Show SSH-based connection fields, hide other fields
@@ -1360,9 +1339,28 @@ class EnhancedClusterConfigWidget:
             return
         config = self.configs[config_name]
         self.current_config_name = config_name
+
         # Basic fields
-        self.config_name.value = config.get("name", config_name)
-        self.cluster_type.value = config.get("cluster_type", "local")
+        self.config_name.value = config_name  # Use the key as the display name
+        cluster_type = config.get("cluster_type", "local")
+        self.cluster_type.value = cluster_type
+
+        # Populate cloud provider options BEFORE setting values
+        if cluster_type in [
+            "aws",
+            "azure",
+            "gcp",
+            "lambda_cloud",
+            "huggingface_spaces",
+        ]:
+            provider_map = {
+                "aws": "aws",
+                "azure": "azure",
+                "gcp": "gcp",
+                "lambda_cloud": "lambda",
+                "huggingface_spaces": "huggingface",
+            }
+            self._set_default_cloud_options(provider_map[cluster_type])
         # Connection fields
         self.host_field.value = config.get("cluster_host", "")
         self.username_field.value = config.get("username", "")
@@ -1377,40 +1375,67 @@ class EnhancedClusterConfigWidget:
         self.k8s_image.value = config.get("k8s_image", "python:3.11-slim")
         self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
 
-        # Cloud provider fields
+        # Cloud provider fields - only set if value exists in dropdown options
         # AWS fields
-        self.aws_region.value = config.get("aws_region", "us-east-1")
-        self.aws_instance_type.value = config.get("aws_instance_type", "t3.medium")
+        aws_region = config.get("aws_region", "us-east-1")
+        if aws_region in self.aws_region.options:
+            self.aws_region.value = aws_region
+
+        aws_instance = config.get("aws_instance_type", "t3.medium")
+        if aws_instance in self.aws_instance_type.options:
+            self.aws_instance_type.value = aws_instance
+
         self.aws_access_key.value = config.get("aws_access_key", "")
         self.aws_secret_key.value = config.get("aws_secret_key", "")
-        self.aws_cluster_type.value = config.get("aws_cluster_type", "ec2")
+
+        aws_cluster_type = config.get("aws_cluster_type", "ec2")
+        if aws_cluster_type in self.aws_cluster_type.options:
+            self.aws_cluster_type.value = aws_cluster_type
 
         # Azure fields
-        self.azure_region.value = config.get("azure_region", "eastus")
-        self.azure_instance_type.value = config.get(
-            "azure_instance_type", "Standard_D2s_v3"
-        )
+        azure_region = config.get("azure_region", "eastus")
+        if azure_region in self.azure_region.options:
+            self.azure_region.value = azure_region
+
+        azure_instance = config.get("azure_instance_type", "Standard_D2s_v3")
+        if azure_instance in self.azure_instance_type.options:
+            self.azure_instance_type.value = azure_instance
+
         self.azure_subscription_id.value = config.get("azure_subscription_id", "")
         self.azure_client_id.value = config.get("azure_client_id", "")
         self.azure_client_secret.value = config.get("azure_client_secret", "")
 
         # GCP fields
         self.gcp_project_id.value = config.get("gcp_project_id", "")
-        self.gcp_region.value = config.get("gcp_region", "us-central1")
-        self.gcp_instance_type.value = config.get("gcp_instance_type", "e2-medium")
+
+        gcp_region = config.get("gcp_region", "us-central1")
+        if gcp_region in self.gcp_region.options:
+            self.gcp_region.value = gcp_region
+
+        gcp_instance = config.get("gcp_instance_type", "e2-medium")
+        if gcp_instance in self.gcp_instance_type.options:
+            self.gcp_instance_type.value = gcp_instance
+
         self.gcp_service_account_key.value = config.get("gcp_service_account_key", "")
 
         # Lambda Cloud fields
         self.lambda_api_key.value = config.get("lambda_api_key", "")
-        self.lambda_instance_type.value = config.get(
-            "lambda_instance_type", "gpu_1x_a10"
-        )
+
+        lambda_instance = config.get("lambda_instance_type", "gpu_1x_a10")
+        if lambda_instance in self.lambda_instance_type.options:
+            self.lambda_instance_type.value = lambda_instance
 
         # HuggingFace fields
         self.hf_token.value = config.get("hf_token", "")
         self.hf_username.value = config.get("hf_username", "")
-        self.hf_hardware.value = config.get("hf_hardware", "cpu-basic")
-        self.hf_sdk.value = config.get("hf_sdk", "gradio")
+
+        hf_hardware = config.get("hf_hardware", "cpu-basic")
+        if hf_hardware in self.hf_hardware.options:
+            self.hf_hardware.value = hf_hardware
+
+        hf_sdk = config.get("hf_sdk", "gradio")
+        if hf_sdk in self.hf_sdk.options:
+            self.hf_sdk.value = hf_sdk
 
         # Paths
         self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
