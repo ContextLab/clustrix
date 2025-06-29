@@ -5,6 +5,7 @@ Tests for SSH key automation utilities.
 import os
 import tempfile
 import pytest
+import platform
 from pathlib import Path
 from unittest.mock import patch, MagicMock, mock_open
 import subprocess
@@ -55,7 +56,9 @@ class TestFindSSHKeys:
                     f.write(
                         "-----BEGIN OPENSSH PRIVATE KEY-----\ntest key content\n-----END OPENSSH PRIVATE KEY-----\n"
                     )
-                os.chmod(key_path, 0o600)  # Proper private key permissions
+                # Set proper permissions only on Unix-like systems
+                if platform.system() != "Windows":
+                    os.chmod(key_path, 0o600)
                 created_keys.append(str(key_path))
 
             with patch("clustrix.ssh_utils.Path.home") as mock_home:
@@ -67,6 +70,10 @@ class TestFindSSHKeys:
                 for key_path in created_keys:
                     assert key_path in result
 
+    @pytest.mark.skipif(
+        platform.system() == "Windows",
+        reason="File permissions not applicable on Windows",
+    )
     def test_find_ssh_keys_wrong_permissions(self):
         """Test that keys with wrong permissions are ignored."""
         with tempfile.TemporaryDirectory() as temp_dir:

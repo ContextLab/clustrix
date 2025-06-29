@@ -8,6 +8,7 @@ SSH keys for seamless cluster authentication setup.
 import os
 import subprocess
 import logging
+import platform
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import paramiko
@@ -67,9 +68,12 @@ def find_ssh_keys() -> List[str]:
         if key_path.exists() and key_path.is_file():
             # Verify it's actually a private key by checking permissions and content
             try:
-                if (
-                    key_path.stat().st_mode & 0o077 == 0
-                ):  # Proper private key permissions
+                # Check permissions only on Unix-like systems
+                permission_ok = True
+                if platform.system() != "Windows":
+                    permission_ok = (key_path.stat().st_mode & 0o077) == 0
+
+                if permission_ok:
                     with open(key_path, "r") as f:
                         content = f.read(100)  # Read first 100 chars
                         if "PRIVATE KEY" in content:
