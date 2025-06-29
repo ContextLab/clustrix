@@ -2624,10 +2624,6 @@ class EnhancedClusterConfigWidget:
         display(main_layout)
 
 
-# Global variable to track if widget has been auto-displayed
-_auto_displayed = False
-
-
 def display_config_widget(auto_display: bool = False):
     """Display the configuration widget."""
     widget = EnhancedClusterConfigWidget(auto_display=auto_display)
@@ -2636,17 +2632,14 @@ def display_config_widget(auto_display: bool = False):
 
 def auto_display_on_import():
     """Automatically display widget when clustrix is imported in a notebook."""
-    global _auto_displayed
-    if _auto_displayed or not IPYTHON_AVAILABLE:
+    if not IPYTHON_AVAILABLE:
         return
     ipython = get_ipython()
     if ipython is None:
         return
     # Check if we're in a notebook environment
     if hasattr(ipython, "kernel") and hasattr(ipython, "register_magic_function"):
-        # Mark as displayed
-        _auto_displayed = True
-        # Display the widget
+        # Always display the widget on import
         display_config_widget(auto_display=True)
 
 
