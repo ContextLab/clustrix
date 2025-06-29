@@ -66,9 +66,9 @@ class ClusterExecutor:
                 and self.config.cluster_type == "kubernetes"
             ):
                 try:
-                    from .cloud_providers import CloudProviderManager
+                    from . import cloud_providers as cloud_providers_module
 
-                    cloud_manager = CloudProviderManager(self.config)
+                    cloud_manager = cloud_providers_module.CloudProviderManager(self.config)
                     result = cloud_manager.auto_configure()
 
                     if result.get("auto_configured"):

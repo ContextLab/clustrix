@@ -17,9 +17,6 @@ from clustrix.notebook_magic import (
     load_config_from_file,
     validate_ip_address,
     validate_hostname,
-    display_config_widget,
-    auto_display_on_import,
-    load_ipython_extension,
 )
 
 # Import widget conditionally to avoid GitHub Actions import issues
@@ -325,7 +322,7 @@ class TestEnhancedClusterConfigWidget:
         assert config["default_cores"] == 8
         assert config["default_memory"] == "32GB"
         assert config["package_manager"] == "conda"
-        assert config["cost_monitoring"] == True
+        assert config["cost_monitoring"] is True
 
     def test_load_config_to_widgets(self, mock_ipython_environment):
         """Test loading configuration into widgets."""
@@ -374,7 +371,7 @@ class TestEnhancedClusterConfigWidget:
         assert widget.memory_field.value == "64GB"
         assert widget.k8s_namespace.value == "production"
         assert widget.package_manager.value == "uv"
-        assert widget.cost_monitoring_checkbox.value == True
+        assert widget.cost_monitoring_checkbox.value is True
 
     def test_cluster_type_field_visibility(self, mock_ipython_environment):
         """Test field visibility changes based on cluster type."""
