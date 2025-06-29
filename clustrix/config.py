@@ -27,6 +27,7 @@ class ClusterConfig:
     k8s_pull_policy: str = "IfNotPresent"
     k8s_job_ttl_seconds: int = 3600
     k8s_backoff_limit: int = 3
+    k8s_remote: bool = False
 
     # Cloud provider settings for remote Kubernetes
     cloud_provider: str = "manual"  # manual, aws, azure, gcp
@@ -38,18 +39,27 @@ class ClusterConfig:
     aws_access_key_id: Optional[str] = None
     aws_secret_access_key: Optional[str] = None
     eks_cluster_name: Optional[str] = None
+    aws_region: Optional[str] = None
 
     # Azure-specific settings
     azure_subscription_id: Optional[str] = None
     azure_resource_group: Optional[str] = None
     azure_tenant_id: Optional[str] = None
     aks_cluster_name: Optional[str] = None
+    azure_region: Optional[str] = None
 
     # GCP-specific settings
     gcp_project_id: Optional[str] = None
     gcp_zone: Optional[str] = None
     gcp_service_account_key: Optional[str] = None
     gke_cluster_name: Optional[str] = None
+    gcp_region: Optional[str] = None
+
+    # Lambda Cloud settings
+    lambda_instance_type: Optional[str] = None
+
+    # Hugging Face Spaces settings
+    hf_hardware: Optional[str] = None
 
     # Resource defaults
     default_cores: int = 4
