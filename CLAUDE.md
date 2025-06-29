@@ -18,20 +18,23 @@ pip install -e ".[kubernetes,dev]"
 ```
 
 ### Code Quality
+
+**CRITICAL: Always run these checks before committing or pushing code:**
+
 ```bash
-# Format code
-black clustrix/
+# Use the comprehensive quality check script (recommended)
+python scripts/check_quality.py
 
-# Run linter
-flake8 clustrix/
-
-# Type checking
-mypy clustrix/
-
-# Run tests (when tests are added)
-pytest
-pytest --cov=clustrix  # with coverage
+# Or run individual checks:
+black clustrix/          # Format code
+flake8 clustrix/         # Run linter  
+mypy clustrix/           # Type checking
+pytest --cov=clustrix    # Run tests with coverage
 ```
+
+**Pre-commit hooks are installed** - they will automatically run black, flake8, and mypy before each commit. If any check fails, the commit will be blocked until fixed.
+
+**Never push without running quality checks** - GitHub Actions will fail if code doesn't pass black, flake8, and mypy.
 
 ## Architecture
 
@@ -104,3 +107,19 @@ pytest --cov=clustrix  # with coverage
 2. Configuration file (`clustrix.yml`)
 3. Environment variables
 4. Default values (lowest priority)
+
+## ⚠️ MANDATORY PRE-COMMIT WORKFLOW ⚠️
+
+**EVERY SINGLE TIME before committing/pushing:**
+
+1. **Run quality checks repeatedly**: `python scripts/pre_push_check.py`
+   - This runs black (formatting), flake8 (linting), mypy (type checking), and pytest (tests)
+   - **It automatically retries up to 5 times** until ALL checks pass
+   - Black may auto-fix formatting issues, so subsequent runs check if everything is clean
+2. **Only commit and push when ALL checks pass**
+
+**CRITICAL: You must run checks repeatedly until they ALL pass. Don't just run once!**
+
+**Pre-commit hooks will block commits that fail quality checks.**
+
+The GitHub Actions CI will fail if code doesn't pass black, flake8, mypy, and pytest. Always run the full cycle locally first.
