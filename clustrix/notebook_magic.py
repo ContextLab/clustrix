@@ -1925,6 +1925,8 @@ class EnhancedClusterConfigWidget:
                 return self._test_gcp_connectivity(config)
             elif cluster_type == "lambda_cloud":
                 return self._test_lambda_connectivity(config)
+            elif cluster_type == "huggingface_spaces":
+                return self._test_huggingface_connectivity(config)
             else:
                 return False
         except Exception:
@@ -1936,11 +1938,33 @@ class EnhancedClusterConfigWidget:
             import boto3  # type: ignore
             from botocore.exceptions import NoCredentialsError, ClientError  # type: ignore
 
-            # Try to create a session and list regions (minimal API call)
-            session = boto3.Session(profile_name=config.get("aws_profile"))
-            ec2 = session.client(
-                "ec2", region_name=config.get("aws_region", "us-east-1")
+            # Map widget field names to AWS credential names
+            aws_access_key = config.get("aws_access_key") or config.get(
+                "aws_access_key_id"
             )
+            aws_secret_key = config.get("aws_secret_key") or config.get(
+                "aws_secret_access_key"
+            )
+            aws_region = config.get("aws_region", "us-east-1")
+
+            # Create session with provided credentials if available
+            session_kwargs = {}
+            if aws_access_key and aws_secret_key:
+                session_kwargs.update(
+                    {
+                        "aws_access_key_id": aws_access_key,
+                        "aws_secret_access_key": aws_secret_key,
+                        "region_name": aws_region,
+                    }
+                )
+            else:
+                # Fall back to profile or default credentials
+                profile = config.get("aws_profile")
+                if profile:
+                    session_kwargs["profile_name"] = profile
+
+            session = boto3.Session(**session_kwargs)
+            ec2 = session.client("ec2", region_name=aws_region)
 
             # Simple API call to test connectivity
             ec2.describe_regions(MaxResults=1)
@@ -1957,14 +1981,27 @@ class EnhancedClusterConfigWidget:
     def _test_azure_connectivity(self, config):
         """Test Azure API connectivity."""
         try:
-            from azure.identity import DefaultAzureCredential
+            from azure.identity import ClientSecretCredential, DefaultAzureCredential
             from azure.mgmt.resource import ResourceManagementClient
 
-            credential = DefaultAzureCredential()
+            # Map widget field names to Azure credential names
             subscription_id = config.get("azure_subscription_id")
+            client_id = config.get("azure_client_id")
+            client_secret = config.get("azure_client_secret")
+            tenant_id = config.get("azure_tenant_id")
 
             if not subscription_id:
                 return False
+
+            # Use provided credentials if available, otherwise fall back to default
+            if client_id and client_secret and tenant_id:
+                credential = ClientSecretCredential(
+                    tenant_id=tenant_id,
+                    client_id=client_id,
+                    client_secret=client_secret,
+                )
+            else:
+                credential = DefaultAzureCredential()
 
             # Try to create a resource client and list resource groups
             resource_client = ResourceManagementClient(credential, subscription_id)
@@ -1980,14 +2017,40 @@ class EnhancedClusterConfigWidget:
     def _test_gcp_connectivity(self, config):
         """Test GCP API connectivity."""
         try:
+            import os
+            import tempfile
             from google.cloud import resource_manager
+            from google.oauth2 import service_account
 
             project_id = config.get("gcp_project_id")
+            service_account_key = config.get("gcp_service_account_key")
+
             if not project_id:
                 return False
 
+            # Use service account key if provided
+            if service_account_key:
+                # Create temporary credentials file
+                with tempfile.NamedTemporaryFile(
+                    mode="w", suffix=".json", delete=False
+                ) as f:
+                    f.write(service_account_key)
+                    temp_key_file = f.name
+
+                try:
+                    # Set up credentials from service account
+                    credentials = service_account.Credentials.from_service_account_file(
+                        temp_key_file
+                    )
+                    client = resource_manager.Client(credentials=credentials)
+                finally:
+                    # Clean up temporary file
+                    os.unlink(temp_key_file)
+            else:
+                # Fall back to default credentials
+                client = resource_manager.Client()
+
             # Try to get project information
-            client = resource_manager.Client()
             project = client.fetch_project(project_id)
             return project is not None
 
@@ -2012,6 +2075,39 @@ class EnhancedClusterConfigWidget:
 
         except ImportError:
             print("ℹ️  Lambda Cloud provider not available for testing")
+            return False
+        except Exception:
+            return False
+
+    def _test_huggingface_connectivity(self, config):
+        """Test HuggingFace API connectivity."""
+        try:
+            import requests
+
+            # Map widget field names to HuggingFace credential names
+            hf_token = config.get("hf_token")
+            hf_username = config.get("hf_username")
+
+            if not hf_token:
+                return False
+
+            # Test HuggingFace API connectivity
+            headers = {"Authorization": f"Bearer {hf_token}"}
+            response = requests.get(
+                "https://huggingface.co/api/whoami", headers=headers, timeout=10
+            )
+
+            if response.status_code == 200:
+                user_info = response.json()
+                # Verify username if provided
+                if hf_username and user_info.get("name") != hf_username:
+                    return False
+                return True
+
+            return False
+
+        except ImportError:
+            print("ℹ️  requests library not available for HuggingFace testing")
             return False
         except Exception:
             return False
@@ -2263,14 +2359,30 @@ class EnhancedClusterConfigWidget:
                     # Test HuggingFace Spaces configuration
                     print("- Provider: HuggingFace Spaces")
 
-                    # Basic validation for HuggingFace
+                    # Check for HuggingFace token
                     hf_token = config.get("hf_token", "")
+                    hf_username = config.get("hf_username", "")
+
                     if hf_token:
                         print("✅ HuggingFace token provided")
-                    else:
-                        print("⚠️  HuggingFace token may be required")
 
-                    print("✅ HuggingFace Spaces configuration appears valid")
+                        # Test HuggingFace API connectivity
+                        print("🔌 Testing HuggingFace API connectivity...")
+                        if self._test_cloud_connectivity("huggingface_spaces", config):
+                            print("✅ HuggingFace API connection successful")
+                            if hf_username:
+                                print(f"✅ Username '{hf_username}' verified")
+                        else:
+                            print("❌ HuggingFace API connection failed (check token)")
+                    else:
+                        print("❌ HuggingFace token is required")
+
+                    if hf_username:
+                        print(f"✅ Username: {hf_username}")
+                    else:
+                        print("ℹ️  Username not specified (optional)")
+
+                    print("✅ HuggingFace Spaces configuration validation completed")
 
                 else:
                     print(f"⚠️  Unknown cluster type: {cluster_type}")
