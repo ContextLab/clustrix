@@ -185,6 +185,40 @@ def generate_ssh_key(
         raise SSHKeyGenerationError(f"Failed to generate SSH key: {e.stderr}")
 
 
+def add_host_key(hostname: str, port: int = 22) -> bool:
+    """
+    Add host key to known_hosts file to avoid verification prompts.
+    
+    Args:
+        hostname: Target hostname
+        port: SSH port (default 22)
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        cmd = ["ssh-keyscan"]
+        if port != 22:
+            cmd.extend(["-p", str(port)])
+        cmd.append(hostname)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode == 0 and result.stdout.strip():
+            # Append to known_hosts file
+            known_hosts_path = Path.home() / ".ssh" / "known_hosts"
+            known_hosts_path.parent.mkdir(mode=0o700, exist_ok=True)
+            
+            with open(known_hosts_path, "a") as f:
+                f.write(result.stdout)
+            
+            logger.info(f"Added host key for {hostname} to known_hosts")
+            return True
+    except Exception as e:
+        logger.debug(f"Failed to add host key for {hostname}: {e}")
+    
+    return False
+
+
 def deploy_public_key(
     hostname: str,
     username: str,
@@ -215,25 +249,34 @@ def deploy_public_key(
     except IOError as e:
         raise SSHKeyDeploymentError(f"Cannot read public key file: {e}")
 
-    # Try ssh-copy-id first (most reliable method)
+    # First, add the host key to known_hosts to avoid verification prompts
+    add_host_key(hostname, port)
+    
+    # Try ssh-copy-id first (most reliable method) with host key acceptance
     try:
         cmd = ["ssh-copy-id", "-i", public_key_path]
+        # Add SSH options to automatically accept new host keys
+        cmd.extend(["-o", "StrictHostKeyChecking=accept-new"])
         if port != 22:
             cmd.extend(["-p", str(port)])
         cmd.append(f"{username}@{hostname}")
 
-        subprocess.run(
+        result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            check=True,
             input=password if password else None,
+            timeout=30
         )
-        logger.info("Successfully deployed public key using ssh-copy-id")
-        return True
+        
+        if result.returncode == 0:
+            logger.info("Successfully deployed public key using ssh-copy-id")
+            return True
+        else:
+            logger.debug(f"ssh-copy-id failed with return code {result.returncode}: {result.stderr}")
 
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        logger.debug("ssh-copy-id failed, trying manual deployment")
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+        logger.debug(f"ssh-copy-id failed: {e}, trying manual deployment")
 
     # Fallback: Manual deployment using paramiko
     try:

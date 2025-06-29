@@ -4,7 +4,7 @@ from .executor import ClusterExecutor
 from .local_executor import LocalExecutor, create_local_executor
 from .loop_analysis import detect_loops_in_function, find_parallelizable_loops
 from .utils import setup_environment
-from .ssh_utils import setup_ssh_keys, find_ssh_keys, list_ssh_keys
+from .ssh_utils import setup_ssh_keys, find_ssh_keys, list_ssh_keys, add_host_key
 from .cost_monitoring import (
     cost_tracking_decorator,
     get_cost_monitor,
@@ -30,6 +30,7 @@ __all__ = [
     "setup_ssh_keys",
     "find_ssh_keys",
     "list_ssh_keys",
+    "add_host_key",
     "cost_tracking_decorator",
     "get_cost_monitor",
     "start_cost_monitoring",
