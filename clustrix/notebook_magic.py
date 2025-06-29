@@ -520,15 +520,6 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="auto"),
         )
         self.ssh_setup_btn.on_click(self._on_setup_ssh_keys)
-        
-        # SSH password field for initial authentication
-        self.ssh_password_field = widgets.Password(
-            description="SSH Password:",
-            placeholder="Enter password for initial SSH key deployment",
-            style={"description_width": "120px"},
-            layout=widgets.Layout(width="100%", margin="5px 0px"),
-            tooltip="Password is only used for initial SSH key deployment and is not stored"
-        )
         # Status output with proper sizing
         self.status_output = widgets.Output(
             layout=widgets.Layout(
@@ -632,6 +623,14 @@ class EnhancedClusterConfigWidget:
             ),
             style=style,
             layout=half_layout,
+        )
+        # SSH password field for initial authentication
+        self.ssh_password_field = widgets.Password(
+            description="SSH Password:",
+            placeholder="Enter password for initial SSH key deployment",
+            style={"description_width": "120px"},
+            layout=widgets.Layout(width="100%", margin="5px 0px"),
+            tooltip="Password is only used for initial SSH key deployment and is not stored"
         )
         # Port field
         self.port_field = widgets.IntText(
