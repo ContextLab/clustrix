@@ -49,6 +49,9 @@ pytest-cov>=2.0
 black>=21.0
 flake8>=3.8
 mypy>=0.812
+types-PyYAML
+types-requests
+types-paramiko
 
 [docs]
 sphinx>=4.0

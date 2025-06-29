@@ -44,7 +44,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing
+        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json
 
     - name: Test installation
       run: |

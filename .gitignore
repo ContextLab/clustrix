@@ -7,3 +7,11 @@ clustrix.egg-info
 # Test notebooks with hardcoded credentials
 test_ssh_setup.ipynb
 clustrix_test_env/
+
+# Personal configuration files and coverage data
+clustrix.yml
+.coverage*
+coverage.json
+jupyter.log
+py310-test/
+.ipynb_checkpoints/

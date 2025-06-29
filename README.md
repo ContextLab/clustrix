@@ -1,7 +1,12 @@
 # Clustrix
 
 [![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/badge/coverage-47%25-yellow.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
+[![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
+[![Linting: flake8](https://img.shields.io/badge/linting-flake8-blue.svg)](https://github.com/PyCQA/flake8)
+[![Type Checking: mypy](https://img.shields.io/badge/mypy-checked-2a6db2.svg)](https://mypy-lang.org/)
 [![PyPI version](https://img.shields.io/pypi/v/clustrix.svg)](https://pypi.org/project/clustrix/)
+[![Downloads](https://img.shields.io/pypi/dm/clustrix.svg)](https://pypi.org/project/clustrix/)
 [![Documentation](https://readthedocs.org/projects/clustrix/badge/?version=latest)](https://clustrix.readthedocs.io/en/latest/?badge=latest)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -501,6 +506,29 @@ def process_large_dataset(file_path, chunk_size=10000):
 
 # Process data on cluster
 processed_data = process_large_dataset('/path/to/large_file.csv')
+```
+
+## Code Quality
+
+Clustrix maintains high code quality standards:
+
+- **Testing**: Comprehensive test suite with pytest
+- **Coverage**: Currently at 47% and improving
+- **Code Style**: Enforced with Black formatter
+- **Linting**: Checked with flake8
+- **Type Checking**: Validated with mypy
+
+To check code quality locally:
+
+```bash
+# Run all quality checks
+python scripts/check_quality.py
+
+# Run individual checks
+pytest --cov=clustrix --cov-report=term
+black --check clustrix/
+flake8 clustrix/
+mypy clustrix/
 ```
 
 ## Contributing

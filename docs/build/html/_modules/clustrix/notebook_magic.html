@@ -657,6 +657,14 @@
             <span class="n">layout</span><span class="o">=</span><span class="n">widgets</span><span class="o">.</span><span class="n">Layout</span><span class="p">(</span><span class="n">width</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">),</span>
         <span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">test_btn</span><span class="o">.</span><span class="n">on_click</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_on_test_config</span><span class="p">)</span>
+
+        <span class="bp">self</span><span class="o">.</span><span class="n">ssh_setup_btn</span> <span class="o">=</span> <span class="n">widgets</span><span class="o">.</span><span class="n">Button</span><span class="p">(</span>
+            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Set Up SSH Keys&quot;</span><span class="p">,</span>
+            <span class="n">button_style</span><span class="o">=</span><span class="s2">&quot;warning&quot;</span><span class="p">,</span>
+            <span class="n">icon</span><span class="o">=</span><span class="s2">&quot;key&quot;</span><span class="p">,</span>
+            <span class="n">layout</span><span class="o">=</span><span class="n">widgets</span><span class="o">.</span><span class="n">Layout</span><span class="p">(</span><span class="n">width</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">),</span>
+        <span class="p">)</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ssh_setup_btn</span><span class="o">.</span><span class="n">on_click</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">_on_setup_ssh_keys</span><span class="p">)</span>
         <span class="c1"># Status output with proper sizing</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">status_output</span> <span class="o">=</span> <span class="n">widgets</span><span class="o">.</span><span class="n">Output</span><span class="p">(</span>
             <span class="n">layout</span><span class="o">=</span><span class="n">widgets</span><span class="o">.</span><span class="n">Layout</span><span class="p">(</span>
@@ -702,11 +710,18 @@
 
     <span class="k">def</span> <span class="nf">_on_config_name_change</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">change</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Handle changes to the config name field.&quot;&quot;&quot;</span>
+        <span class="n">new_name</span> <span class="o">=</span> <span class="n">change</span><span class="p">[</span><span class="s2">&quot;new&quot;</span><span class="p">]</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+        <span class="k">if</span> <span class="ow">not</span> <span class="n">new_name</span><span class="p">:</span>
+            <span class="k">return</span>
+
         <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span> <span class="ow">and</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">:</span>
-            <span class="c1"># Only add name field for non-default configs (avoid modifying DEFAULT_CONFIGS)</span>
-            <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">DEFAULT_CONFIGS</span><span class="p">:</span>
+            <span class="c1"># Check if this is actually a name change (not just loading)</span>
+            <span class="n">current_display_name</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span><span class="p">]</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span>
+            <span class="p">)</span>
+            <span class="k">if</span> <span class="n">new_name</span> <span class="o">!=</span> <span class="n">current_display_name</span><span class="p">:</span>
                 <span class="c1"># Update the name in the current configuration</span>
-                <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span><span class="p">][</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">change</span><span class="p">[</span><span class="s2">&quot;new&quot;</span><span class="p">]</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">[</span><span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span><span class="p">][</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">new_name</span>
                 <span class="c1"># Update the dropdown to reflect the new display name</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">_update_config_dropdown</span><span class="p">()</span>
 
@@ -745,6 +760,14 @@
             <span class="p">),</span>
             <span class="n">style</span><span class="o">=</span><span class="n">style</span><span class="p">,</span>
             <span class="n">layout</span><span class="o">=</span><span class="n">half_layout</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="c1"># SSH password field for initial authentication</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">ssh_password_field</span> <span class="o">=</span> <span class="n">widgets</span><span class="o">.</span><span class="n">Password</span><span class="p">(</span>
+            <span class="n">description</span><span class="o">=</span><span class="s2">&quot;SSH Password:&quot;</span><span class="p">,</span>
+            <span class="n">placeholder</span><span class="o">=</span><span class="s2">&quot;Enter password for initial SSH key deployment&quot;</span><span class="p">,</span>
+            <span class="n">style</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;description_width&quot;</span><span class="p">:</span> <span class="s2">&quot;120px&quot;</span><span class="p">},</span>
+            <span class="n">layout</span><span class="o">=</span><span class="n">widgets</span><span class="o">.</span><span class="n">Layout</span><span class="p">(</span><span class="n">width</span><span class="o">=</span><span class="s2">&quot;100%&quot;</span><span class="p">,</span> <span class="n">margin</span><span class="o">=</span><span class="s2">&quot;5px 0px&quot;</span><span class="p">),</span>
+            <span class="n">tooltip</span><span class="o">=</span><span class="s2">&quot;Password is only used for initial SSH key deployment and is not stored&quot;</span><span class="p">,</span>
         <span class="p">)</span>
         <span class="c1"># Port field</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">port_field</span> <span class="o">=</span> <span class="n">widgets</span><span class="o">.</span><span class="n">IntText</span><span class="p">(</span>
@@ -1179,6 +1202,11 @@
                 <span class="bp">self</span><span class="o">.</span><span class="n">host_field</span><span class="p">,</span>
                 <span class="n">widgets</span><span class="o">.</span><span class="n">HBox</span><span class="p">([</span><span class="bp">self</span><span class="o">.</span><span class="n">username_field</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">ssh_key_field</span><span class="p">]),</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">port_field</span><span class="p">,</span>
+                <span class="n">widgets</span><span class="o">.</span><span class="n">HTML</span><span class="p">(</span><span class="s2">&quot;&lt;h6&gt;SSH Key Setup (Optional)&lt;/h6&gt;&quot;</span><span class="p">),</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ssh_password_field</span><span class="p">,</span>
+                <span class="n">widgets</span><span class="o">.</span><span class="n">HTML</span><span class="p">(</span>
+                    <span class="s2">&quot;&lt;small&gt;&lt;em&gt;Password is only used for initial SSH key deployment and is not stored&lt;/em&gt;&lt;/small&gt;&quot;</span>
+                <span class="p">),</span>
             <span class="p">]</span>
         <span class="p">)</span>
         <span class="c1"># Kubernetes fields</span>
@@ -1496,7 +1524,9 @@
         <span class="bp">self</span><span class="o">.</span><span class="n">current_config_name</span> <span class="o">=</span> <span class="n">config_name</span>
 
         <span class="c1"># Basic fields</span>
-        <span class="bp">self</span><span class="o">.</span><span class="n">config_name</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">config_name</span>  <span class="c1"># Use the key as the display name</span>
+        <span class="bp">self</span><span class="o">.</span><span class="n">config_name</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+            <span class="s2">&quot;name&quot;</span><span class="p">,</span> <span class="n">config_name</span>
+        <span class="p">)</span>  <span class="c1"># Use the name field or fall back to key</span>
         <span class="n">cluster_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cluster_type&quot;</span><span class="p">,</span> <span class="s2">&quot;local&quot;</span><span class="p">)</span>
         <span class="bp">self</span><span class="o">.</span><span class="n">cluster_type</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">cluster_type</span>
 
@@ -1735,7 +1765,7 @@
             <span class="bp">self</span><span class="o">.</span><span class="n">_load_config_to_widgets</span><span class="p">(</span><span class="n">config_name</span><span class="p">)</span>
 
     <span class="k">def</span> <span class="nf">_on_add_config</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">button</span><span class="p">):</span>
-<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add a new configuration.&quot;&quot;&quot;</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Add a new configuration based on current values.&quot;&quot;&quot;</span>
         <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">status_output</span><span class="p">:</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">status_output</span><span class="o">.</span><span class="n">clear_output</span><span class="p">()</span>
             <span class="c1"># Generate unique name</span>
@@ -1745,14 +1775,10 @@
             <span class="k">while</span> <span class="n">config_name</span> <span class="ow">in</span> <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">:</span>
                 <span class="n">config_name</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">base_name</span><span class="si">}</span><span class="s2"> </span><span class="si">{</span><span class="n">counter</span><span class="si">}</span><span class="s2">&quot;</span>
                 <span class="n">counter</span> <span class="o">+=</span> <span class="mi">1</span>
-            <span class="c1"># Create new config</span>
-            <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">[</span><span class="n">config_name</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span>
-                <span class="s2">&quot;name&quot;</span><span class="p">:</span> <span class="n">config_name</span><span class="p">,</span>  <span class="c1"># Use the same name as the key</span>
-                <span class="s2">&quot;cluster_type&quot;</span><span class="p">:</span> <span class="s2">&quot;local&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;default_cores&quot;</span><span class="p">:</span> <span class="mi">4</span><span class="p">,</span>
-                <span class="s2">&quot;default_memory&quot;</span><span class="p">:</span> <span class="s2">&quot;8GB&quot;</span><span class="p">,</span>
-                <span class="s2">&quot;default_time&quot;</span><span class="p">:</span> <span class="s2">&quot;01:00:00&quot;</span><span class="p">,</span>
-            <span class="p">}</span>
+            <span class="c1"># Create new config based on current widget values</span>
+            <span class="n">current_config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_save_config_from_widgets</span><span class="p">()</span>
+            <span class="n">current_config</span><span class="p">[</span><span class="s2">&quot;name&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="n">config_name</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">configs</span><span class="p">[</span><span class="n">config_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">current_config</span>
             <span class="c1"># Update dropdown</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_update_config_dropdown</span><span class="p">()</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">config_dropdown</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">config_name</span>
@@ -2587,6 +2613,130 @@
             <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
                 <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Error testing configuration: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
 
+    <span class="k">def</span> <span class="nf">_on_setup_ssh_keys</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">button</span><span class="p">):</span>
+<span class="w">        </span><span class="sd">&quot;&quot;&quot;Set up SSH keys for the current configuration.&quot;&quot;&quot;</span>
+        <span class="k">with</span> <span class="bp">self</span><span class="o">.</span><span class="n">status_output</span><span class="p">:</span>
+            <span class="bp">self</span><span class="o">.</span><span class="n">status_output</span><span class="o">.</span><span class="n">clear_output</span><span class="p">()</span>
+
+            <span class="k">try</span><span class="p">:</span>
+                <span class="c1"># Get current widget configuration</span>
+                <span class="n">config</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_save_config_from_widgets</span><span class="p">()</span>
+                <span class="n">cluster_type</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cluster_type&quot;</span><span class="p">,</span> <span class="s2">&quot;local&quot;</span><span class="p">)</span>
+
+                <span class="c1"># SSH key setup only applies to remote clusters</span>
+                <span class="k">if</span> <span class="n">cluster_type</span> <span class="o">==</span> <span class="s2">&quot;local&quot;</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ℹ️  SSH keys are not needed for local execution&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+
+                <span class="k">if</span> <span class="n">cluster_type</span> <span class="ow">not</span> <span class="ow">in</span> <span class="p">[</span><span class="s2">&quot;ssh&quot;</span><span class="p">,</span> <span class="s2">&quot;slurm&quot;</span><span class="p">,</span> <span class="s2">&quot;pbs&quot;</span><span class="p">,</span> <span class="s2">&quot;sge&quot;</span><span class="p">]:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;ℹ️  SSH key setup not supported for </span><span class="si">{</span><span class="n">cluster_type</span><span class="si">}</span><span class="s2"> clusters&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Cloud providers use API authentication instead&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+
+                <span class="c1"># Validate required fields</span>
+                <span class="n">host</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cluster_host&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">username</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;username&quot;</span><span class="p">,</span> <span class="s2">&quot;&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                <span class="n">port</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;cluster_port&quot;</span><span class="p">,</span> <span class="mi">22</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">host</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;❌ Host/Address is required for SSH key setup&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">username</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;❌ Username is required for SSH key setup&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;🔐 Setting up SSH keys for </span><span class="si">{</span><span class="n">cluster_type</span><span class="si">}</span><span class="s2"> cluster:&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   Host: </span><span class="si">{</span><span class="n">host</span><span class="si">}</span><span class="s2">:</span><span class="si">{</span><span class="n">port</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   Username: </span><span class="si">{</span><span class="n">username</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">()</span>
+
+                <span class="c1"># Import SSH utilities</span>
+                <span class="kn">from</span> <span class="nn">.ssh_utils</span> <span class="kn">import</span> <span class="n">setup_ssh_keys</span><span class="p">,</span> <span class="n">detect_existing_ssh_key</span>
+                <span class="kn">from</span> <span class="nn">.config</span> <span class="kn">import</span> <span class="n">ClusterConfig</span>
+
+                <span class="c1"># Create a ClusterConfig object</span>
+                <span class="n">cluster_config</span> <span class="o">=</span> <span class="n">ClusterConfig</span><span class="p">(</span>
+                    <span class="n">cluster_type</span><span class="o">=</span><span class="n">cluster_type</span><span class="p">,</span>
+                    <span class="n">cluster_host</span><span class="o">=</span><span class="n">host</span><span class="p">,</span>
+                    <span class="n">username</span><span class="o">=</span><span class="n">username</span><span class="p">,</span>
+                    <span class="n">cluster_port</span><span class="o">=</span><span class="n">port</span><span class="p">,</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Check for existing SSH keys first</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;🔍 Checking for existing SSH keys...&quot;</span><span class="p">)</span>
+                <span class="n">existing_key</span> <span class="o">=</span> <span class="n">detect_existing_ssh_key</span><span class="p">(</span><span class="n">host</span><span class="p">,</span> <span class="n">username</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+
+                <span class="k">if</span> <span class="n">existing_key</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;✅ Found working SSH key: </span><span class="si">{</span><span class="n">existing_key</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="c1"># Update the widget with the found key</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">ssh_key_field</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">existing_key</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   SSH key field has been updated automatically&quot;</span><span class="p">)</span>
+                    <span class="k">return</span>
+
+                <span class="c1"># Set up cluster alias for SSH config</span>
+                <span class="n">cluster_alias</span> <span class="o">=</span> <span class="n">config</span><span class="o">.</span><span class="n">get</span><span class="p">(</span>
+                    <span class="s2">&quot;config_name&quot;</span><span class="p">,</span> <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">cluster_type</span><span class="si">}</span><span class="s2">_</span><span class="si">{</span><span class="n">host</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;_&#39;</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span>
+                <span class="p">)</span>
+
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;🔧 No existing SSH keys found, generating new key pair...&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   Key will be saved for cluster alias: </span><span class="si">{</span><span class="n">cluster_alias</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   This may take a moment...&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Get password from the widget</span>
+                <span class="n">password</span> <span class="o">=</span> <span class="p">(</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">ssh_password_field</span><span class="o">.</span><span class="n">value</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span>
+                    <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">ssh_password_field</span><span class="o">.</span><span class="n">value</span>
+                    <span class="k">else</span> <span class="kc">None</span>
+                <span class="p">)</span>
+
+                <span class="k">if</span> <span class="ow">not</span> <span class="n">password</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span>
+                        <span class="s2">&quot;ℹ️  No password provided - attempting passwordless connection&quot;</span>
+                    <span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span>
+                        <span class="s2">&quot;   If this fails, please enter your SSH password above and try again&quot;</span>
+                    <span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;🔐 Using provided password for initial authentication&quot;</span><span class="p">)</span>
+
+                <span class="c1"># Generate and deploy SSH keys</span>
+                <span class="n">updated_config</span> <span class="o">=</span> <span class="n">setup_ssh_keys</span><span class="p">(</span>
+                    <span class="n">cluster_config</span><span class="p">,</span>
+                    <span class="n">cluster_alias</span><span class="o">=</span><span class="n">cluster_alias</span><span class="p">,</span>
+                    <span class="n">auto_generate</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
+                    <span class="n">key_type</span><span class="o">=</span><span class="s2">&quot;ed25519&quot;</span><span class="p">,</span>  <span class="c1"># Use modern Ed25519 keys</span>
+                    <span class="n">passphrase</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># No passphrase for automation</span>
+                    <span class="n">password</span><span class="o">=</span><span class="n">password</span><span class="p">,</span>  <span class="c1"># Use password from widget for initial auth</span>
+                <span class="p">)</span>
+
+                <span class="c1"># Clear password field for security after use</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ssh_password_field</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
+
+                <span class="c1"># Update the widget with the new key</span>
+                <span class="k">if</span> <span class="n">updated_config</span><span class="o">.</span><span class="n">key_file</span><span class="p">:</span>
+                    <span class="bp">self</span><span class="o">.</span><span class="n">ssh_key_field</span><span class="o">.</span><span class="n">value</span> <span class="o">=</span> <span class="n">updated_config</span><span class="o">.</span><span class="n">key_file</span>
+                    <span class="nb">print</span><span class="p">()</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;✅ SSH key setup completed successfully!&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   Private key: </span><span class="si">{</span><span class="n">updated_config</span><span class="o">.</span><span class="n">key_file</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   Public key: </span><span class="si">{</span><span class="n">updated_config</span><span class="o">.</span><span class="n">key_file</span><span class="si">}</span><span class="s2">.pub&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;   SSH config updated for alias: </span><span class="si">{</span><span class="n">cluster_alias</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">()</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;ℹ️  Note: If connection tests fail initially, the SSH server&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   may need a few moments to recognize the new key.&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">()</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;🔧 You can now test the configuration or apply it&quot;</span><span class="p">)</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   The SSH key field has been updated automatically&quot;</span><span class="p">)</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;❌ SSH key setup failed - no key file path returned&quot;</span><span class="p">)</span>
+
+            <span class="k">except</span> <span class="ne">ImportError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ SSH utilities not available: </span><span class="si">{</span><span class="n">e</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Please ensure paramiko is installed: pip install paramiko&quot;</span><span class="p">)</span>
+            <span class="k">except</span> <span class="ne">Exception</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+                <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;❌ Error setting up SSH keys: </span><span class="si">{</span><span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">)</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   You may need to set up SSH keys manually&quot;</span><span class="p">)</span>
+                <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;   Check the troubleshooting documentation for guidance&quot;</span><span class="p">)</span>
+
     <span class="k">def</span> <span class="nf">display</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
 <span class="w">        </span><span class="sd">&quot;&quot;&quot;Display the enhanced widget interface.&quot;&quot;&quot;</span>
         <span class="c1"># Title</span>
@@ -2630,6 +2780,7 @@
             <span class="p">[</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">apply_btn</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">test_btn</span><span class="p">,</span>
+                <span class="bp">self</span><span class="o">.</span><span class="n">ssh_setup_btn</span><span class="p">,</span>
                 <span class="bp">self</span><span class="o">.</span><span class="n">delete_btn</span><span class="p">,</span>
             <span class="p">]</span>
         <span class="p">)</span>
@@ -2660,10 +2811,6 @@
         <span class="n">display</span><span class="p">(</span><span class="n">main_layout</span><span class="p">)</span>
 
 
-<span class="c1"># Global variable to track if widget has been auto-displayed</span>
-<span class="n">_auto_displayed</span> <span class="o">=</span> <span class="kc">False</span>
-
-
 <span class="k">def</span> <span class="nf">display_config_widget</span><span class="p">(</span><span class="n">auto_display</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">):</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Display the configuration widget.&quot;&quot;&quot;</span>
     <span class="n">widget</span> <span class="o">=</span> <span class="n">EnhancedClusterConfigWidget</span><span class="p">(</span><span class="n">auto_display</span><span class="o">=</span><span class="n">auto_display</span><span class="p">)</span>
@@ -2672,17 +2819,14 @@
 
 <span class="k">def</span> <span class="nf">auto_display_on_import</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Automatically display widget when clustrix is imported in a notebook.&quot;&quot;&quot;</span>
-    <span class="k">global</span> <span class="n">_auto_displayed</span>
-    <span class="k">if</span> <span class="n">_auto_displayed</span> <span class="ow">or</span> <span class="ow">not</span> <span class="n">IPYTHON_AVAILABLE</span><span class="p">:</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">IPYTHON_AVAILABLE</span><span class="p">:</span>
         <span class="k">return</span>
     <span class="n">ipython</span> <span class="o">=</span> <span class="n">get_ipython</span><span class="p">()</span>
     <span class="k">if</span> <span class="n">ipython</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="k">return</span>
     <span class="c1"># Check if we&#39;re in a notebook environment</span>
     <span class="k">if</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ipython</span><span class="p">,</span> <span class="s2">&quot;kernel&quot;</span><span class="p">)</span> <span class="ow">and</span> <span class="nb">hasattr</span><span class="p">(</span><span class="n">ipython</span><span class="p">,</span> <span class="s2">&quot;register_magic_function&quot;</span><span class="p">):</span>
-        <span class="c1"># Mark as displayed</span>
-        <span class="n">_auto_displayed</span> <span class="o">=</span> <span class="kc">True</span>
-        <span class="c1"># Display the widget</span>
+        <span class="c1"># Always display the widget on import</span>
         <span class="n">display_config_widget</span><span class="p">(</span><span class="n">auto_display</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
 
 
