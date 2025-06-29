@@ -1923,6 +1923,8 @@ class EnhancedClusterConfigWidget:
                 return self._test_azure_connectivity(config)
             elif cluster_type == "gcp":
                 return self._test_gcp_connectivity(config)
+            elif cluster_type == "lambda_cloud":
+                return self._test_lambda_connectivity(config)
             else:
                 return False
         except Exception:
@@ -1991,6 +1993,25 @@ class EnhancedClusterConfigWidget:
 
         except ImportError:
             print("ℹ️  Google Cloud SDK not available for GCP testing")
+            return False
+        except Exception:
+            return False
+
+    def _test_lambda_connectivity(self, config):
+        """Test Lambda Cloud API connectivity."""
+        try:
+            from .cloud_providers.lambda_cloud import LambdaCloudProvider
+
+            api_key = config.get("lambda_api_key")
+            if not api_key:
+                return False
+
+            # Create provider instance and test authentication
+            provider = LambdaCloudProvider()
+            return provider.authenticate(api_key=api_key)
+
+        except ImportError:
+            print("ℹ️  Lambda Cloud provider not available for testing")
             return False
         except Exception:
             return False
@@ -2216,19 +2237,40 @@ class EnhancedClusterConfigWidget:
 
                     print("✅ GCP configuration appears valid")
 
-                elif cluster_type in ["lambda_cloud", "huggingface_spaces"]:
-                    # Test other cloud providers
-                    provider_name = cluster_type.replace("_", " ").title()
-                    print(f"- Provider: {provider_name}")
+                elif cluster_type == "lambda_cloud":
+                    # Test Lambda Cloud configuration
+                    print("- Provider: Lambda Cloud")
 
-                    # Basic validation for these providers
-                    api_key = config.get("api_key", "")
+                    # Check for Lambda Cloud API key
+                    api_key = config.get("lambda_api_key", "")
                     if api_key:
-                        print("✅ API key provided")
-                    else:
-                        print("⚠️  API key may be required")
+                        print("✅ Lambda Cloud API key provided")
 
-                    print(f"✅ {provider_name} configuration appears valid")
+                        # Test Lambda Cloud API connectivity
+                        print("🔌 Testing Lambda Cloud API connectivity...")
+                        if self._test_cloud_connectivity("lambda_cloud", config):
+                            print("✅ Lambda Cloud API connection successful")
+                        else:
+                            print(
+                                "❌ Lambda Cloud API connection failed (check API key)"
+                            )
+                    else:
+                        print("❌ Lambda Cloud API key is required")
+
+                    print("✅ Lambda Cloud configuration validation completed")
+
+                elif cluster_type == "huggingface_spaces":
+                    # Test HuggingFace Spaces configuration
+                    print("- Provider: HuggingFace Spaces")
+
+                    # Basic validation for HuggingFace
+                    hf_token = config.get("hf_token", "")
+                    if hf_token:
+                        print("✅ HuggingFace token provided")
+                    else:
+                        print("⚠️  HuggingFace token may be required")
+
+                    print("✅ HuggingFace Spaces configuration appears valid")
 
                 else:
                     print(f"⚠️  Unknown cluster type: {cluster_type}")
