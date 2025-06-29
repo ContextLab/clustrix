@@ -239,6 +239,17 @@ def is_uv_available() -> bool:
         return False
 
 
+def is_conda_available() -> bool:
+    """Check if conda package manager is available."""
+    try:
+        result = subprocess.run(
+            ["conda", "--version"], capture_output=True, text=True, timeout=10
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return False
+
+
 def get_package_manager_command(config: ClusterConfig) -> str:
     """
     Get the appropriate package manager command based on configuration.
@@ -247,15 +258,22 @@ def get_package_manager_command(config: ClusterConfig) -> str:
         config: Cluster configuration
 
     Returns:
-        Package manager command (pip or uv)
+        Package manager command (pip, uv, or conda)
     """
     if config.package_manager == "uv":
         return "uv pip"
+    elif config.package_manager == "conda":
+        return "conda"
     elif config.package_manager == "auto":
-        # Auto-detect: prefer uv if available, fallback to pip
-        return "uv pip" if is_uv_available() else "pip"
+        # Auto-detect: prefer uv if available, then conda, fallback to pip
+        if is_uv_available():
+            return "uv pip"
+        elif is_conda_available():
+            return "conda"
+        else:
+            return "pip"
     else:
-        # Default to pip
+        # Default to pip (handles "pip" and any unrecognized values)
         return "pip"
 
 
@@ -278,33 +296,65 @@ def setup_environment(
         # Use existing conda environment
         return f"conda run -n {config.conda_env_name} python"
 
-    # Create virtual environment
-    venv_path = f"{work_dir}/venv"
+    # Get package manager to determine environment type
+    pkg_manager = get_package_manager_command(config)
 
-    setup_commands = [
-        f"python -m venv {venv_path}",
-        f"source {venv_path}/bin/activate",
-    ]
+    if pkg_manager == "conda":
+        # Create conda environment
+        env_name = f"clustrix_env_{hash(work_dir) % 10000}"
+        env_path = f"{work_dir}/conda_envs/{env_name}"
 
-    # Install requirements
-    if requirements:
-        req_file = f"{work_dir}/requirements.txt"
-        req_content = "\n".join(
-            [f"{pkg}=={version}" for pkg, version in requirements.items()]
-        )
+        setup_commands = [
+            f"mkdir -p {work_dir}/conda_envs",
+            f"conda create -p {env_path} python={config.python_executable.replace('python', '3.11')} -y",
+        ]
 
-        # Get appropriate package manager
-        pkg_manager = get_package_manager_command(config)
+        # Install requirements with conda
+        if requirements:
+            # Create conda environment.yml file
+            env_file = f"{work_dir}/environment.yml"
+            env_content = f"""name: {env_name}
+dependencies:
+  - python={config.python_executable.replace('python', '3.11')}
+  - pip
+  - pip:"""
+            for pkg, version in requirements.items():
+                env_content += f"\n    - {pkg}=={version}"
 
-        # This would need to be written to remote file
-        setup_commands.extend(
-            [
-                f"echo '{req_content}' > {req_file}",
-                f"{venv_path}/bin/{pkg_manager} install -r {req_file}",
-            ]
-        )
+            setup_commands.extend(
+                [
+                    f"echo '{env_content}' > {env_file}",
+                    f"conda env update -p {env_path} -f {env_file}",
+                ]
+            )
 
-    return f"{venv_path}/bin/python"
+        return f"conda run -p {env_path} python"
+
+    else:
+        # Create virtual environment (for pip/uv)
+        venv_path = f"{work_dir}/venv"
+
+        setup_commands = [
+            f"python -m venv {venv_path}",
+            f"source {venv_path}/bin/activate",
+        ]
+
+        # Install requirements
+        if requirements:
+            req_file = f"{work_dir}/requirements.txt"
+            req_content = "\n".join(
+                [f"{pkg}=={version}" for pkg, version in requirements.items()]
+            )
+
+            # This would need to be written to remote file
+            setup_commands.extend(
+                [
+                    f"echo '{req_content}' > {req_file}",
+                    f"{venv_path}/bin/{pkg_manager} install -r {req_file}",
+                ]
+            )
+
+        return f"{venv_path}/bin/python"
 
 
 def setup_remote_environment(
@@ -323,26 +373,56 @@ def setup_remote_environment(
 
     pkg_manager = get_package_manager_command(config)
 
-    # Create virtual environment
-    commands = [
-        f"cd {work_dir}",
-        "python -m venv venv",
-        "source venv/bin/activate",
-    ]
+    if pkg_manager == "conda":
+        # Create conda environment
+        env_name = f"clustrix_env_{hash(work_dir) % 10000}"
+        env_path = f"{work_dir}/conda_envs/{env_name}"
 
-    if requirements:
-        # Create requirements file
-        req_content = "\n".join(
-            [f"{pkg}=={version}" for pkg, version in requirements.items()]
-        )
+        commands = [
+            f"cd {work_dir}",
+            "mkdir -p conda_envs",
+            f"conda create -p {env_path} python={config.python_executable.replace('python', '3.11')} -y",
+        ]
 
-        # Write requirements file
-        sftp = ssh_client.open_sftp()
-        with sftp.open(f"{work_dir}/requirements.txt", "w") as f:
-            f.write(req_content)
-        sftp.close()
+        if requirements:
+            # Create conda environment.yml file
+            env_content = f"""name: {env_name}
+dependencies:
+  - python={config.python_executable.replace('python', '3.11')}
+  - pip
+  - pip:"""
+            for pkg, version in requirements.items():
+                env_content += f"\n    - {pkg}=={version}"
 
-        commands.append(f"{pkg_manager} install -r requirements.txt")
+            # Write environment file
+            sftp = ssh_client.open_sftp()
+            with sftp.open(f"{work_dir}/environment.yml", "w") as f:
+                f.write(env_content)
+            sftp.close()
+
+            commands.append(f"conda env update -p {env_path} -f environment.yml")
+
+    else:
+        # Create virtual environment (for pip/uv)
+        commands = [
+            f"cd {work_dir}",
+            "python -m venv venv",
+            "source venv/bin/activate",
+        ]
+
+        if requirements:
+            # Create requirements file
+            req_content = "\n".join(
+                [f"{pkg}=={version}" for pkg, version in requirements.items()]
+            )
+
+            # Write requirements file
+            sftp = ssh_client.open_sftp()
+            with sftp.open(f"{work_dir}/requirements.txt", "w") as f:
+                f.write(req_content)
+            sftp.close()
+
+            commands.append(f"{pkg_manager} install -r requirements.txt")
 
     # Execute setup commands
     full_command = " && ".join(commands)

@@ -425,9 +425,90 @@ class TestPackageManager:
         assert result == "uv pip"
 
     @patch("clustrix.utils.is_uv_available")
-    def test_get_package_manager_command_auto_uv_unavailable(self, mock_uv_available):
+    @patch("clustrix.utils.is_conda_available")
+    def test_get_package_manager_command_auto_uv_unavailable(
+        self, mock_conda_available, mock_uv_available
+    ):
         """Test auto package manager selection when uv is not available."""
         mock_uv_available.return_value = False
+        mock_conda_available.return_value = (
+            False  # Also mock conda as unavailable to get pip
+        )
+        from clustrix.utils import get_package_manager_command
+
+        config = ClusterConfig(package_manager="auto")
+
+        result = get_package_manager_command(config)
+        assert result == "pip"
+
+    @patch("subprocess.run")
+    def test_is_conda_available_true(self, mock_run):
+        """Test conda availability check when conda is available."""
+        mock_run.return_value.returncode = 0
+
+        from clustrix.utils import is_conda_available
+
+        assert is_conda_available() is True
+        mock_run.assert_called_once_with(
+            ["conda", "--version"], capture_output=True, text=True, timeout=10
+        )
+
+    @patch("subprocess.run")
+    def test_is_conda_available_false(self, mock_run):
+        """Test conda availability check when conda is not available."""
+        mock_run.side_effect = FileNotFoundError
+
+        from clustrix.utils import is_conda_available
+
+        assert is_conda_available() is False
+
+    def test_get_package_manager_command_conda(self):
+        """Test package manager command selection for conda."""
+        from clustrix.utils import get_package_manager_command
+
+        config = ClusterConfig(package_manager="conda")
+
+        result = get_package_manager_command(config)
+        assert result == "conda"
+
+    @patch("clustrix.utils.is_uv_available")
+    @patch("clustrix.utils.is_conda_available")
+    def test_get_package_manager_command_auto_conda_available(
+        self, mock_conda_available, mock_uv_available
+    ):
+        """Test auto package manager selection when conda is available but uv is not."""
+        mock_uv_available.return_value = False
+        mock_conda_available.return_value = True
+        from clustrix.utils import get_package_manager_command
+
+        config = ClusterConfig(package_manager="auto")
+
+        result = get_package_manager_command(config)
+        assert result == "conda"
+
+    @patch("clustrix.utils.is_uv_available")
+    @patch("clustrix.utils.is_conda_available")
+    def test_get_package_manager_command_auto_priority(
+        self, mock_conda_available, mock_uv_available
+    ):
+        """Test auto package manager selection priority: uv > conda > pip."""
+        mock_uv_available.return_value = True
+        mock_conda_available.return_value = True
+        from clustrix.utils import get_package_manager_command
+
+        config = ClusterConfig(package_manager="auto")
+
+        result = get_package_manager_command(config)
+        assert result == "uv pip"  # uv has priority over conda
+
+    @patch("clustrix.utils.is_uv_available")
+    @patch("clustrix.utils.is_conda_available")
+    def test_get_package_manager_command_auto_fallback_to_pip(
+        self, mock_conda_available, mock_uv_available
+    ):
+        """Test auto package manager selection fallback to pip."""
+        mock_uv_available.return_value = False
+        mock_conda_available.return_value = False
         from clustrix.utils import get_package_manager_command
 
         config = ClusterConfig(package_manager="auto")
