@@ -13,6 +13,7 @@ from clustrix.config import ClusterConfig
 try:
     import IPython
     import ipywidgets
+
     WIDGET_DEPS_AVAILABLE = True
 except ImportError:
     WIDGET_DEPS_AVAILABLE = False
@@ -68,7 +69,9 @@ class TestWidgetConfigurationFixes:
         assert "hf_hardware" in hf_config
         assert "hf_sdk" in hf_config
 
-    @pytest.mark.skipif(not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available")
+    @pytest.mark.skipif(
+        not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"
+    )
     def test_widget_safe_value_setting(self):
         """Test that widget safely handles values not in dropdown options."""
         widget = ClusterConfigWidget(auto_display=False)
@@ -99,7 +102,9 @@ class TestWidgetConfigurationFixes:
         assert widget.azure_region.value in widget.azure_region.options
         assert widget.azure_instance_type.value in widget.azure_instance_type.options
 
-    @pytest.mark.skipif(not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available")
+    @pytest.mark.skipif(
+        not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"
+    )
     def test_widget_save_load_cycle(self):
         """Test that widget can save and load configurations correctly."""
         widget = ClusterConfigWidget(auto_display=False)
@@ -191,7 +196,9 @@ class TestWidgetConfigurationFixes:
         assert hf_config.hf_username == "test-user"
         assert hf_config.hf_sdk == "gradio"
 
-    @pytest.mark.skipif(not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available")
+    @pytest.mark.skipif(
+        not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"
+    )
     def test_widget_dropdown_population(self):
         """Test that widget properly populates dropdown options."""
         widget = ClusterConfigWidget(auto_display=False)
@@ -228,7 +235,9 @@ class TestWidgetConfigurationFixes:
                 "description" not in test_config
             ), f"Config '{config_name}' should not have 'description' field initially"
 
-    @pytest.mark.skipif(not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available")
+    @pytest.mark.skipif(
+        not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"
+    )
     def test_widget_cluster_type_change_updates_options(self):
         """Test that changing cluster type updates dropdown options."""
         widget = ClusterConfigWidget(auto_display=False)
