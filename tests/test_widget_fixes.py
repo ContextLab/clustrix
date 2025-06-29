@@ -2,13 +2,17 @@
 Test suite for widget configuration fixes addressing issue #53.
 """
 
-import pytest
 import importlib
-import clustrix.notebook_magic
 
-importlib.reload(clustrix.notebook_magic)
-from clustrix.notebook_magic import DEFAULT_CONFIGS, ClusterConfigWidget
+import clustrix.notebook_magic
 from clustrix.config import ClusterConfig
+
+# Reload to ensure fresh state
+importlib.reload(clustrix.notebook_magic)
+
+# Import after reload to get the refreshed module
+DEFAULT_CONFIGS = clustrix.notebook_magic.DEFAULT_CONFIGS
+ClusterConfigWidget = clustrix.notebook_magic.ClusterConfigWidget
 
 
 class TestWidgetConfigurationFixes:

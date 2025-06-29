@@ -90,7 +90,6 @@ class AzureProvider(CloudProvider):
             assert isinstance(client_id, str)
             assert isinstance(client_secret, str)
             assert isinstance(subscription_id, str)
-            
             self.credential = ClientSecretCredential(
                 tenant_id=tenant_id, client_id=client_id, client_secret=client_secret
             )
