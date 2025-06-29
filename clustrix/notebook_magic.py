@@ -514,7 +514,7 @@ class EnhancedClusterConfigWidget:
         self.test_btn.on_click(self._on_test_config)
 
         self.ssh_setup_btn = widgets.Button(
-            description="Setup SSH Keys",
+            description="Set Up SSH Keys",
             button_style="warning",
             icon="key",
             layout=widgets.Layout(width="auto"),
@@ -2496,7 +2496,7 @@ class EnhancedClusterConfigWidget:
                     cluster_type=cluster_type,
                     cluster_host=host,
                     username=username,
-                    port=port,
+                    cluster_port=port,
                 )
 
                 # Check for existing SSH keys first
