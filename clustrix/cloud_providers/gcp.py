@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 try:
     from google.cloud import compute_v1
+    from google.cloud import container_v1
     from google.oauth2 import service_account
     from google.auth.exceptions import DefaultCredentialsError
 
@@ -14,6 +15,7 @@ try:
 except ImportError:
     GCP_AVAILABLE = False
     compute_v1 = None
+    container_v1 = None
     service_account = None
     DefaultCredentialsError = Exception
 
@@ -33,6 +35,7 @@ class GCPProvider(CloudProvider):
         self.region = "us-central1"
         self.zone = "us-central1-a"
         self.compute_client = None
+        self.container_client = None
         self.service_account_info = None
 
     def authenticate(self, **credentials) -> bool:
@@ -80,6 +83,9 @@ class GCPProvider(CloudProvider):
 
             # Initialize compute client
             self.compute_client = compute_v1.InstancesClient(credentials=creds)
+
+            # Initialize container client
+            self.container_client = container_v1.ClusterManagerClient(credentials=creds)
 
             # Test credentials by making a simple API call
             # List instances to verify access (this should work even if no instances exist)
@@ -214,6 +220,111 @@ class GCPProvider(CloudProvider):
             logger.error(f"Failed to create GCP instance: {e}")
             raise
 
+    def create_gke_cluster(
+        self,
+        cluster_name: str,
+        node_count: int = 3,
+        machine_type: str = "e2-medium",
+        kubernetes_version: Optional[str] = None,
+        disk_size_gb: int = 100,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Create a GKE (Google Kubernetes Engine) cluster.
+
+        Args:
+            cluster_name: Name for the GKE cluster
+            node_count: Number of nodes in the default node pool
+            machine_type: Machine type for nodes (default: e2-medium)
+            kubernetes_version: Kubernetes version (uses default if None)
+            disk_size_gb: Boot disk size in GB for nodes
+            **kwargs: Additional cluster configuration
+
+        Returns:
+            Dict containing cluster information
+        """
+        if not self.authenticated:
+            raise RuntimeError("Not authenticated with GCP")
+
+        try:
+            logger.info(f"Creating GKE cluster '{cluster_name}' in {self.region}...")
+
+            # Set up cluster location (zone or region)
+            location = self.zone  # Using zonal cluster for simplicity
+
+            # Define GKE cluster configuration
+            cluster_config = {
+                "name": cluster_name,
+                "description": "GKE cluster created by Clustrix",
+                "initial_node_count": node_count,
+                "node_config": {
+                    "machine_type": machine_type,
+                    "disk_size_gb": disk_size_gb,
+                    "oauth_scopes": [
+                        "https://www.googleapis.com/auth/devstorage.read_only",
+                        "https://www.googleapis.com/auth/logging.write",
+                        "https://www.googleapis.com/auth/monitoring",
+                        "https://www.googleapis.com/auth/service.management.readonly",
+                        "https://www.googleapis.com/auth/servicecontrol",
+                        "https://www.googleapis.com/auth/trace.append",
+                    ],
+                    "labels": {
+                        "created_by": "clustrix",
+                        "cluster_name": cluster_name.replace("_", "-"),
+                    },
+                },
+                "master_auth": {
+                    "client_certificate_config": {
+                        "issue_client_certificate": False
+                    }
+                },
+                "ip_allocation_policy": {
+                    "use_ip_aliases": True
+                },
+                "network_policy": {
+                    "enabled": False
+                },
+                "addons_config": {
+                    "http_load_balancing": {"disabled": False},
+                    "horizontal_pod_autoscaling": {"disabled": False},
+                },
+            }
+
+            if kubernetes_version:
+                cluster_config["initial_cluster_version"] = kubernetes_version
+
+            # Create cluster using the Container API
+            parent = f"projects/{self.project_id}/locations/{location}"
+            request = container_v1.CreateClusterRequest(
+                parent=parent,
+                cluster=cluster_config,
+            )
+
+            operation = self.container_client.create_cluster(request=request)
+
+            logger.info(f"GKE cluster creation initiated - operation: {operation.name}")
+
+            return {
+                "cluster_name": cluster_name,
+                "status": "creating",
+                "region": self.region,
+                "zone": self.zone,
+                "provider": "gcp",
+                "cluster_type": "gke",
+                "project_id": self.project_id,
+                "location": location,
+                "node_count": node_count,
+                "machine_type": machine_type,
+                "disk_size_gb": disk_size_gb,
+                "kubernetes_version": kubernetes_version,
+                "operation_name": operation.name,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create GKE cluster: {e}")
+            raise
+
     def create_cluster(
         self, cluster_name: str, cluster_type: str = "compute", **kwargs
     ) -> Dict[str, Any]:
@@ -221,14 +332,7 @@ class GCPProvider(CloudProvider):
         if cluster_type == "compute":
             return self.create_compute_instance(cluster_name, **kwargs)
         elif cluster_type == "gke":
-            # TODO: Implement GKE cluster creation
-            return {
-                "cluster_name": cluster_name,
-                "status": "creating",
-                "region": self.region,
-                "provider": "gcp",
-                "cluster_type": "gke",
-            }
+            return self.create_gke_cluster(cluster_name, **kwargs)
         else:
             raise ValueError(f"Unknown cluster type: {cluster_type}")
 
@@ -250,8 +354,14 @@ class GCPProvider(CloudProvider):
                 )
                 return True
             elif cluster_type == "gke":
-                # TODO: Implement GKE cluster deletion
-                logger.info(f"Would delete GKE cluster '{cluster_identifier}'")
+                # Delete GKE cluster
+                location = self.zone  # Using same location as creation
+                name = f"projects/{self.project_id}/locations/{location}/clusters/{cluster_identifier}"
+
+                request = container_v1.DeleteClusterRequest(name=name)
+                operation = self.container_client.delete_cluster(request=request)
+
+                logger.info(f"Deleting GKE cluster '{cluster_identifier}' - operation: {operation.name}")
                 return True
             else:
                 raise ValueError(f"Unknown cluster type: {cluster_type}")
@@ -281,12 +391,26 @@ class GCPProvider(CloudProvider):
                     "cluster_type": "compute",
                 }
             elif cluster_type == "gke":
-                # TODO: Implement GKE status check
+                # Get GKE cluster status
+                location = self.zone  # Using same location as creation
+                name = f"projects/{self.project_id}/locations/{location}/clusters/{cluster_identifier}"
+
+                request = container_v1.GetClusterRequest(name=name)
+                cluster = self.container_client.get_cluster(request=request)
+
                 return {
                     "cluster_name": cluster_identifier,
-                    "status": "running",
+                    "status": cluster.status.name.lower(),
+                    "endpoint": cluster.endpoint,
+                    "current_master_version": cluster.current_master_version,
+                    "current_node_version": cluster.current_node_version,
+                    "node_count": cluster.current_node_count,
+                    "location": cluster.location,
+                    "zone": cluster.zone if cluster.zone else None,
+                    "create_time": cluster.create_time,
                     "provider": "gcp",
                     "cluster_type": "gke",
+                    "project_id": self.project_id,
                 }
         except Exception as e:
             logger.error(f"Failed to get cluster status: {e}")
@@ -329,7 +453,34 @@ class GCPProvider(CloudProvider):
         except Exception as e:
             logger.error(f"Failed to list GCP instances: {e}")
 
-        # TODO: Add GKE cluster listing
+        # List GKE clusters
+        try:
+            location = self.zone  # List clusters in our zone
+            parent = f"projects/{self.project_id}/locations/{location}"
+            request = container_v1.ListClustersRequest(parent=parent)
+
+            response = self.container_client.list_clusters(request=request)
+
+            for cluster in response.clusters:
+                # Only include clusters with clustrix labels
+                labels = cluster.resource_labels or {}
+                if labels.get("created_by") == "clustrix":
+                    clusters.append(
+                        {
+                            "name": cluster.name,
+                            "cluster_id": cluster.name,
+                            "type": "gke",
+                            "status": cluster.status.name.lower(),
+                            "endpoint": cluster.endpoint,
+                            "current_master_version": cluster.current_master_version,
+                            "node_count": cluster.current_node_count,
+                            "location": cluster.location,
+                            "zone": cluster.zone if cluster.zone else None,
+                            "project_id": self.project_id,
+                        }
+                    )
+        except Exception as e:
+            logger.error(f"Failed to list GKE clusters: {e}")
 
         return clusters
 
