@@ -203,7 +203,7 @@ Supported Cluster Types
 +----------------+------------------+----------------------------------+
 | **PBS/Torque** | ✅ Full Support  | Production ready                 |
 +----------------+------------------+----------------------------------+
-| **SGE**        | ⚡ Nearly Ready  | Job submit works, status pending |
+| **SGE**        | ✅ Full Support  | Production ready                 |
 +----------------+------------------+----------------------------------+
 | **SSH**        | ✅ Full Support  | Direct execution                 |
 +----------------+------------------+----------------------------------+
