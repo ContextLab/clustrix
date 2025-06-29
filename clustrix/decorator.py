@@ -375,7 +375,7 @@ def _create_local_work_chunks(
     # Determine chunk size (aim for reasonable number of chunks)
     import os
 
-    max_chunks = os.cpu_count() * 2  # Allow some oversubscription
+    max_chunks = (os.cpu_count() or 1) * 2  # Allow some oversubscription
     chunk_size = max(1, len(loop_range) // max_chunks)
 
     # Create chunks

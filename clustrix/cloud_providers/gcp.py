@@ -14,10 +14,10 @@ try:
     GCP_AVAILABLE = True
 except ImportError:
     GCP_AVAILABLE = False
-    compute_v1 = None
-    container_v1 = None
-    service_account = None
-    DefaultCredentialsError = Exception
+    compute_v1 = None  # type: ignore
+    container_v1 = None  # type: ignore
+    service_account = None  # type: ignore
+    DefaultCredentialsError = Exception  # type: ignore
 
 from .base import CloudProvider
 from . import PROVIDERS
@@ -408,6 +408,8 @@ class GCPProvider(CloudProvider):
                     "cluster_type": "gke",
                     "project_id": self.project_id,
                 }
+            else:
+                raise ValueError(f"Unknown cluster type: {cluster_type}")
         except Exception as e:
             logger.error(f"Failed to get cluster status: {e}")
             raise

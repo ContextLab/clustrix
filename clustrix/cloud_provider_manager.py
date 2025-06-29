@@ -396,9 +396,9 @@ class CloudProviderManager:
 
         configurator = GoogleGKEConfigurator(self.config)
         result = configurator.configure_cluster(
-            self.config.gke_cluster_name,
-            self.config.gcp_zone,
-            self.config.gcp_project_id,
+            self.config.gke_cluster_name or "",
+            self.config.gcp_zone or "",
+            self.config.gcp_project_id or "",
         )
         result["auto_configured"] = True
         return result

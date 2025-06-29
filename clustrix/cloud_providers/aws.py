@@ -5,8 +5,8 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone
 
 try:
-    import boto3
-    from botocore.exceptions import ClientError, NoCredentialsError
+    import boto3  # type: ignore
+    from botocore.exceptions import ClientError, NoCredentialsError  # type: ignore
 
     BOTO3_AVAILABLE = True
 except ImportError:

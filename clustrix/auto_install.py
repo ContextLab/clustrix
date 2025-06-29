@@ -68,7 +68,7 @@ def check_dependencies_installed(provider: str) -> bool:
     # Try importing key modules for each provider
     try:
         if provider == "aws":
-            import boto3  # noqa: F401
+            import boto3  # type: ignore # noqa: F401
         elif provider == "azure":
             from azure.identity import ClientSecretCredential  # noqa: F401
             from azure.mgmt.compute import ComputeManagementClient  # noqa: F401
@@ -76,7 +76,7 @@ def check_dependencies_installed(provider: str) -> bool:
             from google.cloud import compute_v1  # noqa: F401
             from google.cloud import container_v1  # noqa: F401
         elif provider == "kubernetes":
-            import kubernetes  # noqa: F401
+            import kubernetes  # type: ignore # noqa: F401
 
         return True
     except ImportError:

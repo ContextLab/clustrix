@@ -6,8 +6,8 @@ import inspect
 import importlib
 import subprocess
 from typing import Any, Dict, Optional, Callable
-import dill
-import cloudpickle
+import dill  # type: ignore
+import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
 

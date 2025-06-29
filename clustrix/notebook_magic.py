@@ -15,7 +15,7 @@ import logging
 try:
     from IPython.core.magic import Magics, magics_class, cell_magic
     from IPython.display import display as _display, HTML as _HTML
-    import ipywidgets as _widgets
+    import ipywidgets as _widgets  # type: ignore
     from IPython import get_ipython
 
     IPYTHON_AVAILABLE = True
@@ -1927,8 +1927,8 @@ class EnhancedClusterConfigWidget:
     def _test_aws_connectivity(self, config):
         """Test AWS API connectivity."""
         try:
-            import boto3
-            from botocore.exceptions import NoCredentialsError, ClientError
+            import boto3  # type: ignore
+            from botocore.exceptions import NoCredentialsError, ClientError  # type: ignore
 
             # Try to create a session and list regions (minimal API call)
             session = boto3.Session(profile_name=config.get("aws_profile"))

@@ -5,7 +5,7 @@ import pickle
 import logging
 from typing import Any, Dict, Optional
 import paramiko
-import cloudpickle
+import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
 from .utils import create_job_script, setup_remote_environment
@@ -58,7 +58,7 @@ class ClusterExecutor:
     def _setup_kubernetes(self):
         """Setup Kubernetes client with optional cloud provider auto-configuration."""
         try:
-            from kubernetes import client, config
+            from kubernetes import client, config  # type: ignore
 
             # Try cloud provider auto-configuration if enabled
             if (
@@ -354,7 +354,7 @@ class ClusterExecutor:
             - Results are captured via stdout parsing (CLUSTRIX_RESULT: prefix)
         """
         try:
-            from kubernetes import client
+            from kubernetes import client  # type: ignore
         except ImportError:
             raise ImportError(
                 "kubernetes package required for Kubernetes support. "
@@ -390,7 +390,7 @@ class ClusterExecutor:
                                 "args": [
                                     f"""
 import base64
-import cloudpickle
+import cloudpickle  # type: ignore
 import traceback
 
 try:
@@ -732,7 +732,7 @@ except Exception as e:
         elif self.config.cluster_type == "kubernetes":
             # For Kubernetes jobs, check job status via API
             try:
-                from kubernetes import client
+                from kubernetes import client  # type: ignore
 
                 batch_api = client.BatchV1Api()
 
@@ -1124,7 +1124,7 @@ except Exception as e:
                 if "job_state                          r" in stdout:
                     return "running"
                 elif "job_state                          qw" in stdout:
-                    return "queued" 
+                    return "queued"
                 elif "job_state                          Eqw" in stdout:
                     return "failed"
                 elif "job_state                          dr" in stdout:
@@ -1140,7 +1140,7 @@ except Exception as e:
     def _get_k8s_result(self, job_id: str) -> Any:
         """Get result from Kubernetes job logs."""
         try:
-            from kubernetes import client
+            from kubernetes import client  # type: ignore
 
             core_api = client.CoreV1Api()
 
@@ -1182,7 +1182,7 @@ except Exception as e:
     def _get_k8s_error_log(self, job_id: str) -> str:
         """Get error log from Kubernetes job."""
         try:
-            from kubernetes import client
+            from kubernetes import client  # type: ignore
 
             core_api = client.CoreV1Api()
 
@@ -1211,7 +1211,7 @@ except Exception as e:
         except Exception as e:
             return f"Failed to get Kubernetes error logs: {e}"
 
-    def _extract_k8s_exception(self, job_id: str) -> Exception:
+    def _extract_k8s_exception(self, job_id: str) -> Optional[Exception]:
         """Extract original exception from Kubernetes job logs."""
         try:
             error_log = self._get_k8s_error_log(job_id)
@@ -1240,7 +1240,7 @@ except Exception as e:
     def _cleanup_k8s_job(self, job_id: str):
         """Clean up Kubernetes job resources."""
         try:
-            from kubernetes import client
+            from kubernetes import client  # type: ignore
 
             batch_api = client.BatchV1Api()
             core_api = client.CoreV1Api()

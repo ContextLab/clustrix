@@ -15,13 +15,13 @@ try:
     AZURE_AVAILABLE = True
 except ImportError:
     AZURE_AVAILABLE = False
-    ClientSecretCredential = None
-    ComputeManagementClient = None
-    ResourceManagementClient = None
-    NetworkManagementClient = None
-    ContainerServiceClient = None
-    ClientAuthenticationError = Exception
-    ResourceNotFoundError = Exception
+    ClientSecretCredential = None  # type: ignore
+    ComputeManagementClient = None  # type: ignore
+    ResourceManagementClient = None  # type: ignore
+    NetworkManagementClient = None  # type: ignore
+    ContainerServiceClient = None  # type: ignore
+    ClientAuthenticationError = Exception  # type: ignore
+    ResourceNotFoundError = Exception  # type: ignore
 
 from .base import CloudProvider
 from . import PROVIDERS
@@ -85,6 +85,12 @@ class AzureProvider(CloudProvider):
 
         try:
             # Create credential object
+            # Type assertions since we verified these are not None above
+            assert isinstance(tenant_id, str)
+            assert isinstance(client_id, str)
+            assert isinstance(client_secret, str)
+            assert isinstance(subscription_id, str)
+            
             self.credential = ClientSecretCredential(
                 tenant_id=tenant_id, client_id=client_id, client_secret=client_secret
             )
@@ -173,7 +179,7 @@ class AzureProvider(CloudProvider):
         vm_name: str,
         vm_size: str = "Standard_D2s_v3",
         admin_username: str = "azureuser",
-        admin_password: str = None,
+        admin_password: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Create an Azure Virtual Machine.
@@ -520,6 +526,8 @@ class AzureProvider(CloudProvider):
                     "provider": "azure",
                     "cluster_type": "aks",
                 }
+            else:
+                raise ValueError(f"Unknown cluster type: {cluster_type}")
         except Exception as e:
             logger.error(f"Failed to get cluster status: {e}")
             raise

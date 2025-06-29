@@ -51,3 +51,4 @@ tests/test_local_executor.py
 tests/test_loop_analysis.py
 tests/test_notebook_magic.py
 tests/test_utils.py
+tests/test_widget_fixes.py
