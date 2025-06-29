@@ -86,22 +86,35 @@ pytest --cov=clustrix --cov-report=html
 
 ### Bug Reports
 
-When reporting bugs, please include:
+We use GitHub issue templates to ensure we get all the information needed to address bugs effectively. 
 
-- **Description** of the bug
-- **Steps to reproduce** the issue
-- **Expected behavior** vs actual behavior
-- **Environment details** (Python version, OS, cluster type)
-- **Error messages** or logs if applicable
+To report a bug:
+1. Go to [Issues](https://github.com/ContextLab/clustrix/issues)
+2. Click "New Issue" 
+3. Select "Bug report" template
+4. Fill out all sections of the template
+
+The template will guide you to provide:
+- Clear description of the bug
+- Steps to reproduce the issue
+- Expected vs actual behavior
+- Environment details and configuration
+- Full error messages and tracebacks
 
 ### Feature Requests
 
-For new features:
+We love hearing ideas for new features! To ensure we understand your vision:
 
-- **Describe the feature** and its use case
-- **Explain why** it would be valuable
-- **Provide examples** of how it would be used
-- **Consider backwards compatibility**
+1. Go to [Issues](https://github.com/ContextLab/clustrix/issues)
+2. Click "New Issue"
+3. Select "Feature request" template
+4. Complete all sections
+
+The template helps you describe:
+- The feature and its purpose
+- Use cases and benefits
+- Proposed implementation approach
+- Alternative solutions considered
 
 ### Code Contributions
 
@@ -162,22 +175,39 @@ clustrix/
 
 We particularly welcome contributions in these areas:
 
-### High Priority
-- **SGE and Kubernetes support** - Complete the unfinished implementations
-- **Enhanced loop parallelization** - Improve automatic loop detection
-- **Error handling** - Robust error recovery and reporting
-- **Performance optimization** - Reduce overhead and improve efficiency
+### Feature Requests
+We encourage well-defined and clearly scoped requests for additional functionality. When submitting a feature request:
+- Use our [feature request template](https://github.com/ContextLab/clustrix/issues/new?assignees=&labels=enhancement&template=feature_request.md&title=%5BFEATURE%5D+)
+- Provide clear use cases and expected behavior
+- Consider how it fits with existing functionality
+- Think about backwards compatibility
 
-### Medium Priority
-- **Additional cluster types** - Support for other schedulers
-- **Advanced configuration** - More flexible configuration options
-- **Monitoring and logging** - Better observability
-- **Documentation** - Tutorials, examples, and API docs
+Examples of features we'd love to see:
+- **Additional cluster types** - Support for other HPC schedulers
+- **Advanced monitoring** - Real-time job monitoring and resource usage
+- **Workflow management** - Support for complex job dependencies
+- **Integration plugins** - IDE extensions, workflow tools, etc.
 
-### Low Priority
-- **GUI interface** - Web-based or desktop interface
-- **Integration plugins** - Jupyter, IDEs, etc.
-- **Cloud providers** - AWS Batch, Google Cloud, etc.
+### Bug Reports
+Help us improve reliability by reporting bugs you encounter. When filing a bug report:
+- Use our [bug report template](https://github.com/ContextLab/clustrix/issues/new?assignees=&labels=bug&template=bug_report.md&title=%5BBUG%5D+)
+- Include detailed steps to reproduce the issue
+- Provide full error messages and tracebacks
+- Share your environment details and configuration
+
+### Documentation Clean-up
+Great documentation is crucial for adoption and usability. We need help with:
+- **Clarifying confusing sections** - Identify and improve unclear explanations
+- **Updating outdated content** - Keep examples and guides current
+- **Adding missing information** - Fill gaps in API documentation
+- **Creating tutorials** - Step-by-step guides for common use cases
+- **Improving examples** - More diverse, real-world examples
+
+Specific documentation needs:
+- Better explanation of error messages and troubleshooting
+- More examples of advanced configurations
+- Guides for specific cluster environments
+- Performance tuning recommendations
 
 ## Coding Standards
 

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Clustrix Documentation
+    url: https://clustrix.readthedocs.io
+    about: Please check the documentation first for usage questions
+  - name: Discussions
+    url: https://github.com/ContextLab/clustrix/discussions
+    about: For general questions and discussions about Clustrix
