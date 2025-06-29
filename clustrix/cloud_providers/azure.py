@@ -9,6 +9,7 @@ try:
     from azure.mgmt.compute import ComputeManagementClient
     from azure.mgmt.resource import ResourceManagementClient
     from azure.mgmt.network import NetworkManagementClient
+    from azure.mgmt.containerservice import ContainerServiceClient
     from azure.core.exceptions import ClientAuthenticationError, ResourceNotFoundError
 
     AZURE_AVAILABLE = True
@@ -18,6 +19,7 @@ except ImportError:
     ComputeManagementClient = None
     ResourceManagementClient = None
     NetworkManagementClient = None
+    ContainerServiceClient = None
     ClientAuthenticationError = Exception
     ResourceNotFoundError = Exception
 
@@ -41,6 +43,7 @@ class AzureProvider(CloudProvider):
         self.compute_client = None
         self.resource_client = None
         self.network_client = None
+        self.container_client = None
         self.credential = None
 
     def authenticate(self, **credentials) -> bool:
@@ -96,6 +99,10 @@ class AzureProvider(CloudProvider):
             )
 
             self.network_client = NetworkManagementClient(
+                credential=self.credential, subscription_id=subscription_id
+            )
+
+            self.container_client = ContainerServiceClient(
                 credential=self.credential, subscription_id=subscription_id
             )
 
@@ -319,6 +326,87 @@ class AzureProvider(CloudProvider):
             logger.error(f"Failed to create Azure VM: {e}")
             raise
 
+    def create_aks_cluster(
+        self,
+        cluster_name: str,
+        node_count: int = 3,
+        node_vm_size: str = "Standard_DS2_v2",
+        kubernetes_version: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """
+        Create an AKS (Azure Kubernetes Service) cluster.
+
+        Args:
+            cluster_name: Name for the AKS cluster
+            node_count: Number of nodes in the default node pool
+            node_vm_size: VM size for nodes (default: Standard_DS2_v2)
+            kubernetes_version: Kubernetes version (uses default if None)
+            **kwargs: Additional cluster configuration
+
+        Returns:
+            Dict containing cluster information
+        """
+        if not self.authenticated:
+            raise RuntimeError("Not authenticated with Azure")
+
+        try:
+            logger.info(f"Creating AKS cluster '{cluster_name}' in {self.region}...")
+
+            # Ensure resource group exists
+            self.resource_client.resource_groups.create_or_update(
+                self.resource_group, {"location": self.region}
+            )
+
+            # Define AKS cluster configuration
+            cluster_config = {
+                "location": self.region,
+                "kubernetes_version": kubernetes_version,
+                "agent_pool_profiles": [
+                    {
+                        "name": "default",
+                        "count": node_count,
+                        "vm_size": node_vm_size,
+                        "os_type": "Linux",
+                        "mode": "System",
+                    }
+                ],
+                "service_principal_profile": {
+                    "client_id": self.client_id,
+                    "secret": self.credentials.get("client_secret"),
+                },
+                "network_profile": {"network_plugin": "kubenet"},
+                "enable_rbac": True,
+                "tags": {"created_by": "clustrix", "cluster_name": cluster_name},
+            }
+
+            # Start cluster creation (async operation)
+            operation = self.container_client.managed_clusters.begin_create_or_update(
+                resource_group_name=self.resource_group,
+                resource_name=cluster_name,
+                parameters=cluster_config,
+            )
+
+            logger.info(f"AKS cluster creation initiated - operation: {operation}")
+
+            return {
+                "cluster_name": cluster_name,
+                "status": "creating",
+                "region": self.region,
+                "provider": "azure",
+                "cluster_type": "aks",
+                "resource_group": self.resource_group,
+                "node_count": node_count,
+                "node_vm_size": node_vm_size,
+                "kubernetes_version": kubernetes_version,
+                "operation_id": str(operation),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+
+        except Exception as e:
+            logger.error(f"Failed to create AKS cluster: {e}")
+            raise
+
     def create_cluster(
         self, cluster_name: str, cluster_type: str = "vm", **kwargs
     ) -> Dict[str, Any]:
@@ -326,14 +414,7 @@ class AzureProvider(CloudProvider):
         if cluster_type == "vm":
             return self.create_vm(cluster_name, **kwargs)
         elif cluster_type == "aks":
-            # TODO: Implement AKS cluster creation
-            return {
-                "cluster_name": cluster_name,
-                "status": "creating",
-                "region": self.region,
-                "provider": "azure",
-                "cluster_type": "aks",
-            }
+            return self.create_aks_cluster(cluster_name, **kwargs)
         else:
             raise ValueError(f"Unknown cluster type: {cluster_type}")
 
@@ -372,8 +453,12 @@ class AzureProvider(CloudProvider):
                 logger.info(f"Deleted Azure VM '{cluster_identifier}'")
                 return True
             elif cluster_type == "aks":
-                # TODO: Implement AKS cluster deletion
-                logger.info(f"Would delete AKS cluster '{cluster_identifier}'")
+                # Delete AKS cluster
+                operation = self.container_client.managed_clusters.begin_delete(
+                    resource_group_name=self.resource_group,
+                    resource_name=cluster_identifier
+                )
+                logger.info(f"Deleting AKS cluster '{cluster_identifier}' - operation: {operation}")
                 return True
             else:
                 raise ValueError(f"Unknown cluster type: {cluster_type}")
@@ -412,10 +497,24 @@ class AzureProvider(CloudProvider):
                     "cluster_type": "vm",
                 }
             elif cluster_type == "aks":
-                # TODO: Implement AKS status check
+                # Get AKS cluster status
+                cluster = self.container_client.managed_clusters.get(
+                    resource_group_name=self.resource_group,
+                    resource_name=cluster_identifier
+                )
+
                 return {
                     "cluster_name": cluster_identifier,
-                    "status": "running",
+                    "status": cluster.provisioning_state.lower(),
+                    "kubernetes_version": cluster.kubernetes_version,
+                    "node_count": (
+                        cluster.agent_pool_profiles[0].count
+                        if cluster.agent_pool_profiles
+                        else 0
+                    ),
+                    "fqdn": cluster.fqdn,
+                    "region": cluster.location,
+                    "resource_group": self.resource_group,
                     "provider": "azure",
                     "cluster_type": "aks",
                 }
@@ -462,7 +561,35 @@ class AzureProvider(CloudProvider):
         except Exception as e:
             logger.error(f"Failed to list Azure VMs: {e}")
 
-        # TODO: Add AKS cluster listing
+        # List AKS clusters
+        try:
+            aks_clusters = self.container_client.managed_clusters.list_by_resource_group(
+                resource_group_name=self.resource_group
+            )
+
+            for cluster in aks_clusters:
+                # Only include clusters with clustrix tag
+                tags = cluster.tags or {}
+                if tags.get("created_by") == "clustrix":
+                    clusters.append(
+                        {
+                            "name": cluster.name,
+                            "cluster_id": cluster.id,
+                            "type": "aks",
+                            "status": cluster.provisioning_state.lower(),
+                            "kubernetes_version": cluster.kubernetes_version,
+                            "node_count": (
+                                cluster.agent_pool_profiles[0].count
+                                if cluster.agent_pool_profiles
+                                else 0
+                            ),
+                            "fqdn": cluster.fqdn,
+                            "region": cluster.location,
+                            "resource_group": self.resource_group,
+                        }
+                    )
+        except Exception as e:
+            logger.error(f"Failed to list AKS clusters: {e}")
 
         return clusters
 
