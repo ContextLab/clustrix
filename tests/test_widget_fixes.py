@@ -11,8 +11,8 @@ from clustrix.config import ClusterConfig
 
 # Check if widget dependencies are available
 try:
-    import IPython
-    import ipywidgets
+    import IPython  # noqa: F401
+    import ipywidgets  # noqa: F401
 
     WIDGET_DEPS_AVAILABLE = True
 except ImportError:

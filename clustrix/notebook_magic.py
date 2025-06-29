@@ -2091,7 +2091,7 @@ class EnhancedClusterConfigWidget:
             if not hf_token:
                 return False
 
-            # Test HuggingFace API connectivity using models endpoint 
+            # Test HuggingFace API connectivity using models endpoint
             # (whoami endpoint appears to have permission issues with some tokens)
             headers = {"Authorization": f"Bearer {hf_token}"}
             response = requests.get(
@@ -2110,13 +2110,17 @@ class EnhancedClusterConfigWidget:
             if response.status_code == 200:
                 # Successfully authenticated and can access models API
                 models = response.json()
-                
+
                 # Debug: Print successful connection info
                 if hasattr(self, "status_output"):
                     with self.status_output:
-                        print(f"🔍 Debug: Successfully retrieved {len(models)} model(s)")
+                        print(
+                            f"🔍 Debug: Successfully retrieved {len(models)} model(s)"
+                        )
                         if hf_username:
-                            print(f"🔍 Debug: Token validated for user: '{hf_username}'")
+                            print(
+                                f"🔍 Debug: Token validated for user: '{hf_username}'"
+                            )
 
                 return True
 
