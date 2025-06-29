@@ -200,10 +200,10 @@ class TestDeployPublicKey:
             result = deploy_public_key("test.host.com", "testuser", pub_key_path)
             assert result is True
 
-            # Verify ssh-copy-id was called
-            expected_cmd = ["ssh-copy-id", "-i", pub_key_path, "testuser@test.host.com"]
+            # Verify ssh-copy-id was called with StrictHostKeyChecking option
+            expected_cmd = ["ssh-copy-id", "-i", pub_key_path, "-o", "StrictHostKeyChecking=accept-new", "testuser@test.host.com"]
             mock_run.assert_called_with(
-                expected_cmd, capture_output=True, text=True, check=True, input=None
+                expected_cmd, capture_output=True, text=True, input=None, timeout=30
             )
         finally:
             os.unlink(pub_key_path)

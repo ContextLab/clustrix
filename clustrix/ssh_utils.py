@@ -188,11 +188,11 @@ def generate_ssh_key(
 def add_host_key(hostname: str, port: int = 22) -> bool:
     """
     Add host key to known_hosts file to avoid verification prompts.
-    
+
     Args:
         hostname: Target hostname
         port: SSH port (default 22)
-        
+
     Returns:
         True if successful, False otherwise
     """
@@ -201,21 +201,21 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
         if port != 22:
             cmd.extend(["-p", str(port)])
         cmd.append(hostname)
-        
+
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0 and result.stdout.strip():
             # Append to known_hosts file
             known_hosts_path = Path.home() / ".ssh" / "known_hosts"
             known_hosts_path.parent.mkdir(mode=0o700, exist_ok=True)
-            
+
             with open(known_hosts_path, "a") as f:
                 f.write(result.stdout)
-            
+
             logger.info(f"Added host key for {hostname} to known_hosts")
             return True
     except Exception as e:
         logger.debug(f"Failed to add host key for {hostname}: {e}")
-    
+
     return False
 
 
@@ -251,7 +251,7 @@ def deploy_public_key(
 
     # First, add the host key to known_hosts to avoid verification prompts
     add_host_key(hostname, port)
-    
+
     # Try ssh-copy-id first (most reliable method) with host key acceptance
     try:
         cmd = ["ssh-copy-id", "-i", public_key_path]
@@ -266,16 +266,22 @@ def deploy_public_key(
             capture_output=True,
             text=True,
             input=password if password else None,
-            timeout=30
+            timeout=30,
         )
-        
+
         if result.returncode == 0:
             logger.info("Successfully deployed public key using ssh-copy-id")
             return True
         else:
-            logger.debug(f"ssh-copy-id failed with return code {result.returncode}: {result.stderr}")
+            logger.debug(
+                f"ssh-copy-id failed with return code {result.returncode}: {result.stderr}"
+            )
 
-    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired) as e:
+    except (
+        subprocess.CalledProcessError,
+        FileNotFoundError,
+        subprocess.TimeoutExpired,
+    ) as e:
         logger.debug(f"ssh-copy-id failed: {e}, trying manual deployment")
 
     # Fallback: Manual deployment using paramiko
@@ -407,7 +413,7 @@ def setup_ssh_keys(
 
     hostname = config.cluster_host
     username = config.username
-    port = getattr(config, "port", 22)
+    port = getattr(config, "cluster_port", 22)
 
     # Step 1: Check if SSH keys already work
     existing_key = detect_existing_ssh_key(hostname, username, port)
@@ -452,15 +458,18 @@ def setup_ssh_keys(
 
     # Step 4: Test the connection (with retry for key propagation)
     import time
+
     max_retries = 3
     retry_delay = 2
-    
+
     for attempt in range(max_retries):
         test_key = detect_existing_ssh_key(hostname, username, port)
         if test_key == config.key_file:
             break
         elif attempt < max_retries - 1:
-            logger.info(f"Connection test attempt {attempt + 1} failed, retrying in {retry_delay}s...")
+            logger.info(
+                f"Connection test attempt {attempt + 1} failed, retrying in {retry_delay}s..."
+            )
             time.sleep(retry_delay)
         else:
             # Final attempt failed - but still return success since key was generated and deployed

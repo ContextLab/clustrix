@@ -50,7 +50,7 @@ try:
         from .notebook_magic import load_ipython_extension, auto_display_on_import
 
         # Load the magic command (only register once)
-        if not hasattr(ipython, '_clustrix_magic_loaded'):
+        if not hasattr(ipython, "_clustrix_magic_loaded"):
             load_ipython_extension(ipython)
             ipython._clustrix_magic_loaded = True
 

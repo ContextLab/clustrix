@@ -364,8 +364,8 @@ class TestEnhancedClusterConfigWidget:
         widget.configs["test_load"] = test_config
         widget._load_config_to_widgets("test_load")
         # Check that widget values were updated
-        # Note: widget now uses config key as display name instead of "name" field
-        assert widget.config_name.value == "test_load"
+        # Widget uses "name" field from config if present, otherwise falls back to config key
+        assert widget.config_name.value == "Test Load Config"  # Uses the "name" field from test_config
         assert widget.cluster_type.value == "kubernetes"
         assert widget.host_field.value == "k8s.example.com"
         assert widget.port_field.value == 443
@@ -471,22 +471,11 @@ class TestAutoDisplayFunctionality:
         # Use functions from the mocked module
         import clustrix.notebook_magic
 
-        # Reset the global variable
-        with patch("clustrix.notebook_magic._auto_displayed", False):
-            with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
-                clustrix.notebook_magic.auto_display_on_import()
-                mock_display.assert_called_once_with(auto_display=True)
+        # Test auto_display_on_import function
+        with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
+            clustrix.notebook_magic.auto_display_on_import()
+            mock_display.assert_called_once_with(auto_display=True)
 
-    def test_auto_display_already_displayed(self, mock_ipython_environment):
-        """Test that auto display doesn't trigger twice."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
-
-        # Set global variable to True
-        with patch("clustrix.notebook_magic._auto_displayed", True):
-            with patch("clustrix.notebook_magic.display_config_widget") as mock_display:
-                clustrix.notebook_magic.auto_display_on_import()
-                mock_display.assert_not_called()
 
     def test_auto_display_no_ipython(self):
         """Test auto display when IPython not available."""

@@ -3,3 +3,7 @@
 *.DS_Store
 !*.gitkeep
 clustrix.egg-info
+
+# Test notebooks with hardcoded credentials
+test_ssh_setup.ipynb
+clustrix_test_env/

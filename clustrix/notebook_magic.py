@@ -568,10 +568,12 @@ class EnhancedClusterConfigWidget:
         new_name = change["new"].strip()
         if not new_name:
             return
-            
+
         if self.current_config_name and self.current_config_name in self.configs:
             # Check if this is actually a name change (not just loading)
-            current_display_name = self.configs[self.current_config_name].get("name", self.current_config_name)
+            current_display_name = self.configs[self.current_config_name].get(
+                "name", self.current_config_name
+            )
             if new_name != current_display_name:
                 # Update the name in the current configuration
                 self.configs[self.current_config_name]["name"] = new_name
@@ -620,7 +622,7 @@ class EnhancedClusterConfigWidget:
             placeholder="Enter password for initial SSH key deployment",
             style={"description_width": "120px"},
             layout=widgets.Layout(width="100%", margin="5px 0px"),
-            tooltip="Password is only used for initial SSH key deployment and is not stored"
+            tooltip="Password is only used for initial SSH key deployment and is not stored",
         )
         # Port field
         self.port_field = widgets.IntText(
@@ -1057,7 +1059,9 @@ class EnhancedClusterConfigWidget:
                 self.port_field,
                 widgets.HTML("<h6>SSH Key Setup (Optional)</h6>"),
                 self.ssh_password_field,
-                widgets.HTML("<small><em>Password is only used for initial SSH key deployment and is not stored</em></small>"),
+                widgets.HTML(
+                    "<small><em>Password is only used for initial SSH key deployment and is not stored</em></small>"
+                ),
             ]
         )
         # Kubernetes fields
@@ -1375,7 +1379,9 @@ class EnhancedClusterConfigWidget:
         self.current_config_name = config_name
 
         # Basic fields
-        self.config_name.value = config_name  # Use the key as the display name
+        self.config_name.value = config.get(
+            "name", config_name
+        )  # Use the name field or fall back to key
         cluster_type = config.get("cluster_type", "local")
         self.cluster_type.value = cluster_type
 
@@ -2532,14 +2538,22 @@ class EnhancedClusterConfigWidget:
                 print("   This may take a moment...")
 
                 # Get password from the widget
-                password = self.ssh_password_field.value.strip() if self.ssh_password_field.value else None
-                
+                password = (
+                    self.ssh_password_field.value.strip()
+                    if self.ssh_password_field.value
+                    else None
+                )
+
                 if not password:
-                    print("ℹ️  No password provided - attempting passwordless connection")
-                    print("   If this fails, please enter your SSH password above and try again")
+                    print(
+                        "ℹ️  No password provided - attempting passwordless connection"
+                    )
+                    print(
+                        "   If this fails, please enter your SSH password above and try again"
+                    )
                 else:
                     print("🔐 Using provided password for initial authentication")
-                
+
                 # Generate and deploy SSH keys
                 updated_config = setup_ssh_keys(
                     cluster_config,
@@ -2549,7 +2563,7 @@ class EnhancedClusterConfigWidget:
                     passphrase="",  # No passphrase for automation
                     password=password,  # Use password from widget for initial auth
                 )
-                
+
                 # Clear password field for security after use
                 self.ssh_password_field.value = ""
 
