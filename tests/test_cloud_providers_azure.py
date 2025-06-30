@@ -1048,7 +1048,7 @@ class TestAzureProviderEdgeCases:
 
             result = provider.create_vm(
                 vm_name="test-vm",
-                admin_username="testuser"
+                admin_username="testuser",
                 # No admin_password provided
             )
 
