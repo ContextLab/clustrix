@@ -1,8 +1,18 @@
 repos:
+  - repo: local
+    hooks:
+      - id: auto-format
+        name: Auto-format with black (auto-fix)
+        entry: python scripts/pre_commit_auto_format.py
+        language: system
+        files: ^(clustrix/|tests/).*\.py$
+        pass_filenames: false
+        
   - repo: https://github.com/psf/black
-    rev: 23.12.1
+    rev: 25.1.0  # Use same version as local environment
     hooks:
       - id: black
+        name: Black formatting verification
         language_version: python3
         files: ^(clustrix/|tests/)
         
