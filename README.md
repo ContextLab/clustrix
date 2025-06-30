@@ -513,7 +513,6 @@ processed_data = process_large_dataset('/path/to/large_file.csv')
 Clustrix maintains high code quality standards:
 
 - **Testing**: Comprehensive test suite with pytest
-- **Coverage**: Currently at 47% and improving
 - **Code Style**: Enforced with Black formatter
 - **Linting**: Checked with flake8
 - **Type Checking**: Validated with mypy
