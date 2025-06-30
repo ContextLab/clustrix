@@ -1,6 +1,8 @@
 import pytest
 import pickle
-from unittest.mock import Mock, patch
+import os
+import sys
+from unittest.mock import Mock, patch, MagicMock
 from clustrix.executor import ClusterExecutor
 from clustrix.config import ClusterConfig
 import clustrix.executor
@@ -615,3 +617,204 @@ class TestClusterExecutor:
         # Test unknown job
         error_log = executor._get_error_log("unknown_job")
         assert "No job info available" in error_log
+
+
+class TestClusterExecutorEdgeCases:
+    """Test edge cases and error handling in ClusterExecutor."""
+
+    def test_setup_ssh_connection_no_host(self):
+        """Test SSH setup fails when no cluster_host is specified."""
+        config = ClusterConfig(cluster_host=None)
+        executor = ClusterExecutor(config)
+
+        with pytest.raises(ValueError, match="cluster_host must be specified"):
+            executor._setup_ssh_connection()
+
+    @patch("os.getenv")
+    @patch("paramiko.SSHClient")
+    def test_setup_ssh_connection_no_username(self, mock_ssh_class, mock_getenv):
+        """Test SSH setup uses environment USER when no username specified."""
+        mock_getenv.return_value = "envuser"
+        config = ClusterConfig(cluster_host="test.cluster.com", username=None)
+        executor = ClusterExecutor(config)
+
+        mock_ssh = Mock()
+        mock_ssh_class.return_value = mock_ssh
+
+        executor._setup_ssh_connection()
+
+        # Should use environment USER
+        mock_getenv.assert_called_with("USER")
+        connect_call = mock_ssh.connect.call_args[1]
+        assert connect_call["username"] == "envuser"
+
+    @patch("paramiko.SSHClient")
+    def test_setup_ssh_connection_no_auth(self, mock_ssh_class):
+        """Test SSH setup with neither key nor password (uses agent/default)."""
+        config = ClusterConfig(
+            cluster_host="test.cluster.com",
+            username="testuser",
+            key_file=None,
+            password=None,
+        )
+        executor = ClusterExecutor(config)
+
+        mock_ssh = Mock()
+        mock_ssh_class.return_value = mock_ssh
+
+        executor._setup_ssh_connection()
+
+        # Should not include key_filename or password
+        connect_call = mock_ssh.connect.call_args[1]
+        assert "key_filename" not in connect_call
+        assert "password" not in connect_call
+        assert connect_call["username"] == "testuser"
+
+    def test_setup_kubernetes_import_error(self):
+        """Test Kubernetes setup when kubernetes package not available."""
+        config = ClusterConfig(cluster_type="kubernetes")
+        executor = ClusterExecutor(config)
+
+        # Mock import error by patching the import at module level
+        with patch.dict("sys.modules", {"kubernetes": None}):
+            with pytest.raises(ImportError, match="kubernetes package required"):
+                executor._setup_kubernetes()
+
+    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
+    @patch("kubernetes.client")
+    @patch("kubernetes.config")
+    @patch("clustrix.executor.logger")
+    def test_setup_kubernetes_with_cloud_auto_configure_success(
+        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
+    ):
+        """Test Kubernetes setup with successful cloud auto-configuration."""
+        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
+        executor = ClusterExecutor(config)
+
+        # Mock cloud manager
+        mock_cloud_manager = Mock()
+        mock_cloud_manager_class.return_value = mock_cloud_manager
+        mock_cloud_manager.auto_configure.return_value = {
+            "auto_configured": True,
+            "provider": "aws",
+            "cluster_name": "test-cluster",
+        }
+
+        executor._setup_kubernetes()
+
+        mock_cloud_manager.auto_configure.assert_called_once()
+        mock_logger.info.assert_called_with("Auto-configured aws cluster: test-cluster")
+
+    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
+    @patch("kubernetes.client")
+    @patch("kubernetes.config")
+    @patch("clustrix.executor.logger")
+    def test_setup_kubernetes_with_cloud_auto_configure_skipped(
+        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
+    ):
+        """Test Kubernetes setup when cloud auto-configuration is skipped."""
+        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
+        executor = ClusterExecutor(config)
+
+        # Mock cloud manager
+        mock_cloud_manager = Mock()
+        mock_cloud_manager_class.return_value = mock_cloud_manager
+        mock_cloud_manager.auto_configure.return_value = {
+            "auto_configured": False,
+            "reason": "No cloud credentials found",
+            "error": "Authentication failed",
+        }
+
+        executor._setup_kubernetes()
+
+        mock_logger.info.assert_called_with(
+            "Cloud auto-configuration skipped: No cloud credentials found"
+        )
+        mock_logger.warning.assert_called_with(
+            "Auto-configuration error: Authentication failed"
+        )
+
+    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
+    @patch("kubernetes.client")
+    @patch("kubernetes.config")
+    @patch("clustrix.executor.logger")
+    def test_setup_kubernetes_cloud_manager_exception(
+        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
+    ):
+        """Test Kubernetes setup when cloud manager raises exception."""
+        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
+        executor = ClusterExecutor(config)
+
+        # Mock cloud manager to raise exception
+        mock_cloud_manager_class.side_effect = ImportError("Cloud module not found")
+
+        executor._setup_kubernetes()
+
+        mock_logger.warning.assert_called_with(
+            "Cloud provider auto-configuration failed: Cloud module not found"
+        )
+
+    @patch("kubernetes.client")
+    @patch("kubernetes.config")
+    def test_setup_kubernetes_no_cloud_auto_configure(
+        self, mock_k8s_config, mock_k8s_client
+    ):
+        """Test Kubernetes setup without cloud auto-configuration."""
+        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=False)
+        executor = ClusterExecutor(config)
+
+        executor._setup_kubernetes()
+
+        # Should load kube config normally
+        mock_k8s_config.load_kube_config.assert_called_once()
+        mock_k8s_client.ApiClient.assert_called_once()
+
+
+class TestJobSubmissionEdgeCases:
+    """Test job submission edge cases and error handling."""
+
+    @pytest.fixture
+    def mock_executor(self):
+        """Create a mock executor with necessary setup."""
+        config = ClusterConfig(
+            cluster_host="test.cluster.com", cluster_type="slurm", username="testuser"
+        )
+        executor = ClusterExecutor(config)
+
+        # Mock SSH connection
+        executor.ssh_client = Mock()
+        executor.sftp_client = Mock()
+
+        return executor
+
+    def test_submit_job_unsupported_cluster_type(self, mock_executor):
+        """Test job submission with unsupported cluster type."""
+        mock_executor.config.cluster_type = "unsupported_type"
+
+        func_data = {"function": b"test", "args": b"test", "kwargs": b"test"}
+        job_config = {"cores": 2}
+
+        with pytest.raises(ValueError, match="Unsupported cluster type"):
+            mock_executor.submit_job(func_data, job_config)
+
+
+class TestJobStatusAndResults:
+    """Test job status checking and result retrieval."""
+
+    @pytest.fixture
+    def mock_executor(self):
+        """Create a mock executor."""
+        config = ClusterConfig(
+            cluster_host="test.cluster.com", cluster_type="slurm", username="testuser"
+        )
+        executor = ClusterExecutor(config)
+        executor.ssh_client = Mock()
+        executor.sftp_client = Mock()
+        return executor
+
+    def test_get_job_status_unsupported_type(self, mock_executor):
+        """Test job status check with unsupported cluster type."""
+        mock_executor.config.cluster_type = "unsupported"
+
+        status = mock_executor.get_job_status("job123")
+        assert status == "unknown"
