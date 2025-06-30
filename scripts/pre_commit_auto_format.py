@@ -20,14 +20,21 @@ from pathlib import Path
 def run_command(cmd, description="", check=True, capture_output=True):
     """Run a command and return result."""
     try:
-        result = subprocess.run(
-            cmd, 
-            shell=isinstance(cmd, str),
-            check=check, 
-            capture_output=capture_output,
-            text=True,
-            args=cmd if isinstance(cmd, list) else None
-        )
+        if isinstance(cmd, str):
+            result = subprocess.run(
+                cmd, 
+                shell=True,
+                check=check, 
+                capture_output=capture_output,
+                text=True
+            )
+        else:
+            result = subprocess.run(
+                cmd,
+                check=check, 
+                capture_output=capture_output,
+                text=True
+            )
         return result
     except subprocess.CalledProcessError as e:
         if not check:
