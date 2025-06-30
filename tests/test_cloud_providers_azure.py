@@ -274,9 +274,9 @@ class TestAzureProvider:
             # Mock network resources
             mock_vnet = Mock()
             mock_vnet.subnets = [Mock()]
-            mock_vnet.subnets[
-                0
-            ].id = "/subscriptions/test/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vm-vnet/subnets/test-vm-subnet"
+            mock_vnet.subnets[0].id = (
+                "/subscriptions/test/resourceGroups/test-rg/providers/Microsoft.Network/virtualNetworks/test-vm-vnet/subnets/test-vm-subnet"
+            )
             authenticated_provider.network_client.virtual_networks.begin_create_or_update.return_value.result.return_value = (
                 mock_vnet
             )
