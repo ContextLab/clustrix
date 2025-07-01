@@ -742,19 +742,11 @@ def load_and_execute():
             # Create a proper config object
             class ClusterConfig:
                 def __init__(self, **kwargs):
+                    # Set cluster_type explicitly to avoid recursion
+                    self.cluster_type = kwargs.get('cluster_type', 'local')
+                    # Set all other attributes
                     for k, v in kwargs.items():
                         setattr(self, k, v)
-                
-                @property
-                def cluster_type(self):
-                    return getattr(self, '_cluster_type', self.get('cluster_type', 'local'))
-                
-                @cluster_type.setter  
-                def cluster_type(self, value):
-                    self._cluster_type = value
-                
-                def get(self, key, default=None):
-                    return getattr(self, key, default)
             
             config_obj = ClusterConfig(**config_data)
             
