@@ -9,21 +9,21 @@ import os
 import glob as glob_module
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from dataclasses import dataclass
 
 import paramiko
 
 from .config import ClusterConfig
 
 
-@dataclass
 class FileInfo:
     """File information structure."""
 
-    size: int
-    modified: float  # Unix timestamp
-    is_dir: bool
-    permissions: str
+    def __init__(self, size: int, modified: float, is_dir: bool, permissions: str):
+        """Initialize FileInfo with file metadata."""
+        self.size = size
+        self.modified = modified  # Unix timestamp
+        self.is_dir = is_dir
+        self.permissions = permissions
 
     @property
     def modified_datetime(self):
@@ -32,13 +32,32 @@ class FileInfo:
 
         return datetime.fromtimestamp(self.modified)
 
+    def __repr__(self):
+        """String representation of FileInfo."""
+        return (
+            f"FileInfo(size={self.size}, modified={self.modified}, "
+            f"is_dir={self.is_dir}, permissions='{self.permissions}')"
+        )
 
-@dataclass
+    def __eq__(self, other):
+        """Check equality with another FileInfo object."""
+        if not isinstance(other, FileInfo):
+            return False
+        return (
+            self.size == other.size
+            and self.modified == other.modified
+            and self.is_dir == other.is_dir
+            and self.permissions == other.permissions
+        )
+
+
 class DiskUsage:
     """Disk usage information."""
 
-    total_bytes: int
-    file_count: int
+    def __init__(self, total_bytes: int, file_count: int):
+        """Initialize DiskUsage with usage statistics."""
+        self.total_bytes = total_bytes
+        self.file_count = file_count
 
     @property
     def total_mb(self) -> float:
@@ -49,6 +68,21 @@ class DiskUsage:
     def total_gb(self) -> float:
         """Total size in gigabytes."""
         return self.total_bytes / (1024 * 1024 * 1024)
+
+    def __repr__(self):
+        """String representation of DiskUsage."""
+        return (
+            f"DiskUsage(total_bytes={self.total_bytes}, file_count={self.file_count})"
+        )
+
+    def __eq__(self, other):
+        """Check equality with another DiskUsage object."""
+        if not isinstance(other, DiskUsage):
+            return False
+        return (
+            self.total_bytes == other.total_bytes
+            and self.file_count == other.file_count
+        )
 
 
 class ClusterFilesystem:
