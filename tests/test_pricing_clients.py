@@ -53,7 +53,12 @@ class TestPricingCache:
             test_data = {"price": 0.0116}
             cache.set("test_key", test_data)
 
-            # Data should be expired immediately
+            # Add a small delay to ensure cache expires
+            import time
+
+            time.sleep(0.001)  # 1ms delay
+
+            # Data should be expired now
             result = cache.get("test_key")
             assert result is None
 

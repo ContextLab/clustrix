@@ -203,10 +203,13 @@ class ClusterFilesystem:
             # Return relative paths from the search directory
             try:
                 rel_path = item.relative_to(base_path)
-                results.append(str(rel_path))
+                # Normalize path separators to forward slashes for consistency
+                normalized_path = str(rel_path).replace(os.sep, "/")
+                results.append(normalized_path)
             except ValueError:
                 # If relative_to fails, use absolute path
-                results.append(str(item))
+                normalized_path = str(item).replace(os.sep, "/")
+                results.append(normalized_path)
 
         return sorted(results)
 
