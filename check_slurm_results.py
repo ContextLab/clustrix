@@ -37,10 +37,10 @@ def main():
         # Look for recent result files
         result_dir = "/dartfs-hpc/rc/home/b/f002d6b/clustrix/packaging_tests"
         
-        print(f"\n📂 Looking for recent result files (jobs 5230*):")
+        print(f"\n📂 Looking for newest result files (jobs 523031*):")
         
-        # Look specifically for recent jobs
-        stdin, stdout, stderr = ssh_client.exec_command(f"find {result_dir} -name 'result_*_523*.json' | sort")
+        # Look specifically for newest jobs  
+        stdin, stdout, stderr = ssh_client.exec_command(f"find {result_dir} -name 'result_*_523031*.json' | sort")
         recent_files = stdout.read().decode().strip().split('\n')
         
         print(f"📂 Recent result files: {recent_files}")

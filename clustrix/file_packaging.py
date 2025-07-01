@@ -744,6 +744,10 @@ def load_and_execute():
                 def __init__(self, **kwargs):
                     # Set cluster_type explicitly to avoid recursion
                     self.cluster_type = kwargs.get('cluster_type', 'local')
+                    # Set default values for filesystem operations
+                    self.cluster_port = kwargs.get('cluster_port', 22)
+                    self.key_file = kwargs.get('key_file', None)
+                    self.password = kwargs.get('password', None)
                     # Set all other attributes
                     for k, v in kwargs.items():
                         setattr(self, k, v)
