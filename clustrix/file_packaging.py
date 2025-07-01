@@ -736,25 +736,61 @@ def load_and_execute():
         # Execute the function
         result = func(*args, **kwargs)
         
-        # Save result
-        with open(package_dir / "result.pkl", "wb") as f:
-            pickle.dump(result, f)
+        # Save result to accessible directory (where SLURM job was submitted)
+        # Use environment variable set by wrapper script
+        result_working_dir = os.environ.get("CLUSTRIX_ORIGINAL_CWD", "/tmp")
+        
+        # Create result file in accessible location
+        result_file = f"result_{{function_name}}_{{os.environ.get('SLURM_JOB_ID', 'unknown')}}.json"
+        result_path = os.path.join(result_working_dir, result_file)
+        
+        # Save result as JSON for easy access
+        result_data = {{
+            "function_name": function_name,
+            "status": "SUCCESS",
+            "result": result,
+            "metadata": {{
+                "hostname": os.environ.get("HOSTNAME", "unknown"),
+                "slurm_job_id": os.environ.get("SLURM_JOB_ID", "not_set"),
+                "python_version": sys.version.split()[0],
+                "execution_directory": str(package_dir),
+                "timestamp": __import__("datetime").datetime.now().isoformat()
+            }}
+        }}
+        
+        with open(result_path, "w") as f:
+            json.dump(result_data, f, indent=2, default=str)
         
         print(f"Function {{function_name}} executed successfully")
+        print(f"Result saved to: {{result_path}}")
         return result
         
     except Exception as e:
-        # Save error information
+        # Save error information to accessible location
+        result_working_dir = os.environ.get("CLUSTRIX_ORIGINAL_CWD", "/tmp")
+        function_name = metadata.get("function_info", {{}}).get("name", "unknown")
+        
+        error_file = f"error_{{function_name}}_{{os.environ.get('SLURM_JOB_ID', 'unknown')}}.json"
+        error_path = os.path.join(result_working_dir, error_file)
+        
         error_info = {{
+            "function_name": function_name,
+            "status": "ERROR",
             "error": str(e),
             "error_type": type(e).__name__,
-            "traceback": traceback.format_exc()
+            "traceback": traceback.format_exc(),
+            "metadata": {{
+                "hostname": os.environ.get("HOSTNAME", "unknown"),
+                "slurm_job_id": os.environ.get("SLURM_JOB_ID", "not_set"),
+                "timestamp": __import__("datetime").datetime.now().isoformat()
+            }}
         }}
         
-        with open(package_dir / "error.pkl", "wb") as f:
-            pickle.dump(error_info, f)
+        with open(error_path, "w") as f:
+            json.dump(error_info, f, indent=2)
         
         print(f"Function execution failed: {{e}}")
+        print(f"Error saved to: {{error_path}}")
         raise
 
 if __name__ == "__main__":

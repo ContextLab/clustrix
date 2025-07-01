@@ -528,6 +528,10 @@ def main():
     print(f"Starting execution wrapper for {test_name}")
     print(f"Package location: {remote_package_path}")
     
+    # Save the original working directory for result files
+    original_cwd = os.getcwd()
+    print(f"Original working directory: {{original_cwd}}")
+    
     # Extract package to temporary directory
     temp_dir = tempfile.mkdtemp(prefix="clustrix_exec_{test_name}_")
     print(f"Extracting package to: {{temp_dir}}")
@@ -539,6 +543,9 @@ def main():
         
         # Change to the package directory
         os.chdir(temp_dir)
+        
+        # Set environment variable for original working directory
+        os.environ["CLUSTRIX_ORIGINAL_CWD"] = original_cwd
         
         # Run the packaged execution script
         print("Running packaged execution script with dependency resolution...")
