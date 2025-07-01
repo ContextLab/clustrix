@@ -94,6 +94,127 @@ class ClusterFilesystem:
         self._ssh_client: Optional[paramiko.SSHClient] = None
         self._sftp_client: Optional[paramiko.SFTPClient] = None
 
+        # Auto-detect if we're running on the target cluster (for shared filesystems)
+        self._auto_detect_cluster_location()
+
+    def _auto_detect_cluster_location(self):
+        """
+        Auto-detect if we're already running on the target cluster.
+
+        If we're running on the same cluster as the target, we should use local
+        filesystem operations instead of SSH, since most HPC clusters have shared
+        filesystems (NFS/Lustre) across head and compute nodes.
+        """
+        # Only attempt detection if cluster_type is not already 'local'
+        if self.config.cluster_type == "local":
+            return
+
+        # Skip detection if no cluster_host is configured
+        if not hasattr(self.config, "cluster_host") or not self.config.cluster_host:
+            return
+
+        try:
+            import socket
+
+            current_hostname = socket.gethostname()
+            target_host = self.config.cluster_host
+
+            # Check various hostname matching scenarios
+            is_on_target_cluster = (
+                # Exact match
+                current_hostname == target_host
+                or
+                # Current host contains target (e.g., s17.hpcc.dartmouth.edu contains ndoli.dartmouth.edu)
+                target_host in current_hostname
+                or
+                # Target contains current (e.g., compute node s17 part of ndoli.dartmouth.edu)
+                current_hostname in target_host
+                or
+                # Domain matching (e.g., s04.hpcc.dartmouth.edu and ndoli.dartmouth.edu)
+                self._same_domain(current_hostname, target_host)
+                or
+                # HPC cluster specific: check if both are in same institution domain
+                self._same_institution_domain(current_hostname, target_host)
+            )
+
+            if is_on_target_cluster:
+                # We're on the target cluster - use local filesystem operations
+                original_cluster_type = self.config.cluster_type
+                self.config.cluster_type = "local"
+
+                # Log the detection for debugging
+                print(
+                    f"Cluster detection: Running on target cluster (hostname: {current_hostname})"
+                )
+                print(
+                    f"Switched from {original_cluster_type} to local filesystem operations"
+                )
+
+        except Exception as e:
+            # If detection fails, continue with original cluster_type
+            print(f"Warning: Cluster detection failed: {e}")
+            pass
+
+    def _same_domain(self, host1: str, host2: str) -> bool:
+        """Check if two hostnames are in the same domain."""
+        try:
+            # Extract domain parts (ignore first part which might be different)
+            domain1_parts = host1.split(".")[1:]  # Skip hostname, get domain
+            domain2_parts = host2.split(".")[1:]  # Skip hostname, get domain
+
+            # Check if domains match (at least 2 parts)
+            if len(domain1_parts) >= 2 and len(domain2_parts) >= 2:
+                return domain1_parts == domain2_parts
+
+        except (IndexError, AttributeError):
+            pass
+
+        return False
+
+    def _same_institution_domain(self, host1: str, host2: str) -> bool:
+        """
+        Check if two hostnames are from the same institution.
+
+        This handles cases like:
+        - s04.hpcc.dartmouth.edu (compute node)
+        - ndoli.dartmouth.edu (head node)
+
+        Both should be considered the same cluster.
+        """
+        try:
+            # Split hostnames into parts
+            parts1 = host1.split(".")
+            parts2 = host2.split(".")
+
+            # For HPC clusters, check if they share the institution domain
+            # e.g., both end in "dartmouth.edu"
+            if len(parts1) >= 2 and len(parts2) >= 2:
+                # Get the last 2 parts (institution.tld)
+                institution1 = ".".join(parts1[-2:])
+                institution2 = ".".join(parts2[-2:])
+
+                if institution1 == institution2:
+                    # Same institution - likely same cluster
+                    return True
+
+            # Also check for common HPC patterns
+            # e.g., login.cluster.edu and compute01.cluster.edu
+            if len(parts1) >= 3 and len(parts2) >= 3:
+                # Check if middle part matches (cluster name)
+                cluster1_parts = parts1[-3:]  # Get last 3 parts
+                cluster2_parts = parts2[-3:]  # Get last 3 parts
+
+                # If the cluster and institution parts match
+                if (
+                    cluster1_parts[1:] == cluster2_parts[1:]
+                ):  # Same cluster.institution.edu
+                    return True
+
+        except (IndexError, AttributeError):
+            pass
+
+        return False
+
     def __del__(self):
         """Clean up SSH connections."""
         self._close_connections()
