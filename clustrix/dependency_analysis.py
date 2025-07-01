@@ -17,7 +17,9 @@ from pathlib import Path
 class FilesystemCall:
     """Represents a call to cluster filesystem function."""
 
-    def __init__(self, function: str, args: List[str], lineno: int, context: Optional[str] = None):
+    def __init__(
+        self, function: str, args: List[str], lineno: int, context: Optional[str] = None
+    ):
         self.function = function
         self.args = args
         self.lineno = lineno
@@ -30,8 +32,14 @@ class FilesystemCall:
 class ImportInfo:
     """Information about an import statement."""
 
-    def __init__(self, module: str, names: List[str], alias: Optional[str] = None, 
-                 is_from_import: bool = False, lineno: int = 0):
+    def __init__(
+        self,
+        module: str,
+        names: List[str],
+        alias: Optional[str] = None,
+        is_from_import: bool = False,
+        lineno: int = 0,
+    ):
         self.module = module
         self.names = names
         self.alias = alias
@@ -45,8 +53,13 @@ class ImportInfo:
 class LocalFunctionCall:
     """Information about a call to a locally-defined function."""
 
-    def __init__(self, function_name: str, lineno: int, defined_in_scope: bool = False,
-                 source_file: Optional[str] = None):
+    def __init__(
+        self,
+        function_name: str,
+        lineno: int,
+        defined_in_scope: bool = False,
+        source_file: Optional[str] = None,
+    ):
         self.function_name = function_name
         self.lineno = lineno
         self.defined_in_scope = defined_in_scope
@@ -59,7 +72,9 @@ class LocalFunctionCall:
 class FileReference:
     """Reference to a file in the code."""
 
-    def __init__(self, path: str, operation: str, lineno: int, is_relative: bool = True):
+    def __init__(
+        self, path: str, operation: str, lineno: int, is_relative: bool = True
+    ):
         self.path = path
         self.operation = operation  # 'read', 'write', 'open', etc.
         self.lineno = lineno
@@ -150,7 +165,9 @@ class DependencyAnalyzer:
             raise ValueError(f"Invalid syntax in function {func_name}: {e}")
 
         # Initialize dependency graph
-        dependencies = DependencyGraph(function_name=func_name, source_code=dedented_source)
+        dependencies = DependencyGraph(
+            function_name=func_name, source_code=dedented_source
+        )
 
         # Analyze different types of dependencies
         self._analyze_imports(tree, dependencies)
