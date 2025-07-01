@@ -19,6 +19,7 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 - **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
 - **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
+- **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Native Cost Monitoring**: Built-in cost tracking for all major cloud providers
 - **Kubernetes Support**: Deploy to EKS, GKE, AKS, or any Kubernetes cluster
@@ -202,6 +203,66 @@ environment_variables:
 ```
 
 ## Advanced Usage
+
+### Unified Filesystem Utilities
+
+Clustrix provides unified filesystem operations that work seamlessly across local and remote clusters:
+
+```python
+from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists, cluster_glob
+from clustrix.config import ClusterConfig
+
+# Configure for local or remote operations
+config = ClusterConfig(
+    cluster_type="slurm",  # or "local" for local operations
+    cluster_host="cluster.edu",
+    username="researcher",
+    remote_work_dir="/scratch/project"
+)
+
+# List directory contents (works locally and remotely)
+files = cluster_ls("data/", config)
+
+# Find files by pattern
+csv_files = cluster_find("*.csv", "datasets/", config)
+
+# Check file existence
+if cluster_exists("results/output.json", config):
+    print("Results already computed!")
+
+# Get file information
+file_info = cluster_stat("large_dataset.h5", config)
+print(f"Dataset size: {file_info.size / 1e9:.1f} GB")
+
+# Use with @cluster decorator for data-driven workflows
+@cluster(cores=8)
+def process_datasets(config):
+    # Find all data files on the cluster
+    data_files = cluster_glob("*.csv", "input/", config)
+    
+    results = []
+    for filename in data_files:  # Loop gets parallelized automatically
+        # Check file size before processing
+        file_info = cluster_stat(filename, config)
+        if file_info.size > 100_000_000:  # Large files
+            result = process_large_file(filename, config)
+        else:
+            result = process_small_file(filename, config)
+        results.append(result)
+    
+    return results
+```
+
+**Available filesystem operations:**
+
+- `cluster_ls()` - List directory contents
+- `cluster_find()` - Find files by pattern (recursive)
+- `cluster_stat()` - Get file information (size, modified time, permissions)
+- `cluster_exists()` - Check if file/directory exists
+- `cluster_isdir()` / `cluster_isfile()` - Check file type
+- `cluster_glob()` - Pattern matching for files
+- `cluster_du()` - Directory usage information
+- `cluster_count_files()` - Count files matching pattern
 
 ### Cost Monitoring
 

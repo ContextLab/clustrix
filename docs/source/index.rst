@@ -21,6 +21,7 @@ Features
 - **Simple Decorator Interface**: Just add ``@cluster`` to any function
 - **Interactive Jupyter Widget**: ``%%clusterfy`` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH  
+- **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Native Cost Monitoring**: Built-in cost tracking for AWS, GCP, Azure, and Lambda Cloud
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment  
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
@@ -153,6 +154,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Tutorials
    
+   tutorials/filesystem_tutorial
    tutorials/slurm_tutorial
    tutorials/pbs_tutorial
    tutorials/kubernetes_tutorial
@@ -161,6 +163,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Interactive Notebooks
    
+   notebooks/filesystem_tutorial
    notebooks/cluster_config_example
    notebooks/complete_api_demo
    notebooks/slurm_tutorial
@@ -186,6 +189,7 @@ Table of Contents
    :caption: API Reference
 
    api/decorator
+   api/filesystem
    api/config
    api/notebook_magic
    api/cost_monitoring
