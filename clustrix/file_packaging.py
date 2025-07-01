@@ -729,9 +729,49 @@ def load_and_execute():
         else:
             raise ValueError(f"Function {{function_name}} not found after execution")
         
-        # Get arguments
+        # Get arguments and reconstruct config objects if needed
         args = execution_info["args"]
         kwargs = execution_info["kwargs"]
+        
+        # Load cluster config for reconstruction
+        config_file = package_dir / "cluster_config.json"
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config_data = json.load(f)
+            
+            # Create a proper config object
+            class ClusterConfig:
+                def __init__(self, **kwargs):
+                    for k, v in kwargs.items():
+                        setattr(self, k, v)
+                
+                @property
+                def cluster_type(self):
+                    return getattr(self, '_cluster_type', self.get('cluster_type', 'local'))
+                
+                @cluster_type.setter  
+                def cluster_type(self, value):
+                    self._cluster_type = value
+                
+                def get(self, key, default=None):
+                    return getattr(self, key, default)
+            
+            config_obj = ClusterConfig(**config_data)
+            
+            # Replace any string config arguments with proper config object
+            new_args = []
+            for arg in args:
+                if isinstance(arg, str) and "cluster_type" in str(arg):
+                    # This looks like a serialized config, replace with proper object
+                    new_args.append(config_obj)
+                else:
+                    new_args.append(arg)
+            args = tuple(new_args)
+            
+            # Also check kwargs
+            for key, value in kwargs.items():
+                if isinstance(value, str) and "cluster_type" in str(value):
+                    kwargs[key] = config_obj
         
         # Execute the function
         result = func(*args, **kwargs)
