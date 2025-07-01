@@ -15,7 +15,7 @@ import inspect
 import shutil
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Set, Optional, Any, Callable
+from typing import Dict, Set, Optional, Any, Callable, List
 from .dependency_analysis import DependencyGraph, analyze_function_dependencies
 from .config import ClusterConfig
 
