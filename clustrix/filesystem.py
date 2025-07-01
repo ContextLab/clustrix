@@ -123,18 +123,14 @@ class ClusterFilesystem:
             is_on_target_cluster = (
                 # Exact match
                 current_hostname == target_host
-                or
                 # Current host contains target (e.g., s17.hpcc.dartmouth.edu contains ndoli.dartmouth.edu)
-                target_host in current_hostname
-                or
+                or target_host in current_hostname
                 # Target contains current (e.g., compute node s17 part of ndoli.dartmouth.edu)
-                current_hostname in target_host
-                or
+                or current_hostname in target_host
                 # Domain matching (e.g., s04.hpcc.dartmouth.edu and ndoli.dartmouth.edu)
-                self._same_domain(current_hostname, target_host)
-                or
+                or self._same_domain(current_hostname, target_host)
                 # HPC cluster specific: check if both are in same institution domain
-                self._same_institution_domain(current_hostname, target_host)
+                or self._same_institution_domain(current_hostname, target_host)
             )
 
             if is_on_target_cluster:
