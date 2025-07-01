@@ -1,0 +1,28 @@
+{
+  "summary": {
+    "total_tests": 0,
+    "successful": 0,
+    "failed": 0,
+    "success_rate": 0
+  },
+  "results": {},
+  "job_ids": [
+    [
+      "5225713",
+      "basic"
+    ],
+    [
+      "5225714",
+      "filesystem"
+    ],
+    [
+      "5225715",
+      "local_deps"
+    ],
+    [
+      "5225717",
+      "complex"
+    ]
+  ],
+  "timestamp": "2025-07-01T13:22:12.649292"
+}

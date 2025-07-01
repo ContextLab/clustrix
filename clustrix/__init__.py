@@ -29,6 +29,24 @@ from .filesystem import (
     cluster_du,
     cluster_count_files,
 )
+from .dependency_analysis import (
+    DependencyAnalyzer,
+    DependencyGraph,
+    LoopAnalyzer,
+    FilesystemCall,
+    ImportInfo,
+    LocalFunctionCall,
+    FileReference,
+    analyze_function_dependencies,
+    analyze_function_loops,
+)
+from .file_packaging import (
+    FilePackager,
+    PackageInfo,
+    ExecutionContext,
+    create_execution_context,
+    package_function_for_execution,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -65,6 +83,20 @@ __all__ = [
     "cluster_glob",
     "cluster_du",
     "cluster_count_files",
+    "DependencyAnalyzer",
+    "DependencyGraph",
+    "LoopAnalyzer",
+    "FilesystemCall",
+    "ImportInfo",
+    "LocalFunctionCall",
+    "FileReference",
+    "analyze_function_dependencies",
+    "analyze_function_loops",
+    "FilePackager",
+    "PackageInfo",
+    "ExecutionContext",
+    "create_execution_context",
+    "package_function_for_execution",
 ]
 
 # Auto-register IPython magic command and display widget if in notebook environment
