@@ -327,9 +327,29 @@ class FilePackager:
             # Import the filesystem module to get its source
             from . import filesystem
 
-            # Get the filesystem module source
+            # Get the filesystem module source and fix relative imports
             fs_source = inspect.getsource(filesystem)
-            zf.writestr("clustrix_filesystem.py", fs_source)
+            
+            # Replace relative imports with inline definitions to make it standalone
+            fs_source_fixed = fs_source.replace(
+                'from .config import ClusterConfig',
+                '''# ClusterConfig class definition (inline for standalone packaging)
+class ClusterConfig:
+    """Minimal ClusterConfig for packaged execution."""
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    @property
+    def cluster_type(self):
+        return getattr(self, '_cluster_type', 'local')
+    
+    @cluster_type.setter
+    def cluster_type(self, value):
+        self._cluster_type = value'''
+            )
+            
+            zf.writestr("clustrix_filesystem.py", fs_source_fixed)
 
             # Create a clustrix module with the filesystem functions
             clustrix_module = '''
