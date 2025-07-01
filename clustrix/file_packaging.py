@@ -23,9 +23,17 @@ from .config import ClusterConfig
 class PackageInfo:
     """Information about a created package."""
 
-    def __init__(self, package_id: str, package_path: str, function_name: str, 
-                 dependencies: DependencyGraph, size_bytes: int, created_at: datetime,
-                 config_hash: str, metadata: Dict[str, Any]):
+    def __init__(
+        self,
+        package_id: str,
+        package_path: str,
+        function_name: str,
+        dependencies: DependencyGraph,
+        size_bytes: int,
+        created_at: datetime,
+        config_hash: str,
+        metadata: Dict[str, Any],
+    ):
         self.package_id = package_id
         self.package_path = package_path
         self.function_name = function_name
@@ -42,9 +50,15 @@ class PackageInfo:
 class ExecutionContext:
     """Context information for function execution."""
 
-    def __init__(self, working_directory: str, python_version: str, 
-                 environment_variables: Dict[str, str], cluster_config: ClusterConfig,
-                 function_args: tuple, function_kwargs: dict):
+    def __init__(
+        self,
+        working_directory: str,
+        python_version: str,
+        environment_variables: Dict[str, str],
+        cluster_config: ClusterConfig,
+        function_args: tuple,
+        function_kwargs: dict,
+    ):
         self.working_directory = working_directory
         self.python_version = python_version
         self.environment_variables = environment_variables
@@ -82,7 +96,7 @@ class FilePackager:
         """
         # Analyze function dependencies
         dependencies = analyze_function_dependencies(func)
-        
+
         # Detect external dependencies
         external_deps = self._detect_external_dependencies(dependencies)
 
@@ -162,7 +176,9 @@ class FilePackager:
 
         with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
             # Add function source and metadata
-            self._add_function_metadata(zf, func, dependencies, context, package_id, external_deps)
+            self._add_function_metadata(
+                zf, func, dependencies, context, package_id, external_deps
+            )
 
             # Add cluster configuration
             self._add_cluster_config(zf, context.cluster_config)
@@ -213,32 +229,36 @@ class FilePackager:
                         "names": imp.names,
                         "alias": imp.alias,
                         "is_from_import": imp.is_from_import,
-                        "lineno": imp.lineno
-                    } for imp in dependencies.imports
+                        "lineno": imp.lineno,
+                    }
+                    for imp in dependencies.imports
                 ],
                 "local_functions": [
                     {
                         "function_name": call.function_name,
                         "lineno": call.lineno,
                         "defined_in_scope": call.defined_in_scope,
-                        "source_file": call.source_file
-                    } for call in dependencies.local_function_calls
+                        "source_file": call.source_file,
+                    }
+                    for call in dependencies.local_function_calls
                 ],
                 "file_references": [
                     {
                         "path": ref.path,
                         "operation": ref.operation,
                         "lineno": ref.lineno,
-                        "is_relative": ref.is_relative
-                    } for ref in dependencies.file_references
+                        "is_relative": ref.is_relative,
+                    }
+                    for ref in dependencies.file_references
                 ],
                 "filesystem_calls": [
                     {
                         "function": call.function,
                         "args": call.args,
                         "lineno": call.lineno,
-                        "context": call.context
-                    } for call in dependencies.filesystem_calls
+                        "context": call.context,
+                    }
+                    for call in dependencies.filesystem_calls
                 ],
                 "requires_cluster_filesystem": dependencies.requires_cluster_filesystem,
                 "external_dependencies": external_deps,
@@ -329,10 +349,10 @@ class FilePackager:
 
             # Get the filesystem module source and fix relative imports
             fs_source = inspect.getsource(filesystem)
-            
+
             # Replace relative imports with inline definitions to make it standalone
             fs_source_fixed = fs_source.replace(
-                'from .config import ClusterConfig',
+                "from .config import ClusterConfig",
                 '''# ClusterConfig class definition (inline for standalone packaging)
 class ClusterConfig:
     """Minimal ClusterConfig for packaged execution."""
@@ -346,9 +366,9 @@ class ClusterConfig:
     
     @cluster_type.setter
     def cluster_type(self, value):
-        self._cluster_type = value'''
+        self._cluster_type = value''',
             )
-            
+
             zf.writestr("clustrix_filesystem.py", fs_source_fixed)
 
             # Create a clustrix module with the filesystem functions
@@ -502,57 +522,92 @@ def setup_filesystem_functions(cluster_config):
         """Detect external packages that need to be installed in remote environment."""
         external_deps = []
         stdlib_modules = self._get_stdlib_modules()
-        
+
         for import_info in dependencies.imports:
             module_name = import_info.module
-            
+
             # Skip standard library modules
             if module_name in stdlib_modules:
                 continue
-                
+
             # Skip local modules (already detected)
-            if module_name in [os.path.basename(mod).replace('.py', '') for mod in dependencies.local_modules]:
+            if module_name in [
+                os.path.basename(mod).replace(".py", "")
+                for mod in dependencies.local_modules
+            ]:
                 continue
-                
+
             # Try to determine if this is an external package
             try:
                 # Try to import to see if it's available
                 __import__(module_name)
-                
+
                 # Check if it's in site-packages (external dependency)
                 module = sys.modules.get(module_name)
-                if module and hasattr(module, '__file__') and module.__file__:
+                if module and hasattr(module, "__file__") and module.__file__:
                     module_path = Path(module.__file__)
-                    
+
                     # If it contains 'site-packages' in the path, it's external
-                    if 'site-packages' in str(module_path):
+                    if "site-packages" in str(module_path):
                         # Map known module names to package names
                         package_name = self._map_module_to_package(module_name)
                         if package_name and package_name not in external_deps:
                             external_deps.append(package_name)
-                            
+
             except ImportError:
                 # Module not available, but might be external - add it anyway
                 package_name = self._map_module_to_package(module_name)
                 if package_name and package_name not in external_deps:
                     external_deps.append(package_name)
-        
+
         # Always add paramiko if filesystem operations are needed
-        if dependencies.requires_cluster_filesystem and 'paramiko' not in external_deps:
-            external_deps.append('paramiko')
-            
+        if dependencies.requires_cluster_filesystem and "paramiko" not in external_deps:
+            external_deps.append("paramiko")
+
         return external_deps
 
     def _get_stdlib_modules(self) -> Set[str]:
         """Get a set of standard library module names."""
         # This is a basic set - in production, could use more comprehensive detection
         stdlib_modules = {
-            'os', 'sys', 'json', 'pickle', 'traceback', 'pathlib', 'tempfile',
-            'datetime', 'hashlib', 'zipfile', 'inspect', 'shutil', 'glob',
-            'textwrap', 'ast', 'types', 'socket', 'subprocess', 're', 'time',
-            'collections', 'itertools', 'functools', 'operator', 'math',
-            'random', 'string', 'urllib', 'http', 'email', 'csv', 'configparser',
-            'logging', 'unittest', 'io', 'contextlib', 'copy', 'weakref'
+            "os",
+            "sys",
+            "json",
+            "pickle",
+            "traceback",
+            "pathlib",
+            "tempfile",
+            "datetime",
+            "hashlib",
+            "zipfile",
+            "inspect",
+            "shutil",
+            "glob",
+            "textwrap",
+            "ast",
+            "types",
+            "socket",
+            "subprocess",
+            "re",
+            "time",
+            "collections",
+            "itertools",
+            "functools",
+            "operator",
+            "math",
+            "random",
+            "string",
+            "urllib",
+            "http",
+            "email",
+            "csv",
+            "configparser",
+            "logging",
+            "unittest",
+            "io",
+            "contextlib",
+            "copy",
+            "weakref",
         }
         return stdlib_modules
 
@@ -560,24 +615,24 @@ def setup_filesystem_functions(cluster_config):
         """Map a module name to its pip package name."""
         # Common mappings of import names to package names
         module_to_package = {
-            'paramiko': 'paramiko',
-            'numpy': 'numpy',
-            'np': 'numpy',
-            'pandas': 'pandas', 
-            'pd': 'pandas',
-            'sklearn': 'scikit-learn',
-            'cv2': 'opencv-python',
-            'PIL': 'Pillow',
-            'yaml': 'PyYAML',
-            'requests': 'requests',
-            'matplotlib': 'matplotlib',
-            'plt': 'matplotlib',
-            'scipy': 'scipy',
-            'torch': 'torch',
-            'tensorflow': 'tensorflow',
-            'tf': 'tensorflow',
+            "paramiko": "paramiko",
+            "numpy": "numpy",
+            "np": "numpy",
+            "pandas": "pandas",
+            "pd": "pandas",
+            "sklearn": "scikit-learn",
+            "cv2": "opencv-python",
+            "PIL": "Pillow",
+            "yaml": "PyYAML",
+            "requests": "requests",
+            "matplotlib": "matplotlib",
+            "plt": "matplotlib",
+            "scipy": "scipy",
+            "torch": "torch",
+            "tensorflow": "tensorflow",
+            "tf": "tensorflow",
         }
-        
+
         return module_to_package.get(module_name, module_name)
 
     def _find_package_root(self, module_path: Path) -> Optional[Path]:
@@ -652,12 +707,13 @@ def install_external_dependencies():
                 import subprocess
                 result = subprocess.run([
                     sys.executable, "-m", "pip", "install", dep
-                ], capture_output=True, text=True, timeout=300)
+                ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
                 
                 if result.returncode == 0:
                     print(f"Successfully installed {{dep}}")
                 else:
-                    print(f"Failed to install {{dep}}: {{result.stderr}}")
+                    stderr_output = result.stderr.decode() if result.stderr else "Unknown error"
+                    print(f"Failed to install {{dep}}: {{stderr_output}}")
             except Exception as e:
                 print(f"Error installing {{dep}}: {{e}}")
     else:
