@@ -359,11 +359,11 @@ class ClusterConfig:
     def __init__(self, **kwargs):
         for key, value in kwargs.items():
             setattr(self, key, value)
-    
+
     @property
     def cluster_type(self):
         return getattr(self, '_cluster_type', 'local')
-    
+
     @cluster_type.setter
     def cluster_type(self, value):
         self._cluster_type = value''',
@@ -461,7 +461,7 @@ from clustrix_filesystem import ClusterFilesystem
 def setup_filesystem_functions(cluster_config):
     """Set up filesystem functions with the given config."""
     fs = ClusterFilesystem(cluster_config)
-    
+
     # Create convenience functions bound to the config
     functions = {
         'cluster_ls': lambda path=".": fs.ls(path),
@@ -474,7 +474,7 @@ def setup_filesystem_functions(cluster_config):
         'cluster_du': lambda path: fs.du(path),
         'cluster_count_files': lambda path, pattern="*": fs.count_files(path, pattern)
     }
-    
+
     return functions
 '''
             zf.writestr("filesystem_utils.py", convenience_functions)
@@ -509,7 +509,7 @@ def setup_filesystem_functions(cluster_config):
     def _get_installed_packages(self) -> Dict[str, str]:
         """Get information about installed packages."""
         try:
-            import pkg_resources
+            import pkg_resources  # type: ignore[import-untyped]
 
             installed = {}
             for dist in pkg_resources.working_set:
@@ -671,16 +671,16 @@ def setup_environment():
     """Set up the execution environment."""
     # Add package directories to Python path
     package_dir = Path(__file__).parent
-    
+
     # Add sources and modules to path
     sources_dir = package_dir / "sources"
     modules_dir = package_dir / "modules"
-    
+
     if sources_dir.exists():
         sys.path.insert(0, str(sources_dir))
     if modules_dir.exists():
         sys.path.insert(0, str(modules_dir))
-    
+
     # Change to data directory if it exists
     data_dir = package_dir / "data"
     if data_dir.exists():
@@ -689,17 +689,17 @@ def setup_environment():
 def install_external_dependencies():
     """Install external dependencies if needed."""
     package_dir = Path(__file__).parent
-    
+
     # Load metadata to get external dependencies
     metadata_file = package_dir / "metadata.json"
     if not metadata_file.exists():
         return
-    
+
     with open(metadata_file, 'r') as f:
         metadata = json.load(f)
-    
+
     external_deps = metadata.get("dependencies", {{}}).get("external_dependencies", [])
-    
+
     if external_deps:
         print(f"Installing external dependencies: {{', '.join(external_deps)}}")
         for dep in external_deps:
@@ -708,7 +708,7 @@ def install_external_dependencies():
                 result = subprocess.run([
                     sys.executable, "-m", "pip", "install", dep
                 ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=300)
-                
+
                 if result.returncode == 0:
                     print(f"Successfully installed {{dep}}")
                 else:
@@ -722,26 +722,26 @@ def install_external_dependencies():
 def setup_cluster_filesystem():
     """Set up cluster filesystem functions if needed."""
     package_dir = Path(__file__).parent
-    
+
     # Load cluster config
     config_file = package_dir / "cluster_config.json"
     if not config_file.exists():
         return {{}}
-    
+
     with open(config_file, 'r') as f:
         config_data = json.load(f)
-    
+
     # Try to set up filesystem functions
     try:
         sys.path.insert(0, str(package_dir))
         from filesystem_utils import setup_filesystem_functions
-        
+
         # Create a simple config object
         class Config:
             def __init__(self, **kwargs):
                 for k, v in kwargs.items():
                     setattr(self, k, v)
-        
+
         config = Config(**config_data)
         return setup_filesystem_functions(config)
     except Exception as e:
@@ -751,31 +751,31 @@ def setup_cluster_filesystem():
 def load_and_execute():
     """Load function metadata and execute."""
     package_dir = Path(__file__).parent
-    
+
     # Load metadata
     with open(package_dir / "metadata.json", "r") as f:
         metadata = json.load(f)
-    
+
     function_info = metadata["function_info"]
     execution_info = metadata["execution_info"]
-    
+
     # Set up environment
     setup_environment()
-    
+
     # Install external dependencies first
     install_external_dependencies()
-    
+
     # Set up filesystem functions if needed
     if metadata["dependencies"]["requires_cluster_filesystem"]:
         fs_functions = setup_cluster_filesystem()
         globals().update(fs_functions)
-    
+
     try:
         # Execute function source code
         function_source = function_info["source"]
         local_namespace = {{}}
         exec(function_source, globals(), local_namespace)
-        
+
         # Get the function
         function_name = function_info["name"]
         if function_name in local_namespace:
@@ -784,17 +784,17 @@ def load_and_execute():
             func = globals()[function_name]
         else:
             raise ValueError(f"Function {{function_name}} not found after execution")
-        
+
         # Get arguments and reconstruct config objects if needed
         args = execution_info["args"]
         kwargs = execution_info["kwargs"]
-        
+
         # Load cluster config for reconstruction
         config_file = package_dir / "cluster_config.json"
         if config_file.exists():
             with open(config_file, 'r') as f:
                 config_data = json.load(f)
-            
+
             # Create a proper config object
             class ClusterConfig:
                 def __init__(self, **kwargs):
@@ -807,9 +807,9 @@ def load_and_execute():
                     # Set all other attributes
                     for k, v in kwargs.items():
                         setattr(self, k, v)
-            
+
             config_obj = ClusterConfig(**config_data)
-            
+
             # Replace any string config arguments with proper config object
             new_args = []
             for arg in args:
@@ -819,23 +819,23 @@ def load_and_execute():
                 else:
                     new_args.append(arg)
             args = tuple(new_args)
-            
+
             # Also check kwargs
             for key, value in kwargs.items():
                 if isinstance(value, str) and "cluster_type" in str(value):
                     kwargs[key] = config_obj
-        
+
         # Execute the function
         result = func(*args, **kwargs)
-        
+
         # Save result to accessible directory (where SLURM job was submitted)
         # Use environment variable set by wrapper script
         result_working_dir = os.environ.get("CLUSTRIX_ORIGINAL_CWD", "/tmp")
-        
+
         # Create result file in accessible location
         result_file = f"result_{{function_name}}_{{os.environ.get('SLURM_JOB_ID', 'unknown')}}.json"
         result_path = os.path.join(result_working_dir, result_file)
-        
+
         # Save result as JSON for easy access
         result_data = {{
             "function_name": function_name,
@@ -849,22 +849,22 @@ def load_and_execute():
                 "timestamp": __import__("datetime").datetime.now().isoformat()
             }}
         }}
-        
+
         with open(result_path, "w") as f:
             json.dump(result_data, f, indent=2, default=str)
-        
+
         print(f"Function {{function_name}} executed successfully")
         print(f"Result saved to: {{result_path}}")
         return result
-        
+
     except Exception as e:
         # Save error information to accessible location
         result_working_dir = os.environ.get("CLUSTRIX_ORIGINAL_CWD", "/tmp")
         function_name = metadata.get("function_info", {{}}).get("name", "unknown")
-        
+
         error_file = f"error_{{function_name}}_{{os.environ.get('SLURM_JOB_ID', 'unknown')}}.json"
         error_path = os.path.join(result_working_dir, error_file)
-        
+
         error_info = {{
             "function_name": function_name,
             "status": "ERROR",
@@ -877,10 +877,10 @@ def load_and_execute():
                 "timestamp": __import__("datetime").datetime.now().isoformat()
             }}
         }}
-        
+
         with open(error_path, "w") as f:
             json.dump(error_info, f, indent=2)
-        
+
         print(f"Function execution failed: {{e}}")
         print(f"Error saved to: {{error_path}}")
         raise

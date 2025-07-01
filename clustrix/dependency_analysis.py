@@ -437,7 +437,26 @@ class LoopAnalyzer:
             iter_str = ast.unparse(node.iter)
         else:
             target_str = getattr(node.target, "id", str(node.target))
-            iter_str = str(node.iter)
+            # For Python < 3.9, handle common iterator patterns
+            if isinstance(node.iter, ast.Call):
+                if hasattr(node.iter.func, "id"):
+                    # Handle range(), list(), etc.
+                    func_name = node.iter.func.id
+                    args = []
+                    for arg in node.iter.args:
+                        if isinstance(arg, ast.Constant):
+                            args.append(str(arg.value))
+                        elif isinstance(arg, ast.Num):  # Python 3.8 compatibility
+                            args.append(str(arg.n))
+                        else:
+                            args.append("...")
+                    iter_str = f"{func_name}({', '.join(args)})"
+                else:
+                    iter_str = str(node.iter)
+            elif isinstance(node.iter, ast.Name):
+                iter_str = node.iter.id
+            else:
+                iter_str = str(node.iter)
 
         return {
             "type": "for",
