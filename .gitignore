@@ -16,6 +16,16 @@ jupyter.log
 py310-test/
 .ipynb_checkpoints/
 
+# Build and documentation artifacts
+docs/build/
+htmlcov/
+*.log
+*_report_*.json
+*validation*.json
+dist/
+build/
+*.egg-info/
+
 # Clustrix security - prevent credential leaks
 **/.clustrix/credentials/**
 **/.clustrix/keys/**
