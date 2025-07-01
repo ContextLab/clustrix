@@ -251,7 +251,7 @@ class TestAzureCostMonitor:
     def test_initialization(self):
         """Test monitor initialization."""
         assert self.monitor.provider_name == "Azure"
-        assert self.monitor.region == "East US"
+        assert self.monitor.region == "eastus"
         assert "Standard_NC6s_v3" in self.monitor.vm_pricing
 
     def test_estimate_cost_pay_as_you_go(self):
@@ -289,7 +289,7 @@ class TestGCPCostMonitor:
 
     def setup_method(self):
         """Set up test fixtures."""
-        self.monitor = GCPCostMonitor()
+        self.monitor = GCPCostMonitor(use_pricing_api=False)
 
     def test_initialization(self):
         """Test monitor initialization."""

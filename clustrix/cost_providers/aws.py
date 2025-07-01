@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from ..cost_monitoring import BaseCostMonitor, ResourceUsage, CostEstimate
+from ..pricing_clients.aws_pricing import AWSPricingClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,16 @@ logger = logging.getLogger(__name__)
 class AWSCostMonitor(BaseCostMonitor):
     """Cost monitoring for AWS instances (EC2, Batch, etc.)."""
 
-    def __init__(self, region: str = "us-east-1"):
+    def __init__(self, region: str = "us-east-1", use_pricing_api: bool = True):
         super().__init__("AWS")
         self.region = region
+        self.use_pricing_api = use_pricing_api
+
+        # Initialize pricing client
+        self.pricing_client = AWSPricingClient() if use_pricing_api else None
 
         # AWS EC2 On-Demand pricing (us-east-1, as of 2025, approximate rates in USD/hour)
+        # These serve as fallback when API is unavailable
         self.ec2_pricing = {
             # General Purpose
             "t3.micro": 0.0104,
@@ -142,8 +148,37 @@ class AWSCostMonitor(BaseCostMonitor):
         self, instance_type: str, hours_used: float, use_spot: bool = False
     ) -> CostEstimate:
         """Estimate cost for AWS instance usage."""
-        # Get base hourly rate
-        hourly_rate = self.ec2_pricing.get(instance_type, self.ec2_pricing["default"])
+        hourly_rate = None
+        pricing_source = "hardcoded"
+        pricing_warning = None
+
+        # Try to get pricing from API first
+        if self.pricing_client and not use_spot:
+            try:
+                hourly_rate = self.pricing_client.get_instance_pricing(
+                    instance_type=instance_type, region=self.region
+                )
+                if hourly_rate:
+                    logger.debug(
+                        f"Got pricing for {instance_type} from API: ${hourly_rate}/hr"
+                    )
+                    pricing_source = "api"
+            except Exception as e:
+                logger.debug(f"Failed to get pricing from API: {e}")
+
+        # Fall back to hardcoded pricing if API failed
+        if hourly_rate is None:
+            hourly_rate = self.ec2_pricing.get(
+                instance_type, self.ec2_pricing["default"]
+            )
+            pricing_source = "hardcoded"
+            if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
+                pricing_warning = (
+                    f"Using potentially outdated pricing data (last updated: "
+                    f"{self.pricing_client._hardcoded_pricing_date}). "
+                    f"Current prices may differ. Consider checking AWS pricing page."
+                )
+                logger.warning(pricing_warning)
 
         # Apply spot discount if requested
         if use_spot:
@@ -152,6 +187,10 @@ class AWSCostMonitor(BaseCostMonitor):
                 instance_family, self.spot_discounts["default"]
             )
             hourly_rate *= discount_factor
+            if pricing_source == "hardcoded":
+                pricing_warning = (
+                    pricing_warning or ""
+                ) + " Spot pricing is estimated and may vary significantly."
 
         # Calculate estimated cost
         estimated_cost = hourly_rate * hours_used
@@ -165,10 +204,18 @@ class AWSCostMonitor(BaseCostMonitor):
             estimated_cost=estimated_cost,
             currency="USD",
             last_updated=datetime.now(),
+            pricing_source=pricing_source,
+            pricing_warning=pricing_warning,
         )
 
     def get_pricing_info(self) -> Dict[str, float]:
         """Get AWS EC2 pricing information."""
+        # For now, return hardcoded pricing with a warning if outdated
+        # A full implementation would query the API for all instance types
+        if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
+            logger.warning(
+                "Pricing data may be outdated. Consider refreshing from AWS Pricing API."
+            )
         return self.ec2_pricing.copy()
 
     def get_spot_pricing_info(self) -> Dict[str, float]:

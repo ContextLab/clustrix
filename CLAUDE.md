@@ -60,6 +60,13 @@ pytest --cov=clustrix    # Run tests with coverage
    - AST-based loop detection for parallelization
    - Cluster-specific job script generation
 
+5. **Filesystem Utilities** (`clustrix/filesystem.py`): Unified filesystem operations for local and remote clusters:
+   - **ClusterFilesystem class**: Core implementation handling local and SSH-based remote operations
+   - **Convenience functions**: `cluster_ls()`, `cluster_find()`, `cluster_stat()`, `cluster_exists()`, `cluster_isdir()`, `cluster_isfile()`, `cluster_glob()`, `cluster_du()`, `cluster_count_files()`
+   - **Data classes**: `FileInfo` for file metadata, `DiskUsage` for directory usage statistics
+   - **Automatic connection management**: SSH connections handled transparently
+   - **Config-driven**: Uses `ClusterConfig` to determine local vs remote operations
+
 ### Key Design Patterns
 
 - **Strategy Pattern**: Different cluster types handled via specific submission methods
@@ -96,6 +103,52 @@ pytest --cov=clustrix    # Run tests with coverage
 3. Add status checking logic to `get_job_status`
 4. Update job script generation in `utils.py` if needed
 
+### Using Filesystem Utilities
+```python
+from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists, cluster_glob
+from clustrix.config import ClusterConfig
+
+# Configure for local or remote operations
+config = ClusterConfig(
+    cluster_type="slurm",  # or "local" for local operations
+    cluster_host="cluster.edu",
+    username="researcher",
+    remote_work_dir="/scratch/project"
+)
+
+# List directory contents (works locally and remotely)
+files = cluster_ls("data/", config)
+
+# Find files by pattern
+csv_files = cluster_find("*.csv", "datasets/", config)
+
+# Check file existence
+if cluster_exists("results/output.json", config):
+    print("Results already computed!")
+
+# Get file information
+file_info = cluster_stat("large_dataset.h5", config)
+print(f"Dataset size: {file_info.size / 1e9:.1f} GB")
+
+# Use with @cluster decorator for data-driven workflows
+@cluster(cores=8)
+def process_datasets(config):
+    # Find all data files on the cluster
+    data_files = cluster_glob("*.csv", "input/", config)
+    
+    results = []
+    for filename in data_files:  # Loop gets parallelized automatically
+        # Check file size before processing
+        file_info = cluster_stat(filename, config)
+        if file_info.size > 100_000_000:  # Large files
+            result = process_large_file(filename, config)
+        else:
+            result = process_small_file(filename, config)
+        results.append(result)
+    
+    return results
+```
+
 ### Debugging Remote Execution
 - Check remote logs in `~/.clustrix/jobs/{job_id}/`
 - Enable SSH debug mode in Paramiko connection
@@ -123,3 +176,7 @@ pytest --cov=clustrix    # Run tests with coverage
 **Pre-commit hooks will block commits that fail quality checks.**
 
 The GitHub Actions CI will fail if code doesn't pass black, flake8, mypy, and pytest. Always run the full cycle locally first.
+
+## Testing Guidelines
+
+- **External Function Validation**: When testing external functions and features (i.e., anything that we cannot directly test locally), we *MUST* validate that those functions work (without resorting to local fallbacks) at least once before we can check the issue off as completed. Use GitHub issue spec criteria and comments to track what has been validated. We can store API keys, usernames, and/or passwords locally (if we can do so securely) in order to enable this. Once we have verified functionality (again, WITHOUT resorting to fallbacks), we can check off that functionality as "tested" and then use mocked functions or objects in pytests to avoid incurring excessive API fees.

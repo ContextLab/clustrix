@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from ..cost_monitoring import BaseCostMonitor, ResourceUsage, CostEstimate
+from ..pricing_clients.azure_pricing import AzurePricingClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,16 @@ logger = logging.getLogger(__name__)
 class AzureCostMonitor(BaseCostMonitor):
     """Cost monitoring for Azure Virtual Machines and Batch."""
 
-    def __init__(self, region: str = "East US"):
+    def __init__(self, region: str = "eastus", use_pricing_api: bool = True):
         super().__init__("Azure")
         self.region = region
+        self.use_pricing_api = use_pricing_api
+
+        # Initialize pricing client
+        self.pricing_client = AzurePricingClient() if use_pricing_api else None
 
         # Azure VM pricing (East US, as of 2025, approximate rates in USD/hour)
+        # These serve as fallback when API is unavailable
         self.vm_pricing = {
             # B-series (Burstable)
             "Standard_B1s": 0.0104,
@@ -132,25 +138,70 @@ class AzureCostMonitor(BaseCostMonitor):
         self, instance_type: str, hours_used: float, use_spot: bool = False
     ) -> CostEstimate:
         """Estimate cost for Azure VM usage."""
-        # Get base hourly rate
-        hourly_rate = self.vm_pricing.get(instance_type, self.vm_pricing["default"])
+        hourly_rate = None
+        pricing_source = "hardcoded"
+        pricing_warning = None
 
-        # Apply spot discount if requested
-        if use_spot:
-            instance_family = (
-                instance_type.split("_")[1] if "_" in instance_type else instance_type
-            )
-            # Match instance family prefix
-            discount_key = next(
-                (
-                    k
-                    for k in self.spot_discounts.keys()
-                    if instance_family.startswith(k.replace("Standard_", ""))
-                ),
-                "default",
-            )
-            discount_factor = self.spot_discounts[discount_key]
-            hourly_rate *= discount_factor
+        # Try to get pricing from API first
+        if self.pricing_client and not use_spot:
+            try:
+                hourly_rate = self.pricing_client.get_instance_pricing(
+                    instance_type=instance_type, region=self.region
+                )
+                if hourly_rate:
+                    logger.debug(
+                        f"Got pricing for {instance_type} from Azure API: ${hourly_rate}/hr"
+                    )
+                    pricing_source = "api"
+            except Exception as e:
+                logger.debug(f"Failed to get pricing from Azure API: {e}")
+
+        # Handle spot pricing
+        if use_spot and self.pricing_client:
+            try:
+                hourly_rate = self.pricing_client.get_spot_pricing(
+                    instance_type, self.region
+                )
+                if hourly_rate:
+                    pricing_source = "api"
+            except Exception as e:
+                logger.debug(f"Failed to get spot pricing from Azure API: {e}")
+
+        # Fall back to hardcoded pricing if API failed
+        if hourly_rate is None:
+            hourly_rate = self.vm_pricing.get(instance_type, self.vm_pricing["default"])
+            pricing_source = "hardcoded"
+
+            if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
+                pricing_warning = (
+                    f"Using potentially outdated pricing data (last updated: "
+                    f"{self.pricing_client._hardcoded_pricing_date}). "
+                    f"Current prices may differ. Consider checking Azure pricing page."
+                )
+                logger.warning(pricing_warning)
+
+            # Apply spot discount if requested and using hardcoded pricing
+            if use_spot:
+                instance_family = (
+                    instance_type.split("_")[1]
+                    if "_" in instance_type
+                    else instance_type
+                )
+                # Match instance family prefix
+                discount_key = next(
+                    (
+                        k
+                        for k in self.spot_discounts.keys()
+                        if instance_family.startswith(k.replace("Standard_", ""))
+                    ),
+                    "default",
+                )
+                discount_factor = self.spot_discounts[discount_key]
+                hourly_rate *= discount_factor
+                if pricing_source == "hardcoded":
+                    pricing_warning = (
+                        pricing_warning or ""
+                    ) + " Spot pricing is estimated and may vary significantly."
 
         # Calculate estimated cost
         estimated_cost = hourly_rate * hours_used
@@ -164,6 +215,8 @@ class AzureCostMonitor(BaseCostMonitor):
             estimated_cost=estimated_cost,
             currency="USD",
             last_updated=datetime.now(),
+            pricing_source=pricing_source,
+            pricing_warning=pricing_warning,
         )
 
     def get_pricing_info(self) -> Dict[str, float]:

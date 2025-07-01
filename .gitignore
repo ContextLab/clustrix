@@ -15,3 +15,17 @@ coverage.json
 jupyter.log
 py310-test/
 .ipynb_checkpoints/
+
+# Clustrix security - prevent credential leaks
+**/.clustrix/credentials/**
+**/.clustrix/keys/**
+**/clustrix-credentials.json
+**/clustrix-*.pem
+**/clustrix-*.key
+**/*-credentials.json
+**/*-service-account.json
+.env.local
+.env.validation
+**/validation-secrets.json
+**/.op/
+**/op-session-*

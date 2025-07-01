@@ -404,11 +404,31 @@ dependencies:
 
     else:
         # Create virtual environment (for pip/uv)
-        commands = [
-            f"cd {work_dir}",
-            "python -m venv venv",
-            "source venv/bin/activate",
-        ]
+        commands = [f"cd {work_dir}"]
+
+        # Add module loads if specified in config
+        if config.module_loads:
+            for module in config.module_loads:
+                commands.append(f"module load {module}")
+
+        # Add environment variables if specified in config
+        if config.environment_variables:
+            for var, value in config.environment_variables.items():
+                commands.append(f"export {var}={value}")
+
+        # Add pre-execution commands if specified in config
+        if config.pre_execution_commands:
+            for cmd in config.pre_execution_commands:
+                commands.append(cmd)
+
+        # Now create virtual environment using the configured python executable
+        python_cmd = config.python_executable if config.python_executable else "python"
+        commands.extend(
+            [
+                f"{python_cmd} -m venv venv",
+                "source venv/bin/activate",
+            ]
+        )
 
         if requirements:
             # Create requirements file
@@ -487,11 +507,12 @@ def _create_slurm_script(
             script_lines.append(cmd)
 
     # Add execution commands
+    python_cmd = config.python_executable if config.python_executable else "python"
     script_lines.extend(
         [
             f"cd {remote_job_dir}",
             "source venv/bin/activate",
-            'python -c "',
+            f'{python_cmd} -c "',
             "import pickle",
             "import sys",
             "import traceback",

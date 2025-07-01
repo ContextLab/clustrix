@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Any
 
 from ..cost_monitoring import BaseCostMonitor, ResourceUsage, CostEstimate
+from ..pricing_clients.gcp_pricing import GCPPricingClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,16 @@ logger = logging.getLogger(__name__)
 class GCPCostMonitor(BaseCostMonitor):
     """Cost monitoring for Google Cloud Platform Compute Engine instances."""
 
-    def __init__(self, region: str = "us-central1"):
+    def __init__(self, region: str = "us-central1", use_pricing_api: bool = True):
         super().__init__("Google Cloud Platform")
         self.region = region
+        self.use_pricing_api = use_pricing_api
+
+        # Initialize pricing client
+        self.pricing_client = GCPPricingClient() if use_pricing_api else None
 
         # GCP Compute Engine pricing (us-central1, as of 2025, approximate rates in USD/hour)
+        # These serve as fallback when API is unavailable
         self.compute_pricing = {
             # General Purpose (N2)
             "n2-standard-2": 0.097,
@@ -140,16 +146,61 @@ class GCPCostMonitor(BaseCostMonitor):
         sustained_use_percent: float = 0,
     ) -> CostEstimate:
         """Estimate cost for GCP instance usage."""
-        # Get base hourly rate
-        hourly_rate = self.compute_pricing.get(
-            instance_type, self.compute_pricing["default"]
-        )
+        hourly_rate = None
+        pricing_source = "hardcoded"
+        pricing_warning = None
 
-        # Apply preemptible discount if requested
-        if use_preemptible:
-            hourly_rate *= self.preemptible_discount
+        # Try to get pricing from API first
+        if self.pricing_client and not use_preemptible:
+            try:
+                hourly_rate = self.pricing_client.get_instance_pricing(
+                    instance_type=instance_type, region=self.region
+                )
+                if hourly_rate:
+                    logger.debug(
+                        f"Got pricing for {instance_type} from GCP API: ${hourly_rate}/hr"
+                    )
+                    pricing_source = "api"
+            except Exception as e:
+                logger.debug(f"Failed to get pricing from GCP API: {e}")
 
-        # Apply sustained use discount
+        # Handle preemptible pricing
+        if use_preemptible and self.pricing_client:
+            try:
+                hourly_rate = self.pricing_client.get_preemptible_pricing(
+                    instance_type, self.region
+                )
+                if hourly_rate:
+                    pricing_source = "api"
+            except Exception as e:
+                logger.debug(f"Failed to get preemptible pricing from GCP API: {e}")
+
+        # Fall back to hardcoded pricing if API failed
+        if hourly_rate is None:
+            hourly_rate = self.compute_pricing.get(
+                instance_type, self.compute_pricing["default"]
+            )
+            pricing_source = "hardcoded"
+
+            if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
+                pricing_warning = (
+                    f"Using potentially outdated pricing data (last updated: "
+                    f"{self.pricing_client._hardcoded_pricing_date}). "
+                    f"Current prices may differ. Consider checking GCP pricing page."
+                )
+                logger.warning(pricing_warning)
+
+            # Apply preemptible discount if requested and using hardcoded pricing
+            if use_preemptible:
+                hourly_rate *= self.preemptible_discount
+                if pricing_source == "hardcoded":
+                    pricing_warning = (
+                        (pricing_warning or "")
+                        + " Preemptible pricing is estimated and may vary significantly."
+                    )
+
+        # Apply sustained use discount (GCP feature)
+        discount: float = 0.0
         if sustained_use_percent > 25:
             discount_tier = min(
                 [
@@ -175,6 +226,8 @@ class GCPCostMonitor(BaseCostMonitor):
             estimated_cost=estimated_cost,
             currency="USD",
             last_updated=datetime.now(),
+            pricing_source=pricing_source,
+            pricing_warning=pricing_warning,
         )
 
     def get_pricing_info(self) -> Dict[str, float]:

@@ -82,6 +82,7 @@ class ClusterConfig:
 
     # Paths
     remote_work_dir: str = "/tmp/clustrix"
+    local_work_dir: Optional[str] = None  # If None, uses current working directory
     local_cache_dir: str = "~/.clustrix/cache"
     conda_env_name: Optional[str] = None
     python_executable: str = "python"

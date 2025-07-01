@@ -268,7 +268,7 @@ class TestScriptGeneration:
         assert "cd /scratch/test/jobs/job_123" in script
 
         # Check Python execution
-        assert "python -c" in script
+        assert "python3 -c" in script or "python -c" in script
         assert "import pickle" in script
         assert "function_data.pkl" in script
         assert "result.pkl" in script

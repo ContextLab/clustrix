@@ -41,6 +41,8 @@ class CostEstimate:
     estimated_cost: float
     currency: str = "USD"
     last_updated: Optional[datetime] = None
+    pricing_source: str = "api"  # "api" or "hardcoded"
+    pricing_warning: Optional[str] = None
 
 
 @dataclass

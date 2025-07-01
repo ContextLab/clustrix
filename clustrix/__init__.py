@@ -15,6 +15,20 @@ from .cost_monitoring import (
     CostEstimate,
     CostReport,
 )
+from .filesystem import (
+    ClusterFilesystem,
+    FileInfo,
+    DiskUsage,
+    cluster_ls,
+    cluster_find,
+    cluster_stat,
+    cluster_exists,
+    cluster_isdir,
+    cluster_isfile,
+    cluster_glob,
+    cluster_du,
+    cluster_count_files,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -39,6 +53,18 @@ __all__ = [
     "ResourceUsage",
     "CostEstimate",
     "CostReport",
+    "ClusterFilesystem",
+    "FileInfo",
+    "DiskUsage",
+    "cluster_ls",
+    "cluster_find",
+    "cluster_stat",
+    "cluster_exists",
+    "cluster_isdir",
+    "cluster_isfile",
+    "cluster_glob",
+    "cluster_du",
+    "cluster_count_files",
 ]
 
 # Auto-register IPython magic command and display widget if in notebook environment
