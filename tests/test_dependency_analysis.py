@@ -342,9 +342,12 @@ class TestEdgeCases:
         analyzer = DependencyAnalyzer()
         deps = analyzer.analyze_function(func_with_methods)
 
-        # Should detect the import but not the method call as a filesystem call
+        # Should detect both imports from clustrix.filesystem and clustrix.config
         # (since we only detect direct function calls, not method calls)
-        assert len(deps.imports) == 1
+        assert len(deps.imports) == 2
+        import_modules = [imp.module for imp in deps.imports]
+        assert "clustrix.filesystem" in import_modules
+        assert "clustrix.config" in import_modules
         # Method calls are harder to detect without more sophisticated analysis
 
     def test_empty_function(self):
