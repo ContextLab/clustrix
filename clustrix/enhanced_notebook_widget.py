@@ -1,6 +1,7 @@
 """Enhanced notebook widget with advanced authentication options."""
 
 import os
+from typing import Optional
 
 try:
     import ipywidgets as widgets
@@ -19,7 +20,9 @@ from .validation import (
 )
 
 
-def create_enhanced_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
+def create_enhanced_cluster_widget(
+    config: Optional[ClusterConfig] = None,
+) -> widgets.VBox:
     """
     Create enhanced cluster configuration widget with advanced authentication options.
 

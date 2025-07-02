@@ -134,7 +134,7 @@ class AuthenticationManager:
 
     def _initialize_auth_methods(self) -> List[AuthMethod]:
         """Initialize authentication methods in simplified 4-step priority order."""
-        methods = [
+        methods: List[AuthMethod] = [
             SSHKeyAuthMethod(self.config),
         ]
 
