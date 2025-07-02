@@ -14,7 +14,7 @@
 - **✅ PRODUCTION READY**: 15/15 unit tests passing, comprehensive error handling
 - **📚 DOCUMENTED**: Complete tutorial and API documentation available
 
-**📖 See [SSH Key Automation Tutorial](ssh_key_automation_tutorial.md) for usage guide**
+**📖 Try the interactive [SSH Key Automation Tutorial](ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
 ## Executive Summary
 

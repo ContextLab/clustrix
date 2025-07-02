@@ -275,7 +275,7 @@ kinit your_netid@UNIVERSITY.EDU
 ssh your_netid@cluster.university.edu
 ```
 
-**📖 For complete details, see the [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.md)**
+**📖 For complete details, try the interactive [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
 ## Advanced Usage
 
