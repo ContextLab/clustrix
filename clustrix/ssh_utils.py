@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import paramiko
 from clustrix.config import ClusterConfig
+from clustrix.auth_fallbacks import setup_auth_with_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,44 @@ def find_ssh_keys() -> List[str]:
     return existing_keys
 
 
+def detect_working_ssh_key(
+    hostname: str, username: str, port: int = 22
+) -> Optional[str]:
+    """Check if any existing SSH key already works for this host."""
+    return detect_existing_ssh_key(hostname, username, port)
+
+
+def validate_ssh_key(
+    hostname: str, username: str, key_path: str, port: int = 22
+) -> bool:
+    """Verify that a specific SSH key enables passwordless authentication."""
+    try:
+        client = paramiko.SSHClient()
+        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+        # Try to connect with this specific key
+        client.connect(
+            hostname=hostname,
+            username=username,
+            port=port,
+            key_filename=key_path,
+            timeout=10,
+            auth_timeout=10,
+            banner_timeout=10,
+            look_for_keys=False,  # Only use the specified key
+            allow_agent=False,  # Don't use SSH agent
+        )
+
+        # If we get here, the connection worked
+        client.close()
+        logger.info(f"SSH key validation successful: {key_path}")
+        return True
+
+    except Exception as e:
+        logger.debug(f"SSH key validation failed for {key_path}: {e}")
+        return False
+
+
 def detect_existing_ssh_key(
     hostname: str, username: str, port: int = 22
 ) -> Optional[str]:
@@ -129,6 +168,14 @@ def detect_existing_ssh_key(
             continue
 
     return None
+
+
+def generate_ssh_key_pair(
+    key_name: str, key_type: str = "ed25519", key_dir: Path = Path.home() / ".ssh"
+) -> Tuple[str, str]:
+    """Generate new SSH key pair with proper permissions."""
+    key_path = str(key_dir / key_name)
+    return generate_ssh_key(key_path, key_type)
 
 
 def generate_ssh_key(
@@ -223,6 +270,13 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
     return False
 
 
+def deploy_ssh_key(
+    hostname: str, username: str, password: str, public_key_path: str, port: int = 22
+) -> bool:
+    """Deploy public key to remote authorized_keys using password auth."""
+    return deploy_public_key(hostname, username, public_key_path, port, password)
+
+
 def deploy_public_key(
     hostname: str,
     username: str,
@@ -312,7 +366,29 @@ def deploy_public_key(
         )
         stdout.channel.recv_exit_status()  # Wait for command to complete
 
-        # Add public key to authorized_keys
+        # Clean up any existing Clustrix keys first (for key rotation/refresh)
+        # Create backup and clean in multiple steps for reliability
+        cleanup_cmd = """
+        if [ -f ~/.ssh/authorized_keys ]; then
+            cp ~/.ssh/authorized_keys ~/.ssh/authorized_keys.backup
+            grep -v 'Clustrix' ~/.ssh/authorized_keys > ~/.ssh/authorized_keys.tmp || touch ~/.ssh/authorized_keys.tmp
+            mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys
+            echo "Cleanup completed"
+        else
+            touch ~/.ssh/authorized_keys
+            echo "Created new authorized_keys"
+        fi
+        """
+        stdin, stdout, stderr = client.exec_command(cleanup_cmd)
+        cleanup_status = stdout.channel.recv_exit_status()
+        cleanup_output = stdout.read().decode().strip()
+
+        if cleanup_status == 0:
+            logger.info(f"Cleaned up existing Clustrix keys: {cleanup_output}")
+        else:
+            logger.warning("Failed to clean up existing keys, proceeding with append")
+
+        # Add new public key to authorized_keys
         escaped_key = public_key_content.replace("'", "'\"'\"'")
         cmd_str = f"echo '{escaped_key}' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
         stdin, stdout, stderr = client.exec_command(cmd_str)
@@ -386,106 +462,187 @@ Host {alias}
 
 def setup_ssh_keys(
     config: ClusterConfig,
+    password: str,
     cluster_alias: Optional[str] = None,
-    auto_generate: bool = True,
     key_type: str = "ed25519",
-    passphrase: str = "",
-    password: Optional[str] = None,
-) -> ClusterConfig:
+    force_refresh: bool = False,
+    auto_refresh_days: Optional[int] = None,
+) -> Dict[str, Any]:
     """
-    Automatically set up SSH keys for cluster authentication.
+    Main entry point for SSH key automation.
 
     Args:
         config: ClusterConfig object for the target cluster
+        password: Password for initial SSH connection
         cluster_alias: Optional alias for SSH config entry
-        auto_generate: Whether to generate new keys if none exist
-        key_type: Type of key to generate if needed ('ed25519', 'rsa')
-        passphrase: Passphrase for new keys (empty for no passphrase)
-        password: Password for initial SSH connection (if needed)
+        key_type: Type of key to generate ('ed25519', 'rsa')
+        force_refresh: Force generation of new keys even if existing ones work
+        auto_refresh_days: Auto-refresh keys older than this many days (not implemented yet)
 
     Returns:
-        Updated ClusterConfig with key_file populated
-
-    Raises:
-        SSHKeySetupError: If key setup fails
+        {
+            "success": bool,
+            "key_path": str,           # Path to private key
+            "key_already_existed": bool,
+            "key_deployed": bool,
+            "connection_tested": bool,
+            "error": Optional[str],
+            "details": Dict[str, Any]
+        }
     """
-    if not config.cluster_host:
-        raise SSHKeySetupError("cluster_host must be specified in config")
+    # Initialize result dictionary
+    result = {
+        "success": False,
+        "key_path": "",
+        "key_already_existed": False,
+        "key_deployed": False,
+        "connection_tested": False,
+        "error": None,
+        "details": {},
+    }
 
-    if not config.username:
-        raise SSHKeySetupError("username must be specified in config")
+    try:
+        if not config.cluster_host:
+            result["error"] = "cluster_host must be specified in config"
+            return result
 
-    hostname = config.cluster_host
-    username = config.username
-    port = getattr(config, "cluster_port", 22)
+        if not config.username:
+            result["error"] = "username must be specified in config"
+            return result
 
-    # Step 1: Check if SSH keys already work
-    existing_key = detect_existing_ssh_key(hostname, username, port)
-    if existing_key:
-        logger.info(f"Found working SSH key for {hostname}: {existing_key}")
-        config.key_file = existing_key
-        return config
+        hostname = config.cluster_host
+        username = config.username
+        port = getattr(config, "cluster_port", 22)
 
-    # Step 2: Generate new SSH key if auto_generate is enabled
-    if not auto_generate:
-        raise SSHKeySetupError(
-            f"No working SSH key found for {hostname} and auto_generate=False"
-        )
+        # Step 1: Check if SSH keys already work (unless force_refresh)
+        existing_key = None
+        if not force_refresh:
+            existing_key = detect_existing_ssh_key(hostname, username, port)
+            if existing_key:
+                logger.info(f"Found working SSH key for {hostname}: {existing_key}")
+                result.update(
+                    {
+                        "success": True,
+                        "key_path": existing_key,
+                        "key_already_existed": True,
+                        "key_deployed": False,
+                        "connection_tested": True,
+                        "details": {"message": "Using existing working SSH key"},
+                    }
+                )
+                config.key_file = existing_key
+                return result
 
-    # Create key path
-    ssh_dir = Path.home() / ".ssh"
-    if cluster_alias:
-        key_name = f"id_{key_type}_{cluster_alias}"
-    else:
-        key_name = f"id_{key_type}_clustrix_{hostname.replace('.', '_')}"
+        # Step 2: Generate new SSH key
+        ssh_dir = Path.home() / ".ssh"
 
-    key_path = str(ssh_dir / key_name)
-
-    # Check if key already exists
-    if Path(key_path).exists():
-        logger.warning(f"SSH key already exists at {key_path}, using existing key")
-        config.key_file = key_path
-    else:
-        # Generate new key
-        comment = f"{username}@{hostname} (generated by Clustrix)"
-        private_key_path, public_key_path = generate_ssh_key(
-            key_path, key_type, passphrase, comment
-        )
-        config.key_file = private_key_path
-
-        # Deploy public key
-        deploy_public_key(hostname, username, public_key_path, port, password)
-
-    # Step 3: Update SSH config if alias provided
-    if cluster_alias:
-        update_ssh_config(hostname, username, config.key_file, cluster_alias, port)
-
-    # Step 4: Test the connection (with retry for key propagation)
-    import time
-
-    max_retries = 3
-    retry_delay = 2
-
-    for attempt in range(max_retries):
-        test_key = detect_existing_ssh_key(hostname, username, port)
-        if test_key == config.key_file:
-            break
-        elif attempt < max_retries - 1:
-            logger.info(
-                f"Connection test attempt {attempt + 1} failed, retrying in {retry_delay}s..."
-            )
-            time.sleep(retry_delay)
+        # Use improved key naming convention from technical design
+        if cluster_alias:
+            key_name = f"id_{key_type}_clustrix_{username}_{cluster_alias}"
         else:
-            # Final attempt failed - but still return success since key was generated and deployed
-            logger.warning(
-                f"SSH key generated and deployed successfully, but connection test failed. "
-                f"Generated key: {config.key_file}, Test result: {test_key}. "
-                f"The key may need time to propagate or there may be server-side caching."
-            )
-            # Don't raise an error - the key was successfully created and deployed
+            clean_hostname = hostname.replace(".", "_").replace("-", "_")
+            key_name = f"id_{key_type}_clustrix_{username}_{clean_hostname}"
 
-    logger.info(f"SSH key setup completed successfully for {hostname}")
-    return config
+        key_path = str(ssh_dir / key_name)
+        result["key_path"] = key_path
+
+        # Check if key already exists and handle force_refresh
+        if Path(key_path).exists():
+            if force_refresh:
+                logger.info(f"Force refresh enabled, removing existing key: {key_path}")
+                try:
+                    Path(key_path).unlink()
+                    Path(f"{key_path}.pub").unlink(missing_ok=True)
+                except OSError as e:
+                    result["error"] = f"Failed to remove existing key: {e}"
+                    return result
+            else:
+                logger.info(f"SSH key already exists at {key_path}, using existing key")
+                result["key_already_existed"] = True
+
+        # Generate new key if it doesn't exist or was removed
+        if not Path(key_path).exists():
+            try:
+                import time
+
+                comment = f"{username}@{hostname} (generated by Clustrix on {time.strftime('%Y-%m-%d %H:%M:%S')})"
+                private_key_path, public_key_path = generate_ssh_key(
+                    key_path, key_type, "", comment  # No passphrase for automation
+                )
+                logger.info(f"Generated new SSH key: {private_key_path}")
+                result["details"] = result.get("details", {})
+                result["details"]["key_generated"] = True
+            except SSHKeyGenerationError as e:
+                result["error"] = f"Failed to generate SSH key: {e}"
+                return result
+
+        # Step 3: Deploy public key
+        try:
+            public_key_path = f"{key_path}.pub"
+            success = deploy_public_key(
+                hostname, username, public_key_path, port, password
+            )
+            if success:
+                result["key_deployed"] = True
+                logger.info("Successfully deployed public key to remote host")
+            else:
+                result["error"] = "Failed to deploy public key to remote host"
+                return result
+        except SSHKeyDeploymentError as e:
+            result["error"] = f"Failed to deploy public key: {e}"
+            return result
+
+        # Step 4: Update SSH config if alias provided
+        if cluster_alias:
+            try:
+                update_ssh_config(hostname, username, key_path, cluster_alias, port)
+                result["details"] = result.get("details", {})
+                result["details"]["ssh_config_updated"] = True
+            except Exception as e:
+                logger.warning(f"Failed to update SSH config: {e}")
+                result["details"] = result.get("details", {})
+                result["details"]["ssh_config_error"] = str(e)
+
+        # Step 5: Test the connection (with retry for key propagation)
+        import time
+
+        max_retries = 3
+        retry_delay = 2
+
+        for attempt in range(max_retries):
+            test_key = detect_existing_ssh_key(hostname, username, port)
+            if test_key == key_path:
+                result["connection_tested"] = True
+                logger.info("SSH key connection test successful")
+                break
+            elif attempt < max_retries - 1:
+                logger.info(
+                    f"Connection test attempt {attempt + 1} failed, retrying in {retry_delay}s..."
+                )
+                time.sleep(retry_delay)
+            else:
+                logger.warning(
+                    "SSH key deployed successfully but connection test failed. "
+                    "The key may need time to propagate or there may be server-side caching."
+                )
+                result["details"] = result.get("details", {})
+                result["details"][
+                    "connection_test_warning"
+                ] = "Key deployed but connection test failed"
+
+        # Update config and mark as successful
+        config.key_file = key_path
+        result["success"] = True
+        result["details"] = result.get("details", {})
+        result["details"]["message"] = "SSH key setup completed successfully"
+
+        logger.info(f"SSH key setup completed successfully for {hostname}")
+        return result
+
+    except Exception as e:
+        result["error"] = f"Unexpected error during SSH key setup: {e}"
+        logger.error(f"SSH key setup failed: {e}")
+        return result
 
 
 def get_ssh_key_info(key_path: str) -> Dict[str, Any]:
@@ -539,3 +696,39 @@ def list_ssh_keys() -> List[Dict[str, Any]]:
     """
     ssh_keys = find_ssh_keys()
     return [get_ssh_key_info(key_path) for key_path in ssh_keys]
+
+
+def setup_ssh_keys_with_fallback(
+    config: ClusterConfig,
+    password: Optional[str] = None,
+    cluster_alias: Optional[str] = None,
+    key_type: str = "ed25519",
+    force_refresh: bool = False,
+    auto_refresh_days: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Set up SSH keys with automatic password fallback for enhanced compatibility.
+
+    This function attempts SSH key setup and automatically falls back to password
+    authentication if needed, with environment-specific password retrieval.
+
+    Args:
+        config: ClusterConfig object for the target cluster
+        password: Optional password for initial SSH connection
+        cluster_alias: Optional alias for SSH config entry
+        key_type: Type of key to generate ('ed25519', 'rsa')
+        force_refresh: Force generation of new keys even if existing ones work
+        auto_refresh_days: Auto-refresh keys older than this many days (not implemented yet)
+
+    Returns:
+        Same format as setup_ssh_keys() with additional fallback information
+    """
+    return setup_auth_with_fallback(
+        config=config,
+        setup_ssh_keys_func=setup_ssh_keys,
+        password=password,
+        cluster_alias=cluster_alias,
+        key_type=key_type,
+        force_refresh=force_refresh,
+        auto_refresh_days=auto_refresh_days,
+    )

@@ -317,15 +317,17 @@ class TestSetupSSHKeys:
         """Test error when host is missing."""
         config = ClusterConfig(cluster_type="slurm", username="testuser")
 
-        with pytest.raises(SSHKeySetupError, match="cluster_host must be specified"):
-            setup_ssh_keys(config)
+        result = setup_ssh_keys(config, "testpass")
+        assert not result["success"]
+        assert "cluster_host must be specified" in result["error"]
 
     def test_setup_ssh_keys_missing_username(self):
         """Test error when username is missing."""
         config = ClusterConfig(cluster_type="slurm", cluster_host="test.host.com")
 
-        with pytest.raises(SSHKeySetupError, match="username must be specified"):
-            setup_ssh_keys(config)
+        result = setup_ssh_keys(config, "testpass")
+        assert not result["success"]
+        assert "username must be specified" in result["error"]
 
     @patch("clustrix.ssh_utils.detect_existing_ssh_key")
     def test_setup_ssh_keys_existing_key_found(self, mock_detect):
@@ -336,9 +338,12 @@ class TestSetupSSHKeys:
             cluster_type="slurm", cluster_host="test.host.com", username="testuser"
         )
 
-        result = setup_ssh_keys(config)
+        result = setup_ssh_keys(config, "testpass")
 
-        assert result.key_file == "/home/user/.ssh/id_rsa"
+        assert result["success"]
+        assert result["key_path"] == "/home/user/.ssh/id_rsa"
+        assert result["key_already_existed"]
+        assert config.key_file == "/home/user/.ssh/id_rsa"
         mock_detect.assert_called_once_with("test.host.com", "testuser", 22)
 
     @patch("clustrix.ssh_utils.detect_existing_ssh_key")

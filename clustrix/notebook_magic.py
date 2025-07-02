@@ -624,6 +624,15 @@ class EnhancedClusterConfigWidget:
             layout=widgets.Layout(width="100%", margin="5px 0px"),
             tooltip="Password is only used for initial SSH key deployment and is not stored",
         )
+
+        # SSH key rotation options
+        self.ssh_force_refresh = widgets.Checkbox(
+            value=False,
+            description="Force refresh SSH keys",
+            tooltip="Generate new SSH keys even if existing ones work",
+            style={"description_width": "150px"},
+            layout=widgets.Layout(width="100%", margin="5px 0px"),
+        )
         # Port field
         self.port_field = widgets.IntText(
             value=22,
@@ -1059,6 +1068,7 @@ class EnhancedClusterConfigWidget:
                 self.port_field,
                 widgets.HTML("<h6>SSH Key Setup (Optional)</h6>"),
                 self.ssh_password_field,
+                self.ssh_force_refresh,
                 widgets.HTML(
                     "<small><em>Password is only used for initial SSH key deployment and is not stored</em></small>"
                 ),
@@ -2544,45 +2554,62 @@ class EnhancedClusterConfigWidget:
                     else None
                 )
 
+                # Get force refresh setting
+                force_refresh = self.ssh_force_refresh.value
+
+                if force_refresh:
+                    print("🔄 Force refresh enabled - will generate new SSH keys")
+
                 if not password:
-                    print(
-                        "ℹ️  No password provided - attempting passwordless connection"
-                    )
-                    print(
-                        "   If this fails, please enter your SSH password above and try again"
-                    )
+                    print("❌ Password is required for SSH key setup")
+                    print("   Please enter your SSH password above and try again")
+                    return
                 else:
                     print("🔐 Using provided password for initial authentication")
 
-                # Generate and deploy SSH keys
-                updated_config = setup_ssh_keys(
+                # Generate and deploy SSH keys using new API
+                result = setup_ssh_keys(
                     cluster_config,
+                    password=password,  # Password is required in new API
                     cluster_alias=cluster_alias,
-                    auto_generate=True,
                     key_type="ed25519",  # Use modern Ed25519 keys
-                    passphrase="",  # No passphrase for automation
-                    password=password,  # Use password from widget for initial auth
+                    force_refresh=force_refresh,
                 )
 
                 # Clear password field for security after use
                 self.ssh_password_field.value = ""
 
-                # Update the widget with the new key
-                if updated_config.key_file:
-                    self.ssh_key_field.value = updated_config.key_file
+                # Handle the new dict return format
+                if result["success"]:
+                    self.ssh_key_field.value = result["key_path"]
                     print()
                     print("✅ SSH key setup completed successfully!")
-                    print(f"   Private key: {updated_config.key_file}")
-                    print(f"   Public key: {updated_config.key_file}.pub")
+                    print(f"   Private key: {result['key_path']}")
+                    print(f"   Public key: {result['key_path']}.pub")
+
+                    if result["key_already_existed"]:
+                        print("   Using existing working SSH key")
+                    else:
+                        print("   Generated new SSH key")
+
+                    if result["key_deployed"]:
+                        print("   Public key deployed to remote server")
+
+                    if result["connection_tested"]:
+                        print("   Connection test successful")
+                    elif "connection_test_warning" in result["details"]:
+                        print("   ⚠️  Connection test failed but key was deployed")
+                        print("   The key may need time to propagate")
+
                     print(f"   SSH config updated for alias: {cluster_alias}")
-                    print()
-                    print("ℹ️  Note: If connection tests fail initially, the SSH server")
-                    print("   may need a few moments to recognize the new key.")
                     print()
                     print("🔧 You can now test the configuration or apply it")
                     print("   The SSH key field has been updated automatically")
                 else:
-                    print("❌ SSH key setup failed - no key file path returned")
+                    print(f"❌ SSH key setup failed: {result['error']}")
+                    if result["details"]:
+                        for key, value in result["details"].items():
+                            print(f"   {key}: {value}")
 
             except ImportError as e:
                 print(f"❌ SSH utilities not available: {e}")
