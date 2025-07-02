@@ -350,20 +350,36 @@ class TestSetupSSHKeys:
     @patch("clustrix.ssh_utils.generate_ssh_key")
     @patch("clustrix.ssh_utils.deploy_public_key")
     @patch("clustrix.ssh_utils.update_ssh_config")
+    @patch("pathlib.Path.exists")
     def test_setup_ssh_keys_full_workflow(
-        self, mock_update_config, mock_deploy, mock_generate, mock_detect
+        self,
+        mock_path_exists,
+        mock_update_config,
+        mock_deploy,
+        mock_generate,
+        mock_detect,
     ):
         """Test complete SSH key setup workflow."""
-        # No existing key found
+        # The actual key path will be determined by the function
+        expected_key_path = (
+            "/Users/jmanning/.ssh/id_ed25519_clustrix_testuser_testcluster"
+        )
+
+        # Set up detect_existing_ssh_key to return None initially, then the key path
         mock_detect.side_effect = [
-            None,
-            "/home/user/.ssh/id_ed25519_test",
-        ]  # Before and after generation
+            None,  # First call: no existing key
+            expected_key_path,  # Second call: key works
+            expected_key_path,  # Third call: key works (retry)
+            expected_key_path,  # Fourth call: key works (retry)
+        ]
+
+        # Key file doesn't exist initially
+        mock_path_exists.return_value = False
 
         # Key generation succeeds
         mock_generate.return_value = (
-            "/home/user/.ssh/id_ed25519_test",
-            "/home/user/.ssh/id_ed25519_test.pub",
+            expected_key_path,
+            f"{expected_key_path}.pub",
         )
 
         # Deployment succeeds
@@ -373,9 +389,14 @@ class TestSetupSSHKeys:
             cluster_type="slurm", cluster_host="test.host.com", username="testuser"
         )
 
-        result = setup_ssh_keys(config, cluster_alias="testcluster")
+        result = setup_ssh_keys(
+            config, password="testpass", cluster_alias="testcluster"
+        )
 
-        assert result.key_file == "/home/user/.ssh/id_ed25519_test"
+        assert result["success"]
+        assert result["key_deployed"]
+        assert result["connection_tested"]
+        assert config.key_file == expected_key_path
         mock_generate.assert_called_once()
         mock_deploy.assert_called_once()
         mock_update_config.assert_called_once()
