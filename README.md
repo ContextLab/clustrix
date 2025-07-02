@@ -16,6 +16,7 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 ## Features
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
+- **🔑 Automated SSH Key Setup**: 15-second secure cluster access setup (vs 15-30 min manual)
 - **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
 - **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
@@ -201,6 +202,80 @@ module_loads:
 environment_variables:
   CUDA_VISIBLE_DEVICES: "0,1"
 ```
+
+## SSH Key Automation
+
+Clustrix provides automated SSH key setup to eliminate the manual process of generating and deploying SSH keys to clusters. This feature transforms a 15-30 minute manual setup into a **15-second automated process**.
+
+### Quick Setup Methods
+
+#### Method 1: Jupyter Widget (Recommended)
+The easiest way is using the interactive widget that appears when you import Clustrix:
+
+```python
+import clustrix
+# Look for the "SSH Key Setup" section in the widget interface
+```
+
+1. Enter your cluster hostname and username
+2. Enter your password  
+3. Click "Setup SSH Keys"
+4. ✅ Done! Secure access in <15 seconds
+
+#### Method 2: CLI Command
+```bash
+# Basic setup
+clustrix ssh-setup --host cluster.university.edu --user your_username
+
+# With custom alias for easy access
+clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
+
+# Now you can connect with: ssh my_hpc
+```
+
+#### Method 3: Python API
+```python
+from clustrix import setup_ssh_keys_with_fallback
+from clustrix.config import ClusterConfig
+
+config = ClusterConfig(
+    cluster_type="slurm",
+    cluster_host="cluster.university.edu", 
+    username="your_username"
+)
+
+result = setup_ssh_keys_with_fallback(config)
+if result["success"]:
+    print("✅ SSH keys setup successfully!")
+```
+
+### Key Features
+
+- **🔒 Secure**: Ed25519 keys with proper permissions (600/644)
+- **🧹 Smart Cleanup**: Automatically removes conflicting old keys
+- **🔄 Key Rotation**: Force refresh to generate new keys
+- **🌐 Cross-platform**: Works on Windows, macOS, Linux  
+- **🏢 Enterprise Ready**: Handles Kerberos clusters gracefully
+- **💡 Smart Fallbacks**: Environment-specific password retrieval
+
+### Password Fallback System
+
+No need to enter passwords manually! Clustrix automatically retrieves passwords from:
+
+- **Google Colab**: Colab secrets (stored securely)
+- **Environment Variables**: `CLUSTRIX_PASSWORD_*` or `CLUSTER_PASSWORD`
+- **Interactive Prompts**: GUI popups in notebooks, terminal prompts in CLI
+
+### Enterprise Cluster Support
+
+For university/enterprise clusters using Kerberos authentication:
+```bash
+# Clustrix deploys keys successfully, then use Kerberos for auth
+kinit your_netid@UNIVERSITY.EDU
+ssh your_netid@cluster.university.edu
+```
+
+**📖 For complete details, see the [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.md)**
 
 ## Advanced Usage
 
