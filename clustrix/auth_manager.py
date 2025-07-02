@@ -14,6 +14,7 @@ from .auth_methods import (
     detect_environment,
     is_colab,
 )
+from .kerberos_auth import KerberosAuthMethod
 
 
 class AuthenticationManager:
@@ -136,7 +137,7 @@ class AuthenticationManager:
         """Initialize authentication methods in priority order."""
         methods = [
             SSHKeyAuthMethod(self.config),
-            # Note: Kerberos will be added in Phase 3
+            KerberosAuthMethod(self.config),  # Add Kerberos support
         ]
 
         # Add 1Password if configured
