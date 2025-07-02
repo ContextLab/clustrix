@@ -1,15 +1,19 @@
 """Modern notebook widget with profile management and horizontal layout."""
 
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import ipywidgets as widgets
 
 try:
-    import ipywidgets as widgets
+    import ipywidgets as widgets  # noqa: F811
     from IPython.display import display
 
     IPYTHON_AVAILABLE = True
 except ImportError:
     IPYTHON_AVAILABLE = False
+    widgets = None  # type: ignore
 
 from .config import ClusterConfig
 from .profile_manager import ProfileManager
@@ -585,7 +589,7 @@ class ModernClustrixWidget:
         else:
             self.widgets["remote_section"].layout.display = "none"
 
-    def get_widget(self) -> widgets.Widget:
+    def get_widget(self) -> "widgets.Widget":
         """Get the complete widget for display."""
         # Main container
         main_container = widgets.VBox(
@@ -1144,7 +1148,7 @@ class ModernClustrixWidget:
 
 def create_modern_cluster_widget(
     profile_manager: Optional[ProfileManager] = None,
-) -> widgets.Widget:
+) -> "widgets.Widget":
     """
     Create a modern cluster configuration widget with profile management.
 

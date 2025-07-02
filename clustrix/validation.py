@@ -30,7 +30,7 @@ def validate_cluster_auth(
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         # Try password auth if provided
-        if password:
+        if password and config.cluster_host:
             client.connect(
                 hostname=config.cluster_host,
                 username=config.username,
@@ -85,27 +85,31 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
         # Try SSH key auth
-        client.connect(
-            hostname=config.cluster_host,
-            username=config.username,
-            port=config.ssh_port,
-            timeout=10,
-            look_for_keys=True,
-            allow_agent=True,
-        )
+        if config.cluster_host:
+            client.connect(
+                hostname=config.cluster_host,
+                username=config.username,
+                port=config.ssh_port,
+                timeout=10,
+                look_for_keys=True,
+                allow_agent=True,
+            )
 
-        # Run simple command to verify
-        stdin, stdout, stderr = client.exec_command("echo 'SSH key auth working'")
-        result = stdout.read().decode().strip()
-        error = stderr.read().decode().strip()
+            # Run simple command to verify
+            stdin, stdout, stderr = client.exec_command("echo 'SSH key auth working'")
+            result = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
 
-        client.close()
+            client.close()
 
-        if result == "SSH key auth working":
-            print("✅ SSH key authentication successful")
-            return True
+            if result == "SSH key auth working":
+                print("✅ SSH key authentication successful")
+                return True
+            else:
+                print(f"⚠️  SSH key command execution issue: {error}")
+                return False
         else:
-            print(f"⚠️  SSH key command execution issue: {error}")
+            print("❌ No cluster host configured")
             return False
 
     except paramiko.AuthenticationException:

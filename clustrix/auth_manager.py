@@ -55,9 +55,9 @@ class AuthenticationManager:
         # 2. Try 1Password if configured
         if self.config.use_1password:
             print("   • Checking 1Password...")
-            method = OnePasswordAuthMethod(self.config)
-            if method.is_applicable(connection_params):
-                result = method.attempt_auth(connection_params)
+            onepassword_method = OnePasswordAuthMethod(self.config)
+            if onepassword_method.is_applicable(connection_params):
+                result = onepassword_method.attempt_auth(connection_params)
                 if result.success:
                     print("   ✅ Retrieved password from 1Password")
                     return result.password
@@ -69,9 +69,9 @@ class AuthenticationManager:
             print(
                 f"   • Checking environment variable ${self.config.password_env_var}..."
             )
-            method = EnvironmentPasswordMethod(self.config)
-            if method.is_applicable(connection_params):
-                result = method.attempt_auth(connection_params)
+            env_method = EnvironmentPasswordMethod(self.config)
+            if env_method.is_applicable(connection_params):
+                result = env_method.attempt_auth(connection_params)
                 if result.success:
                     print(f"   ✅ Using password from ${self.config.password_env_var}")
                     return result.password
@@ -80,14 +80,14 @@ class AuthenticationManager:
 
         # 4. Fall back to interactive prompt
         print("   • Prompting for password...")
-        method = InteractivePasswordMethod(self.config)
-        result = method.attempt_auth(connection_params)
+        interactive_method = InteractivePasswordMethod(self.config)
+        result = interactive_method.attempt_auth(connection_params)
 
         if result.success:
             print("   ✅ Password entered interactively")
 
             # Offer to store in 1Password if enabled
-            if self.config.use_1password:
+            if self.config.use_1password and result.password:
                 self._offer_1password_storage(result.password)
 
             return result.password
@@ -224,8 +224,12 @@ class AuthenticationManager:
         try:
             onepassword_method = OnePasswordAuthMethod(self.config)
 
-            if onepassword_method.store_password(
-                self.config.cluster_host, self.config.username, password
+            if (
+                self.config.cluster_host
+                and self.config.username
+                and onepassword_method.store_password(
+                    self.config.cluster_host, self.config.username, password
+                )
             ):
                 print(f"✅ Password stored in 1Password as '{note_name}'")
 
@@ -241,9 +245,9 @@ class AuthenticationManager:
         except Exception as e:
             print(f"❌ Error storing in 1Password: {e}")
 
-    def validate_configuration(self) -> Dict[str, bool]:
+    def validate_configuration(self) -> Dict[str, Optional[bool]]:
         """Validate the current authentication configuration."""
-        results = {}
+        results: Dict[str, Optional[bool]] = {}
 
         print("🔍 Validating authentication configuration...")
 
