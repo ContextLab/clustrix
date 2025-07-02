@@ -74,8 +74,16 @@ def update_readme_badge(readme_path, coverage_percent):
             print(f"✅ Updated coverage badge to {coverage_percent}% ({color})")
             return True
         else:
-            print("⚠️  No coverage badge found to update (or no change needed)")
-            return False
+            # Check if badge was found by testing if the pattern matches
+            match = re.search(badge_pattern, content)
+            if match:
+                print(f"ℹ️  Coverage badge already shows {coverage_percent}% - no update needed")
+                print(f"🔍 Found badge: {match.group()}")
+                return True  # Success - no change needed
+            else:
+                print("❌ No coverage badge found to update")
+                print(f"🔍 Searched for pattern: {badge_pattern}")
+                return False
             
     except Exception as e:
         print(f"❌ Error updating README: {e}")
@@ -108,6 +116,7 @@ def main():
         sys.exit(1)
     
     print(f"📊 Current coverage: {coverage_percent}%")
+    print(f"🔍 Looking for coverage badge in: {readme_file}")
     
     # Update README badge
     success = update_readme_badge(readme_file, coverage_percent)
