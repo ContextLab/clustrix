@@ -1,5 +1,6 @@
 import json
 import yaml
+import os
 from pathlib import Path
 from typing import Dict, Optional
 from dataclasses import dataclass, asdict
@@ -100,6 +101,15 @@ class ClusterConfig:
     # Monitoring settings
     cost_monitoring: bool = False  # Enable cost monitoring for cloud providers
 
+    # Enhanced Authentication Options
+    use_1password: bool = False  # Enable 1Password integration
+    onepassword_note: str = ""  # 1Password secure note name
+    use_env_password: bool = False  # Enable environment variable password
+    password_env_var: str = ""  # Name of environment variable containing password
+    cache_credentials: bool = True  # Cache credentials in memory
+    credential_cache_ttl: int = 300  # Credential cache TTL in seconds (5 minutes)
+    ssh_port: int = 22  # SSH port (for consistency with cluster_port)
+
     # Advanced settings
     environment_variables: Optional[Dict[str, str]] = None
     module_loads: Optional[list] = None
@@ -130,6 +140,12 @@ class ClusterConfig:
         except Exception:
             # Silently fail in constructor to avoid breaking imports
             pass
+
+    def get_env_password(self) -> Optional[str]:
+        """Get password from specified environment variable."""
+        if self.use_env_password and self.password_env_var:
+            return os.environ.get(self.password_env_var)
+        return None
 
     def save_to_file(self, config_path: str) -> None:
         """Save this configuration instance to a file."""
