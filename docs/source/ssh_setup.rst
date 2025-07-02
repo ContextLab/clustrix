@@ -1,266 +1,346 @@
 SSH Key Setup for Remote Clusters
 ====================================
 
-Clustrix requires SSH access to remote clusters for job submission and management. This guide provides detailed instructions for setting up SSH keys with different cluster environments and authentication methods.
+Clustrix provides **automated SSH key setup** that transforms the traditional 15-30 minute manual process into a **15-second automated experience**. This feature eliminates the complexity of SSH configuration while maintaining security best practices.
 
-Overview
---------
+.. note::
+   **🚀 New in Clustrix**: Automated SSH key setup makes cluster access effortless! 
+   Try the interactive tutorial: `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
 
-Clustrix supports multiple authentication methods:
+Quick Start: Automated Setup
+-----------------------------
 
-- **SSH Key Authentication** (Recommended): Most secure and convenient
-- **Password Authentication**: Simple but less secure
-- **SSH Agent**: For multiple key management
-- **Custom Key Files**: For specific cluster configurations
+The easiest way to set up SSH access is using Clustrix's automated system:
 
-SSH Key Authentication Setup
----------------------------
+Method 1: Interactive Widget (Recommended)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Generate SSH Key Pair
-~~~~~~~~~~~~~~~~~~~~~~~~
+.. code-block:: python
 
-Generate a new SSH key pair specifically for cluster access:
+   import clustrix
+   
+   # The widget appears automatically with SSH Key Setup section
+   # 1. Enter your cluster hostname (e.g., cluster.university.edu)
+   # 2. Enter your username  
+   # 3. Enter your password
+   # 4. Click "Setup SSH Keys"
+   # ✅ Done in 15 seconds!
+
+Method 2: Command Line Interface
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   # Generate RSA key (recommended for compatibility)
-   ssh-keygen -t rsa -b 4096 -f ~/.ssh/clustrix_key
+   # Basic automated setup
+   clustrix ssh-setup --host cluster.university.edu --user your_username
    
-   # Or generate Ed25519 key (more secure, newer systems)
-   ssh-keygen -t ed25519 -f ~/.ssh/clustrix_ed25519
-
-**Important**: Use a strong passphrase for additional security.
-
-2. Copy Public Key to Cluster
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Upload your public key to the cluster:
-
-.. code-block:: bash
-
-   # Using ssh-copy-id (easiest method)
-   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.hostname.edu
+   # With custom alias for easy access
+   clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
    
-   # Manual method if ssh-copy-id is not available
-   cat ~/.ssh/clustrix_key.pub | ssh username@cluster.hostname.edu "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+   # Now you can connect with: ssh my_hpc
 
-3. Configure SSH Client
-~~~~~~~~~~~~~~~~~~~~~~
-
-Create or edit ``~/.ssh/config`` to define cluster-specific settings:
-
-.. code-block:: text
-
-   # Example SSH config for a SLURM cluster
-   Host my-slurm-cluster
-       HostName slurm.university.edu
-       User myusername
-       IdentityFile ~/.ssh/clustrix_key
-       ForwardAgent yes
-       ServerAliveInterval 60
-       ServerAliveCountMax 3
-   
-   # Example for a PBS cluster with specific port
-   Host my-pbs-cluster
-       HostName pbs.cluster.org
-       Port 2222
-       User researcher
-       IdentityFile ~/.ssh/clustrix_key
-       ProxyJump gateway.cluster.org
-   
-   # Example for SGE cluster with compression
-   Host my-sge-cluster
-       HostName sge.hpc.gov
-       User scientist
-       IdentityFile ~/.ssh/clustrix_key
-       Compression yes
-       TCPKeepAlive yes
-
-4. Test SSH Connection
+Method 3: Python API
 ~~~~~~~~~~~~~~~~~~~~
 
-Verify your SSH setup works correctly:
+.. code-block:: python
+
+   from clustrix import setup_ssh_keys_with_fallback
+   from clustrix.config import ClusterConfig
+   
+   config = ClusterConfig(
+       cluster_type="slurm",
+       cluster_host="cluster.university.edu", 
+       username="your_username"
+   )
+   
+   result = setup_ssh_keys_with_fallback(config)
+   if result["success"]:
+       print("✅ SSH keys setup successfully!")
+
+What the Automation Does
+-----------------------
+
+The automated SSH setup handles everything for you:
+
+🔑 **Key Generation**
+  - Creates Ed25519 keys (quantum-resistant, modern encryption)
+  - Proper file permissions (600 for private, 644 for public)
+  - Informative comments with timestamps
+
+🚀 **Key Deployment** 
+  - Securely copies public key to remote cluster
+  - Automatically cleans up conflicting old keys
+  - Tests connection to verify success
+
+⚙️ **SSH Configuration**
+  - Updates ~/.ssh/config with cluster alias
+  - Configures optimal connection settings
+  - Enables easy future connections
+
+🔒 **Security Features**
+  - No plain-text credential storage
+  - Automatic password clearing from memory  
+  - Cross-platform compatibility (Windows, macOS, Linux)
+
+Advanced Features
+-----------------
+
+Password Fallback System
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Clustrix automatically retrieves passwords from secure sources:
+
+**Google Colab Integration**
+
+.. code-block:: python
+
+   # Store password in Colab secrets (key icon 🔑 in sidebar)
+   # Use key: CLUSTER_PASSWORD_HOSTNAME or CLUSTER_PASSWORD
+   # Clustrix automatically retrieves it!
+
+**Environment Variables**
 
 .. code-block:: bash
 
-   # Test basic connection
-   ssh my-slurm-cluster "hostname && whoami"
+   # Set cluster-specific password
+   export CLUSTRIX_PASSWORD_CLUSTER_UNIVERSITY_EDU="your_password"
    
-   # Test specific commands that Clustrix will use
-   ssh my-slurm-cluster "which sbatch && squeue --version"
+   # Or generic fallback
+   export CLUSTER_PASSWORD="your_password"
 
-Clustrix Configuration
----------------------
+**Interactive Prompts**
+  - **Jupyter Notebooks**: GUI popup dialogs
+  - **Command Line**: Secure terminal prompts
+  - **Python Scripts**: Standard input prompts
 
-Configure Clustrix to use your SSH setup:
+Key Rotation and Management
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: python
+
+   # Force generation of new keys (for security rotation)
+   result = setup_ssh_keys_with_fallback(
+       config, 
+       force_refresh=True  # Removes old keys, generates fresh ones
+   )
+   
+   # Check existing SSH keys
+   from clustrix import find_ssh_keys, list_ssh_keys
+   
+   keys = find_ssh_keys()
+   print(f"Found {len(keys)} SSH keys")
+   
+   # Get detailed key information
+   key_info = list_ssh_keys()
+   for info in key_info:
+       if info["exists"]:
+           print(f"Key: {info['type']} {info['bit_size']} bits")
+
+Enterprise Cluster Support
+--------------------------
+
+University and Enterprise Clusters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Many university clusters use **Kerberos authentication**. Clustrix handles this gracefully:
+
+.. code-block:: bash
+
+   # Clustrix deploys SSH keys successfully, then use Kerberos for auth
+   kinit your_netid@UNIVERSITY.EDU
+   ssh your_netid@cluster.university.edu
+
+The SSH key deployment still succeeds and helps with file transfers and other operations.
+
+Multi-Factor Authentication
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For clusters requiring MFA:
+  - SSH keys handle the cryptographic authentication
+  - MFA only needed for initial login or sensitive operations
+  - Reduces overall authentication friction
+
+Configuration Integration
+-------------------------
+
+After SSH setup, configure Clustrix normally:
 
 Python Configuration
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
    from clustrix import configure
    
-   # Using SSH config host alias (recommended)
+   # After automated SSH setup, just configure normally
    configure(
        cluster_type="slurm",
-       cluster_host="my-slurm-cluster",  # matches SSH config
-       username="myusername",           # optional if in SSH config
-   )
-   
-   # Using specific key file
-   configure(
-       cluster_type="pbs", 
-       cluster_host="pbs.cluster.org",
-       username="researcher",
-       key_file="~/.ssh/clustrix_key"
-   )
-   
-   # Using password authentication (not recommended)
-   configure(
-       cluster_type="sge",
-       cluster_host="sge.hpc.gov", 
-       username="scientist",
-       password="your_password"  # Use environment variable instead
+       cluster_host="cluster.university.edu",
+       username="your_username"
+       # No need to specify key_file - automatically detected!
    )
 
 Configuration File
 ~~~~~~~~~~~~~~~~~
 
-Create ``~/.clustrix/config.yml``:
-
 .. code-block:: yaml
 
-   # SLURM cluster with SSH key
+   # ~/.clustrix/config.yml
    cluster_type: "slurm"
-   cluster_host: "my-slurm-cluster"
-   username: "myusername"
-   key_file: "~/.ssh/clustrix_key"
-   remote_work_dir: "/scratch/myusername/clustrix"
+   cluster_host: "cluster.university.edu"
+   username: "your_username"
+   # key_file automatically set by SSH automation
    
-   # Default resource settings
    default_cores: 4
    default_memory: "8GB"
    default_time: "02:00:00"
    
-   # Environment setup
    module_loads:
      - "python/3.11"
      - "gcc/11.2"
+
+Complete Workflow Example
+-------------------------
+
+Here's a complete end-to-end example:
+
+.. code-block:: python
+
+   import clustrix
+   from clustrix import setup_ssh_keys_with_fallback, cluster
+   from clustrix.config import ClusterConfig
    
-   environment_variables:
-     OMP_NUM_THREADS: "4"
+   # Step 1: Automated SSH setup
+   config = ClusterConfig(
+       cluster_type="slurm",
+       cluster_host="hpc.university.edu",
+       username="researcher"
+   )
+   
+   ssh_result = setup_ssh_keys_with_fallback(config)
+   if not ssh_result["success"]:
+       raise Exception(f"SSH setup failed: {ssh_result['error']}")
+   
+   print("✅ SSH keys configured automatically!")
+   
+   # Step 2: Configure Clustrix
+   clustrix.configure(
+       cluster_type=config.cluster_type,
+       cluster_host=config.cluster_host,
+       username=config.username,
+       default_cores=4,
+       default_memory="8GB"
+   )
+   
+   # Step 3: Use cluster computing
+   @cluster(cores=8, memory="16GB", time="01:00:00")
+   def scientific_computation(n_samples=1000):
+       import numpy as np
+       data = np.random.randn(n_samples, n_samples)
+       eigenvalues = np.linalg.eigvals(data)
+       return float(np.mean(eigenvalues.real))
+   
+   # This executes on the cluster automatically
+   result = scientific_computation(n_samples=500)
+   print(f"Computation result: {result}")
 
-Environment Variables
-~~~~~~~~~~~~~~~~~~~
+Manual Setup (Legacy)
+---------------------
 
-Set environment variables for sensitive information:
+.. warning::
+   **Manual setup is no longer recommended**. Use the automated SSH setup above for better security and convenience.
+
+If you need manual setup for special configurations:
+
+1. Generate SSH Key Pair
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
-   # In your shell profile (~/.bashrc, ~/.zshrc)
-   export CLUSTRIX_HOST="slurm.university.edu"
-   export CLUSTRIX_USERNAME="myusername"
-   export CLUSTRIX_KEY_FILE="~/.ssh/clustrix_key"
+   # Generate Ed25519 key (recommended)
+   ssh-keygen -t ed25519 -f ~/.ssh/clustrix_key
    
-   # For password auth (not recommended in scripts)
-   export CLUSTRIX_PASSWORD="your_password"
+   # Or RSA key for older systems
+   ssh-keygen -t rsa -b 4096 -f ~/.ssh/clustrix_key
 
-Advanced SSH Configurations
----------------------------
-
-SSH Agent Integration
+2. Deploy Public Key
 ~~~~~~~~~~~~~~~~~~~
-
-For managing multiple keys and passphrases:
 
 .. code-block:: bash
 
-   # Start SSH agent
-   eval "$(ssh-agent -s)"
-   
-   # Add your cluster key
-   ssh-add ~/.ssh/clustrix_key
-   
-   # Verify keys are loaded
-   ssh-add -l
+   # Copy public key to cluster
+   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.hostname.edu
 
-Configure Clustrix to use SSH agent:
+3. Configure SSH Client
+~~~~~~~~~~~~~~~~~~~~~~
+
+.. code-block:: text
+
+   # ~/.ssh/config
+   Host my-cluster
+       HostName cluster.hostname.edu
+       User username
+       IdentityFile ~/.ssh/clustrix_key
+       IdentitiesOnly yes
+
+4. Configure Clustrix
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
    configure(
        cluster_type="slurm",
        cluster_host="my-cluster",
-       username="myuser"
-       # No key_file specified - will use SSH agent
+       key_file="~/.ssh/clustrix_key"
    )
 
-Jump Hosts and Bastion Servers
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Troubleshooting
+--------------
 
-For clusters behind firewalls:
+Common Issues and Solutions
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: text
-
-   # SSH config with jump host
-   Host cluster-gateway
-       HostName gateway.cluster.org
-       User myuser
-       IdentityFile ~/.ssh/gateway_key
-   
-   Host cluster-internal
-       HostName internal.cluster.local
-       User myuser  
-       IdentityFile ~/.ssh/cluster_key
-       ProxyJump cluster-gateway
+**SSH Key Setup Failed**
 
 .. code-block:: python
 
-   # Clustrix configuration for jump host setup
-   configure(
-       cluster_type="slurm",
-       cluster_host="cluster-internal",  # Uses SSH config
-       username="myuser"
-   )
+   # Enable debug logging
+   import logging
+   logging.basicConfig(level=logging.DEBUG)
+   
+   # Try setup with detailed output
+   result = setup_ssh_keys_with_fallback(config)
+   print(f"Detailed result: {result}")
 
-Multiple Cluster Management
-~~~~~~~~~~~~~~~~~~~~~~~~~
+**Kerberos Authentication Required**
 
-Manage multiple clusters with different keys:
+.. code-block:: bash
+
+   # This is expected for university clusters
+   kinit your_netid@UNIVERSITY.EDU
+   ssh your_netid@cluster.university.edu
+
+**Connection Test Failed**
 
 .. code-block:: python
 
-   # Define cluster configurations
-   clusters = {
-       "slurm_cluster": {
-           "cluster_type": "slurm",
-           "cluster_host": "slurm.university.edu",
-           "key_file": "~/.ssh/slurm_key"
-       },
-       "pbs_cluster": {
-           "cluster_type": "pbs", 
-           "cluster_host": "pbs.research.org",
-           "key_file": "~/.ssh/pbs_key"
-       }
-   }
+   # Try force refresh to clean up old keys
+   result = setup_ssh_keys_with_fallback(
+       config, 
+       force_refresh=True
+   )
+
+**Permission Denied**
+
+.. code-block:: bash
+
+   # Check key permissions
+   ls -la ~/.ssh/
    
-   # Switch between clusters
-   from clustrix import configure
-   
-   # Use SLURM cluster
-   configure(**clusters["slurm_cluster"])
-   
-   @cluster(cores=8)
-   def slurm_task():
-       return "Running on SLURM"
-   
-   # Switch to PBS cluster
-   configure(**clusters["pbs_cluster"])
-   
-   @cluster(cores=4)
-   def pbs_task():
-       return "Running on PBS"
+   # Should be:
+   # drwx------  ~/.ssh/
+   # -rw-------  ~/.ssh/id_ed25519*
+   # -rw-r--r--  ~/.ssh/id_ed25519*.pub
 
 Security Best Practices
 -----------------------
@@ -268,188 +348,41 @@ Security Best Practices
 Key Management
 ~~~~~~~~~~~~
 
-1. **Use Strong Passphrases**: Always protect private keys with passphrases
-2. **Separate Keys per Cluster**: Use different keys for different environments
-3. **Regular Key Rotation**: Replace keys periodically (every 6-12 months)
-4. **Backup Keys Securely**: Store encrypted backups of important keys
-
-File Permissions
-~~~~~~~~~~~~~~
-
-Ensure correct SSH file permissions:
-
-.. code-block:: bash
-
-   # Set correct permissions
-   chmod 700 ~/.ssh
-   chmod 600 ~/.ssh/config
-   chmod 600 ~/.ssh/clustrix_key
-   chmod 644 ~/.ssh/clustrix_key.pub
-   chmod 600 ~/.ssh/authorized_keys  # on remote cluster
+1. **Use Ed25519 Keys**: Default in automated setup, quantum-resistant
+2. **Regular Rotation**: Use ``force_refresh=True`` periodically  
+3. **Unique Keys**: Different keys for different clusters
+4. **Secure Storage**: Keys stored with proper permissions automatically
 
 Network Security
-~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
-1. **Use SSH Config**: Centralize connection settings
-2. **Enable Compression**: For large data transfers
-3. **Configure Timeouts**: Prevent hanging connections
-4. **Use Port Forwarding**: For additional services when needed
+1. **SSH Config Aliases**: Hide hostnames, centralize settings
+2. **Connection Timeouts**: Prevent hanging connections
+3. **Agent Forwarding**: Only when necessary
+4. **Jump Hosts**: Supported through SSH config
 
-Troubleshooting
---------------
-
-Common Issues
-~~~~~~~~~~~
-
-**Connection Refused**
-
-.. code-block:: bash
-
-   # Check if SSH service is running
-   ssh -v username@cluster.hostname.edu
-   
-   # Test different ports
-   ssh -p 2222 username@cluster.hostname.edu
-
-**Permission Denied**
-
-.. code-block:: bash
-
-   # Verify key permissions
-   ls -la ~/.ssh/
-   
-   # Check authorized_keys on remote
-   ssh username@cluster.hostname.edu "ls -la ~/.ssh/authorized_keys"
-   
-   # Debug SSH connection
-   ssh -vvv username@cluster.hostname.edu
-
-**Clustrix Connection Errors**
+Monitoring
+~~~~~~~~~
 
 .. code-block:: python
 
-   # Test Clustrix SSH connection
-   from clustrix.executor import ClusterExecutor
-   from clustrix.config import get_config
+   # Monitor SSH key usage
+   from clustrix import list_ssh_keys
    
-   config = get_config()
-   executor = ClusterExecutor(config)
-   
-   try:
-       executor.connect()
-       print("SSH connection successful!")
-       executor.disconnect()
-   except Exception as e:
-       print(f"Connection failed: {e}")
+   keys = list_ssh_keys()
+   for key_info in keys:
+       if key_info["exists"]:
+           print(f"Key: {key_info['path']}")
+           print(f"Type: {key_info['type']}")
+           print(f"Fingerprint: {key_info['fingerprint']}")
 
-**Debug Mode**
+Getting Help
+-----------
 
-Enable verbose logging for troubleshooting:
+- **Interactive Tutorial**: `SSH Automation Notebook <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
+- **GitHub Issues**: `Report problems <https://github.com/ContextLab/clustrix/issues>`_
+- **Documentation**: `Read the Docs <https://clustrix.readthedocs.io>`_
+- **SSH Key Automation**: `Issue #57 <https://github.com/ContextLab/clustrix/issues/57>`_
 
-.. code-block:: python
-
-   import logging
-   logging.basicConfig(level=logging.DEBUG)
-   
-   from clustrix import configure, cluster
-   
-   configure(
-       cluster_type="slurm",
-       cluster_host="my-cluster",
-       username="myuser"
-   )
-
-Cluster-Specific Setup
---------------------
-
-SLURM Clusters
-~~~~~~~~~~~~
-
-Typical SLURM cluster requirements:
-
-.. code-block:: python
-
-   configure(
-       cluster_type="slurm",
-       cluster_host="slurm.hpc.edu",
-       username="researcher", 
-       key_file="~/.ssh/slurm_key",
-       remote_work_dir="/scratch/researcher/jobs",
-       module_loads=["python/3.11", "gcc/11"],
-       default_partition="compute"
-   )
-
-PBS/Torque Clusters
-~~~~~~~~~~~~~~~~
-
-PBS cluster configuration:
-
-.. code-block:: python
-
-   configure(
-       cluster_type="pbs",
-       cluster_host="pbs.cluster.org",
-       username="scientist",
-       key_file="~/.ssh/pbs_key", 
-       remote_work_dir="/home/scientist/clustrix",
-       default_queue="normal"
-   )
-
-SGE Clusters
-~~~~~~~~~~
-
-Sun Grid Engine setup:
-
-.. code-block:: python
-
-   configure(
-       cluster_type="sge",
-       cluster_host="sge.grid.edu",
-       username="user",
-       key_file="~/.ssh/sge_key",
-       remote_work_dir="/tmp/user/clustrix"
-   )
-
-Complete Example
----------------
-
-Here's a complete working example:
-
-.. code-block:: bash
-
-   # 1. Generate SSH key
-   ssh-keygen -t rsa -b 4096 -f ~/.ssh/my_cluster_key
-   
-   # 2. Copy to cluster
-   ssh-copy-id -i ~/.ssh/my_cluster_key.pub myuser@cluster.university.edu
-   
-   # 3. Create SSH config
-   echo "Host my-cluster
-       HostName cluster.university.edu
-       User myuser
-       IdentityFile ~/.ssh/my_cluster_key" >> ~/.ssh/config
-   
-   # 4. Test connection
-   ssh my-cluster "hostname"
-
-.. code-block:: python
-
-   # 5. Configure Clustrix
-   from clustrix import configure, cluster
-   
-   configure(
-       cluster_type="slurm",
-       cluster_host="my-cluster",
-       remote_work_dir="/scratch/myuser/clustrix"
-   )
-   
-   # 6. Use Clustrix
-   @cluster(cores=4, memory="8GB")
-   def compute_task(n):
-       return sum(i**2 for i in range(n))
-   
-   # This will execute on the remote cluster
-   result = compute_task(1000)
-   print(f"Result: {result}")
-
-This setup provides secure, reliable SSH access for Clustrix to manage your cluster computing jobs.
+.. note::
+   **Remember**: 15 seconds of automation beats 15-30 minutes of manual setup! 🚀
