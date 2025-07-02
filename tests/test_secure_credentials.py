@@ -664,8 +664,9 @@ class TestEnsureSecureEnvironment:
         # Check that permissions were set
         mock_chmod.assert_called_once_with(0o700)
 
-        # Check return value
-        assert str(result).endswith(".clustrix/credentials")
+        # Check return value (cross-platform path check)
+        assert result.name == "credentials"
+        assert result.parent.name == ".clustrix"
 
     @patch("pathlib.Path.mkdir")
     @patch("pathlib.Path.exists")
@@ -681,7 +682,8 @@ class TestEnsureSecureEnvironment:
         result = ensure_secure_environment()
 
         # Should not try to write to .gitignore since security section exists
-        assert str(result).endswith(".clustrix/credentials")
+        assert result.name == "credentials"
+        assert result.parent.name == ".clustrix"
 
     @patch("pathlib.Path.mkdir")
     @patch("pathlib.Path.exists")
@@ -697,7 +699,8 @@ class TestEnsureSecureEnvironment:
         # Should still create directories and set permissions
         assert mock_mkdir.call_count == 2
         mock_chmod.assert_called_once_with(0o700)
-        assert str(result).endswith(".clustrix/credentials")
+        assert result.name == "credentials"
+        assert result.parent.name == ".clustrix"
 
     @patch("pathlib.Path.mkdir")
     @patch("pathlib.Path.exists")
@@ -711,4 +714,5 @@ class TestEnsureSecureEnvironment:
 
         # Should not raise exception even if chmod fails
         result = ensure_secure_environment()
-        assert str(result).endswith(".clustrix/credentials")
+        assert result.name == "credentials"
+        assert result.parent.name == ".clustrix"
