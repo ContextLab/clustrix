@@ -351,8 +351,10 @@ class TestSetupSSHKeys:
     @patch("clustrix.ssh_utils.deploy_public_key")
     @patch("clustrix.ssh_utils.update_ssh_config")
     @patch("pathlib.Path.exists")
+    @patch("pathlib.Path.home")
     def test_setup_ssh_keys_full_workflow(
         self,
+        mock_home,
         mock_path_exists,
         mock_update_config,
         mock_deploy,
@@ -360,9 +362,13 @@ class TestSetupSSHKeys:
         mock_detect,
     ):
         """Test complete SSH key setup workflow."""
-        # The actual key path will be determined by the function
-        expected_key_path = (
-            "/Users/jmanning/.ssh/id_ed25519_clustrix_testuser_testcluster"
+        # Set up mock home directory that works in any environment
+        from pathlib import Path
+
+        mock_home_path = Path("/home/testuser")  # Generic path for testing
+        mock_home.return_value = mock_home_path
+        expected_key_path = str(
+            mock_home_path / ".ssh" / "id_ed25519_clustrix_testuser_testcluster"
         )
 
         # Set up detect_existing_ssh_key to return None initially, then the key path
