@@ -16,7 +16,7 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 ## Features
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
-- **🔑 Automated SSH Key Setup**: 15-second secure cluster access setup (vs 15-30 min manual)
+- **Automated SSH Key Setup**: Create and deplot SSH keys to enable secure passwordless authentication with one click or API call
 - **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
 - **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
