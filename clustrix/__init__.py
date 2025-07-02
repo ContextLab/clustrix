@@ -53,6 +53,12 @@ from .file_packaging import (
     create_execution_context,
     package_function_for_execution,
 )
+from .profile_manager import ProfileManager
+from .modern_notebook_widget import (
+    ModernClustrixWidget,
+    create_modern_cluster_widget,
+    display_modern_widget,
+)
 
 __version__ = "0.1.0"
 __all__ = [
@@ -104,6 +110,10 @@ __all__ = [
     "ExecutionContext",
     "create_execution_context",
     "package_function_for_execution",
+    "ProfileManager",
+    "ModernClustrixWidget",
+    "create_modern_cluster_widget",
+    "display_modern_widget",
 ]
 
 # Auto-register IPython magic command and display widget if in notebook environment
