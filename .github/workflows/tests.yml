@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ master, main, develop ]
 
+permissions:
+  contents: write
+  pull-requests: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -45,6 +49,22 @@ jobs:
     - name: Test with pytest
       run: |
         pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json
+
+    - name: Update coverage badge
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'
+      run: |
+        python .github/scripts/update_coverage_badge.py
+    
+    - name: Commit coverage badge update
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add README.md
+        git diff --staged --quiet || git commit -m "Update coverage badge [skip ci]"
+        git push
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Test installation
       run: |
