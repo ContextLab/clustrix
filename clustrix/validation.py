@@ -3,13 +3,15 @@
 import os
 import subprocess
 import time
-from typing import Dict
+from typing import Dict, Optional
 import paramiko
 
 from .config import ClusterConfig
 
 
-def validate_cluster_auth(config: ClusterConfig, password: str = None) -> bool:
+def validate_cluster_auth(
+    config: ClusterConfig, password: Optional[str] = None
+) -> bool:
     """
     Validate authentication works on real cluster.
 
@@ -114,92 +116,7 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
         return False
 
 
-def validate_kerberos_auth(config: ClusterConfig) -> bool:
-    """
-    Validate Kerberos authentication if applicable.
-
-    Args:
-        config: Cluster configuration
-
-    Returns:
-        True if Kerberos auth successful or not required, False if required but failed
-    """
-    # Check if this is a Kerberos-enabled cluster
-    kerberos_clusters = ["ndoli.dartmouth.edu", "discovery.dartmouth.edu"]
-
-    is_kerberos_cluster = any(
-        config.cluster_host.endswith(cluster) for cluster in kerberos_clusters
-    )
-
-    if not is_kerberos_cluster:
-        print("ℹ️  Not a Kerberos-enabled cluster, skipping Kerberos validation")
-        return True  # Not a Kerberos cluster
-
-    print(f"🎫 Testing Kerberos authentication to {config.cluster_host}...")
-
-    try:
-        # Check for valid ticket
-        result = subprocess.run(["klist", "-s"], capture_output=True, timeout=5)
-        if result.returncode != 0:
-            print("⚠️  No valid Kerberos ticket - run 'kinit' first")
-            print("💡 To authenticate: kinit <username>@DARTMOUTH.EDU")
-            return False
-
-        # Check ticket details
-        result = subprocess.run(["klist"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0:
-            print("✅ Valid Kerberos ticket found")
-            # Show ticket info (first few lines)
-            lines = result.stdout.split("\n")[:3]
-            for line in lines:
-                if line.strip():
-                    print(f"   {line}")
-
-        # Try GSSAPI connection
-        try:
-            client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-            client.connect(
-                hostname=config.cluster_host,
-                username=config.username,
-                port=config.ssh_port,
-                gss_auth=True,
-                gss_kex=True,
-                timeout=10,
-            )
-
-            # Test command execution
-            stdin, stdout, stderr = client.exec_command("echo 'Kerberos auth working'")
-            result = stdout.read().decode().strip()
-
-            client.close()
-
-            if result == "Kerberos auth working":
-                print(f"✅ Kerberos authentication successful to {config.cluster_host}")
-                return True
-            else:
-                print("⚠️  Kerberos connection established but command execution failed")
-                return False
-
-        except Exception as e:
-            print(f"❌ Kerberos SSH connection failed: {e}")
-            return False
-
-    except subprocess.TimeoutExpired:
-        print("⚠️  Kerberos ticket check timed out")
-        return False
-    except FileNotFoundError:
-        print(
-            "⚠️  Kerberos tools not found - install with: sudo apt-get install krb5-user"
-        )
-        return False
-    except Exception as e:
-        print(f"❌ Kerberos authentication error: {e}")
-        return False
-
-
-def validate_1password_integration(note_name: str = None) -> bool:
+def validate_1password_integration(note_name: Optional[str] = None) -> bool:
     """
     Validate 1Password CLI integration works.
 
@@ -286,7 +203,7 @@ def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
         results["1password"] = validate_1password_integration(config.onepassword_note)
     else:
         print("ℹ️  1Password integration disabled")
-        results["1password"] = None
+        results["1password"] = False
 
     # Test environment variable if enabled
     if config.use_env_password:
@@ -301,13 +218,10 @@ def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
             results["env_password"] = False
     else:
         print("ℹ️  Environment variable password disabled")
-        results["env_password"] = None
+        results["env_password"] = False
 
     # Test SSH key authentication
     results["ssh_key"] = validate_ssh_key_auth(config)
-
-    # Test Kerberos if applicable
-    results["kerberos"] = validate_kerberos_auth(config)
 
     # Summary
     print(f"\n{'=' * 60}")
@@ -338,19 +252,17 @@ TEST_CLUSTERS = [
         "host": "tensor01.dartmouth.edu",
         "type": "ssh",
         "description": "Simple SSH cluster for basic testing",
-        "supports_kerberos": False,
     },
     {
         "name": "ndoli",
         "host": "ndoli.dartmouth.edu",
         "type": "slurm",
-        "description": "SLURM cluster with Kerberos/GSSAPI",
-        "supports_kerberos": True,
+        "description": "SLURM cluster (requires special authentication)",
     },
 ]
 
 
-def validate_on_test_clusters(username: str = None) -> None:
+def validate_on_test_clusters(username: Optional[str] = None) -> None:
     """
     Run validation on all test clusters.
 

@@ -14,7 +14,6 @@ from .auth_methods import (
     detect_environment,
     is_colab,
 )
-from .kerberos_auth import KerberosAuthMethod
 
 
 class AuthenticationManager:
@@ -134,10 +133,9 @@ class AuthenticationManager:
         return AuthResult(success=False, error="All authentication methods failed")
 
     def _initialize_auth_methods(self) -> List[AuthMethod]:
-        """Initialize authentication methods in priority order."""
+        """Initialize authentication methods in simplified 4-step priority order."""
         methods = [
             SSHKeyAuthMethod(self.config),
-            KerberosAuthMethod(self.config),  # Add Kerberos support
         ]
 
         # Add 1Password if configured
