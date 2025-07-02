@@ -66,6 +66,7 @@ __all__ = [
     "find_parallelizable_loops",
     "setup_environment",
     "setup_ssh_keys",
+    "setup_ssh_keys_with_fallback",
     "find_ssh_keys",
     "list_ssh_keys",
     "add_host_key",

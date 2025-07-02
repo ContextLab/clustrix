@@ -490,8 +490,8 @@ def setup_ssh_keys(
             "details": Dict[str, Any]
         }
     """
-    # Initialize result dictionary
-    result = {
+    # Initialize result dictionary with proper typing
+    result: Dict[str, Any] = {
         "success": False,
         "key_path": "",
         "key_already_existed": False,
@@ -570,8 +570,9 @@ def setup_ssh_keys(
                     key_path, key_type, "", comment  # No passphrase for automation
                 )
                 logger.info(f"Generated new SSH key: {private_key_path}")
-                result["details"] = result.get("details", {})
-                result["details"]["key_generated"] = True
+                details = result.get("details", {})
+                details["key_generated"] = True
+                result["details"] = details
             except SSHKeyGenerationError as e:
                 result["error"] = f"Failed to generate SSH key: {e}"
                 return result
@@ -596,12 +597,14 @@ def setup_ssh_keys(
         if cluster_alias:
             try:
                 update_ssh_config(hostname, username, key_path, cluster_alias, port)
-                result["details"] = result.get("details", {})
-                result["details"]["ssh_config_updated"] = True
+                details = result.get("details", {})
+                details["ssh_config_updated"] = True
+                result["details"] = details
             except Exception as e:
                 logger.warning(f"Failed to update SSH config: {e}")
-                result["details"] = result.get("details", {})
-                result["details"]["ssh_config_error"] = str(e)
+                details = result.get("details", {})
+                details["ssh_config_error"] = str(e)
+                result["details"] = details
 
         # Step 5: Test the connection (with retry for key propagation)
         import time
@@ -625,16 +628,18 @@ def setup_ssh_keys(
                     "SSH key deployed successfully but connection test failed. "
                     "The key may need time to propagate or there may be server-side caching."
                 )
-                result["details"] = result.get("details", {})
-                result["details"][
-                    "connection_test_warning"
-                ] = "Key deployed but connection test failed"
+                details = result.get("details", {})
+                details["connection_test_warning"] = (
+                    "Key deployed but connection test failed"
+                )
+                result["details"] = details
 
         # Update config and mark as successful
         config.key_file = key_path
         result["success"] = True
-        result["details"] = result.get("details", {})
-        result["details"]["message"] = "SSH key setup completed successfully"
+        details = result.get("details", {})
+        details["message"] = "SSH key setup completed successfully"
+        result["details"] = details
 
         logger.info(f"SSH key setup completed successfully for {hostname}")
         return result

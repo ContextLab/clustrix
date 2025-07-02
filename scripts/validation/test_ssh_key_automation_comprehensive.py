@@ -97,7 +97,7 @@ def check_existing_ssh_keys() -> Dict:
     }
 
 
-def backup_ssh_keys(backup_suffix: str = None) -> Dict:
+def backup_ssh_keys(backup_suffix: Optional[str] = None) -> Dict:
     """Backup existing SSH keys before testing."""
     if backup_suffix is None:
         backup_suffix = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -158,7 +158,7 @@ def test_clustrix_ssh_automation(hostname: str, username: str) -> Dict:
         
         # Test SSH key setup
         print("Running SSH key automation...")
-        setup_result = setup_ssh_keys(config)
+        setup_result = setup_ssh_keys(config, password="test_password")
         
         return {
             "automation_attempted": True,
