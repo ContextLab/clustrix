@@ -159,9 +159,18 @@ class TestGetClusterPassword:
             "CLUSTER_PASSWORD_example.com": "colab_password"
         }.get(key)
 
-        with patch.dict(sys.modules, {"google.colab": Mock()}):
-            with patch("google.colab.userdata", mock_userdata):
-                result = get_cluster_password("example.com", "testuser")
+        # Create a mock colab module
+        mock_colab = Mock()
+        mock_colab.userdata = mock_userdata
+
+        # Create a mock google module with colab attribute
+        mock_google = Mock()
+        mock_google.colab = mock_colab
+
+        with patch.dict(
+            sys.modules, {"google": mock_google, "google.colab": mock_colab}
+        ):
+            result = get_cluster_password("example.com", "testuser")
 
         assert result == "colab_password"
 
@@ -184,9 +193,18 @@ class TestGetClusterPassword:
 
         mock_userdata.get.side_effect = mock_get_side_effect
 
-        with patch.dict(sys.modules, {"google.colab": Mock()}):
-            with patch("google.colab.userdata", mock_userdata):
-                result = get_cluster_password("example.com", "testuser")
+        # Create a mock colab module
+        mock_colab = Mock()
+        mock_colab.userdata = mock_userdata
+
+        # Create a mock google module with colab attribute
+        mock_google = Mock()
+        mock_google.colab = mock_colab
+
+        with patch.dict(
+            sys.modules, {"google": mock_google, "google.colab": mock_colab}
+        ):
+            result = get_cluster_password("example.com", "testuser")
 
         assert result == "found_password"
 
