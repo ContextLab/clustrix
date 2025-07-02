@@ -25,9 +25,9 @@ This document provides a comprehensive specification of every component in the m
   - Dropdown arrow on right
   - Width: ~250px
   - Text: "Local single-core" / "SLURM University Cluster"
-- **Behavior**: Dropdown menu with profile selection
+- **Behavior**: Dropdown menu with profile selection, entries are editable
 - **Location**: Top row, after "Active profile:" label
-- **Function**: Select active configuration profile
+- **Function**: Select active configuration profile, profile names can be edited in place
 - **Context**: Always visible
 
 #### 1.3 Add Profile Button (+)
@@ -37,7 +37,7 @@ This document provides a comprehensive specification of every component in the m
   - Square shape, ~35px x 35px
 - **Behavior**: Clickable button
 - **Location**: Top row, immediately right of profile dropdown
-- **Function**: Clone current profile to create new one
+- **Function**: Clone current profile and append " (copy)" to the name, make cloned profile active
 - **Context**: Always visible
 
 #### 1.4 Remove Profile Button (−)
@@ -45,10 +45,10 @@ This document provides a comprehensive specification of every component in the m
   - Dark purple/navy background (#3e4a61)
   - White "−" symbol
   - Square shape, ~35px x 35px
-- **Behavior**: Clickable button
+- **Behavior**: Clickable button (disabled/unclickable when only one profile remains)
 - **Location**: Top row, immediately right of add profile button
-- **Function**: Delete currently selected profile
-- **Context**: Always visible
+- **Function**: Delete currently selected profile (cannot delete if it's the only profile)
+- **Context**: Always visible, but disabled when only one profile exists
 
 ### Row 2: Configuration Management
 
@@ -76,7 +76,7 @@ This document provides a comprehensive specification of every component in the m
   - Square shape, ~35px x 35px
 - **Behavior**: Clickable button
 - **Location**: Second row, immediately right of config filename field
-- **Function**: Save current configuration to file
+- **Function**: Save ALL profiles (not just active one) to specified config file
 - **Context**: Always visible
 
 #### 2.4 Load Config Button (📁)
@@ -84,9 +84,9 @@ This document provides a comprehensive specification of every component in the m
   - Orange/amber background
   - Dark folder/load icon
   - Square shape, ~35px x 35px
-- **Behavior**: Clickable button
+- **Behavior**: Clickable button (opens file selection dialog)
 - **Location**: Second row, immediately right of save button
-- **Function**: Load configuration from file
+- **Function**: Open file dialog to select .yml or .json file, replace ALL current profiles with loaded profiles
 - **Context**: Always visible
 
 #### 2.5 Apply Button
@@ -96,7 +96,7 @@ This document provides a comprehensive specification of every component in the m
   - Rectangular shape, ~80px x 35px
 - **Behavior**: Clickable button
 - **Location**: Second row, right side
-- **Function**: Apply current widget settings to profile
+- **Function**: Set the currently displayed configuration as the active profile
 - **Context**: Always visible
 
 #### 2.6 Test Connect Button
@@ -106,7 +106,7 @@ This document provides a comprehensive specification of every component in the m
   - Rectangular shape, ~110px x 35px
 - **Behavior**: Clickable button
 - **Location**: Second row, right of Apply button
-- **Function**: Test SSH connection to cluster
+- **Function**: Test full connection workflow: connect to cluster, create simple venv, run command in venv, delete venv
 - **Context**: Always visible
 
 #### 2.7 Test Submit Button
@@ -116,7 +116,7 @@ This document provides a comprehensive specification of every component in the m
   - Rectangular shape, ~110px x 35px
 - **Behavior**: Clickable button
 - **Location**: Second row, far right
-- **Function**: Test job submission to cluster
+- **Function**: Full job submission test: connect, create venv, submit 4 test jobs, collect results, verify accuracy, clean up all test files
 - **Context**: Always visible
 
 ### Row 3: Core Cluster Configuration
@@ -134,9 +134,9 @@ This document provides a comprehensive specification of every component in the m
   - Dropdown arrow on right
   - Width: ~120px
   - Text: "local" / "slurm"
-- **Behavior**: Dropdown menu with cluster type options
+- **Behavior**: Dropdown menu with pre-populated hardcoded cluster type options
 - **Location**: Third row, after "Cluster type:" label
-- **Function**: Select cluster scheduler type
+- **Function**: Select cluster scheduler type from fixed list (local, slurm, pbs, sge, ssh, kubernetes)
 - **Context**: Always visible
 
 #### 3.3 "CPUs:" Label
@@ -152,9 +152,9 @@ This document provides a comprehensive specification of every component in the m
   - Width: ~50px
   - Text: "1" / "8"
   - Small up/down arrows on right
-- **Behavior**: Numeric input with spinner controls
+- **Behavior**: Numeric input with spinner controls, increments of 1, minimum value -1 (use all available)
 - **Location**: Third row, after "CPUs:" label
-- **Function**: Set number of CPU cores to request
+- **Function**: Set number of CPU cores to request (-1 = use all available, cannot go below -1)
 - **Context**: Always visible
 
 #### 3.5 "RAM:" Label
@@ -175,10 +175,10 @@ This document provides a comprehensive specification of every component in the m
 - **Context**: Always visible
 
 #### 3.7 "GB" Label
-- **Appearance**: Gray text, standard font
-- **Behavior**: Static text label
+- **Appearance**: Light gray text, standard font (non-editable styling)
+- **Behavior**: Static text label (not editable)
 - **Location**: Third row, immediately after RAM field
-- **Function**: Unit indicator for RAM amount
+- **Function**: Unit indicator for RAM amount, displayed in light gray to indicate non-editable
 - **Context**: Always visible
 
 #### 3.8 "Time:" Label
@@ -300,9 +300,9 @@ This document provides a comprehensive specification of every component in the m
   - White background with black border
   - Width: ~120px
   - Text: "••••••••" (masked)
-- **Behavior**: Password input (masked text)
+- **Behavior**: Password input (masked text, may be left empty)
 - **Location**: Fifth row, after "Password:" label
-- **Function**: Enter SSH password
+- **Function**: Enter SSH password (optional if SSH keys already configured)
 - **Context**: Visible only when cluster type is remote
 
 ### Row 6: Additional Authentication Options (Context: Only when cluster type ≠ "local")
@@ -353,9 +353,9 @@ This document provides a comprehensive specification of every component in the m
   - White background with black border
   - Width: ~150px
   - Text: "/home/researc" (truncated)
-- **Behavior**: Editable text input
+- **Behavior**: Editable text input (may be left empty)
 - **Location**: Sixth row, after "Home dir:" label
-- **Function**: Specify remote home directory path
+- **Function**: Specify remote home directory path for SSH key setup, required for auto SSH key setup
 - **Context**: Visible only when cluster type is remote
 
 ### Row 7: Action Buttons for Remote (Context: Only when cluster type ≠ "local")
@@ -395,9 +395,9 @@ This document provides a comprehensive specification of every component in the m
   - Dropdown arrow on right
   - Width: ~100px
   - Text: "auto"
-- **Behavior**: Dropdown menu with package manager options
+- **Behavior**: Dropdown menu with package manager options (not editable)
 - **Location**: Advanced section, first row, after label
-- **Function**: Select package manager (pip, conda, auto)
+- **Function**: Select package manager from fixed options (pip, conda, auto)
 - **Context**: Visible only when advanced settings expanded
 
 #### 8.3 "Python executable:" Label
@@ -431,7 +431,7 @@ This document provides a comprehensive specification of every component in the m
   - Square shape, ~20px x 20px
 - **Behavior**: Clickable checkbox
 - **Location**: Advanced section, first row, after label
-- **Function**: Enable environment cloning
+- **Function**: Enable environment cloning (checked = clone current venv, unchecked = run without venv setup)
 - **Context**: Visible only when advanced settings expanded
 
 #### 8.7 "Env variables:" Label
@@ -447,9 +447,9 @@ This document provides a comprehensive specification of every component in the m
   - Dropdown arrow on right
   - Width: ~200px
   - Text: "KEY1=value1" (placeholder/gray when empty)
-- **Behavior**: Dropdown/selection list for environment variables
+- **Behavior**: Editable dropdown/selection list, initially empty
 - **Location**: Advanced section, second row, after label
-- **Function**: Select/view environment variables
+- **Function**: Add text and click "+" to add entries, select existing entries, click "−" to delete selected entry
 - **Context**: Visible only when advanced settings expanded
 
 #### 8.9 Add Env Variable Button (+)
@@ -485,9 +485,9 @@ This document provides a comprehensive specification of every component in the m
   - Dropdown arrow on right
   - Width: ~120px
   - Text: "module1" (placeholder/gray when empty)
-- **Behavior**: Dropdown/selection list for modules
+- **Behavior**: Editable dropdown/selection list, initially empty, behaves like Env variables menu
 - **Location**: Advanced section, second row, after label
-- **Function**: Select/view loaded modules
+- **Function**: Add text and click "+" to add module entries, select existing, click "−" to delete selected
 - **Context**: Visible only when advanced settings expanded
 
 #### 8.13 Add Module Button (+)
@@ -523,9 +523,10 @@ This document provides a comprehensive specification of every component in the m
   - Multi-line text area
   - Width: ~600px, Height: ~100px
   - Text: Example commands like "source /path/to/setup.sh"
-- **Behavior**: Multi-line editable text input
+  - Bash syntax highlighting
+- **Behavior**: Multi-line editable text input with syntax highlighting
 - **Location**: Advanced section, third row, spanning most of width
-- **Function**: Enter shell commands to run before job execution
+- **Function**: Enter shell commands to run before job execution, with bash syntax highlighting
 - **Context**: Visible only when advanced settings expanded
 
 ## Layout Structure Summary
@@ -568,5 +569,47 @@ This document provides a comprehensive specification of every component in the m
 - Advanced settings button controls advanced section visibility
 - Profile selection updates all field values
 - Component interactions trigger appropriate updates
+
+## Additional Behavioral Details
+
+### Profile Management
+- **Profile Dropdown**: Entries are editable in-place to rename profiles
+- **Add Profile (+)**: Clones current profile and appends " (copy)" to create unique name
+- **Remove Profile (−)**: Disabled when only one profile exists, prevents deletion of last profile
+
+### Configuration Management  
+- **Config Filename**: Fully editable text field for specifying save/load file names
+- **Save Button**: Saves ALL profiles to file, not just the currently active one
+- **Load Button**: Opens file dialog, replaces ALL current profiles with loaded ones
+- **Apply Button**: Makes the currently displayed configuration the active profile
+
+### Testing Functions
+- **Test Connect**: Full connection validation including venv creation, command execution, and cleanup
+- **Test Submit**: Complete job workflow test with 4 test jobs, result verification, and cleanup
+
+### Core Configuration
+- **Cluster Type**: Fixed dropdown with hardcoded options (local, slurm, pbs, sge, ssh, kubernetes)
+- **CPU Count**: Allows -1 value meaning "use all available", cannot go below -1
+- **RAM Field**: Editable numeric input, "GB" label is non-editable and styled in light gray
+- **Time Field**: Editable time format input (HH:MM:SS)
+
+### Advanced Settings
+- **Package Manager**: Fixed dropdown (pip, conda, auto) - not editable
+- **Python Executable**: Fully editable text field
+- **Clone Environment**: Checkbox controlling virtual environment behavior
+- **Environment Variables**: Editable dropdown starting empty, add/remove with +/− buttons
+- **Modules**: Identical behavior to environment variables
+- **Pre-exec Commands**: Multi-line text area with bash syntax highlighting
+
+### Remote Configuration
+- **Password Field**: Optional, may be empty if SSH keys configured
+- **Home Directory**: Optional but required for automatic SSH key setup
+- **All Remote Fields**: Only visible when cluster type is not "local"
+
+### State Management
+- Component visibility controlled by cluster type selection
+- Advanced section visibility controlled by Advanced Settings button
+- Profile selection updates all field values
+- Remove button state depends on profile count
 
 This specification provides the exact blueprint for implementing each component to match the mockups precisely.
