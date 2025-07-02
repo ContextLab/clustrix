@@ -59,7 +59,7 @@ class SSHKeyAuthMethod(AuthMethod):
             ssh_dir = os.path.expanduser("~/.ssh")
             key_patterns = ["id_rsa", "id_ed25519", "id_ecdsa", "id_dsa"]
 
-            # Also look for clustrix-specific keys
+            # Also look for clustrix-specific keys and pattern-based keys
             hostname = connection_params.get("hostname", "")
             username = connection_params.get("username", "")
 
@@ -70,10 +70,30 @@ class SSHKeyAuthMethod(AuthMethod):
                 ]
                 key_patterns = clustrix_patterns + key_patterns
 
+            # First try exact pattern matches
             for pattern in key_patterns:
                 key_path = os.path.join(ssh_dir, pattern)
                 if os.path.exists(key_path) and os.path.exists(f"{key_path}.pub"):
                     return AuthResult(success=True, method="ssh_key", key_path=key_path)
+
+            # If no exact matches, look for keys containing hostname and username
+            if hostname and username:
+                try:
+                    for filename in os.listdir(ssh_dir):
+                        if (
+                            filename.startswith(("id_ed25519", "id_rsa", "id_ecdsa"))
+                            and not filename.endswith(".pub")
+                            and username in filename
+                            and hostname.split(".")[0] in filename
+                        ):  # Match base hostname
+                            key_path = os.path.join(ssh_dir, filename)
+                            pub_path = f"{key_path}.pub"
+                            if os.path.exists(pub_path):
+                                return AuthResult(
+                                    success=True, method="ssh_key", key_path=key_path
+                                )
+                except OSError:
+                    pass  # Directory listing failed
 
             return AuthResult(
                 success=False,
@@ -114,7 +134,7 @@ class OnePasswordAuthMethod(AuthMethod):
 
     def __init__(self, config: ClusterConfig):
         super().__init__(config)
-        self.cache = {}  # In-memory credential cache
+        self.cache: Dict[str, Dict[str, Any]] = {}  # In-memory credential cache
 
     def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
         """Check if 1Password is configured and available."""
@@ -286,7 +306,7 @@ This note was automatically created by Clustrix for secure cluster access.
 class WidgetPasswordMethod(AuthMethod):
     """Widget password field authentication."""
 
-    def __init__(self, config: ClusterConfig, widget_password: str = None):
+    def __init__(self, config: ClusterConfig, widget_password: Optional[str] = None):
         super().__init__(config)
         self.widget_password = widget_password
 
