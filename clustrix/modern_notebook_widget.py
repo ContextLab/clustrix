@@ -663,6 +663,13 @@ class ModernClustrixWidget:
 
         return main_container
 
+    def display(self) -> None:
+        """Display the widget in the notebook."""
+        if IPYTHON_AVAILABLE:
+            display(self.get_widget())
+        else:
+            print("Widget display requires IPython/Jupyter environment")
+
     # Event handlers - Profile Management
     def _on_profile_change(self, change):
         """Handle profile dropdown changes."""
