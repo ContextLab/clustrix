@@ -71,21 +71,45 @@ class ModernClustrixWidget:
             font-family: 'Lexend Deca', sans-serif !important;
         }
 
-        /* Grid layout based on mockup analysis - All rows align to Row 2 structure */
-        /* Row 2 defines the base grid: 100 + 160 + 30 + 30 + 60 + 90 + 90 = 560px */
-        .clustrix-row1 {
-            grid-template-columns: 100px 370px 30px 30px 1fr;
-        }
-        .clustrix-row2 {
-            grid-template-columns: 100px 160px 30px 30px 60px 90px 90px 1fr;
-        }
-        .clustrix-row3 {
-            grid-template-columns: 100px 130px 35px 55px 35px 75px 35px 75px 1fr;
+        /* 14-column grid system based on proportional mockup analysis */
+        /* Each unit represents 1/14th of total row width for perfect alignment */
+        .clustrix-row1, .clustrix-row2, .clustrix-row3 {
+            grid-template-columns: repeat(14, 1fr);
         }
         .clustrix-row4 {
             grid-template-columns: 1fr;
             justify-items: center;
         }
+
+        /* Row 1: [2 units label][8 units profile dropdown][1 unit +][1 unit -][2 units spacer] */
+        .clustrix-row1-label { grid-column: 1 / 3; }
+        .clustrix-row1-profile { grid-column: 3 / 11; }
+        .clustrix-row1-add { grid-column: 11 / 12; }
+        .clustrix-row1-remove { grid-column: 12 / 13; }
+        .clustrix-row1-spacer { grid-column: 13 / 15; }
+
+        /* Row 2: [2 units label][3 units field][1 unit save][1 unit load][1.5 units apply][2 units test1]
+         *        [2 units test2][1.5 units spacer] */
+        .clustrix-row2-label { grid-column: 1 / 3; }
+        .clustrix-row2-field { grid-column: 3 / 6; }
+        .clustrix-row2-save { grid-column: 6 / 7; }
+        .clustrix-row2-load { grid-column: 7 / 8; }
+        .clustrix-row2-apply { grid-column: 8 / 10; }
+        .clustrix-row2-test1 { grid-column: 10 / 12; }
+        .clustrix-row2-test2 { grid-column: 12 / 14; }
+        .clustrix-row2-spacer { grid-column: 14 / 15; }
+
+        /* Row 3: [2 units label][2 units cluster][1 unit cpu-lbl][1.5 units cpu][1 unit ram-lbl]
+         *        [1.5 units ram][1 unit time-lbl][1.5 units time][2.5 units spacer] */
+        .clustrix-row3-label { grid-column: 1 / 3; }
+        .clustrix-row3-cluster { grid-column: 3 / 5; }
+        .clustrix-row3-cpu-label { grid-column: 5 / 6; }
+        .clustrix-row3-cpu-field { grid-column: 6 / 8; }
+        .clustrix-row3-ram-label { grid-column: 8 / 9; }
+        .clustrix-row3-ram-field { grid-column: 9 / 11; }
+        .clustrix-row3-time-label { grid-column: 11 / 12; }
+        .clustrix-row3-time-field { grid-column: 12 / 14; }
+        .clustrix-row3-spacer { grid-column: 14 / 15; }
 
         .clustrix-label {
             text-align: right;
@@ -600,10 +624,6 @@ class ModernClustrixWidget:
                 port_label,
                 widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["port"],
-                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
-                username_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["username"],
             ],
             layout=widgets.Layout(
                 justify_content="flex-start", margin="5px 0px", align_items="center"
@@ -655,10 +675,6 @@ class ModernClustrixWidget:
                 refresh_label,
                 widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["refresh_keys"],
-                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
-                password_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["password"],
             ],
             layout=widgets.Layout(
                 justify_content="flex-start", margin="5px 0px", align_items="center"
@@ -701,16 +717,16 @@ class ModernClustrixWidget:
             layout=widgets.Layout(width="150px", height="35px"),
         )
 
-        # Row 6 container with styled box and proper alignment
+        # Authentication fields container with styled box (Username, Password, Home dir)
         auth_fields_container = widgets.VBox(
             [
                 widgets.HBox(
                     [
-                        env_var_label,
+                        username_label,
                         widgets.HTML(
                             value="<div style='width: 10px;'></div>"
                         ),  # Spacer
-                        self.widgets["local_env_var"],
+                        self.widgets["username"],
                     ],
                     layout=widgets.Layout(
                         justify_content="flex-start", align_items="center"
@@ -718,11 +734,11 @@ class ModernClustrixWidget:
                 ),
                 widgets.HBox(
                     [
-                        onepassword_label,
+                        password_label,
                         widgets.HTML(
                             value="<div style='width: 10px;'></div>"
                         ),  # Spacer
-                        self.widgets["use_1password"],
+                        self.widgets["password"],
                     ],
                     layout=widgets.Layout(
                         justify_content="flex-start", align_items="center"
@@ -749,6 +765,39 @@ class ModernClustrixWidget:
             ),
         )
 
+        # Secondary container for other auth options (Env var, 1Password)
+        other_auth_container = widgets.VBox(
+            [
+                widgets.HBox(
+                    [
+                        env_var_label,
+                        widgets.HTML(
+                            value="<div style='width: 10px;'></div>"
+                        ),  # Spacer
+                        self.widgets["local_env_var"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-start", align_items="center"
+                    ),
+                ),
+                widgets.HBox(
+                    [
+                        onepassword_label,
+                        widgets.HTML(
+                            value="<div style='width: 10px;'></div>"
+                        ),  # Spacer
+                        self.widgets["use_1password"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-start", align_items="center"
+                    ),
+                ),
+            ],
+            layout=widgets.Layout(
+                margin="5px 0px",
+            ),
+        )
+
         self.widgets["remote_row6"] = auth_fields_container
 
         # 7.2 Auto Setup SSH Keys Button (only for remote)
@@ -770,9 +819,10 @@ class ModernClustrixWidget:
         # Remote section container (initially hidden, only visible when cluster type != "local")
         self.widgets["remote_section"] = widgets.VBox(
             [
-                self.widgets["remote_row4"],  # Host, port, username
-                self.widgets["remote_row5"],  # SSH key, refresh, password
-                self.widgets["remote_row6"],  # Env var, 1Password, home dir
+                self.widgets["remote_row4"],  # Host, port
+                self.widgets["remote_row5"],  # SSH key, refresh
+                self.widgets["remote_row6"],  # Username, Password, Home dir (styled)
+                other_auth_container,  # Env var, 1Password
                 remote_action_row,  # SSH setup button
             ],
             layout=widgets.Layout(display="none", margin="10px 0px"),
@@ -796,78 +846,120 @@ class ModernClustrixWidget:
 
     def _create_grid_layout(self) -> None:
         """Create grid layout for proper alignment."""
-        # Row 1: Profile Management (based on mockup analysis)
+        # Row 1: Profile Management (proportional 14-column grid)
+        row1_label = widgets.HTML("Active profile:")
+        row1_label.add_class("clustrix-label")
+        row1_label.add_class("clustrix-row1-label")
+
+        self.widgets["profile_dropdown"].add_class("clustrix-row1-profile")
+        self.widgets["add_profile_btn"].add_class("clustrix-row1-add")
+        self.widgets["remove_profile_btn"].add_class("clustrix-row1-remove")
+
+        row1_spacer = widgets.HTML("")
+        row1_spacer.add_class("clustrix-row1-spacer")
+
         row1_grid = widgets.GridBox(
             [
-                widgets.HTML("Active profile:", layout=widgets.Layout(width="100px")),
+                row1_label,
                 self.widgets["profile_dropdown"],
                 self.widgets["add_profile_btn"],
                 self.widgets["remove_profile_btn"],
-                widgets.HTML(""),  # Empty cell for spacing
+                row1_spacer,
             ],
             layout=widgets.Layout(
-                grid_template_columns="100px 370px 30px 30px 1fr",
                 grid_gap="8px",
                 align_items="center",
             ),
         )
         row1_grid.add_class("clustrix-grid")
+        row1_grid.add_class("clustrix-row1")
 
-        # Row 2: Configuration Management (based on mockup analysis)
+        # Row 2: Configuration Management (proportional 14-column grid)
+        row2_label = widgets.HTML("Config filename:")
+        row2_label.add_class("clustrix-label")
+        row2_label.add_class("clustrix-row2-label")
+
+        self.widgets["config_filename"].add_class("clustrix-row2-field")
+        self.widgets["save_btn"].add_class("clustrix-row2-save")
+        self.widgets["load_btn"].add_class("clustrix-row2-load")
+        self.widgets["apply_btn"].add_class("clustrix-row2-apply")
+        self.widgets["test_connect_btn"].add_class("clustrix-row2-test1")
+        self.widgets["test_submit_btn"].add_class("clustrix-row2-test2")
+
+        row2_spacer = widgets.HTML("")
+        row2_spacer.add_class("clustrix-row2-spacer")
+
         row2_grid = widgets.GridBox(
             [
-                widgets.HTML("Config filename:", layout=widgets.Layout(width="100px")),
+                row2_label,
                 self.widgets["config_filename"],
                 self.widgets["save_btn"],
                 self.widgets["load_btn"],
                 self.widgets["apply_btn"],
                 self.widgets["test_connect_btn"],
                 self.widgets["test_submit_btn"],
-                widgets.HTML(""),  # Empty cell
+                row2_spacer,
             ],
             layout=widgets.Layout(
-                grid_template_columns="100px 160px 30px 30px 60px 90px 90px 1fr",
                 grid_gap="8px",
                 align_items="center",
             ),
         )
         row2_grid.add_class("clustrix-grid")
+        row2_grid.add_class("clustrix-row2")
 
-        # Row 3: Cluster Configuration (based on mockup analysis)
+        # Row 3: Cluster Configuration (proportional 14-column grid)
+        row3_label = widgets.HTML("Cluster type:")
+        row3_label.add_class("clustrix-label")
+        row3_label.add_class("clustrix-row3-label")
+
+        row3_cpu_label = widgets.HTML("CPUs:")
+        row3_cpu_label.add_class("clustrix-label")
+        row3_cpu_label.add_class("clustrix-row3-cpu-label")
+
+        row3_ram_label = widgets.HTML("RAM:")
+        row3_ram_label.add_class("clustrix-label")
+        row3_ram_label.add_class("clustrix-row3-ram-label")
+
+        row3_time_label = widgets.HTML("Time:")
+        row3_time_label.add_class("clustrix-label")
+        row3_time_label.add_class("clustrix-row3-time-label")
+
+        self.widgets["cluster_type"].add_class("clustrix-row3-cluster")
+        self.widgets["cpus"].add_class("clustrix-row3-cpu-field")
+        self.widgets["ram"].add_class("clustrix-row3-ram-field")
+        self.widgets["time"].add_class("clustrix-row3-time-field")
+
+        row3_spacer = widgets.HTML("")
+        row3_spacer.add_class("clustrix-row3-spacer")
+
         row3_grid = widgets.GridBox(
             [
-                widgets.HTML("Cluster type:", layout=widgets.Layout(width="100px")),
+                row3_label,
                 self.widgets["cluster_type"],
-                widgets.HTML("CPUs:", layout=widgets.Layout(width="40px")),
+                row3_cpu_label,
                 self.widgets["cpus"],
-                widgets.HTML("RAM:", layout=widgets.Layout(width="40px")),
+                row3_ram_label,
                 self.widgets["ram"],
-                widgets.HTML("Time:", layout=widgets.Layout(width="40px")),
+                row3_time_label,
                 self.widgets["time"],
-                widgets.HTML(""),  # Empty cell
+                row3_spacer,
             ],
             layout=widgets.Layout(
-                grid_template_columns="100px 130px 35px 55px 35px 75px 35px 75px 1fr",
                 grid_gap="8px",
                 align_items="center",
             ),
         )
         row3_grid.add_class("clustrix-grid")
+        row3_grid.add_class("clustrix-row3")
 
         # Row 4: Advanced Settings Button (centered)
         row4_grid = widgets.GridBox(
             [self.widgets["advanced_toggle"]],
-            layout=widgets.Layout(
-                grid_template_columns="1fr", justify_items="center", margin="10px 0px"
-            ),
+            layout=widgets.Layout(justify_items="center", margin="10px 0px"),
         )
         row4_grid.add_class("clustrix-grid")
-
-        # Add CSS classes to labels for right alignment
-        for grid in [row1_grid, row2_grid, row3_grid]:
-            for child in grid.children:
-                if isinstance(child, widgets.HTML) and child.value.endswith(":"):
-                    child.add_class("clustrix-label")
+        row4_grid.add_class("clustrix-row4")
 
         # Store grid rows
         self.widgets["grid_row1"] = row1_grid
