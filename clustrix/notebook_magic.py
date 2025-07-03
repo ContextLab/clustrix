@@ -2695,15 +2695,9 @@ class EnhancedClusterConfigWidget:
 
 def display_config_widget(auto_display: bool = False):
     """Display the configuration widget."""
-    # Use the new modern widget instead of the old enhanced widget
-    try:
-        from .modern_notebook_widget import display_modern_widget
+    from .modern_notebook_widget import display_modern_widget
 
-        return display_modern_widget()
-    except ImportError:
-        # Fallback to old widget if modern widget not available
-        widget = EnhancedClusterConfigWidget(auto_display=auto_display)
-        widget.display()
+    return display_modern_widget()
 
 
 def auto_display_on_import():

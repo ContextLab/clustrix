@@ -48,11 +48,11 @@ class ModernClustrixWidget:
         css = """
         <style>
         @import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@300;400;500&display=swap');
-        
+
         .clustrix-widget, .clustrix-widget * {
             font-family: 'Lexend Deca', sans-serif !important;
         }
-        
+
         .widget-button.clustrix-button {
             background-color: #333366 !important;
             color: white !important;
@@ -63,36 +63,37 @@ class ModernClustrixWidget:
         .widget-button.clustrix-button:hover {
             background-color: #444477 !important;
         }
-        
+
         .clustrix-grid {
             display: grid;
             gap: 8px;
             align-items: center;
             font-family: 'Lexend Deca', sans-serif !important;
         }
-        
-        /* Analyzed from mockups - estimated proportions */
+
+        /* Grid layout based on mockup analysis - All rows align to Row 2 structure */
+        /* Row 2 defines the base grid: 100 + 160 + 30 + 30 + 60 + 90 + 90 = 560px */
         .clustrix-row1 {
-            grid-template-columns: 100px 280px 30px 30px 1fr;
+            grid-template-columns: 100px 370px 30px 30px 1fr;
         }
         .clustrix-row2 {
             grid-template-columns: 100px 160px 30px 30px 60px 90px 90px 1fr;
         }
         .clustrix-row3 {
-            grid-template-columns: 100px 100px 40px 60px 40px 70px 40px 70px 1fr;
+            grid-template-columns: 100px 130px 35px 55px 35px 75px 35px 75px 1fr;
         }
         .clustrix-row4 {
             grid-template-columns: 1fr;
             justify-items: center;
         }
-        
+
         .clustrix-label {
             text-align: right;
             font-weight: normal;
             font-family: 'Lexend Deca', sans-serif !important;
             padding-right: 5px;
         }
-        
+
         .widget-text, .widget-dropdown, .widget-combobox {
             font-family: 'Lexend Deca', sans-serif !important;
         }
@@ -805,7 +806,7 @@ class ModernClustrixWidget:
                 widgets.HTML(""),  # Empty cell for spacing
             ],
             layout=widgets.Layout(
-                grid_template_columns="100px 280px 30px 30px 1fr",
+                grid_template_columns="100px 370px 30px 30px 1fr",
                 grid_gap="8px",
                 align_items="center",
             ),
@@ -846,7 +847,7 @@ class ModernClustrixWidget:
                 widgets.HTML(""),  # Empty cell
             ],
             layout=widgets.Layout(
-                grid_template_columns="100px 100px 40px 60px 40px 70px 40px 70px 1fr",
+                grid_template_columns="100px 130px 35px 55px 35px 75px 35px 75px 1fr",
                 grid_gap="8px",
                 align_items="center",
             ),

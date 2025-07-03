@@ -14,8 +14,12 @@ from clustrix.config import ClusterConfig
 class MockWidget:
     """Mock ipywidgets.Widget for testing."""
 
-    def __init__(self, **kwargs):
-        self.value = kwargs.get("value", "")
+    def __init__(self, *args, **kwargs):
+        # Accept positional args for text content (like HTML widgets)
+        if args:
+            self.value = str(args[0]) if args[0] is not None else ""
+        else:
+            self.value = kwargs.get("value", "")
         self.options = kwargs.get("options", [])
         self.description = kwargs.get("description", "")
         self.disabled = kwargs.get("disabled", False)
@@ -44,6 +48,12 @@ class MockWidget:
     def on_click(self, handler):
         """Mock on_click method."""
         self._click_handlers.append(handler)
+
+    def add_class(self, class_name):
+        """Mock add_class method for CSS classes."""
+        if not hasattr(self, "_css_classes"):
+            self._css_classes = []
+        self._css_classes.append(class_name)
 
     def trigger_change(self, new_value):
         """Simulate a value change event."""
@@ -87,6 +97,14 @@ class MockVBox(MockWidget):
         self.children = children or []
 
 
+class MockGridBox(MockWidget):
+    """Mock ipywidgets.GridBox for testing."""
+
+    def __init__(self, children=None, **kwargs):
+        super().__init__(**kwargs)
+        self.children = children or []
+
+
 class MockOutput:
     """Mock ipywidgets.Output for testing."""
 
@@ -117,6 +135,18 @@ class MockOutput:
         self.captured_output.clear()
 
 
+class MockHTML(MockWidget):
+    """Special mock for HTML widgets that ensures value is always a string."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Ensure value is always a string for HTML widgets
+        if hasattr(self, "value") and self.value is not None:
+            self.value = str(self.value)
+        else:
+            self.value = ""
+
+
 class MockWidgets:
     """Mock ipywidgets module for testing."""
 
@@ -129,9 +159,10 @@ class MockWidgets:
     Checkbox = MockWidget
     Button = MockWidget
     Textarea = MockWidget
-    HTML = MockWidget
+    HTML = MockHTML  # Use special HTML mock
     HBox = MockHBox
     VBox = MockVBox
+    GridBox = MockGridBox  # Use proper GridBox mock
     Output = MockOutput
     Layout = MockLayout
 
