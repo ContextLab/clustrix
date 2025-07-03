@@ -94,35 +94,38 @@ class ModernClustrixWidget:
         self._create_output_area()
 
     def _create_profile_row(self) -> None:
-        """Create the top profile management row."""
-        # Profile dropdown
+        """Create the top profile management row according to specification."""
+        # 1.1 "Active profile:" Label
+        profile_label = widgets.HTML(value="Active profile:")
+
+        # 1.2 Profile Dropdown (editable entries)
         profile_names = self.profile_manager.get_profile_names()
         self.widgets["profile_dropdown"] = widgets.Dropdown(
             options=profile_names,
             value=self.profile_manager.active_profile,
-            description="Active profile:",
-            layout=widgets.Layout(**self.styles["profile_dropdown"]),
-            style={"description_width": "100px"},
+            layout=widgets.Layout(width="250px"),
         )
 
-        # Add/Remove profile buttons
+        # 1.3 Add Profile Button (+)
         self.widgets["add_profile_btn"] = widgets.Button(
-            icon="plus",
-            tooltip="Clone current profile",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#28a745"},
+            description="+",
+            tooltip="Clone current profile and append ' (copy)'",
+            layout=widgets.Layout(width="35px", height="35px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
+        # 1.4 Remove Profile Button (−)
         self.widgets["remove_profile_btn"] = widgets.Button(
-            icon="minus",
+            description="−",
             tooltip="Remove current profile",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#dc3545"},
+            layout=widgets.Layout(width="35px", height="35px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
-        # Profile row container
+        # Profile row container (Row 1)
         self.widgets["profile_row"] = widgets.HBox(
             [
+                profile_label,
                 self.widgets["profile_dropdown"],
                 self.widgets["add_profile_btn"],
                 self.widgets["remove_profile_btn"],
@@ -131,55 +134,60 @@ class ModernClustrixWidget:
         )
 
     def _create_config_row(self) -> None:
-        """Create the configuration file management row."""
-        # Config filename
+        """Create the configuration file management row according to specification."""
+        # 2.1 "Config filename:" Label
+        config_label = widgets.HTML(value="Config filename:")
+
+        # 2.2 Config Filename Field (editable text)
         self.widgets["config_filename"] = widgets.Text(
             value="clustrix.yml",
-            description="Config filename:",
-            layout=widgets.Layout(**self.styles["config_filename"]),
-            style={"description_width": "120px"},
+            layout=widgets.Layout(width="180px"),
         )
 
-        # File management buttons
+        # 2.3 Save Config Button (📄) - saves ALL profiles
         self.widgets["save_btn"] = widgets.Button(
-            icon="save",
-            tooltip="Save all profiles to file",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#17a2b8"},
+            description="📄",
+            tooltip="Save ALL profiles (not just active one) to specified config file",
+            layout=widgets.Layout(width="35px", height="35px"),
+            style={"button_color": "lightgray"},
         )
 
+        # 2.4 Load Config Button (📁) - opens file dialog, replaces ALL profiles
         self.widgets["load_btn"] = widgets.Button(
-            icon="folder-open",
-            tooltip="Load profiles from file",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#ffc107"},
+            description="📁",
+            tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
+            layout=widgets.Layout(width="35px", height="35px"),
+            style={"button_color": "orange"},
         )
 
-        # Action buttons
+        # 2.5 Apply Button - sets current configuration as active
         self.widgets["apply_btn"] = widgets.Button(
             description="Apply",
-            tooltip="Apply current configuration",
+            tooltip="Set the currently displayed configuration as the active profile",
             layout=widgets.Layout(width="80px", height="35px"),
-            style=self.styles["main_button"],
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
+        # 2.6 Test Connect Button - full connection workflow
         self.widgets["test_connect_btn"] = widgets.Button(
             description="Test connect",
-            tooltip="Test cluster connection",
-            layout=widgets.Layout(width="120px", height="35px"),
-            style=self.styles["main_button"],
+            tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
+            layout=widgets.Layout(width="110px", height="35px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
+        # 2.7 Test Submit Button - complete job submission test
         self.widgets["test_submit_btn"] = widgets.Button(
             description="Test submit",
-            tooltip="Test job submission",
+            tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
             layout=widgets.Layout(width="110px", height="35px"),
-            style=self.styles["main_button"],
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
-        # Config row container
+        # Config row container (Row 2)
         self.widgets["config_row"] = widgets.HBox(
             [
+                config_label,
                 self.widgets["config_filename"],
                 self.widgets["save_btn"],
                 self.widgets["load_btn"],
@@ -191,79 +199,66 @@ class ModernClustrixWidget:
         )
 
     def _create_cluster_row(self) -> None:
-        """Create the main cluster configuration row."""
-        # Cluster type dropdown
+        """Create the main cluster configuration row according to specification."""
+        # 3.1 "Cluster type:" Label
+        cluster_type_label = widgets.HTML(value="Cluster type:")
+
+        # 3.2 Cluster Type Dropdown - hardcoded options (not editable)
         self.widgets["cluster_type"] = widgets.Dropdown(
-            options=[
-                "local",
-                "ssh",
-                "slurm",
-                "pbs",
-                "sge",
-                "kubernetes",
-                "aws",
-                "azure",
-                "gcp",
-            ],
+            options=["local", "slurm", "pbs", "sge", "ssh", "kubernetes"],
             value="local",
-            description="Cluster type:",
-            layout=widgets.Layout(**self.styles["cluster_field"]),
-            style={"description_width": "90px"},
+            layout=widgets.Layout(width="120px"),
         )
 
-        # CPUs field with lock icon
+        # 3.3 "CPUs:" Label
+        cpus_label = widgets.HTML(value="CPUs:")
+
+        # 3.4 CPU Count Field - increments of 1, minimum -1 (use all available)
         self.widgets["cpus"] = widgets.IntText(
             value=1,
-            description="CPUs:",
-            layout=widgets.Layout(**self.styles["small_field"]),
-            style={"description_width": "50px"},
+            layout=widgets.Layout(width="50px"),
         )
 
-        # Lock icon for CPUs (displayed when constrained)
-        self.widgets["cpus_lock"] = widgets.HTML(
-            value="🔒",
-            layout=widgets.Layout(width="20px", margin="0px 5px"),
-        )
+        # 3.5 "RAM:" Label
+        ram_label = widgets.HTML(value="RAM:")
 
-        # RAM field
+        # 3.6 RAM Amount Field - editable numeric
         self.widgets["ram"] = widgets.FloatText(
             value=16.25,
-            description="RAM:",
-            layout=widgets.Layout(**self.styles["small_field"]),
-            style={"description_width": "40px"},
+            layout=widgets.Layout(width="80px"),
         )
 
-        # RAM unit label
-        self.widgets["ram_unit"] = widgets.HTML(
-            value="<span style='color: #6c757d; margin-left: 5px;'>GB</span>",
-            layout=widgets.Layout(width="30px"),
-        )
+        # 3.7 "GB" Label - light gray, non-editable
+        gb_label = widgets.HTML(value="<span style='color: #6c757d;'>GB</span>")
 
-        # Time field
+        # 3.8 "Time:" Label
+        time_label = widgets.HTML(value="Time:")
+
+        # 3.9 Time Limit Field - editable time format (HH:MM:SS)
         self.widgets["time"] = widgets.Text(
             value="01:00:00",
-            description="Time:",
-            placeholder="HH:MM:SS",
-            layout=widgets.Layout(**self.styles["small_field"]),
-            style={"description_width": "50px"},
+            layout=widgets.Layout(width="80px"),
         )
 
-        # Advanced settings toggle
+        # 7.1 Advanced Settings Button - toggle for advanced section
         self.widgets["advanced_toggle"] = widgets.Button(
             description="Advanced settings",
-            icon="caret-down",
+            tooltip="Show/hide advanced configuration section",
             layout=widgets.Layout(width="150px", height="35px"),
-            style={"button_color": "#6c757d"},
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
-        # Cluster row container
+        # Cluster row container (Row 3)
         self.widgets["cluster_row"] = widgets.HBox(
             [
+                cluster_type_label,
                 self.widgets["cluster_type"],
+                cpus_label,
                 self.widgets["cpus"],
-                self.widgets["cpus_lock"],
+                ram_label,
                 self.widgets["ram"],
-                self.widgets["ram_unit"],
+                gb_label,
+                time_label,
                 self.widgets["time"],
                 self.widgets["advanced_toggle"],
             ],
