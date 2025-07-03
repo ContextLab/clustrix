@@ -121,6 +121,7 @@ class MockWidgets:
     """Mock ipywidgets module for testing."""
 
     Dropdown = MockWidget
+    Combobox = MockWidget  # Added for editable dropdowns
     Text = MockWidget
     IntText = MockWidget
     FloatText = MockWidget
@@ -254,7 +255,7 @@ class TestWidgetComponents:
 
         # Check resource fields
         assert widget.widgets["cpus"].value == 1
-        assert widget.widgets["ram"].value == 16.25
+        assert widget.widgets["ram"].value == "16GB"  # Now Text field with GB
         assert widget.widgets["time"].value == "01:00:00"
 
         # Check advanced toggle
@@ -446,7 +447,7 @@ class TestConfigurationSynchronization:
         # Set some widget values
         widget.widgets["cluster_type"].value = "slurm"
         widget.widgets["cpus"].value = 8
-        widget.widgets["ram"].value = 32.0
+        widget.widgets["ram"].value = "32GB"  # Now a string with GB
         widget.widgets["time"].value = "02:00:00"
         widget.widgets["host"].value = "cluster.edu"
         widget.widgets["username"].value = "researcher"
@@ -460,7 +461,7 @@ class TestConfigurationSynchronization:
         # Verify config values
         assert config.cluster_type == "slurm"
         assert config.default_cores == 8
-        assert config.default_memory == "32.0GB"
+        assert config.default_memory == "32GB"  # Now direct string
         assert config.default_time == "02:00:00"
         assert config.cluster_host == "cluster.edu"
         assert config.username == "researcher"
@@ -487,7 +488,7 @@ class TestConfigurationSynchronization:
         # Verify widget values
         assert widget.widgets["cluster_type"].value == "pbs"
         assert widget.widgets["cpus"].value == 16
-        assert widget.widgets["ram"].value == 64.0
+        assert widget.widgets["ram"].value == "64GB"  # Now string format
         assert widget.widgets["time"].value == "04:00:00"
         assert widget.widgets["host"].value == "hpc.university.edu"
         assert widget.widgets["username"].value == "student"
@@ -557,7 +558,7 @@ class TestDynamicListManagement:
 
         # Verify env var removed
         assert len(env_vars.options) == 0
-        assert env_vars.value is None
+        assert env_vars.value == ""  # Combobox returns empty string, not None
 
     def test_add_module(self, mock_ipython_env, temp_profile_manager):
         """Test adding modules."""
@@ -595,7 +596,7 @@ class TestDynamicListManagement:
 
         # Verify module removed
         assert len(modules.options) == 0
-        assert modules.value is None
+        assert modules.value == ""  # Combobox returns empty string, not None
 
 
 class TestFileOperations:
@@ -666,7 +667,7 @@ class TestActionButtons:
 
         # Set some values
         widget.widgets["cpus"].value = 8
-        widget.widgets["ram"].value = 16.0
+        widget.widgets["ram"].value = "16GB"  # Now string format
 
         # Simulate apply button click
         apply_button = widget.widgets["apply_btn"]
@@ -676,7 +677,7 @@ class TestActionButtons:
         current_profile_name = temp_profile_manager.active_profile
         current_config = temp_profile_manager.profiles[current_profile_name]
         assert current_config.default_cores == 8
-        assert current_config.default_memory == "16.0GB"
+        assert current_config.default_memory == "16GB"  # Now direct string
 
     def test_test_connect_button(self, mock_ipython_env, temp_profile_manager):
         """Test test connect button."""
