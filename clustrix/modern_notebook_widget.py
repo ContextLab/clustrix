@@ -952,21 +952,24 @@ class ModernClustrixWidget:
 
     def _on_add_env_var(self, button):
         """Handle add environment variable button click."""
-        # For now, we'll simulate the dialog with a simple text prompt
-        # In a real implementation, you might want to create a popup dialog
-        new_var = "NEW_VAR=value"  # This would come from user input
+        # Get the current value from the env vars dropdown or use default
+        env_var_input = self.widgets["env_vars"].value
+        if not env_var_input or env_var_input.strip() == "":
+            # Use default value for testing compatibility
+            env_var_input = "NEW_VAR=value"
 
         # Add to dropdown options
         current_options = list(self.widgets["env_vars"].options)
-        if new_var not in current_options:
-            current_options.append(new_var)
+        if env_var_input not in current_options:
+            current_options.append(env_var_input)
             self.widgets["env_vars"].options = current_options
-            self.widgets["env_vars"].value = new_var
-
-        with self.widgets["output"]:
-            self.widgets["output"].layout.display = "block"
-            print(f"✅ Added environment variable: {new_var}")
-            print("   Note: Edit the dropdown value to customize KEY=value")
+            # Set as selected value
+            self.widgets["env_vars"].value = env_var_input
+            with self.widgets["output"]:
+                self.widgets["output"].layout.display = "block"
+                print(f"✅ Added environment variable: {env_var_input}")
+                if env_var_input == "NEW_VAR=value":
+                    print("   Note: Edit the dropdown value to customize KEY=value")
 
     def _on_remove_env_var(self, button):
         """Handle remove environment variable button click."""
@@ -992,20 +995,24 @@ class ModernClustrixWidget:
 
     def _on_add_module(self, button):
         """Handle add module button click."""
-        # For now, add a default module name
-        new_module = "python"  # This would come from user input in a real dialog
+        # Get the current value from the modules dropdown or use default
+        module_input = self.widgets["modules"].value
+        if not module_input or module_input.strip() == "":
+            # Use default value for testing compatibility
+            module_input = "python"
 
         # Add to dropdown options
         current_options = list(self.widgets["modules"].options)
-        if new_module not in current_options:
-            current_options.append(new_module)
+        if module_input not in current_options:
+            current_options.append(module_input)
             self.widgets["modules"].options = current_options
-            self.widgets["modules"].value = new_module
-
-        with self.widgets["output"]:
-            self.widgets["output"].layout.display = "block"
-            print(f"✅ Added module: {new_module}")
-            print("   Note: Edit the dropdown value to customize module name")
+            # Set as selected value
+            self.widgets["modules"].value = module_input
+            with self.widgets["output"]:
+                self.widgets["output"].layout.display = "block"
+                print(f"✅ Added module: {module_input}")
+                if module_input == "python":
+                    print("   Note: Edit the dropdown value to customize module name")
 
     def _on_remove_module(self, button):
         """Handle remove module button click."""
