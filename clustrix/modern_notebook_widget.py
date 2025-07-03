@@ -71,45 +71,44 @@ class ModernClustrixWidget:
             font-family: 'Lexend Deca', sans-serif !important;
         }
 
-        /* 14-column grid system based on proportional mockup analysis */
-        /* Each unit represents 1/14th of total row width for perfect alignment */
-        .clustrix-row1, .clustrix-row2, .clustrix-row3 {
-            grid-template-columns: repeat(14, 1fr);
-        }
-        .clustrix-row4 {
-            grid-template-columns: 1fr;
-            justify-items: center;
+        /* 19-column grid system based on detailed mockup analysis */
+        /* Each unit represents 1/19th of total row width for perfect alignment */
+        .clustrix-row1, .clustrix-row2, .clustrix-row3, .clustrix-row4 {
+            grid-template-columns: repeat(19, 1fr);
         }
 
-        /* Row 1: [2 units label][8 units profile dropdown][1 unit +][1 unit -][2 units spacer] */
-        .clustrix-row1-label { grid-column: 1 / 3; }
-        .clustrix-row1-profile { grid-column: 3 / 11; }
-        .clustrix-row1-add { grid-column: 11 / 12; }
-        .clustrix-row1-remove { grid-column: 12 / 13; }
-        .clustrix-row1-spacer { grid-column: 13 / 15; }
+        /* Row 1: AAAABBBBBBBBBBBBBCD */
+        /* A=active profile text, B=profile dropdown, C=+ button, D=- button */
+        .clustrix-row1-label { grid-column: 1 / 5; }     /* A: 4 columns */
+        .clustrix-row1-profile { grid-column: 5 / 18; }  /* B: 13 columns */
+        .clustrix-row1-add { grid-column: 18 / 19; }     /* C: 1 column */
+        .clustrix-row1-remove { grid-column: 19 / 20; }  /* D: 1 column */
 
-        /* Row 2: [2 units label][3 units field][1 unit save][1 unit load][1.5 units apply][2 units test1]
-         *        [2 units test2][1.5 units spacer] */
-        .clustrix-row2-label { grid-column: 1 / 3; }
-        .clustrix-row2-field { grid-column: 3 / 6; }
-        .clustrix-row2-save { grid-column: 6 / 7; }
-        .clustrix-row2-load { grid-column: 7 / 8; }
-        .clustrix-row2-apply { grid-column: 8 / 10; }
-        .clustrix-row2-test1 { grid-column: 10 / 12; }
-        .clustrix-row2-test2 { grid-column: 12 / 14; }
-        .clustrix-row2-spacer { grid-column: 14 / 15; }
+        /* Row 2: EEEEFFFFFFFGHIIJJKK */
+        /* E=config filename text, F=config field, G=save, H=load, I=apply, J=test conn, K=test submit */
+        .clustrix-row2-label { grid-column: 1 / 5; }     /* E: 4 columns */
+        .clustrix-row2-field { grid-column: 5 / 12; }    /* F: 7 columns */
+        .clustrix-row2-save { grid-column: 12 / 13; }    /* G: 1 column */
+        .clustrix-row2-load { grid-column: 13 / 14; }    /* H: 1 column */
+        .clustrix-row2-apply { grid-column: 14 / 16; }   /* I: 2 columns */
+        .clustrix-row2-test1 { grid-column: 16 / 18; }   /* J: 2 columns */
+        .clustrix-row2-test2 { grid-column: 18 / 20; }   /* K: 2 columns */
 
-        /* Row 3: [2 units label][2 units cluster][1 unit cpu-lbl][1.5 units cpu][1 unit ram-lbl]
-         *        [1.5 units ram][1 unit time-lbl][1.5 units time][2.5 units spacer] */
-        .clustrix-row3-label { grid-column: 1 / 3; }
-        .clustrix-row3-cluster { grid-column: 3 / 5; }
-        .clustrix-row3-cpu-label { grid-column: 5 / 6; }
-        .clustrix-row3-cpu-field { grid-column: 6 / 8; }
-        .clustrix-row3-ram-label { grid-column: 8 / 9; }
-        .clustrix-row3-ram-field { grid-column: 9 / 11; }
-        .clustrix-row3-time-label { grid-column: 11 / 12; }
-        .clustrix-row3-time-field { grid-column: 12 / 14; }
-        .clustrix-row3-spacer { grid-column: 14 / 15; }
+        /* Row 3: LLLLMMMNNOOPPQQRRSS */
+        /* L=cluster type text, M=cluster dropdown, N=CPUs text, O=CPU field,
+         * P=RAM text, Q=RAM field, R=Time text, S=Time field */
+        .clustrix-row3-label { grid-column: 1 / 5; }      /* L: 4 columns */
+        .clustrix-row3-cluster { grid-column: 5 / 8; }    /* M: 3 columns */
+        .clustrix-row3-cpu-label { grid-column: 8 / 10; } /* N: 2 columns */
+        .clustrix-row3-cpu-field { grid-column: 10 / 12; }/* O: 2 columns */
+        .clustrix-row3-ram-label { grid-column: 12 / 14; }/* P: 2 columns */
+        .clustrix-row3-ram-field { grid-column: 14 / 16; }/* Q: 2 columns */
+        .clustrix-row3-time-label { grid-column: 16 / 18; }/* R: 2 columns */
+        .clustrix-row3-time-field { grid-column: 18 / 20; }/* S: 2 columns */
+
+        /* Row 4: TTTTTTTTTTUUUVVVVVV */
+        /* T=empty space, U=advanced button, V=empty space */
+        .clustrix-row4-advanced { grid-column: 11 / 14; } /* U: 3 columns */
 
         .clustrix-label {
             text-align: right;
@@ -846,7 +845,7 @@ class ModernClustrixWidget:
 
     def _create_grid_layout(self) -> None:
         """Create grid layout for proper alignment."""
-        # Row 1: Profile Management (proportional 14-column grid)
+        # Row 1: Profile Management (19-column grid: AAAABBBBBBBBBBBBBCD)
         row1_label = widgets.HTML("Active profile:")
         row1_label.add_class("clustrix-label")
         row1_label.add_class("clustrix-row1-label")
@@ -855,16 +854,12 @@ class ModernClustrixWidget:
         self.widgets["add_profile_btn"].add_class("clustrix-row1-add")
         self.widgets["remove_profile_btn"].add_class("clustrix-row1-remove")
 
-        row1_spacer = widgets.HTML("")
-        row1_spacer.add_class("clustrix-row1-spacer")
-
         row1_grid = widgets.GridBox(
             [
                 row1_label,
                 self.widgets["profile_dropdown"],
                 self.widgets["add_profile_btn"],
                 self.widgets["remove_profile_btn"],
-                row1_spacer,
             ],
             layout=widgets.Layout(
                 grid_gap="8px",
@@ -874,7 +869,7 @@ class ModernClustrixWidget:
         row1_grid.add_class("clustrix-grid")
         row1_grid.add_class("clustrix-row1")
 
-        # Row 2: Configuration Management (proportional 14-column grid)
+        # Row 2: Configuration Management (19-column grid: EEEEFFFFFFFGHIIJJKK)
         row2_label = widgets.HTML("Config filename:")
         row2_label.add_class("clustrix-label")
         row2_label.add_class("clustrix-row2-label")
@@ -886,9 +881,6 @@ class ModernClustrixWidget:
         self.widgets["test_connect_btn"].add_class("clustrix-row2-test1")
         self.widgets["test_submit_btn"].add_class("clustrix-row2-test2")
 
-        row2_spacer = widgets.HTML("")
-        row2_spacer.add_class("clustrix-row2-spacer")
-
         row2_grid = widgets.GridBox(
             [
                 row2_label,
@@ -898,7 +890,6 @@ class ModernClustrixWidget:
                 self.widgets["apply_btn"],
                 self.widgets["test_connect_btn"],
                 self.widgets["test_submit_btn"],
-                row2_spacer,
             ],
             layout=widgets.Layout(
                 grid_gap="8px",
@@ -908,7 +899,7 @@ class ModernClustrixWidget:
         row2_grid.add_class("clustrix-grid")
         row2_grid.add_class("clustrix-row2")
 
-        # Row 3: Cluster Configuration (proportional 14-column grid)
+        # Row 3: Cluster Configuration (19-column grid: LLLLMMMNNOOPPQQRRSS)
         row3_label = widgets.HTML("Cluster type:")
         row3_label.add_class("clustrix-label")
         row3_label.add_class("clustrix-row3-label")
@@ -930,9 +921,6 @@ class ModernClustrixWidget:
         self.widgets["ram"].add_class("clustrix-row3-ram-field")
         self.widgets["time"].add_class("clustrix-row3-time-field")
 
-        row3_spacer = widgets.HTML("")
-        row3_spacer.add_class("clustrix-row3-spacer")
-
         row3_grid = widgets.GridBox(
             [
                 row3_label,
@@ -943,7 +931,6 @@ class ModernClustrixWidget:
                 self.widgets["ram"],
                 row3_time_label,
                 self.widgets["time"],
-                row3_spacer,
             ],
             layout=widgets.Layout(
                 grid_gap="8px",
@@ -953,10 +940,12 @@ class ModernClustrixWidget:
         row3_grid.add_class("clustrix-grid")
         row3_grid.add_class("clustrix-row3")
 
-        # Row 4: Advanced Settings Button (centered)
+        # Row 4: Advanced Settings Button (19-column grid: TTTTTTTTTTUUUVVVVVV)
+        self.widgets["advanced_toggle"].add_class("clustrix-row4-advanced")
+
         row4_grid = widgets.GridBox(
             [self.widgets["advanced_toggle"]],
-            layout=widgets.Layout(justify_items="center", margin="10px 0px"),
+            layout=widgets.Layout(margin="10px 0px"),
         )
         row4_grid.add_class("clustrix-grid")
         row4_grid.add_class("clustrix-row4")
