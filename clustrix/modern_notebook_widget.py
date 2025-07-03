@@ -1402,3 +1402,9 @@ def display_modern_widget():
     widget = create_modern_cluster_widget()
     display(widget)
     return widget
+
+
+# Convenience function for backward compatibility
+def show_widget():
+    """Display the modern cluster configuration widget (convenience function)."""
+    return display_modern_widget()

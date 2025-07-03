@@ -58,6 +58,7 @@ from .modern_notebook_widget import (
     ModernClustrixWidget,
     create_modern_cluster_widget,
     display_modern_widget,
+    show_widget,
 )
 
 __version__ = "0.1.0"
@@ -114,6 +115,7 @@ __all__ = [
     "ModernClustrixWidget",
     "create_modern_cluster_widget",
     "display_modern_widget",
+    "show_widget",
 ]
 
 # Auto-register IPython magic command and display widget if in notebook environment
