@@ -47,18 +47,18 @@ class ModernClustrixWidget:
         """Inject CSS styles for proper button colors, Arvo font, and grid layout."""
         css = """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Arvo:wght@400;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@300;400;500&display=swap');
         
         .clustrix-widget, .clustrix-widget * {
-            font-family: 'Arvo', serif !important;
+            font-family: 'Lexend Deca', sans-serif !important;
         }
         
         .widget-button.clustrix-button {
             background-color: #333366 !important;
             color: white !important;
-            font-weight: bold !important;
+            font-weight: normal !important;
             border: none !important;
-            font-family: 'Arvo', serif !important;
+            font-family: 'Lexend Deca', sans-serif !important;
         }
         .widget-button.clustrix-button:hover {
             background-color: #444477 !important;
@@ -66,19 +66,20 @@ class ModernClustrixWidget:
         
         .clustrix-grid {
             display: grid;
-            gap: 10px;
+            gap: 8px;
             align-items: center;
-            font-family: 'Arvo', serif !important;
+            font-family: 'Lexend Deca', sans-serif !important;
         }
         
+        /* Analyzed from mockups - estimated proportions */
         .clustrix-row1 {
-            grid-template-columns: 120px 250px 35px 35px 1fr;
+            grid-template-columns: 100px 280px 30px 30px 1fr;
         }
         .clustrix-row2 {
-            grid-template-columns: 120px 180px 35px 35px 80px 110px 110px 1fr;
+            grid-template-columns: 100px 160px 30px 30px 60px 90px 90px 1fr;
         }
         .clustrix-row3 {
-            grid-template-columns: 120px 120px 50px 50px 50px 80px 50px 80px 1fr;
+            grid-template-columns: 100px 100px 40px 60px 40px 70px 40px 70px 1fr;
         }
         .clustrix-row4 {
             grid-template-columns: 1fr;
@@ -88,11 +89,12 @@ class ModernClustrixWidget:
         .clustrix-label {
             text-align: right;
             font-weight: normal;
-            font-family: 'Arvo', serif !important;
+            font-family: 'Lexend Deca', sans-serif !important;
+            padding-right: 5px;
         }
         
         .widget-text, .widget-dropdown, .widget-combobox {
-            font-family: 'Arvo', serif !important;
+            font-family: 'Lexend Deca', sans-serif !important;
         }
         </style>
         """
@@ -176,14 +178,14 @@ class ModernClustrixWidget:
         self.widgets["profile_dropdown"] = widgets.Combobox(
             options=all_profiles,
             value=self.profile_manager.active_profile,
-            layout=widgets.Layout(width="250px", height="35px"),
+            layout=widgets.Layout(width="280px", height="35px"),
         )
 
         # 1.3 Add Profile Button (+)
         self.widgets["add_profile_btn"] = widgets.Button(
             description="+",
             tooltip="Clone current profile and append ' (copy)'",
-            layout=widgets.Layout(width="35px", height="35px"),
+            layout=widgets.Layout(width="30px", height="35px"),
         )
         self.widgets["add_profile_btn"].add_class("clustrix-button")
 
@@ -191,7 +193,7 @@ class ModernClustrixWidget:
         self.widgets["remove_profile_btn"] = widgets.Button(
             description="−",
             tooltip="Remove current profile",
-            layout=widgets.Layout(width="35px", height="35px"),
+            layout=widgets.Layout(width="30px", height="35px"),
         )
         self.widgets["remove_profile_btn"].add_class("clustrix-button")
 
@@ -222,14 +224,14 @@ class ModernClustrixWidget:
         # 2.2 Config Filename Field (editable text)
         self.widgets["config_filename"] = widgets.Text(
             value="clustrix.yml",
-            layout=widgets.Layout(width="180px", height="35px"),
+            layout=widgets.Layout(width="160px", height="35px"),
         )
 
         # 2.3 Save Config Button (💾 disk emoji) - saves ALL profiles
         self.widgets["save_btn"] = widgets.Button(
             description="💾",
             tooltip="Save ALL profiles (not just active one) to specified config file",
-            layout=widgets.Layout(width="35px", height="35px"),
+            layout=widgets.Layout(width="30px", height="35px"),
             style={"button_color": "#f8f9fa"},  # Light gray like text fields
         )
 
@@ -237,7 +239,7 @@ class ModernClustrixWidget:
         self.widgets["load_btn"] = widgets.Button(
             description="📂",
             tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
-            layout=widgets.Layout(width="35px", height="35px"),
+            layout=widgets.Layout(width="30px", height="35px"),
             style={"button_color": "#f8f9fa"},  # Light gray like text fields
         )
 
@@ -245,7 +247,7 @@ class ModernClustrixWidget:
         self.widgets["apply_btn"] = widgets.Button(
             description="Apply",
             tooltip="Set the currently displayed configuration as the active profile",
-            layout=widgets.Layout(width="80px", height="35px"),
+            layout=widgets.Layout(width="60px", height="35px"),
         )
         self.widgets["apply_btn"].add_class("clustrix-button")
 
@@ -253,7 +255,7 @@ class ModernClustrixWidget:
         self.widgets["test_connect_btn"] = widgets.Button(
             description="Test connect",
             tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
-            layout=widgets.Layout(width="110px", height="35px"),
+            layout=widgets.Layout(width="90px", height="35px"),
         )
         self.widgets["test_connect_btn"].add_class("clustrix-button")
 
@@ -261,7 +263,7 @@ class ModernClustrixWidget:
         self.widgets["test_submit_btn"] = widgets.Button(
             description="Test submit",
             tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
-            layout=widgets.Layout(width="110px", height="35px"),
+            layout=widgets.Layout(width="90px", height="35px"),
         )
         self.widgets["test_submit_btn"].add_class("clustrix-button")
 
@@ -299,7 +301,7 @@ class ModernClustrixWidget:
         self.widgets["cluster_type"] = widgets.Dropdown(
             options=["local", "slurm", "pbs", "sge", "ssh", "kubernetes"],
             value="local",
-            layout=widgets.Layout(width="120px", height="35px"),
+            layout=widgets.Layout(width="100px", height="35px"),
         )
 
         # 3.3 "CPUs:" Label
@@ -309,7 +311,7 @@ class ModernClustrixWidget:
         # 3.4 CPU Count Field - increments of 1, minimum -1 (use all available)
         self.widgets["cpus"] = widgets.IntText(
             value=1,
-            layout=widgets.Layout(width="50px", height="35px"),
+            layout=widgets.Layout(width="60px", height="35px"),
         )
 
         # 3.5 "RAM:" Label
@@ -319,7 +321,7 @@ class ModernClustrixWidget:
         # 3.6 RAM Amount Field - free text with GB inside
         self.widgets["ram"] = widgets.Text(
             value="16GB",
-            layout=widgets.Layout(width="80px", height="35px"),
+            layout=widgets.Layout(width="70px", height="35px"),
         )
 
         # 3.8 "Time:" Label
@@ -329,7 +331,7 @@ class ModernClustrixWidget:
         # 3.9 Time Limit Field - editable time format (HH:MM:SS)
         self.widgets["time"] = widgets.Text(
             value="01:00:00",
-            layout=widgets.Layout(width="80px", height="35px"),
+            layout=widgets.Layout(width="70px", height="35px"),
         )
 
         # Advanced Settings Button will be moved to separate row - create placeholder
@@ -793,27 +795,27 @@ class ModernClustrixWidget:
 
     def _create_grid_layout(self) -> None:
         """Create grid layout for proper alignment."""
-        # Row 1: Profile Management
+        # Row 1: Profile Management (based on mockup analysis)
         row1_grid = widgets.GridBox(
             [
-                widgets.HTML("Active profile:", layout=widgets.Layout(width="120px")),
+                widgets.HTML("Active profile:", layout=widgets.Layout(width="100px")),
                 self.widgets["profile_dropdown"],
                 self.widgets["add_profile_btn"],
                 self.widgets["remove_profile_btn"],
                 widgets.HTML(""),  # Empty cell for spacing
             ],
             layout=widgets.Layout(
-                grid_template_columns="120px 250px 35px 35px 1fr",
-                grid_gap="10px",
+                grid_template_columns="100px 280px 30px 30px 1fr",
+                grid_gap="8px",
                 align_items="center",
             ),
         )
         row1_grid.add_class("clustrix-grid")
 
-        # Row 2: Configuration Management
+        # Row 2: Configuration Management (based on mockup analysis)
         row2_grid = widgets.GridBox(
             [
-                widgets.HTML("Config filename:", layout=widgets.Layout(width="120px")),
+                widgets.HTML("Config filename:", layout=widgets.Layout(width="100px")),
                 self.widgets["config_filename"],
                 self.widgets["save_btn"],
                 self.widgets["load_btn"],
@@ -823,29 +825,29 @@ class ModernClustrixWidget:
                 widgets.HTML(""),  # Empty cell
             ],
             layout=widgets.Layout(
-                grid_template_columns="120px 180px 35px 35px 80px 110px 110px 1fr",
-                grid_gap="10px",
+                grid_template_columns="100px 160px 30px 30px 60px 90px 90px 1fr",
+                grid_gap="8px",
                 align_items="center",
             ),
         )
         row2_grid.add_class("clustrix-grid")
 
-        # Row 3: Cluster Configuration
+        # Row 3: Cluster Configuration (based on mockup analysis)
         row3_grid = widgets.GridBox(
             [
-                widgets.HTML("Cluster type:", layout=widgets.Layout(width="120px")),
+                widgets.HTML("Cluster type:", layout=widgets.Layout(width="100px")),
                 self.widgets["cluster_type"],
-                widgets.HTML("CPUs:", layout=widgets.Layout(width="50px")),
+                widgets.HTML("CPUs:", layout=widgets.Layout(width="40px")),
                 self.widgets["cpus"],
-                widgets.HTML("RAM:", layout=widgets.Layout(width="50px")),
+                widgets.HTML("RAM:", layout=widgets.Layout(width="40px")),
                 self.widgets["ram"],
-                widgets.HTML("Time:", layout=widgets.Layout(width="50px")),
+                widgets.HTML("Time:", layout=widgets.Layout(width="40px")),
                 self.widgets["time"],
                 widgets.HTML(""),  # Empty cell
             ],
             layout=widgets.Layout(
-                grid_template_columns="120px 120px 50px 50px 50px 80px 50px 80px 1fr",
-                grid_gap="10px",
+                grid_template_columns="100px 100px 40px 60px 40px 70px 40px 70px 1fr",
+                grid_gap="8px",
                 align_items="center",
             ),
         )
