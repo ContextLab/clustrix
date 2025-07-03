@@ -400,77 +400,62 @@ class ModernClustrixWidget:
         )
 
     def _create_advanced_section(self) -> None:
-        """Create the collapsible advanced settings section according to specification."""
-        # Advanced Settings Row 1: Package manager + Python + Clone env
-        # 8.1 "Package manager:" Label (right-aligned)
-        package_manager_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Package manager:</div>"
-        )
+        """Create the collapsible advanced settings section with proper GridBox layout.
 
-        # 8.2 Package Manager Dropdown - fixed options (not editable), default 'auto'
+        Layout specification (19 columns):
+        XXXXXXXXXXXXXXXXXXX  (border)
+        XAAAABBCCCCDDDEEEFX  (Package manager + Python exec + Clone env)
+        XGGGGHHHHIKKKLLLMNX  (Env vars + Modules with +/- buttons)
+        XOOOOPPPPPPPPPPPPPX  (Pre-exec commands label + textarea)
+        XQQQQPPPPPPPPPPPPPX  (Empty + textarea continuation)
+        XXXXXXXXXXXXXXXXXXX  (border)
+        """
+        # Create all components first
+
+        # A: Package manager label (4 columns)
+        package_manager_label = widgets.HTML("Package manager:")
+        package_manager_label.add_class("clustrix-label")
+
+        # B: Package manager dropdown (2 columns)
         self.widgets["package_manager"] = widgets.Dropdown(
             options=["auto", "pip", "conda"],
             value="auto",
-            layout=widgets.Layout(width="100px", height="35px"),
+            layout=widgets.Layout(height="35px"),
         )
 
-        # 8.3 "Python executable:" Label (right-aligned)
-        python_exec_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Python executable:</div>"
-        )
+        # C: Python executable label (4 columns)
+        python_exec_label = widgets.HTML("Python executable:")
+        python_exec_label.add_class("clustrix-label")
 
-        # 8.4 Python Executable Field - editable text
+        # D: Python executable field (3 columns)
         self.widgets["python_executable"] = widgets.Text(
             value="python",
-            layout=widgets.Layout(width="120px", height="35px"),
+            layout=widgets.Layout(height="35px"),
         )
 
-        # 8.5 "Clone environment:" Label (right-aligned)
-        clone_env_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Clone environment:</div>"
-        )
+        # E: Clone env label (3 columns)
+        clone_env_label = widgets.HTML("Clone env:")
+        clone_env_label.add_class("clustrix-label")
 
-        # 8.6 Clone Environment Checkbox - controls venv behavior
+        # F: Clone env checkbox (1 column)
         self.widgets["clone_env"] = widgets.Checkbox(
             value=True,
-            layout=widgets.Layout(width="20px", height="35px"),
+            layout=widgets.Layout(height="35px"),
         )
 
-        # Advanced Row 1 container with proper spacing
-        advanced_row1 = widgets.HBox(
-            [
-                package_manager_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["package_manager"],
-                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
-                python_exec_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["python_executable"],
-                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
-                clone_env_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["clone_env"],
-            ],
-            layout=widgets.Layout(
-                justify_content="flex-start", margin="5px 0px", align_items="center"
-            ),
-        )
+        # G: Env variables label (4 columns)
+        env_vars_label = widgets.HTML("Env variables:")
+        env_vars_label.add_class("clustrix-label")
 
-        # Advanced Settings Row 2: Environment variables + Modules
-        # 8.7 "Env variables:" Label (right-aligned)
-        env_vars_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Env variables:</div>"
-        )
-
-        # 8.8 Environment Variables Combobox - editable, initially empty
+        # H: Env variables combobox (4 columns)
         self.widgets["env_vars"] = widgets.Combobox(
             options=[],
             value="",
             placeholder="KEY=value",
-            layout=widgets.Layout(width="200px", height="35px"),
+            layout=widgets.Layout(height="35px"),
         )
 
-        # 8.9 Add Env Variable Button (+)
+        # I: Env vars add button (1 column)
         self.widgets["env_vars_add"] = widgets.Button(
             description="+",
             tooltip="Add new environment variable",
@@ -478,7 +463,7 @@ class ModernClustrixWidget:
         )
         self.widgets["env_vars_add"].add_class("clustrix-button")
 
-        # 8.10 Remove Env Variable Button (−)
+        # J: Env vars remove button (1 column)
         self.widgets["env_vars_remove"] = widgets.Button(
             description="−",
             tooltip="Remove selected environment variable",
@@ -486,20 +471,19 @@ class ModernClustrixWidget:
         )
         self.widgets["env_vars_remove"].add_class("clustrix-button")
 
-        # 8.11 "Modules:" Label (right-aligned)
-        modules_label = widgets.HTML(
-            value="<div style='text-align: right; width: 80px;'>Modules:</div>"
-        )
+        # K: Modules label (3 columns)
+        modules_label = widgets.HTML("Modules:")
+        modules_label.add_class("clustrix-label")
 
-        # 8.12 Modules Combobox - editable, initially empty, same behavior as env vars
+        # L: Modules combobox (3 columns)
         self.widgets["modules"] = widgets.Combobox(
             options=[],
             value="",
             placeholder="module_name",
-            layout=widgets.Layout(width="120px", height="35px"),
+            layout=widgets.Layout(height="35px"),
         )
 
-        # 8.13 Add Module Button (+)
+        # M: Modules add button (1 column)
         self.widgets["modules_add"] = widgets.Button(
             description="+",
             tooltip="Add new module to load",
@@ -507,7 +491,7 @@ class ModernClustrixWidget:
         )
         self.widgets["modules_add"].add_class("clustrix-button")
 
-        # 8.14 Remove Module Button (−)
+        # N: Modules remove button (1 column)
         self.widgets["modules_remove"] = widgets.Button(
             description="−",
             tooltip="Remove selected module",
@@ -515,58 +499,76 @@ class ModernClustrixWidget:
         )
         self.widgets["modules_remove"].add_class("clustrix-button")
 
-        # Advanced Row 2 container with proper spacing
-        advanced_row2 = widgets.HBox(
-            [
-                env_vars_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["env_vars"],
-                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
-                self.widgets["env_vars_add"],
-                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
-                self.widgets["env_vars_remove"],
-                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
-                modules_label,
-                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
-                self.widgets["modules"],
-                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
-                self.widgets["modules_add"],
-                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
-                self.widgets["modules_remove"],
-            ],
-            layout=widgets.Layout(
-                justify_content="flex-start", margin="5px 0px", align_items="center"
-            ),
-        )
+        # O: Pre-exec commands label (4 columns)
+        pre_exec_label = widgets.HTML("Pre-exec commands:")
+        pre_exec_label.add_class("clustrix-label")
 
-        # Advanced Settings Row 3: Pre-execution commands
-        # 8.15 "Pre-exec commands:" Label (right-aligned)
-        pre_exec_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Pre-exec commands:</div>"
-        )
-
-        # 8.16 Pre-execution Commands Text Area - with bash syntax highlighting
+        # P: Pre-exec commands textarea (spans multiple rows and columns)
         self.widgets["pre_exec_commands"] = widgets.Textarea(
             value="",
             placeholder="source /path/to/setup.sh\nexport PATH=/custom/path:$PATH",
-            layout=widgets.Layout(width="600px", height="100px"),
+            layout=widgets.Layout(height="100px"),
         )
 
-        # Advanced Row 3 container
-        advanced_row3 = widgets.VBox(
+        # Create GridBox layouts for each row
+        # Row 1: AAAABBCCCCDDDEEEF
+        advanced_row1 = widgets.GridBox(
             [
-                pre_exec_label,
-                self.widgets["pre_exec_commands"],
+                package_manager_label,  # A: 1-5
+                self.widgets["package_manager"],  # B: 5-7
+                python_exec_label,  # C: 7-11
+                self.widgets["python_executable"],  # D: 11-14
+                clone_env_label,  # E: 14-17
+                self.widgets["clone_env"],  # F: 17-18
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(
+                grid_template_columns="4fr 2fr 4fr 3fr 3fr 1fr 2fr",
+                grid_gap="8px",
+                align_items="center",
+                margin="5px 0px",
+            ),
         )
 
-        # Advanced section container (initially hidden, toggles with advanced_toggle button)
+        # Row 2: GGGGHHHHIKKKLLLMN
+        advanced_row2 = widgets.GridBox(
+            [
+                env_vars_label,  # G: 1-5
+                self.widgets["env_vars"],  # H: 5-9
+                self.widgets["env_vars_add"],  # I: 9-10
+                self.widgets["env_vars_remove"],  # J: 10-11
+                modules_label,  # K: 11-14
+                self.widgets["modules"],  # L: 14-17
+                self.widgets["modules_add"],  # M: 17-18
+                self.widgets["modules_remove"],  # N: 18-19
+            ],
+            layout=widgets.Layout(
+                grid_template_columns="4fr 4fr 1fr 1fr 3fr 3fr 1fr 1fr 2fr",
+                grid_gap="8px",
+                align_items="center",
+                margin="5px 0px",
+            ),
+        )
+
+        # Row 3-4: OOOO + PPPPPPPPPPPPPP (label + textarea spanning 2 rows)
+        advanced_row3 = widgets.GridBox(
+            [
+                pre_exec_label,  # O: 1-5
+                self.widgets["pre_exec_commands"],  # P: 5-19 (spans to end)
+            ],
+            layout=widgets.Layout(
+                grid_template_columns="4fr 15fr",
+                grid_gap="8px",
+                align_items="flex-start",  # Align to top for textarea
+                margin="5px 0px",
+            ),
+        )
+
+        # Advanced section container (initially hidden)
         self.widgets["advanced_section"] = widgets.VBox(
             [
-                advanced_row1,  # Package manager + Python + Clone env
-                advanced_row2,  # Environment variables + Modules
-                advanced_row3,  # Pre-exec commands
+                advanced_row1,
+                advanced_row2,
+                advanced_row3,
             ],
             layout=widgets.Layout(
                 display="none",
@@ -940,15 +942,19 @@ class ModernClustrixWidget:
         row3_grid.add_class("clustrix-grid")
         row3_grid.add_class("clustrix-row3")
 
-        # Row 4: Advanced Settings Button (19-column grid: TTTTTTTTTTUUUVVVVVV)
-        self.widgets["advanced_toggle"].add_class("clustrix-row4-advanced")
+        # Row 4: Advanced Settings Button (TTTTTTTTTTUUUVVVVVV)
+        # Use a centered grid with empty space + button + empty space
+        empty1 = widgets.HTML("")
+        empty2 = widgets.HTML("")
 
         row4_grid = widgets.GridBox(
-            [self.widgets["advanced_toggle"]],
-            layout=widgets.Layout(margin="10px 0px"),
+            [empty1, self.widgets["advanced_toggle"], empty2],
+            layout=widgets.Layout(
+                grid_template_columns="10fr 3fr 6fr",
+                justify_items="center",
+                margin="10px 0px",
+            ),
         )
-        row4_grid.add_class("clustrix-grid")
-        row4_grid.add_class("clustrix-row4")
 
         # Store grid rows
         self.widgets["grid_row1"] = row1_grid
