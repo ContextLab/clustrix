@@ -266,112 +266,144 @@ class ModernClustrixWidget:
         )
 
     def _create_advanced_section(self) -> None:
-        """Create the collapsible advanced settings section."""
-        # Package manager dropdown
+        """Create the collapsible advanced settings section according to specification."""
+        # Advanced Settings Row 1: Package manager + Python + Clone env
+        # 8.1 "Package manager:" Label
+        package_manager_label = widgets.HTML(value="Package manager:")
+
+        # 8.2 Package Manager Dropdown - fixed options (not editable)
         self.widgets["package_manager"] = widgets.Dropdown(
-            options=["auto", "pip", "conda", "mamba", "poetry"],
+            options=["auto", "pip", "conda"],
             value="auto",
-            description="Package manager:",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "120px"},
+            layout=widgets.Layout(width="100px"),
         )
 
-        # Python executable
+        # 8.3 "Python executable:" Label
+        python_exec_label = widgets.HTML(value="Python executable:")
+
+        # 8.4 Python Executable Field - editable text
         self.widgets["python_executable"] = widgets.Text(
             value="python",
-            description="Python executable:",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "130px"},
+            layout=widgets.Layout(width="120px"),
         )
 
-        # Clone environment checkbox
+        # 8.5 "Clone env:" Label
+        clone_env_label = widgets.HTML(value="Clone env:")
+
+        # 8.6 Clone Environment Checkbox - controls venv behavior
         self.widgets["clone_env"] = widgets.Checkbox(
             value=True,
-            description="Clone env",
-            style={"description_width": "80px"},
+            layout=widgets.Layout(width="20px"),
         )
 
-        # Environment variables
+        # Advanced Row 1 container
+        advanced_row1 = widgets.HBox(
+            [
+                package_manager_label,
+                self.widgets["package_manager"],
+                python_exec_label,
+                self.widgets["python_executable"],
+                clone_env_label,
+                self.widgets["clone_env"],
+            ],
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+        )
+
+        # Advanced Settings Row 2: Environment variables + Modules
+        # 8.7 "Env variables:" Label
+        env_vars_label = widgets.HTML(value="Env variables:")
+
+        # 8.8 Environment Variables Dropdown - editable, initially empty
         self.widgets["env_vars"] = widgets.Dropdown(
             options=[],
             value=None,
-            description="Env variables:",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "100px"},
+            layout=widgets.Layout(width="200px"),
         )
 
+        # 8.9 Add Env Variable Button (+)
         self.widgets["env_vars_add"] = widgets.Button(
-            icon="plus",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#28a745"},
+            description="+",
+            tooltip="Add new environment variable",
+            layout=widgets.Layout(width="25px", height="25px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
+        # 8.10 Remove Env Variable Button (−)
         self.widgets["env_vars_remove"] = widgets.Button(
-            icon="minus",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#dc3545"},
+            description="−",
+            tooltip="Remove selected environment variable",
+            layout=widgets.Layout(width="25px", height="25px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
-        # Modules
+        # 8.11 "Modules:" Label
+        modules_label = widgets.HTML(value="Modules:")
+
+        # 8.12 Modules Dropdown - editable, initially empty, same behavior as env vars
         self.widgets["modules"] = widgets.Dropdown(
             options=[],
             value=None,
-            description="Modules:",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "70px"},
+            layout=widgets.Layout(width="120px"),
         )
 
+        # 8.13 Add Module Button (+)
         self.widgets["modules_add"] = widgets.Button(
-            icon="plus",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#28a745"},
+            description="+",
+            tooltip="Add new module to load",
+            layout=widgets.Layout(width="25px", height="25px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
+        # 8.14 Remove Module Button (−)
         self.widgets["modules_remove"] = widgets.Button(
-            icon="minus",
-            layout=widgets.Layout(**self.styles["icon_button"]),
-            style={"button_color": "#dc3545"},
+            description="−",
+            tooltip="Remove selected module",
+            layout=widgets.Layout(width="25px", height="25px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
         )
 
-        # Pre-exec commands
-        self.widgets["pre_exec_commands"] = widgets.Textarea(
-            value="",
-            description="Pre-exec commands:",
-            placeholder="source /path/to/setup.sh\nexport PATH=/custom/path:$PATH",
-            layout=widgets.Layout(width="400px", height="100px"),
-            style={"description_width": "130px"},
-        )
-
-        # Advanced section rows
-        advanced_row1 = widgets.HBox(
-            [
-                self.widgets["package_manager"],
-                self.widgets["python_executable"],
-                self.widgets["clone_env"],
-            ],
-            layout=widgets.Layout(margin="5px 0px"),
-        )
-
+        # Advanced Row 2 container
         advanced_row2 = widgets.HBox(
             [
+                env_vars_label,
                 self.widgets["env_vars"],
                 self.widgets["env_vars_add"],
                 self.widgets["env_vars_remove"],
+                modules_label,
                 self.widgets["modules"],
                 self.widgets["modules_add"],
                 self.widgets["modules_remove"],
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
         )
 
+        # Advanced Settings Row 3: Pre-execution commands
+        # 8.15 "Pre-exec commands:" Label
+        pre_exec_label = widgets.HTML(value="Pre-exec commands:")
+
+        # 8.16 Pre-execution Commands Text Area - with bash syntax highlighting
+        self.widgets["pre_exec_commands"] = widgets.Textarea(
+            value="",
+            placeholder="source /path/to/setup.sh\nexport PATH=/custom/path:$PATH",
+            layout=widgets.Layout(width="600px", height="100px"),
+        )
+
+        # Advanced Row 3 container
         advanced_row3 = widgets.VBox(
-            [self.widgets["pre_exec_commands"]],
+            [
+                pre_exec_label,
+                self.widgets["pre_exec_commands"],
+            ],
             layout=widgets.Layout(margin="5px 0px"),
         )
 
-        # Advanced section container (initially hidden)
+        # Advanced section container (initially hidden, toggles with advanced_toggle button)
         self.widgets["advanced_section"] = widgets.VBox(
-            [advanced_row1, advanced_row2, advanced_row3],
+            [
+                advanced_row1,  # Package manager + Python + Clone env
+                advanced_row2,  # Environment variables + Modules
+                advanced_row3,  # Pre-exec commands
+            ],
             layout=widgets.Layout(
                 display="none",
                 padding="10px",
@@ -381,134 +413,159 @@ class ModernClustrixWidget:
         )
 
     def _create_remote_section(self) -> None:
-        """Create remote cluster configuration section."""
-        # Host/address
+        """Create remote cluster configuration section according to specification."""
+        # Row 4: Remote Connection
+        # 4.1 "Host/address:" Label
+        host_label = widgets.HTML(value="Host/address:")
+
+        # 4.2 Hostname Field (editable text)
         self.widgets["host"] = widgets.Text(
             value="",
-            description="Host/address:",
             placeholder="slurm.university.edu",
-            layout=widgets.Layout(**self.styles["large_field"]),
-            style={"description_width": "100px"},
+            layout=widgets.Layout(width="200px"),
         )
 
-        # Port
+        # 4.3 "Port:" Label
+        port_label = widgets.HTML(value="Port:")
+
+        # 4.4 Port Number Field (numeric with spinner)
         self.widgets["port"] = widgets.IntText(
             value=22,
-            description="Port:",
-            layout=widgets.Layout(**self.styles["small_field"]),
-            style={"description_width": "40px"},
+            layout=widgets.Layout(width="60px"),
         )
 
-        # Port lock icon
-        self.widgets["port_lock"] = widgets.HTML(
-            value="🔒",
-            layout=widgets.Layout(width="20px", margin="0px 5px"),
-        )
+        # 4.5 "Username:" Label
+        username_label = widgets.HTML(value="Username:")
 
-        # Username
+        # 4.6 Username Field (editable text)
         self.widgets["username"] = widgets.Text(
             value=os.getenv("USER", ""),
-            description="Username:",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "80px"},
+            layout=widgets.Layout(width="120px"),
         )
 
-        # SSH key file
-        self.widgets["ssh_key_file"] = widgets.Text(
-            value="~/.ssh/id_rsa",
-            description="SSH key file:",
-            layout=widgets.Layout(**self.styles["large_field"]),
-            style={"description_width": "90px"},
-        )
-
-        # Refresh checkbox
-        self.widgets["refresh_keys"] = widgets.Checkbox(
-            value=False,
-            description="Refresh:",
-            style={"description_width": "60px"},
-        )
-
-        # Password field
-        self.widgets["password"] = widgets.Password(
-            value="",
-            description="Password:",
-            placeholder="••••••••",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "80px"},
-        )
-
-        # Local env var
-        self.widgets["local_env_var"] = widgets.Text(
-            value="",
-            description="Local env var:",
-            placeholder="MY_PASSWORD",
-            layout=widgets.Layout(**self.styles["medium_field"]),
-            style={"description_width": "100px"},
-        )
-
-        # 1Password checkbox
-        self.widgets["use_1password"] = widgets.Checkbox(
-            value=False,
-            description="1password:",
-            style={"description_width": "80px"},
-        )
-
-        # Home directory
-        self.widgets["home_dir"] = widgets.Text(
-            value="",
-            description="Home dir:",
-            placeholder="/home/researcher",
-            layout=widgets.Layout(**self.styles["large_field"]),
-            style={"description_width": "80px"},
-        )
-
-        # Auto setup SSH keys button
-        self.widgets["auto_setup_ssh"] = widgets.Button(
-            description="Auto setup SSH keys",
-            layout=widgets.Layout(width="170px", height="35px"),
-            style=self.styles["main_button"],
-        )
-
-        # Remote section rows
-        remote_row1 = widgets.HBox(
+        # Row 4 container
+        self.widgets["remote_row4"] = widgets.HBox(
             [
+                host_label,
                 self.widgets["host"],
+                port_label,
                 self.widgets["port"],
-                self.widgets["port_lock"],
+                username_label,
                 self.widgets["username"],
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
         )
 
-        remote_row2 = widgets.HBox(
+        # Row 5: SSH Authentication
+        # 5.1 "SSH key file:" Label
+        ssh_key_label = widgets.HTML(value="SSH key file:")
+
+        # 5.2 SSH Key File Field (editable text)
+        self.widgets["ssh_key_file"] = widgets.Text(
+            value="~/.ssh/id_rsa",
+            layout=widgets.Layout(width="180px"),
+        )
+
+        # 5.3 "Refresh:" Label
+        refresh_label = widgets.HTML(value="Refresh:")
+
+        # 5.4 Refresh Keys Button (light gray)
+        self.widgets["refresh_keys"] = widgets.Button(
+            description="",
+            layout=widgets.Layout(width="60px", height="25px"),
+            style={"button_color": "lightgray"},
+        )
+
+        # 5.5 "Password:" Label
+        password_label = widgets.HTML(value="Password:")
+
+        # 5.6 Password Field (masked, optional)
+        self.widgets["password"] = widgets.Password(
+            value="",
+            placeholder="••••••••",
+            layout=widgets.Layout(width="120px"),
+        )
+
+        # Row 5 container
+        self.widgets["remote_row5"] = widgets.HBox(
             [
+                ssh_key_label,
                 self.widgets["ssh_key_file"],
+                refresh_label,
                 self.widgets["refresh_keys"],
+                password_label,
                 self.widgets["password"],
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
         )
 
-        remote_row3 = widgets.HBox(
+        # Row 6: Additional Authentication Options
+        # 6.1 "Local env var:" Label
+        env_var_label = widgets.HTML(value="Local env var:")
+
+        # 6.2 Environment Variable Field (editable text)
+        self.widgets["local_env_var"] = widgets.Text(
+            value="",
+            placeholder="MY_PASSWORD",
+            layout=widgets.Layout(width="150px"),
+        )
+
+        # 6.3 "1password:" Label
+        onepassword_label = widgets.HTML(value="1password:")
+
+        # 6.4 1Password Checkbox
+        self.widgets["use_1password"] = widgets.Checkbox(
+            value=False,
+            layout=widgets.Layout(width="20px"),
+        )
+
+        # 6.5 "Home dir:" Label
+        home_dir_label = widgets.HTML(value="Home dir:")
+
+        # 6.6 Home Directory Field (editable, optional, required for SSH setup)
+        self.widgets["home_dir"] = widgets.Text(
+            value="",
+            placeholder="/home/researcher",
+            layout=widgets.Layout(width="150px"),
+        )
+
+        # Row 6 container
+        self.widgets["remote_row6"] = widgets.HBox(
             [
+                env_var_label,
                 self.widgets["local_env_var"],
+                onepassword_label,
                 self.widgets["use_1password"],
+                home_dir_label,
                 self.widgets["home_dir"],
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
         )
 
-        remote_row4 = widgets.HBox(
+        # 7.2 Auto Setup SSH Keys Button (only for remote)
+        self.widgets["auto_setup_ssh"] = widgets.Button(
+            description="Auto setup SSH keys",
+            tooltip="Automatically configure SSH key authentication",
+            layout=widgets.Layout(width="180px", height="35px"),
+            style={"button_color": "#3e4a61", "font_weight": "bold"},
+        )
+
+        # Row 7: Action Buttons for Remote
+        remote_action_row = widgets.HBox(
             [
-                self.widgets["advanced_toggle"],  # Reuse from cluster row
                 self.widgets["auto_setup_ssh"],
             ],
-            layout=widgets.Layout(margin="5px 0px"),
+            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
         )
 
-        # Remote section container (initially hidden)
+        # Remote section container (initially hidden, only visible when cluster type != "local")
         self.widgets["remote_section"] = widgets.VBox(
-            [remote_row1, remote_row2, remote_row3, remote_row4],
+            [
+                self.widgets["remote_row4"],  # Host, port, username
+                self.widgets["remote_row5"],  # SSH key, refresh, password
+                self.widgets["remote_row6"],  # Env var, 1Password, home dir
+                remote_action_row,  # SSH setup button
+            ],
             layout=widgets.Layout(display="none", margin="10px 0px"),
         )
 
