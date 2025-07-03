@@ -48,7 +48,7 @@ class ModernClustrixWidget:
         """Create CSS styles matching the mockup design."""
         self.styles = {
             "main_button": {
-                "button_color": "#3e4a61",
+                "button_color": "#333366",
                 "font_weight": "bold",
                 "border": "none",
                 "font_size": "14px",
@@ -95,15 +95,30 @@ class ModernClustrixWidget:
 
     def _create_profile_row(self) -> None:
         """Create the top profile management row according to specification."""
-        # 1.1 "Active profile:" Label
-        profile_label = widgets.HTML(value="Active profile:")
+        # 1.1 "Active profile:" Label (right-aligned)
+        profile_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Active profile:</div>"
+        )
 
-        # 1.2 Profile Dropdown (editable entries)
+        # 1.2 Profile Dropdown (editable entries with default configurations)
+        default_profiles = [
+            "Local single-core",
+            "Local quad-core",
+            "Local 8-core",
+            "Local all cores",
+            "SLURM cluster",
+            "PBS cluster",
+            "SGE cluster",
+            "SSH cluster",
+        ]
         profile_names = self.profile_manager.get_profile_names()
-        self.widgets["profile_dropdown"] = widgets.Dropdown(
-            options=profile_names,
+        # Merge defaults with existing profiles
+        all_profiles = list(set(default_profiles + profile_names))
+
+        self.widgets["profile_dropdown"] = widgets.Combobox(
+            options=all_profiles,
             value=self.profile_manager.active_profile,
-            layout=widgets.Layout(width="250px"),
+            layout=widgets.Layout(width="250px", height="35px"),
         )
 
         # 1.3 Add Profile Button (+)
@@ -111,7 +126,7 @@ class ModernClustrixWidget:
             description="+",
             tooltip="Clone current profile and append ' (copy)'",
             layout=widgets.Layout(width="35px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # 1.4 Remove Profile Button (−)
@@ -119,45 +134,52 @@ class ModernClustrixWidget:
             description="−",
             tooltip="Remove current profile",
             layout=widgets.Layout(width="35px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
-        # Profile row container (Row 1)
+        # Profile row container (Row 1) with proper spacing
         self.widgets["profile_row"] = widgets.HBox(
             [
                 profile_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["profile_dropdown"],
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["add_profile_btn"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["remove_profile_btn"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
     def _create_config_row(self) -> None:
         """Create the configuration file management row according to specification."""
-        # 2.1 "Config filename:" Label
-        config_label = widgets.HTML(value="Config filename:")
+        # 2.1 "Config filename:" Label (right-aligned)
+        config_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Config filename:</div>"
+        )
 
         # 2.2 Config Filename Field (editable text)
         self.widgets["config_filename"] = widgets.Text(
             value="clustrix.yml",
-            layout=widgets.Layout(width="180px"),
+            layout=widgets.Layout(width="180px", height="35px"),
         )
 
-        # 2.3 Save Config Button (📄) - saves ALL profiles
+        # 2.3 Save Config Button (💾 disk emoji) - saves ALL profiles
         self.widgets["save_btn"] = widgets.Button(
-            description="📄",
+            description="💾",
             tooltip="Save ALL profiles (not just active one) to specified config file",
             layout=widgets.Layout(width="35px", height="35px"),
-            style={"button_color": "lightgray"},
+            style={"button_color": "#f8f9fa"},  # Light gray like text fields
         )
 
-        # 2.4 Load Config Button (📁) - opens file dialog, replaces ALL profiles
+        # 2.4 Load Config Button (📂 open folder emoji) - opens file dialog, replaces ALL profiles
         self.widgets["load_btn"] = widgets.Button(
-            description="📁",
+            description="📂",
             tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
             layout=widgets.Layout(width="35px", height="35px"),
-            style={"button_color": "orange"},
+            style={"button_color": "#f8f9fa"},  # Light gray like text fields
         )
 
         # 2.5 Apply Button - sets current configuration as active
@@ -165,7 +187,7 @@ class ModernClustrixWidget:
             description="Apply",
             tooltip="Set the currently displayed configuration as the active profile",
             layout=widgets.Layout(width="80px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # 2.6 Test Connect Button - full connection workflow
@@ -173,7 +195,7 @@ class ModernClustrixWidget:
             description="Test connect",
             tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
             layout=widgets.Layout(width="110px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # 2.7 Test Submit Button - complete job submission test
@@ -181,143 +203,188 @@ class ModernClustrixWidget:
             description="Test submit",
             tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
             layout=widgets.Layout(width="110px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
-        # Config row container (Row 2)
+        # Config row container (Row 2) with proper spacing
         self.widgets["config_row"] = widgets.HBox(
             [
                 config_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["config_filename"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["save_btn"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["load_btn"],
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["apply_btn"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["test_connect_btn"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["test_submit_btn"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
     def _create_cluster_row(self) -> None:
         """Create the main cluster configuration row according to specification."""
-        # 3.1 "Cluster type:" Label
-        cluster_type_label = widgets.HTML(value="Cluster type:")
+        # 3.1 "Cluster type:" Label (right-aligned)
+        cluster_type_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Cluster type:</div>"
+        )
 
         # 3.2 Cluster Type Dropdown - hardcoded options (not editable)
         self.widgets["cluster_type"] = widgets.Dropdown(
             options=["local", "slurm", "pbs", "sge", "ssh", "kubernetes"],
             value="local",
-            layout=widgets.Layout(width="120px"),
+            layout=widgets.Layout(width="120px", height="35px"),
         )
 
-        # 3.3 "CPUs:" Label
-        cpus_label = widgets.HTML(value="CPUs:")
+        # 3.3 "CPUs:" Label (right-aligned)
+        cpus_label = widgets.HTML(
+            value="<div style='text-align: right; width: 50px;'>CPUs:</div>"
+        )
 
         # 3.4 CPU Count Field - increments of 1, minimum -1 (use all available)
         self.widgets["cpus"] = widgets.IntText(
             value=1,
-            layout=widgets.Layout(width="50px"),
+            layout=widgets.Layout(width="50px", height="35px"),
         )
 
-        # 3.5 "RAM:" Label
-        ram_label = widgets.HTML(value="RAM:")
-
-        # 3.6 RAM Amount Field - editable numeric
-        self.widgets["ram"] = widgets.FloatText(
-            value=16.25,
-            layout=widgets.Layout(width="80px"),
+        # 3.5 "RAM:" Label (right-aligned)
+        ram_label = widgets.HTML(
+            value="<div style='text-align: right; width: 50px;'>RAM:</div>"
         )
 
-        # 3.7 "GB" Label - light gray, non-editable
-        gb_label = widgets.HTML(value="<span style='color: #6c757d;'>GB</span>")
+        # 3.6 RAM Amount Field - free text with GB inside
+        self.widgets["ram"] = widgets.Text(
+            value="16GB",
+            layout=widgets.Layout(width="80px", height="35px"),
+        )
 
-        # 3.8 "Time:" Label
-        time_label = widgets.HTML(value="Time:")
+        # 3.8 "Time:" Label (right-aligned)
+        time_label = widgets.HTML(
+            value="<div style='text-align: right; width: 50px;'>Time:</div>"
+        )
 
         # 3.9 Time Limit Field - editable time format (HH:MM:SS)
         self.widgets["time"] = widgets.Text(
             value="01:00:00",
-            layout=widgets.Layout(width="80px"),
+            layout=widgets.Layout(width="80px", height="35px"),
         )
 
-        # 7.1 Advanced Settings Button - toggle for advanced section
+        # Advanced Settings Button will be moved to separate row - create placeholder
+        # This will be repositioned in the main container layout
+
+        # Cluster row container (Row 3) with proper spacing - without advanced button
+        self.widgets["cluster_row"] = widgets.HBox(
+            [
+                cluster_type_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
+                self.widgets["cluster_type"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
+                cpus_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
+                self.widgets["cpus"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
+                ram_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
+                self.widgets["ram"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
+                time_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
+                self.widgets["time"],
+            ],
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
+        )
+
+        # 7.1 Advanced Settings Button - centered on separate row
         self.widgets["advanced_toggle"] = widgets.Button(
             description="Advanced settings",
             tooltip="Show/hide advanced configuration section",
             layout=widgets.Layout(width="150px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
-        # Cluster row container (Row 3)
-        self.widgets["cluster_row"] = widgets.HBox(
-            [
-                cluster_type_label,
-                self.widgets["cluster_type"],
-                cpus_label,
-                self.widgets["cpus"],
-                ram_label,
-                self.widgets["ram"],
-                gb_label,
-                time_label,
-                self.widgets["time"],
-                self.widgets["advanced_toggle"],
-            ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+        # Advanced settings button row (centered)
+        self.widgets["advanced_button_row"] = widgets.HBox(
+            [self.widgets["advanced_toggle"]],
+            layout=widgets.Layout(justify_content="center", margin="10px 0px"),
         )
 
     def _create_advanced_section(self) -> None:
         """Create the collapsible advanced settings section according to specification."""
         # Advanced Settings Row 1: Package manager + Python + Clone env
-        # 8.1 "Package manager:" Label
-        package_manager_label = widgets.HTML(value="Package manager:")
+        # 8.1 "Package manager:" Label (right-aligned)
+        package_manager_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Package manager:</div>"
+        )
 
-        # 8.2 Package Manager Dropdown - fixed options (not editable)
+        # 8.2 Package Manager Dropdown - fixed options (not editable), default 'auto'
         self.widgets["package_manager"] = widgets.Dropdown(
             options=["auto", "pip", "conda"],
             value="auto",
-            layout=widgets.Layout(width="100px"),
+            layout=widgets.Layout(width="100px", height="35px"),
         )
 
-        # 8.3 "Python executable:" Label
-        python_exec_label = widgets.HTML(value="Python executable:")
+        # 8.3 "Python executable:" Label (right-aligned)
+        python_exec_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Python executable:</div>"
+        )
 
         # 8.4 Python Executable Field - editable text
         self.widgets["python_executable"] = widgets.Text(
             value="python",
-            layout=widgets.Layout(width="120px"),
+            layout=widgets.Layout(width="120px", height="35px"),
         )
 
-        # 8.5 "Clone env:" Label
-        clone_env_label = widgets.HTML(value="Clone env:")
+        # 8.5 "Clone environment:" Label (right-aligned)
+        clone_env_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Clone environment:</div>"
+        )
 
         # 8.6 Clone Environment Checkbox - controls venv behavior
         self.widgets["clone_env"] = widgets.Checkbox(
             value=True,
-            layout=widgets.Layout(width="20px"),
+            layout=widgets.Layout(width="20px", height="35px"),
         )
 
-        # Advanced Row 1 container
+        # Advanced Row 1 container with proper spacing
         advanced_row1 = widgets.HBox(
             [
                 package_manager_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["package_manager"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 python_exec_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["python_executable"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 clone_env_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["clone_env"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
         # Advanced Settings Row 2: Environment variables + Modules
-        # 8.7 "Env variables:" Label
-        env_vars_label = widgets.HTML(value="Env variables:")
+        # 8.7 "Env variables:" Label (right-aligned)
+        env_vars_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Env variables:</div>"
+        )
 
-        # 8.8 Environment Variables Dropdown - editable, initially empty
-        self.widgets["env_vars"] = widgets.Dropdown(
+        # 8.8 Environment Variables Combobox - editable, initially empty
+        self.widgets["env_vars"] = widgets.Combobox(
             options=[],
-            value=None,
-            layout=widgets.Layout(width="200px"),
+            value="",
+            placeholder="KEY=value",
+            layout=widgets.Layout(width="200px", height="35px"),
         )
 
         # 8.9 Add Env Variable Button (+)
@@ -325,7 +392,7 @@ class ModernClustrixWidget:
             description="+",
             tooltip="Add new environment variable",
             layout=widgets.Layout(width="25px", height="25px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # 8.10 Remove Env Variable Button (−)
@@ -333,17 +400,20 @@ class ModernClustrixWidget:
             description="−",
             tooltip="Remove selected environment variable",
             layout=widgets.Layout(width="25px", height="25px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
-        # 8.11 "Modules:" Label
-        modules_label = widgets.HTML(value="Modules:")
+        # 8.11 "Modules:" Label (right-aligned)
+        modules_label = widgets.HTML(
+            value="<div style='text-align: right; width: 80px;'>Modules:</div>"
+        )
 
-        # 8.12 Modules Dropdown - editable, initially empty, same behavior as env vars
-        self.widgets["modules"] = widgets.Dropdown(
+        # 8.12 Modules Combobox - editable, initially empty, same behavior as env vars
+        self.widgets["modules"] = widgets.Combobox(
             options=[],
-            value=None,
-            layout=widgets.Layout(width="120px"),
+            value="",
+            placeholder="module_name",
+            layout=widgets.Layout(width="120px", height="35px"),
         )
 
         # 8.13 Add Module Button (+)
@@ -351,7 +421,7 @@ class ModernClustrixWidget:
             description="+",
             tooltip="Add new module to load",
             layout=widgets.Layout(width="25px", height="25px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # 8.14 Remove Module Button (−)
@@ -359,27 +429,38 @@ class ModernClustrixWidget:
             description="−",
             tooltip="Remove selected module",
             layout=widgets.Layout(width="25px", height="25px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
-        # Advanced Row 2 container
+        # Advanced Row 2 container with proper spacing
         advanced_row2 = widgets.HBox(
             [
                 env_vars_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["env_vars"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["env_vars_add"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["env_vars_remove"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 modules_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["modules"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["modules_add"],
+                widgets.HTML(value="<div style='width: 5px;'></div>"),  # Small spacer
                 self.widgets["modules_remove"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
         # Advanced Settings Row 3: Pre-execution commands
-        # 8.15 "Pre-exec commands:" Label
-        pre_exec_label = widgets.HTML(value="Pre-exec commands:")
+        # 8.15 "Pre-exec commands:" Label (right-aligned)
+        pre_exec_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Pre-exec commands:</div>"
+        )
 
         # 8.16 Pre-execution Commands Text Area - with bash syntax highlighting
         self.widgets["pre_exec_commands"] = widgets.Textarea(
@@ -415,139 +496,207 @@ class ModernClustrixWidget:
     def _create_remote_section(self) -> None:
         """Create remote cluster configuration section according to specification."""
         # Row 4: Remote Connection
-        # 4.1 "Host/address:" Label
-        host_label = widgets.HTML(value="Host/address:")
+        # 4.1 "Host/address:" Label (right-aligned)
+        host_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Host/address:</div>"
+        )
 
         # 4.2 Hostname Field (editable text)
         self.widgets["host"] = widgets.Text(
             value="",
             placeholder="slurm.university.edu",
-            layout=widgets.Layout(width="200px"),
+            layout=widgets.Layout(width="200px", height="35px"),
         )
 
-        # 4.3 "Port:" Label
-        port_label = widgets.HTML(value="Port:")
+        # 4.3 "Port:" Label (right-aligned)
+        port_label = widgets.HTML(
+            value="<div style='text-align: right; width: 50px;'>Port:</div>"
+        )
 
         # 4.4 Port Number Field (numeric with spinner)
         self.widgets["port"] = widgets.IntText(
             value=22,
-            layout=widgets.Layout(width="60px"),
+            layout=widgets.Layout(width="60px", height="35px"),
         )
 
-        # 4.5 "Username:" Label
-        username_label = widgets.HTML(value="Username:")
+        # 4.5 "Username:" Label (right-aligned)
+        username_label = widgets.HTML(
+            value="<div style='text-align: right; width: 80px;'>Username:</div>"
+        )
 
         # 4.6 Username Field (editable text)
         self.widgets["username"] = widgets.Text(
             value=os.getenv("USER", ""),
-            layout=widgets.Layout(width="120px"),
+            layout=widgets.Layout(width="120px", height="35px"),
         )
 
-        # Row 4 container
+        # Row 4 container with proper spacing
         self.widgets["remote_row4"] = widgets.HBox(
             [
                 host_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["host"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 port_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["port"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 username_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["username"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
         # Row 5: SSH Authentication
-        # 5.1 "SSH key file:" Label
-        ssh_key_label = widgets.HTML(value="SSH key file:")
+        # 5.1 "SSH key file:" Label (right-aligned)
+        ssh_key_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>SSH key file:</div>"
+        )
 
         # 5.2 SSH Key File Field (editable text)
         self.widgets["ssh_key_file"] = widgets.Text(
             value="~/.ssh/id_rsa",
-            layout=widgets.Layout(width="180px"),
+            layout=widgets.Layout(width="180px", height="35px"),
         )
 
-        # 5.3 "Refresh:" Label
-        refresh_label = widgets.HTML(value="Refresh:")
-
-        # 5.4 Refresh Keys Button (light gray)
-        self.widgets["refresh_keys"] = widgets.Button(
-            description="",
-            layout=widgets.Layout(width="60px", height="25px"),
-            style={"button_color": "lightgray"},
+        # 5.3 "Refresh:" Label (right-aligned)
+        refresh_label = widgets.HTML(
+            value="<div style='text-align: right; width: 60px;'>Refresh:</div>"
         )
 
-        # 5.5 "Password:" Label
-        password_label = widgets.HTML(value="Password:")
+        # 5.4 Refresh Keys Checkbox (was incorrectly a button)
+        self.widgets["refresh_keys"] = widgets.Checkbox(
+            value=False,
+            layout=widgets.Layout(width="20px", height="35px"),
+        )
+
+        # 5.5 "Password:" Label (right-aligned)
+        password_label = widgets.HTML(
+            value="<div style='text-align: right; width: 80px;'>Password:</div>"
+        )
 
         # 5.6 Password Field (masked, optional)
         self.widgets["password"] = widgets.Password(
             value="",
             placeholder="••••••••",
-            layout=widgets.Layout(width="120px"),
+            layout=widgets.Layout(width="120px", height="35px"),
         )
 
-        # Row 5 container
+        # Row 5 container with proper spacing
         self.widgets["remote_row5"] = widgets.HBox(
             [
                 ssh_key_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["ssh_key_file"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 refresh_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["refresh_keys"],
+                widgets.HTML(value="<div style='width: 20px;'></div>"),  # Spacer
                 password_label,
+                widgets.HTML(value="<div style='width: 10px;'></div>"),  # Spacer
                 self.widgets["password"],
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                justify_content="flex-start", margin="5px 0px", align_items="center"
+            ),
         )
 
-        # Row 6: Additional Authentication Options
-        # 6.1 "Local env var:" Label
-        env_var_label = widgets.HTML(value="Local env var:")
+        # Row 6: Additional Authentication Options with styled box
+        # 6.1 "Local env var:" Label (right-aligned)
+        env_var_label = widgets.HTML(
+            value="<div style='text-align: right; width: 120px;'>Local env var:</div>"
+        )
 
         # 6.2 Environment Variable Field (editable text)
         self.widgets["local_env_var"] = widgets.Text(
             value="",
             placeholder="MY_PASSWORD",
-            layout=widgets.Layout(width="150px"),
+            layout=widgets.Layout(width="150px", height="35px"),
         )
 
-        # 6.3 "1password:" Label
-        onepassword_label = widgets.HTML(value="1password:")
+        # 6.3 "1Password:" Label (right-aligned)
+        onepassword_label = widgets.HTML(
+            value="<div style='text-align: right; width: 80px;'>1Password:</div>"
+        )
 
         # 6.4 1Password Checkbox
         self.widgets["use_1password"] = widgets.Checkbox(
             value=False,
-            layout=widgets.Layout(width="20px"),
+            layout=widgets.Layout(width="20px", height="35px"),
         )
 
-        # 6.5 "Home dir:" Label
-        home_dir_label = widgets.HTML(value="Home dir:")
+        # 6.5 "Home dir:" Label (right-aligned)
+        home_dir_label = widgets.HTML(
+            value="<div style='text-align: right; width: 80px;'>Home dir:</div>"
+        )
 
         # 6.6 Home Directory Field (editable, optional, required for SSH setup)
         self.widgets["home_dir"] = widgets.Text(
             value="",
             placeholder="/home/researcher",
-            layout=widgets.Layout(width="150px"),
+            layout=widgets.Layout(width="150px", height="35px"),
         )
 
-        # Row 6 container
-        self.widgets["remote_row6"] = widgets.HBox(
+        # Row 6 container with styled box and proper alignment
+        auth_fields_container = widgets.VBox(
             [
-                env_var_label,
-                self.widgets["local_env_var"],
-                onepassword_label,
-                self.widgets["use_1password"],
-                home_dir_label,
-                self.widgets["home_dir"],
+                widgets.HBox(
+                    [
+                        env_var_label,
+                        widgets.HTML(
+                            value="<div style='width: 10px;'></div>"
+                        ),  # Spacer
+                        self.widgets["local_env_var"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-start", align_items="center"
+                    ),
+                ),
+                widgets.HBox(
+                    [
+                        onepassword_label,
+                        widgets.HTML(
+                            value="<div style='width: 10px;'></div>"
+                        ),  # Spacer
+                        self.widgets["use_1password"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-start", align_items="center"
+                    ),
+                ),
+                widgets.HBox(
+                    [
+                        home_dir_label,
+                        widgets.HTML(
+                            value="<div style='width: 10px;'></div>"
+                        ),  # Spacer
+                        self.widgets["home_dir"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-start", align_items="center"
+                    ),
+                ),
             ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            layout=widgets.Layout(
+                border="1px solid #dee2e6",
+                padding="10px",
+                background_color="#f8f9fa",
+                margin="5px 0px",
+            ),
         )
+
+        self.widgets["remote_row6"] = auth_fields_container
 
         # 7.2 Auto Setup SSH Keys Button (only for remote)
         self.widgets["auto_setup_ssh"] = widgets.Button(
             description="Auto setup SSH keys",
             tooltip="Automatically configure SSH key authentication",
             layout=widgets.Layout(width="180px", height="35px"),
-            style={"button_color": "#3e4a61", "font_weight": "bold"},
+            style={"button_color": "#333366", "font_weight": "bold", "color": "white"},
         )
 
         # Row 7: Action Buttons for Remote
@@ -643,12 +792,15 @@ class ModernClustrixWidget:
 
     def get_widget(self) -> "widgets.Widget":
         """Get the complete widget for display."""
-        # Main container
+        # Main container with proper row ordering
         main_container = widgets.VBox(
             [
                 self.widgets["profile_row"],
                 self.widgets["config_row"],
                 self.widgets["cluster_row"],
+                self.widgets[
+                    "advanced_button_row"
+                ],  # Centered advanced settings button
                 self.widgets["remote_section"],
                 self.widgets["advanced_section"],
                 self.widgets["output"],
@@ -959,13 +1111,13 @@ class ModernClustrixWidget:
 
     def _on_add_env_var(self, button):
         """Handle add environment variable button click."""
-        # Get the current value from the env vars dropdown or use default
+        # Get the current value from the env vars combobox or use default
         env_var_input = self.widgets["env_vars"].value
         if not env_var_input or env_var_input.strip() == "":
             # Use default value for testing compatibility
             env_var_input = "NEW_VAR=value"
 
-        # Add to dropdown options
+        # Add to combobox options
         current_options = list(self.widgets["env_vars"].options)
         if env_var_input not in current_options:
             current_options.append(env_var_input)
@@ -976,12 +1128,12 @@ class ModernClustrixWidget:
                 self.widgets["output"].layout.display = "block"
                 print(f"✅ Added environment variable: {env_var_input}")
                 if env_var_input == "NEW_VAR=value":
-                    print("   Note: Edit the dropdown value to customize KEY=value")
+                    print("   Note: Edit the combobox value to customize KEY=value")
 
     def _on_remove_env_var(self, button):
         """Handle remove environment variable button click."""
         selected = self.widgets["env_vars"].value
-        if selected:
+        if selected and selected.strip():
             current_options = list(self.widgets["env_vars"].options)
             if selected in current_options:
                 current_options.remove(selected)
@@ -990,7 +1142,7 @@ class ModernClustrixWidget:
                 if current_options:
                     self.widgets["env_vars"].value = current_options[0]
                 else:
-                    self.widgets["env_vars"].value = None
+                    self.widgets["env_vars"].value = ""
 
                 with self.widgets["output"]:
                     self.widgets["output"].layout.display = "block"
@@ -1002,13 +1154,13 @@ class ModernClustrixWidget:
 
     def _on_add_module(self, button):
         """Handle add module button click."""
-        # Get the current value from the modules dropdown or use default
+        # Get the current value from the modules combobox or use default
         module_input = self.widgets["modules"].value
         if not module_input or module_input.strip() == "":
             # Use default value for testing compatibility
             module_input = "python"
 
-        # Add to dropdown options
+        # Add to combobox options
         current_options = list(self.widgets["modules"].options)
         if module_input not in current_options:
             current_options.append(module_input)
@@ -1019,12 +1171,12 @@ class ModernClustrixWidget:
                 self.widgets["output"].layout.display = "block"
                 print(f"✅ Added module: {module_input}")
                 if module_input == "python":
-                    print("   Note: Edit the dropdown value to customize module name")
+                    print("   Note: Edit the combobox value to customize module name")
 
     def _on_remove_module(self, button):
         """Handle remove module button click."""
         selected = self.widgets["modules"].value
-        if selected:
+        if selected and selected.strip():
             current_options = list(self.widgets["modules"].options)
             if selected in current_options:
                 current_options.remove(selected)
@@ -1033,7 +1185,7 @@ class ModernClustrixWidget:
                 if current_options:
                     self.widgets["modules"].value = current_options[0]
                 else:
-                    self.widgets["modules"].value = None
+                    self.widgets["modules"].value = ""
 
                 with self.widgets["output"]:
                     self.widgets["output"].layout.display = "block"
@@ -1083,7 +1235,7 @@ class ModernClustrixWidget:
                     password=self.widgets["password"].value,
                     port=getattr(config, "cluster_port", 22),
                     key_type="ed25519",
-                    force_refresh=self.widgets["refresh_keys"].value,
+                    force_refresh=self.widgets["refresh_keys"].value,  # Now a checkbox
                 )
 
                 if result:
@@ -1106,7 +1258,7 @@ class ModernClustrixWidget:
 
     def _get_config_from_widgets(self) -> ClusterConfig:
         """Extract configuration from current widget values."""
-        # Get environment variables from dropdown
+        # Get environment variables from combobox
         env_vars = {}
         if self.widgets["env_vars"].options:
             for env_var in self.widgets["env_vars"].options:
@@ -1114,7 +1266,7 @@ class ModernClustrixWidget:
                     key, value = env_var.split("=", 1)
                     env_vars[key] = value
 
-        # Get modules from dropdown
+        # Get modules from combobox
         modules = (
             list(self.widgets["modules"].options)
             if self.widgets["modules"].options
@@ -1125,7 +1277,7 @@ class ModernClustrixWidget:
         config_data = {
             "cluster_type": self.widgets["cluster_type"].value,
             "default_cores": self.widgets["cpus"].value,
-            "default_memory": f"{self.widgets['ram'].value}GB",
+            "default_memory": self.widgets["ram"].value,  # Already includes GB
             "default_time": self.widgets["time"].value,
         }
 
@@ -1164,12 +1316,12 @@ class ModernClustrixWidget:
         # Basic cluster settings
         self.widgets["cluster_type"].value = config.cluster_type
         self.widgets["cpus"].value = config.default_cores
-        # Parse memory from string format like "16GB" to float
+        # Set memory as string (already includes GB)
         memory_str = config.default_memory
-        if isinstance(memory_str, str) and memory_str.endswith("GB"):
-            self.widgets["ram"].value = float(memory_str[:-2])
+        if isinstance(memory_str, str):
+            self.widgets["ram"].value = memory_str
         else:
-            self.widgets["ram"].value = 16.0  # Default fallback
+            self.widgets["ram"].value = "16GB"  # Default fallback
         self.widgets["time"].value = config.default_time
 
         # Remote settings
