@@ -41,6 +41,8 @@ pytest --cov=clustrix    # Run tests with coverage
 ### Core Components
 
 1. **`@cluster` Decorator** (`clustrix/decorator.py`): Main user interface for marking functions for remote execution. Supports resource specification and automatic loop parallelization.
+   
+   **⚠️ REPL Limitation**: Functions defined interactively in the Python REPL cannot be serialized because `inspect.getsource()` cannot access their source code. This affects interactive Python sessions and some notebook environments. Functions must be defined in `.py` files or environments where source code is preserved.
 
 2. **ClusterExecutor** (`clustrix/executor.py`): Central execution engine handling:
    - Job submission to different schedulers (SLURM, PBS, SGE, Kubernetes, SSH)

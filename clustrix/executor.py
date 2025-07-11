@@ -453,7 +453,7 @@ except Exception as e:
     def _submit_ssh_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
-        """Submit job via direct SSH (no scheduler)."""
+        """Submit job via direct SSH using two-venv approach."""
         remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
         self._execute_remote_command(f"mkdir -p {remote_job_dir}")
 
@@ -465,31 +465,27 @@ except Exception as e:
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
-        # Try to set up a compatible Python environment
+        # Setup two-venv environment for cross-version compatibility
         try:
-            from .utils import setup_python_compatible_environment
+            from .utils import setup_two_venv_environment
 
-            compatible_python = setup_python_compatible_environment(
-                self.ssh_client,
-                remote_job_dir,
-                func_data.get("requirements", {}),
-                self.config,
+            logger.info(
+                "Setting up two-venv environment for cross-version compatibility"
             )
-            # Create a copy of config to avoid modifying the original
-            import copy
-
-            updated_config = copy.deepcopy(self.config)
-            updated_config.python_executable = compatible_python
-        except Exception:
-            # Fall back to original approach if compatible environment setup fails
-            from .utils import setup_remote_environment
-
-            setup_remote_environment(
-                self.ssh_client,
-                remote_job_dir,
-                func_data.get("requirements", {}),
-                self.config,
+            venv_info = setup_two_venv_environment(
+                self.ssh_client, remote_job_dir, func_data["requirements"], self.config
             )
+
+            # Update config with venv paths
+            updated_config = self.config
+            updated_config.python_executable = venv_info["venv1_python"]
+            logger.info(
+                f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to setup two-venv environment: {e}")
+            # Fall back to original approach
             updated_config = self.config
 
         # Create execution script

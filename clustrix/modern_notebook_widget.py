@@ -535,10 +535,9 @@ class ModernClustrixWidget:
         )
 
         # Row 2: XGGGGHHHHIKKKLLLMNX (X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X)
-        # But N is the last element, so the pattern is actually X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X
+        # Pattern: X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X
         # That's 1 + 4 + 4 + 1 + 1 + 3 + 3 + 1 + 1 = 19 columns total
         spacer2_1 = widgets.HTML("")  # X: border column 1
-        spacer2_19 = widgets.HTML("")  # X: border column 19
 
         advanced_row2 = widgets.GridBox(
             [

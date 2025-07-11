@@ -549,6 +549,33 @@ clustrix status
 5. **Result Collection**: Automatically retrieves results once execution completes
 6. **Cleanup**: Optionally cleans up temporary files and environments
 
+### Important Notes
+
+**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) cannot be serialized for remote execution because their source code is not available. This affects:
+- Interactive Python sessions (`python` command)
+- Some notebook environments that don't preserve function source
+
+**✅ Recommended Approach**: Define functions in:
+- Python files (`.py` scripts)
+- Jupyter notebooks 
+- IPython environments
+- Any environment where `inspect.getsource()` can access the function source code
+
+```python
+# ❌ This won't work in interactive Python REPL
+>>> @cluster(cores=2)
+... def my_function(x):
+...     return x * 2
+>>> my_function(5)  # Error: source code not available
+
+# ✅ This works in .py files and notebooks
+@cluster(cores=2)
+def my_function(x):
+    return x * 2
+
+result = my_function(5)  # Works correctly
+```
+
 ## Supported Cluster Types
 
 - **SLURM**: Full support for Slurm Workload Manager

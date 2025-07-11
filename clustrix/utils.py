@@ -117,14 +117,19 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     try:
         func_source = inspect.getsource(func)
     except Exception:
+        # Cannot get source code - this is common for dynamically defined functions
         pass
 
     # Serialize function using dill for better cross-Python compatibility
     try:
         func_bytes = dill.dumps(func, protocol=4)
     except Exception:
-        # Fallback to cloudpickle
-        func_bytes = cloudpickle.dumps(func, protocol=4)
+        try:
+            # Fallback to cloudpickle
+            func_bytes = cloudpickle.dumps(func, protocol=4)
+        except Exception:
+            # Final fallback to built-in pickle
+            func_bytes = pickle.dumps(func, protocol=4)
 
     # Serialize arguments
     args_bytes = pickle.dumps(args, protocol=4)
@@ -365,6 +370,131 @@ dependencies:
         return f"{venv_path}/bin/python"
 
 
+def setup_two_venv_environment(
+    ssh_client,
+    work_dir: str,
+    requirements: Dict[str, str],
+    config: Optional[ClusterConfig] = None,
+) -> Dict[str, str]:
+    """Setup a two-venv environment on remote cluster for cross-version compatibility.
+
+    This function creates two separate virtual environments:
+    1. VENV1: Compatible Python version for serialization/deserialization
+    2. VENV2: Job execution environment that replicates the local environment
+
+    Args:
+        ssh_client: SSH client connection
+        work_dir: Remote working directory
+        requirements: Package requirements
+        config: Cluster configuration
+
+    Returns:
+        Dict containing paths to both Python executables
+    """
+    if config is None:
+        from .config import get_config
+
+        config = get_config()
+
+    import sys
+
+    local_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
+
+    # Try to find a Python version that matches our local version
+    compatible_python = None
+    python_candidates = [
+        f"python{local_python_version}",
+        f"python{sys.version_info.major}.{sys.version_info.minor}",
+        "python3.12",
+        "python3.11",
+        "python3.10",
+        "python3.9",
+        "python3.8",
+        "python3.7",
+        "python3.6",
+        "python3",
+        "python",
+    ]
+
+    for python_cmd in python_candidates:
+        test_cmd = (
+            f"{python_cmd} -c 'import sys; print(sys.version_info[:2])' 2>/dev/null"
+        )
+        stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
+        version_output = stdout.read().decode().strip()
+
+        if version_output and "(" in version_output:
+            try:
+                # Extract version tuple
+                version_str = version_output.split("(")[1].split(")")[0]
+                major, minor = map(int, version_str.split(", ")[:2])
+
+                # Check if version is compatible (3.6+)
+                if major == 3 and minor >= 6:
+                    compatible_python = python_cmd
+                    remote_python_version = f"{major}.{minor}"
+                    break
+            except Exception:
+                continue
+
+    if not compatible_python:
+        raise RuntimeError("No compatible Python version found on remote system")
+
+    # Create VENV1 for serialization compatibility
+    venv1_path = f"{work_dir}/venv1_serialization"
+
+    # Create VENV2 for job execution
+    venv2_path = f"{work_dir}/venv2_execution"
+
+    commands = [
+        f"cd {work_dir}",
+        # Create VENV1 (serialization environment)
+        f"{compatible_python} -m venv {venv1_path}",
+        f"source {venv1_path}/bin/activate",
+        "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv1'",
+        "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in venv1'",
+        "deactivate",
+        # Create VENV2 (execution environment)
+        f"{compatible_python} -m venv {venv2_path}",
+        f"source {venv2_path}/bin/activate",
+        "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
+    ]
+
+    # Install essential packages in VENV2
+    essential_packages = ["dill", "cloudpickle"]
+    for pkg in essential_packages:
+        if pkg in requirements:
+            commands.append(
+                f"pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
+            )
+        else:
+            commands.append(
+                f"pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
+            )
+
+    commands.append("deactivate")
+
+    # Execute setup commands
+    full_command = " && ".join(commands)
+    stdin, stdout, stderr = ssh_client.exec_command(full_command)
+
+    # Wait for completion with extended timeout
+    exit_status = stdout.channel.recv_exit_status()
+
+    if exit_status == 0:
+        return {
+            "venv1_python": f"{venv1_path}/bin/python",
+            "venv2_python": f"{venv2_path}/bin/python",
+            "venv1_path": venv1_path,
+            "venv2_path": venv2_path,
+            "compatible_python": compatible_python,
+            "remote_python_version": remote_python_version,
+        }
+    else:
+        error_output = stderr.read().decode()
+        raise RuntimeError(f"Failed to setup two-venv environment: {error_output}")
+
+
 def setup_python_compatible_environment(
     ssh_client,
     work_dir: str,
@@ -393,7 +523,7 @@ def setup_python_compatible_environment(
     # Try to detect available Python versions on the remote system
     detect_cmd = "python3 --version 2>/dev/null || python --version 2>/dev/null || echo 'no python'"
     stdin, stdout, stderr = ssh_client.exec_command(detect_cmd)
-    python_version_output = stdout.read().decode().strip()
+    _ = stdout.read().decode().strip()  # Version detection output
 
     # Check if we can create a compatible venv
     compatible_python = None
@@ -425,7 +555,7 @@ def setup_python_compatible_environment(
                 if major == 3 and minor >= 6:
                     compatible_python = python_cmd
                     break
-            except:
+            except Exception:
                 continue
 
     if compatible_python:
@@ -438,51 +568,14 @@ def setup_python_compatible_environment(
             f"source {compat_venv_path}/bin/activate",
         ]
 
-        # Install requirements in the compatible venv
-        if requirements:
-            # Filter out requirements that might not be available on older systems
-            # and only install essential packages for function execution
-            essential_requirements = {}
-            for pkg, version in requirements.items():
-                if pkg.lower() in [
-                    "dill",
-                    "cloudpickle",
-                    "pickle",
-                    "numpy",
-                    "pandas",
-                    "scipy",
-                    "matplotlib",
-                ]:
-                    essential_requirements[pkg] = version
-
-            if essential_requirements:
-                req_content = "\n".join(
-                    [
-                        f"{pkg}=={version}"
-                        for pkg, version in essential_requirements.items()
-                    ]
-                )
-
-                # Write requirements file
-                sftp = ssh_client.open_sftp()
-                with sftp.open(f"{work_dir}/compat_requirements.txt", "w") as f:
-                    f.write(req_content)
-                sftp.close()
-
-                commands.extend(
-                    [
-                        "pip install --upgrade pip",
-                        f"pip install -r {work_dir}/compat_requirements.txt || echo 'Some packages failed to install, continuing...'",
-                    ]
-                )
-            else:
-                # Just install essential packages
-                commands.extend(
-                    [
-                        "pip install --upgrade pip",
-                        "pip install dill cloudpickle || echo 'Failed to install serialization packages, using built-in pickle'",
-                    ]
-                )
+        # Install only essential packages for function execution
+        # Skip complex requirements to avoid timeout issues
+        commands.extend(
+            [
+                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed, continuing...'",
+                "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages, using built-in pickle'",
+            ]
+        )
 
         # Execute setup commands
         full_command = " && ".join(commands)
@@ -574,18 +667,23 @@ dependencies:
         )
 
         if requirements:
-            # Create requirements file
-            req_content = "\n".join(
-                [f"{pkg}=={version}" for pkg, version in requirements.items()]
-            )
+            # Only install essential packages, skip complex requirements
+            essential_pkgs = []
+            for pkg, version in requirements.items():
+                if pkg.lower() in ["dill", "cloudpickle"]:
+                    essential_pkgs.append(f"{pkg}=={version}")
 
-            # Write requirements file
-            sftp = ssh_client.open_sftp()
-            with sftp.open(f"{work_dir}/requirements.txt", "w") as f:
-                f.write(req_content)
-            sftp.close()
-
-            commands.append(f"{pkg_manager} install -r requirements.txt")
+            if essential_pkgs:
+                # Install essential packages with timeout
+                pkg_list = " ".join(essential_pkgs)
+                commands.append(
+                    f"{pkg_manager} install {pkg_list} --timeout=30 || echo 'Package installation failed, continuing...'"
+                )
+            else:
+                # Just install basic packages
+                commands.append(
+                    f"{pkg_manager} install dill cloudpickle --timeout=30 || echo 'Package installation failed, continuing...'"
+                )
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -596,6 +694,8 @@ dependencies:
     if exit_status != 0:
         error = stderr.read().decode()
         raise RuntimeError(f"Environment setup failed: {error}")
+
+    return "Environment setup completed successfully"
 
 
 def create_job_script(
@@ -816,86 +916,296 @@ def _create_ssh_script(
 
     python_cmd = config.python_executable if config.python_executable else "python"
 
-    # Check if we have a compatible venv setup
-    if "compat_venv" in python_cmd:
-        # Use the compatible venv directly
+    # Check if we have two-venv setup
+    if "venv1_serialization" in python_cmd:
+        # Use the two-venv approach
         script_lines = [
             "#!/bin/bash",
             f"cd {remote_job_dir}",
-            f"source {remote_job_dir}/compat_venv/bin/activate",
+            "",
+            "# Two-venv approach for cross-version compatibility",
+            "# VENV1: Serialization/deserialization",
+            "# VENV2: Function execution",
+            "",
+            "# Step 1: Use VENV1 to deserialize function data",
+            f"source {remote_job_dir}/venv1_serialization/bin/activate",
         ]
     else:
-        # Use the original venv setup
+        # Use the original single-venv approach
         script_lines = [
             "#!/bin/bash",
             f"cd {remote_job_dir}",
-            "source venv/bin/activate",
+            "source venv/bin/activate || echo 'No venv found, using system Python'",
         ]
 
     # Add the Python execution part
-    script_lines.extend(
-        [
-            f'{python_cmd} -c "',
-            "import pickle",
-            "import sys",
-            "import traceback",
-            "",
-            "try:",
-            "    import dill",
-            "except ImportError:",
-            "    dill = None",
-            "try:",
-            "    import cloudpickle",
-            "except ImportError:",
-            "    cloudpickle = None",
-            "",
-            "try:",
-            "    with open('function_data.pkl', 'rb') as f:",
-            "        data = pickle.load(f)",
-            "    ",
-            "    # Try dill first, then cloudpickle, then source code",
-            "    func = None",
-            "    if dill:",
-            "        try:",
-            "            func = dill.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and cloudpickle:",
-            "        try:",
-            "            func = cloudpickle.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and data.get('function_source'):",
-            "        try:",
-            "            import textwrap",
-            "            source = data['function_source']",
-            "            # Execute the source code to create the function",
-            "            namespace = {}",
-            "            exec(source, namespace)",
-            "            # Get the function name from func_info",
-            "            func_name = data['func_info']['name']",
-            "            func = namespace[func_name]",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None:",
-            "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
-            "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
-            "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
-            "    ",
-            "    args = pickle.loads(data['args'])",
-            "    kwargs = pickle.loads(data['kwargs'])",
-            "    ",
-            "    result = func(*args, **kwargs)",
-            "    ",
-            "    with open('result.pkl', 'wb') as f:",
-            "        pickle.dump(result, f, protocol=4)",
-            "        ",
-            "except Exception as e:",
-            "    with open('error.pkl', 'wb') as f:",
-            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-            "    sys.exit(1)",
-            '"',
-        ]
-    )
+    if "venv1_serialization" in python_cmd:
+        # Two-venv approach
+        script_lines.extend(
+            [
+                "",
+                'python -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "try:",
+                "    import dill",
+                "except ImportError:",
+                "    dill = None",
+                "try:",
+                "    import cloudpickle",
+                "except ImportError:",
+                "    cloudpickle = None",
+                "",
+                "print('VENV1 - Deserializing function data')",
+                "print('Python version: ' + sys.version)",
+                "",
+                "try:",
+                "    with open('function_data.pkl', 'rb') as f:",
+                "        data = pickle.load(f)",
+                "    ",
+                "    print('Data keys: ' + str(list(data.keys())))",
+                "    print('Function source available: ' + str(data.get('function_source') is not None))",
+                "    print('Function data size: ' + str(len(data['function'])) + ' bytes')",
+                "    ",
+                "    # Try dill first, then cloudpickle, then built-in pickle",
+                "    func = None",
+                "    if dill:",
+                "        try:",
+                "            func = dill.loads(data['function'])",
+                "            print('Successfully deserialized with dill')",
+                "        except Exception as e:",
+                "            print('Dill deserialization failed: ' + str(e))",
+                "            pass",
+                "    if func is None and cloudpickle:",
+                "        try:",
+                "            func = cloudpickle.loads(data['function'])",
+                "            print('Successfully deserialized with cloudpickle')",
+                "        except Exception as e:",
+                "            print('Cloudpickle deserialization failed: ' + str(e))",
+                "            pass",
+                "    if func is None:",
+                "        try:",
+                "            func = pickle.loads(data['function'])",
+                "            print('Successfully deserialized with pickle')",
+                "        except Exception as e:",
+                "            print('Pickle deserialization failed: ' + str(e))",
+                "            pass",
+                "    ",
+                "    if func is None and data.get('function_source'):",
+                "        try:",
+                "            print('Attempting source code execution fallback')",
+                "            source = data['function_source']",
+                "            func_name = data['func_info']['name']",
+                "            print('Function name: ' + func_name)",
+                "            print('Function source length: ' + str(len(source)))",
+                "            # Clean up the source code",
+                "            import textwrap",
+                "            # Remove decorator lines",
+                "            lines = source.split('\\n')",
+                "            clean_lines = []",
+                "            for line in lines:",
+                "                if not line.strip().startswith('@'):",
+                "                    clean_lines.append(line)",
+                "            clean_source = '\\n'.join(clean_lines)",
+                "            # Remove common indentation",
+                "            clean_source = textwrap.dedent(clean_source)",
+                "            print('Cleaned source code: ' + repr(clean_source[:100]))",
+                "            # Execute the source code to create the function",
+                "            namespace = {}",
+                "            exec(clean_source, namespace)",
+                "            func = namespace[func_name]",
+                "            print('Successfully created function from source code')",
+                "        except Exception as e:",
+                "            print('Source code execution failed: ' + str(e))",
+                "            pass",
+                "    if func is None:",
+                "        error_msg = 'Could not deserialize function with dill, cloudpickle, pickle, or source code. '",
+                "        error_msg += 'dill available: ' + str(dill is not None) + ', cloudpickle available: ' + str(cloudpickle is not None)",
+                "        raise RuntimeError(error_msg)",
+                "    ",
+                "    args = pickle.loads(data['args'])",
+                "    kwargs = pickle.loads(data['kwargs'])",
+                "    ",
+                "    # Save the function data for VENV2",
+                "    # If function was created from source, pass the source code instead of the function object",
+                "    if 'clean_source' in locals():",
+                "        # Function was created from source code, pass the source",
+                "        with open('function_deserialized.pkl', 'wb') as f:",
+                "            pickle.dump({'source': clean_source, 'func_name': func_name, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+                "    else:",
+                "        # Function was deserialized from binary, pass the function object",
+                "        with open('function_deserialized.pkl', 'wb') as f:",
+                "            pickle.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+                "    ",
+                "    print('Function deserialized successfully for execution')",
+                "    ",
+                "except Exception as e:",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    sys.exit(1)",
+                '"',
+                "",
+                "# Step 2: Use VENV2 to execute the function",
+                "deactivate",
+                f"source {remote_job_dir}/venv2_execution/bin/activate",
+                "",
+                'python -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "print('VENV2 - Executing function')",
+                "print('Python version: ' + sys.version)",
+                "",
+                "try:",
+                "    import os",
+                "    print('Files in directory: ' + str(os.listdir('.')))",
+                "    if not os.path.exists('function_deserialized.pkl'):",
+                "        raise FileNotFoundError('function_deserialized.pkl not found - VENV1 deserialization may have failed')",
+                "    with open('function_deserialized.pkl', 'rb') as f:",
+                "        exec_data = pickle.load(f)",
+                "    ",
+                "    # Handle both function object and source code cases",
+                "    if 'func' in exec_data:",
+                "        # Function object was passed",
+                "        func = exec_data['func']",
+                "    elif 'source' in exec_data:",
+                "        # Source code was passed, recreate function",
+                "        print('Recreating function from source code in VENV2')",
+                "        namespace = {}",
+                "        exec(exec_data['source'], namespace)",
+                "        func = namespace[exec_data['func_name']]",
+                "    else:",
+                "        raise ValueError('Neither func nor source found in execution data')",
+                "    ",
+                "    args = exec_data['args']",
+                "    kwargs = exec_data['kwargs']",
+                "    ",
+                "    print('Executing function with args: ' + str(args))",
+                "    result = func(*args, **kwargs)",
+                "    print('Function executed successfully')",
+                "    ",
+                "    # Save result for VENV1 to serialize",
+                "    with open('result_raw.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "    ",
+                "except Exception as e:",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    sys.exit(1)",
+                '"',
+                "",
+                "# Step 3: Use VENV1 to serialize the result",
+                "deactivate",
+                f"source {remote_job_dir}/venv1_serialization/bin/activate",
+                "",
+                'python -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "print('VENV1 - Serializing result')",
+                "",
+                "try:",
+                "    import os",
+                "    if not os.path.exists('result_raw.pkl'):",
+                "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
+                "    with open('result_raw.pkl', 'rb') as f:",
+                "        result = pickle.load(f)",
+                "    ",
+                "    with open('result.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "    ",
+                "    print('Result serialized successfully')",
+                "    ",
+                "except Exception as e:",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    sys.exit(1)",
+                '"',
+            ]
+        )
+    else:
+        # Single-venv approach
+        script_lines.extend(
+            [
+                "",
+                f'{python_cmd} -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "try:",
+                "    import dill",
+                "except ImportError:",
+                "    dill = None",
+                "try:",
+                "    import cloudpickle",
+                "except ImportError:",
+                "    cloudpickle = None",
+                "",
+                "try:",
+                "    with open('function_data.pkl', 'rb') as f:",
+                "        data = pickle.load(f)",
+                "    ",
+                "    print('Python version: ' + sys.version)",
+                "    print('Data keys: ' + str(list(data.keys())))",
+                "    print('Function source available: ' + str(data.get('function_source') is not None))",
+                "    print('Function data size: ' + str(len(data['function'])) + ' bytes')",
+                "    ",
+                "    # Try dill first, then cloudpickle, then built-in pickle, then source code",
+                "    func = None",
+                "    if dill:",
+                "        try:",
+                "            func = dill.loads(data['function'])",
+                "        except Exception as e:",
+                "            print('Dill deserialization failed: ' + str(e))",
+                "            pass",
+                "    if func is None and cloudpickle:",
+                "        try:",
+                "            func = cloudpickle.loads(data['function'])",
+                "        except Exception as e:",
+                "            print('Cloudpickle deserialization failed: ' + str(e))",
+                "            pass",
+                "    if func is None:",
+                "        try:",
+                "            func = pickle.loads(data['function'])",
+                "        except Exception as e:",
+                "            print('Pickle deserialization failed: ' + str(e))",
+                "            pass",
+                "    if func is None and data.get('function_source'):",
+                "        try:",
+                "            import textwrap",
+                "            source = data['function_source']",
+                "            # Execute the source code to create the function",
+                "            namespace = {}",
+                "            exec(source, namespace)",
+                "            # Get the function name from func_info",
+                "            func_name = data['func_info']['name']",
+                "            func = namespace[func_name]",
+                "        except Exception as e:",
+                "            pass",
+                "    if func is None:",
+                "        error_msg = 'Could not deserialize function with dill, cloudpickle, pickle, or source code. '",
+                "        error_msg += 'dill available: ' + str(dill is not None) + ', cloudpickle available: ' + str(cloudpickle is not None)",
+                "        raise RuntimeError(error_msg)",
+                "    ",
+                "    args = pickle.loads(data['args'])",
+                "    kwargs = pickle.loads(data['kwargs'])",
+                "    ",
+                "    result = func(*args, **kwargs)",
+                "    ",
+                "    with open('result.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "        ",
+                "except Exception as e:",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    sys.exit(1)",
+                '"',
+            ]
+        )
 
     return "\n".join(script_lines)

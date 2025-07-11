@@ -71,19 +71,19 @@ class TestSerialization:
     @patch("clustrix.utils.dill.dumps")
     @patch("clustrix.utils.cloudpickle.dumps")
     def test_fallback_to_dill(self, mock_cloudpickle, mock_dill):
-        """Test fallback to dill when cloudpickle fails."""
-        mock_cloudpickle.side_effect = Exception("Cloudpickle failed")
-        mock_dill.return_value = b"dill_data"
+        """Test fallback to cloudpickle when dill fails."""
+        mock_dill.side_effect = Exception("Dill failed")
+        mock_cloudpickle.return_value = b"cloudpickle_data"
 
         def test_func():
             return "test"
 
         result = serialize_function(test_func, (), {})
 
-        # The result should be a dict containing the dill data
-        assert result["function"] == b"dill_data"
-        mock_cloudpickle.assert_called_once()
+        # The result should be a dict containing the cloudpickle data
+        assert result["function"] == b"cloudpickle_data"
         mock_dill.assert_called_once()
+        mock_cloudpickle.assert_called_once()
 
 
 class TestEnvironmentInfo:
@@ -323,7 +323,7 @@ class TestScriptGeneration:
         assert "#!/bin/bash" in script
         assert "cd /home/user/job_789" in script
         assert "source venv/bin/activate" in script
-        assert "python -c" in script
+        assert "python3 -c" in script
         assert "function_data.pkl" in script
         assert "result.pkl" in script
         assert "error.pkl" in script
@@ -367,12 +367,12 @@ class TestRemoteEnvironment:
         config = ClusterConfig(package_manager="pip")
 
         # This should not raise an error
-        setup_remote_environment(mock_ssh, "/tmp/test", requirements, config)
+        result = setup_remote_environment(mock_ssh, "/tmp/test", requirements, config)
 
         # Verify SSH commands were executed
         assert mock_ssh.exec_command.called
-        # Verify SFTP was used
-        assert mock_ssh.open_sftp.called
+        # Verify return value
+        assert result == "Environment setup completed successfully"
 
 
 class TestPackageManager:

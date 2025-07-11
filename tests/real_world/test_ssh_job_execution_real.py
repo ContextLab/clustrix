@@ -36,7 +36,8 @@ class TestRealSSHJobExecution:
             key_file=ssh_creds.get("private_key_path"),
             remote_work_dir=f"/tmp/clustrix_ssh_test_{uuid.uuid4().hex[:8]}",
             python_executable="python3",  # Use python3 on tensor01
-            cleanup_on_success=True,
+            cleanup_on_success=False,  # Don't cleanup so we can inspect files
+            job_poll_interval=5,  # Poll every 5 seconds instead of 30
         )
 
         return ssh_creds
@@ -262,7 +263,7 @@ class TestRealSSHJobExecution:
             import subprocess
 
             # Get Python information
-            python_info = {
+            python_info: Dict[str, Any] = {
                 "version": sys.version,
                 "version_info": list(sys.version_info),
                 "executable": sys.executable,
@@ -395,7 +396,7 @@ class TestRealSSHJobExecution:
         """Test SSH job error handling."""
 
         @cluster(cores=1, memory="1GB")
-        def ssh_error_test(error_scenario: str) -> Dict[str, Any]:
+        def ssh_error_test(error_scenario: str) -> Any:
             """Test different error scenarios via SSH."""
             import os
             import sys
@@ -559,13 +560,15 @@ class TestRealSSHJobExecution:
             import subprocess
             import os
 
-            network_info = {
+            network_info: Dict[str, Any] = {
                 "hostname": socket.gethostname(),
                 "fqdn": socket.getfqdn(),
                 "local_ip": None,
                 "interfaces": [],
                 "connectivity_tests": {},
             }
+            # Explicitly initialize connectivity_tests as a dict
+            network_info["connectivity_tests"] = {}
 
             # Get local IP
             try:
