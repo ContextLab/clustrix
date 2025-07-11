@@ -112,16 +112,23 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     # Get environment info (not used here but needed for compatibility)
     _ = get_environment_info()  # For compatibility with tests
 
-    # Serialize function using cloudpickle for better compatibility
+    # Try to get function source code for better cross-Python compatibility
+    func_source = None
     try:
-        func_bytes = cloudpickle.dumps(func)
+        func_source = inspect.getsource(func)
     except Exception:
-        # Fallback to dill
-        func_bytes = dill.dumps(func)
+        pass
+
+    # Serialize function using dill for better cross-Python compatibility
+    try:
+        func_bytes = dill.dumps(func, protocol=4)
+    except Exception:
+        # Fallback to cloudpickle
+        func_bytes = cloudpickle.dumps(func, protocol=4)
 
     # Serialize arguments
-    args_bytes = pickle.dumps(args)
-    kwargs_bytes = pickle.dumps(kwargs)
+    args_bytes = pickle.dumps(args, protocol=4)
+    kwargs_bytes = pickle.dumps(kwargs, protocol=4)
 
     # Get function metadata
     func_info = {
@@ -138,6 +145,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     return {
         "function": func_bytes,
+        "function_source": func_source,
         "args": args_bytes,
         "kwargs": kwargs_bytes,
         "requirements": requirements,
@@ -163,9 +171,9 @@ def deserialize_function(func_data: bytes) -> tuple:
     elif isinstance(func_data, dict):
         # Dictionary format from serialize_function
         try:
-            func = cloudpickle.loads(func_data["function"])
-        except Exception:
             func = dill.loads(func_data["function"])
+        except Exception:
+            func = cloudpickle.loads(func_data["function"])
 
         args = pickle.loads(func_data["args"])
         kwargs = pickle.loads(func_data["kwargs"])
@@ -197,7 +205,7 @@ def get_environment_requirements() -> Dict[str, str]:
         pass
 
     # Always include essential packages
-    essential_packages = ["pickle", "cloudpickle", "dill"]
+    essential_packages = ["cloudpickle", "dill"]
     for pkg in essential_packages:
         if pkg not in requirements:
             try:
@@ -357,13 +365,148 @@ dependencies:
         return f"{venv_path}/bin/python"
 
 
+def setup_python_compatible_environment(
+    ssh_client,
+    work_dir: str,
+    requirements: Dict[str, str],
+    config: Optional[ClusterConfig] = None,
+) -> str:
+    """Setup a Python-compatible environment on remote cluster.
+
+    This function creates a separate venv with a compatible Python version
+    to ensure cross-version compatibility for function serialization.
+
+    Args:
+        ssh_client: SSH client connection
+        work_dir: Remote working directory
+        requirements: Package requirements
+        config: Cluster configuration
+
+    Returns:
+        Path to the compatible Python executable
+    """
+    if config is None:
+        from .config import get_config
+
+        config = get_config()
+
+    # Try to detect available Python versions on the remote system
+    detect_cmd = "python3 --version 2>/dev/null || python --version 2>/dev/null || echo 'no python'"
+    stdin, stdout, stderr = ssh_client.exec_command(detect_cmd)
+    python_version_output = stdout.read().decode().strip()
+
+    # Check if we can create a compatible venv
+    compatible_python = None
+
+    # Try different Python versions in order of preference
+    python_candidates = [
+        "python3.9",
+        "python3.8",
+        "python3.7",
+        "python3.6",
+        "python3",
+        "python",
+    ]
+
+    for python_cmd in python_candidates:
+        test_cmd = (
+            f"{python_cmd} -c 'import sys; print(sys.version_info[:2])' 2>/dev/null"
+        )
+        stdin, stdout, stderr = ssh_client.exec_command(test_cmd)
+        version_output = stdout.read().decode().strip()
+
+        if version_output and "(" in version_output:
+            try:
+                # Extract version tuple
+                version_str = version_output.split("(")[1].split(")")[0]
+                major, minor = map(int, version_str.split(", ")[:2])
+
+                # Check if version is compatible (3.6+)
+                if major == 3 and minor >= 6:
+                    compatible_python = python_cmd
+                    break
+            except:
+                continue
+
+    if compatible_python:
+        # Create a separate venv with the compatible Python version
+        compat_venv_path = f"{work_dir}/compat_venv"
+
+        commands = [
+            f"cd {work_dir}",
+            f"{compatible_python} -m venv {compat_venv_path}",
+            f"source {compat_venv_path}/bin/activate",
+        ]
+
+        # Install requirements in the compatible venv
+        if requirements:
+            # Filter out requirements that might not be available on older systems
+            # and only install essential packages for function execution
+            essential_requirements = {}
+            for pkg, version in requirements.items():
+                if pkg.lower() in [
+                    "dill",
+                    "cloudpickle",
+                    "pickle",
+                    "numpy",
+                    "pandas",
+                    "scipy",
+                    "matplotlib",
+                ]:
+                    essential_requirements[pkg] = version
+
+            if essential_requirements:
+                req_content = "\n".join(
+                    [
+                        f"{pkg}=={version}"
+                        for pkg, version in essential_requirements.items()
+                    ]
+                )
+
+                # Write requirements file
+                sftp = ssh_client.open_sftp()
+                with sftp.open(f"{work_dir}/compat_requirements.txt", "w") as f:
+                    f.write(req_content)
+                sftp.close()
+
+                commands.extend(
+                    [
+                        "pip install --upgrade pip",
+                        f"pip install -r {work_dir}/compat_requirements.txt || echo 'Some packages failed to install, continuing...'",
+                    ]
+                )
+            else:
+                # Just install essential packages
+                commands.extend(
+                    [
+                        "pip install --upgrade pip",
+                        "pip install dill cloudpickle || echo 'Failed to install serialization packages, using built-in pickle'",
+                    ]
+                )
+
+        # Execute setup commands
+        full_command = " && ".join(commands)
+        stdin, stdout, stderr = ssh_client.exec_command(full_command)
+
+        # Wait for completion
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status == 0:
+            return f"{compat_venv_path}/bin/python"
+        else:
+            # Fall back to original approach
+            return setup_remote_environment(ssh_client, work_dir, requirements, config)
+    else:
+        # Fall back to original approach
+        return setup_remote_environment(ssh_client, work_dir, requirements, config)
+
+
 def setup_remote_environment(
     ssh_client,
     work_dir: str,
     requirements: Dict[str, str],
     config: Optional[ClusterConfig] = None,
-):
-    """Setup environment on remote cluster via SSH."""
+) -> str:
+    """Setup environment on remote cluster via SSH (original approach)."""
 
     # Get appropriate package manager
     if config is None:
@@ -518,21 +661,35 @@ def _create_slurm_script(
             "import traceback",
             "",
             "try:",
+            "    import dill",
+            "except ImportError:",
+            "    dill = None",
+            "try:",
+            "    import cloudpickle",
+            "except ImportError:",
+            "    cloudpickle = None",
+            "",
+            "try:",
             "    with open('function_data.pkl', 'rb') as f:",
             "        data = pickle.load(f)",
             "    ",
-            "    func = pickle.loads(data['function'])",
+            "    # Try dill first, then cloudpickle",
+            "    try:",
+            "        func = dill.loads(data['function']) if dill else None",
+            "    except:",
+            "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
+            "    ",
             "    args = pickle.loads(data['args'])",
             "    kwargs = pickle.loads(data['kwargs'])",
             "    ",
             "    result = func(*args, **kwargs)",
             "    ",
             "    with open('result.pkl', 'wb') as f:",
-            "        pickle.dump(result, f)",
+            "        pickle.dump(result, f, protocol=4)",
             "        ",
             "except Exception as e:",
             "    with open('error.pkl', 'wb') as f:",
-            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f)",
+            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
             "    raise",
             '"',
         ]
@@ -588,26 +745,63 @@ def _create_sge_script(
         "",
         f"cd {remote_job_dir}",
         "source venv/bin/activate",
-        'python -c "',
+        f'{config.python_executable if config.python_executable else "python"} -c "',
         "import pickle",
         "import sys",
         "import traceback",
         "",
         "try:",
+        "    import dill",
+        "except ImportError:",
+        "    dill = None",
+        "try:",
+        "    import cloudpickle",
+        "except ImportError:",
+        "    cloudpickle = None",
+        "",
+        "try:",
         "    with open('function_data.pkl', 'rb') as f:",
-        "        func_data = pickle.load(f)",
+        "        data = pickle.load(f)",
         "    ",
-        "    func = func_data['func']",
-        "    args = func_data['args']",
-        "    kwargs = func_data['kwargs']",
+        "    # Try dill first, then cloudpickle, then source code",
+        "    func = None",
+        "    if dill:",
+        "        try:",
+        "            func = dill.loads(data['function'])",
+        "        except Exception as e:",
+        "            pass",
+        "    if func is None and cloudpickle:",
+        "        try:",
+        "            func = cloudpickle.loads(data['function'])",
+        "        except Exception as e:",
+        "            pass",
+        "    if func is None and data.get('function_source'):",
+        "        try:",
+        "            import textwrap",
+        "            source = data['function_source']",
+        "            # Execute the source code to create the function",
+        "            namespace = {}",
+        "            exec(source, namespace)",
+        "            # Get the function name from func_info",
+        "            func_name = data['func_info']['name']",
+        "            func = namespace[func_name]",
+        "        except Exception as e:",
+        "            pass",
+        "    if func is None:",
+        "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
+        "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
+        "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
+        "    ",
+        "    args = pickle.loads(data['args'])",
+        "    kwargs = pickle.loads(data['kwargs'])",
         "    ",
         "    result = func(*args, **kwargs)",
         "    ",
         "    with open('result.pkl', 'wb') as f:",
-        "        pickle.dump(result, f)",
+        "        pickle.dump(result, f, protocol=4)",
         "except Exception as e:",
         "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f)",
+        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
         "    raise",
         '"',
     ]
@@ -620,33 +814,88 @@ def _create_ssh_script(
 ) -> str:
     """Create simple execution script for SSH."""
 
-    script_lines = [
-        "#!/bin/bash",
-        f"cd {remote_job_dir}",
-        "source venv/bin/activate",
-        'python -c "',
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "try:",
-        "    with open('function_data.pkl', 'rb') as f:",
-        "        data = pickle.load(f)",
-        "    ",
-        "    func = pickle.loads(data['function'])",
-        "    args = pickle.loads(data['args'])",
-        "    kwargs = pickle.loads(data['kwargs'])",
-        "    ",
-        "    result = func(*args, **kwargs)",
-        "    ",
-        "    with open('result.pkl', 'wb') as f:",
-        "        pickle.dump(result, f)",
-        "        ",
-        "except Exception as e:",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f)",
-        "    sys.exit(1)",
-        '"',
-    ]
+    python_cmd = config.python_executable if config.python_executable else "python"
+
+    # Check if we have a compatible venv setup
+    if "compat_venv" in python_cmd:
+        # Use the compatible venv directly
+        script_lines = [
+            "#!/bin/bash",
+            f"cd {remote_job_dir}",
+            f"source {remote_job_dir}/compat_venv/bin/activate",
+        ]
+    else:
+        # Use the original venv setup
+        script_lines = [
+            "#!/bin/bash",
+            f"cd {remote_job_dir}",
+            "source venv/bin/activate",
+        ]
+
+    # Add the Python execution part
+    script_lines.extend(
+        [
+            f'{python_cmd} -c "',
+            "import pickle",
+            "import sys",
+            "import traceback",
+            "",
+            "try:",
+            "    import dill",
+            "except ImportError:",
+            "    dill = None",
+            "try:",
+            "    import cloudpickle",
+            "except ImportError:",
+            "    cloudpickle = None",
+            "",
+            "try:",
+            "    with open('function_data.pkl', 'rb') as f:",
+            "        data = pickle.load(f)",
+            "    ",
+            "    # Try dill first, then cloudpickle, then source code",
+            "    func = None",
+            "    if dill:",
+            "        try:",
+            "            func = dill.loads(data['function'])",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None and cloudpickle:",
+            "        try:",
+            "            func = cloudpickle.loads(data['function'])",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None and data.get('function_source'):",
+            "        try:",
+            "            import textwrap",
+            "            source = data['function_source']",
+            "            # Execute the source code to create the function",
+            "            namespace = {}",
+            "            exec(source, namespace)",
+            "            # Get the function name from func_info",
+            "            func_name = data['func_info']['name']",
+            "            func = namespace[func_name]",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None:",
+            "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
+            "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
+            "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
+            "    ",
+            "    args = pickle.loads(data['args'])",
+            "    kwargs = pickle.loads(data['kwargs'])",
+            "    ",
+            "    result = func(*args, **kwargs)",
+            "    ",
+            "    with open('result.pkl', 'wb') as f:",
+            "        pickle.dump(result, f, protocol=4)",
+            "        ",
+            "except Exception as e:",
+            "    with open('error.pkl', 'wb') as f:",
+            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+            "    sys.exit(1)",
+            '"',
+        ]
+    )
 
     return "\n".join(script_lines)

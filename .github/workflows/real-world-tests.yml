@@ -1,0 +1,174 @@
+name: Real-World Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      run_expensive:
+        description: 'Run expensive tests'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  real-world-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[test]"
+    
+    - name: Set up SSH server for testing
+      run: |
+        # Install SSH server
+        sudo apt-get update
+        sudo apt-get install -y openssh-server
+        
+        # Create test user
+        sudo useradd -m -s /bin/bash ${{ secrets.CLUSTRIX_USERNAME }}
+        echo "${{ secrets.CLUSTRIX_USERNAME }}:${{ secrets.CLUSTRIX_PASSWORD }}" | sudo chpasswd
+        
+        # Configure SSH
+        sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        sudo systemctl restart ssh
+        
+        # Test SSH connection
+        timeout 10 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.CLUSTRIX_USERNAME }}@localhost "echo 'SSH connection successful'"
+
+    - name: Run filesystem tests
+      run: |
+        python scripts/run_real_world_tests.py --filesystem
+    
+    - name: Run SSH tests
+      env:
+        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
+        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
+      run: |
+        python scripts/run_real_world_tests.py --ssh
+    
+    - name: Run API tests (free tier)
+      env:
+        LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCP_JSON: ${{ secrets.GCP_JSON }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+        HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        python scripts/run_real_world_tests.py --api
+    
+    - name: Run visual tests
+      run: |
+        python scripts/run_real_world_tests.py --visual
+    
+    - name: Run expensive tests
+      if: ${{ inputs.run_expensive }}
+      env:
+        LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCP_JSON: ${{ secrets.GCP_JSON }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+        HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        python scripts/run_real_world_tests.py --api --expensive
+    
+    - name: Upload test artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: |
+          tests/real_world/screenshots/
+          tests/real_world/temp/
+        retention-days: 7
+
+  slurm-tests:
+    runs-on: ubuntu-latest
+    if: false  # Disabled until SLURM server is available
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[test]"
+    
+    - name: Test SLURM connection
+      env:
+        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
+        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
+      run: |
+        python -c "
+        from tests.real_world.credential_manager import get_credential_manager
+        manager = get_credential_manager()
+        slurm_creds = manager.get_slurm_credentials()
+        print('SLURM credentials available:', slurm_creds is not None)
+        "
+
+  credential-check:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[test]"
+    
+    - name: Check credentials
+      env:
+        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
+        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
+        LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCP_JSON: ${{ secrets.GCP_JSON }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+        HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        python scripts/run_real_world_tests.py --check-creds
+    
+    - name: Test credential integration
+      env:
+        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
+        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
+        LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+        GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+        GCP_JSON: ${{ secrets.GCP_JSON }}
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_ACCESS_KEY: ${{ secrets.AWS_ACCESS_KEY }}
+        HF_USERNAME: ${{ secrets.HF_USERNAME }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        python scripts/test_real_world_credentials.py

@@ -510,54 +510,71 @@ class ModernClustrixWidget:
             layout=widgets.Layout(height="100px"),
         )
 
-        # Create GridBox layouts for each row
-        # Row 1: AAAABBCCCCDDDEEEF
+        # Create 19-column GridBox layouts with spacers
+        # Row 1: XAAAABBCCCCDDDEEEFX (X + A(4) + B(2) + C(4) + D(3) + E(3) + F(1) + X)
+        spacer1_1 = widgets.HTML("")  # X: border column 1
+        spacer1_19 = widgets.HTML("")  # X: border column 19
+
         advanced_row1 = widgets.GridBox(
             [
-                package_manager_label,  # A: 1-5
-                self.widgets["package_manager"],  # B: 5-7
-                python_exec_label,  # C: 7-11
-                self.widgets["python_executable"],  # D: 11-14
-                clone_env_label,  # E: 14-17
-                self.widgets["clone_env"],  # F: 17-18
+                spacer1_1,  # X: column 1
+                package_manager_label,  # A: columns 2-5 (4 cols)
+                self.widgets["package_manager"],  # B: columns 6-7 (2 cols)
+                python_exec_label,  # C: columns 8-11 (4 cols)
+                self.widgets["python_executable"],  # D: columns 12-14 (3 cols)
+                clone_env_label,  # E: columns 15-17 (3 cols)
+                self.widgets["clone_env"],  # F: column 18 (1 col)
+                spacer1_19,  # X: column 19
             ],
             layout=widgets.Layout(
-                grid_template_columns="4fr 2fr 4fr 3fr 3fr 1fr 2fr",
-                grid_gap="8px",
+                grid_template_columns="1fr 4fr 2fr 4fr 3fr 3fr 1fr 1fr",
+                grid_gap="2px",
                 align_items="center",
                 margin="5px 0px",
             ),
         )
 
-        # Row 2: GGGGHHHHIKKKLLLMN
+        # Row 2: XGGGGHHHHIKKKLLLMNX (X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X)
+        # But N is the last element, so the pattern is actually X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X
+        # That's 1 + 4 + 4 + 1 + 1 + 3 + 3 + 1 + 1 = 19 columns total
+        spacer2_1 = widgets.HTML("")  # X: border column 1
+        spacer2_19 = widgets.HTML("")  # X: border column 19
+
         advanced_row2 = widgets.GridBox(
             [
-                env_vars_label,  # G: 1-5
-                self.widgets["env_vars"],  # H: 5-9
-                self.widgets["env_vars_add"],  # I: 9-10
-                self.widgets["env_vars_remove"],  # J: 10-11
-                modules_label,  # K: 11-14
-                self.widgets["modules"],  # L: 14-17
-                self.widgets["modules_add"],  # M: 17-18
-                self.widgets["modules_remove"],  # N: 18-19
+                spacer2_1,  # X: column 1
+                env_vars_label,  # G: columns 2-5 (4 cols)
+                self.widgets["env_vars"],  # H: columns 6-9 (4 cols)
+                self.widgets["env_vars_add"],  # I: column 10 (1 col)
+                self.widgets["env_vars_remove"],  # J: column 11 (1 col)
+                modules_label,  # K: columns 12-14 (3 cols)
+                self.widgets["modules"],  # L: columns 15-17 (3 cols)
+                self.widgets["modules_add"],  # M: column 18 (1 col)
+                self.widgets["modules_remove"],  # N: column 19 (1 col)
             ],
             layout=widgets.Layout(
-                grid_template_columns="4fr 4fr 1fr 1fr 3fr 3fr 1fr 1fr 2fr",
-                grid_gap="8px",
+                grid_template_columns="1fr 4fr 4fr 1fr 1fr 3fr 3fr 1fr 1fr",
+                grid_gap="2px",
                 align_items="center",
                 margin="5px 0px",
             ),
         )
 
-        # Row 3-4: OOOO + PPPPPPPPPPPPPP (label + textarea spanning 2 rows)
+        # Row 3: XOOOOPPPPPPPPPPPPPX (X + O(4) + P(13) + X)
+        # Row 4: XQQQQPPPPPPPPPPPPPX (X + Q(4) + P(13) + X) - Q is empty, P continues
+        spacer3_1 = widgets.HTML("")  # X: border column 1
+        spacer3_19 = widgets.HTML("")  # X: border column 19
+
         advanced_row3 = widgets.GridBox(
             [
-                pre_exec_label,  # O: 1-5
-                self.widgets["pre_exec_commands"],  # P: 5-19 (spans to end)
+                spacer3_1,  # X: column 1
+                pre_exec_label,  # O: columns 2-5 (4 cols)
+                self.widgets["pre_exec_commands"],  # P: columns 6-18 (13 cols)
+                spacer3_19,  # X: column 19
             ],
             layout=widgets.Layout(
-                grid_template_columns="4fr 15fr",
-                grid_gap="8px",
+                grid_template_columns="1fr 4fr 13fr 1fr",
+                grid_gap="2px",
                 align_items="flex-start",  # Align to top for textarea
                 margin="5px 0px",
             ),
@@ -864,7 +881,8 @@ class ModernClustrixWidget:
                 self.widgets["remove_profile_btn"],
             ],
             layout=widgets.Layout(
-                grid_gap="8px",
+                grid_template_columns="4fr 13fr 1fr 1fr",  # AAAABBBBBBBBBBBBBCD
+                grid_gap="4px",
                 align_items="center",
             ),
         )
@@ -894,7 +912,8 @@ class ModernClustrixWidget:
                 self.widgets["test_submit_btn"],
             ],
             layout=widgets.Layout(
-                grid_gap="8px",
+                grid_template_columns="4fr 7fr 1fr 1fr 2fr 2fr 2fr",  # EEEEFFFFFFFGHIIJJKK
+                grid_gap="4px",
                 align_items="center",
             ),
         )
@@ -935,7 +954,8 @@ class ModernClustrixWidget:
                 self.widgets["time"],
             ],
             layout=widgets.Layout(
-                grid_gap="8px",
+                grid_template_columns="4fr 3fr 2fr 2fr 2fr 2fr 2fr 2fr",  # LLLLMMMNNOOPPQQRRSS
+                grid_gap="4px",
                 align_items="center",
             ),
         )
@@ -950,7 +970,8 @@ class ModernClustrixWidget:
         row4_grid = widgets.GridBox(
             [empty1, self.widgets["advanced_toggle"], empty2],
             layout=widgets.Layout(
-                grid_template_columns="10fr 3fr 6fr",
+                grid_template_columns="10fr 3fr 6fr",  # TTTTTTTTTTUUUVVVVVV
+                grid_gap="4px",
                 justify_items="center",
                 margin="10px 0px",
             ),

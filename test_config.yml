@@ -32,7 +32,7 @@ profiles:
     cost_monitoring: false
     credential_cache_ttl: 300
     default_cores: 1
-    default_memory: 16.25GB
+    default_memory: 16GB
     default_partition: null
     default_queue: null
     default_time: 01:00:00

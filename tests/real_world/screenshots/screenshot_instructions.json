@@ -1,0 +1,16 @@
+{
+  "test_session": "0fc3ad11",
+  "screenshots_needed": [
+    "modern_widget_default_state.png",
+    "modern_widget_slurm_config.png",
+    "modern_widget_advanced_settings.png",
+    "enhanced_widget_comparison.png"
+  ],
+  "instructions": [
+    "1. Open widget HTML files in browser",
+    "2. Take screenshots at different viewport sizes",
+    "3. Test widget interactions manually",
+    "4. Verify layout matches mockups",
+    "5. Check accessibility with screen reader"
+  ]
+}

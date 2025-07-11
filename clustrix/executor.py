@@ -134,7 +134,7 @@ class ClusterExecutor:
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f)
+            pickle.dump(func_data, f, protocol=4)
             local_pickle_path = f.name
 
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
@@ -186,7 +186,7 @@ class ClusterExecutor:
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f)
+            pickle.dump(func_data, f, protocol=4)
             local_pickle_path = f.name
 
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
@@ -228,7 +228,7 @@ class ClusterExecutor:
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f)
+            pickle.dump(func_data, f, protocol=4)
             local_pickle_path = f.name
 
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
@@ -459,18 +459,45 @@ except Exception as e:
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f)
+            pickle.dump(func_data, f, protocol=4)
             local_pickle_path = f.name
 
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
+
+        # Try to set up a compatible Python environment
+        try:
+            from .utils import setup_python_compatible_environment
+
+            compatible_python = setup_python_compatible_environment(
+                self.ssh_client,
+                remote_job_dir,
+                func_data.get("requirements", {}),
+                self.config,
+            )
+            # Create a copy of config to avoid modifying the original
+            import copy
+
+            updated_config = copy.deepcopy(self.config)
+            updated_config.python_executable = compatible_python
+        except Exception:
+            # Fall back to original approach if compatible environment setup fails
+            from .utils import setup_remote_environment
+
+            setup_remote_environment(
+                self.ssh_client,
+                remote_job_dir,
+                func_data.get("requirements", {}),
+                self.config,
+            )
+            updated_config = self.config
 
         # Create execution script
         script_content = create_job_script(
             cluster_type="ssh",
             job_config=job_config,
             remote_job_dir=remote_job_dir,
-            config=self.config,
+            config=updated_config,
         )
 
         script_path = f"{remote_job_dir}/job.sh"
@@ -1054,9 +1081,9 @@ except Exception as e:
         """Execute function on cluster (simplified interface for tests)."""
         job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
         func_data = {
-            "function": cloudpickle.dumps(func),
-            "args": pickle.dumps(args),
-            "kwargs": pickle.dumps(kwargs),
+            "function": cloudpickle.dumps(func, protocol=4),
+            "args": pickle.dumps(args, protocol=4),
+            "kwargs": pickle.dumps(kwargs, protocol=4),
             "requirements": {},
         }
 
