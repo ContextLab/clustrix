@@ -445,6 +445,14 @@ def setup_two_venv_environment(
 
     # Create VENV2 for job execution
     venv2_path = f"{work_dir}/venv2_execution"
+    conda_env_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
+
+    # Check if conda is available for creating a modern Python environment
+    conda_available = False
+    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
+    conda_output = stdout.read().decode().strip()
+    if conda_output and "conda" in conda_output:
+        conda_available = True
 
     commands = [
         f"cd {work_dir}",
@@ -454,11 +462,26 @@ def setup_two_venv_environment(
         "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv1'",
         "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in venv1'",
         "deactivate",
-        # Create VENV2 (execution environment)
-        f"{compatible_python} -m venv {venv2_path}",
-        f"source {venv2_path}/bin/activate",
-        "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
     ]
+
+    # Create VENV2 with conda if available (for modern Python + CUDA support)
+    if conda_available:
+        commands.extend([
+            # Create conda environment with Python 3.9 for VENV2
+            f"conda create -n {conda_env_name} python=3.9 -y || echo 'Failed to create conda env'",
+            f"conda activate {conda_env_name}",
+            "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
+        ])
+        # Update venv2_python path to use conda environment
+        venv2_python_path = f"conda run -n {conda_env_name} python"
+    else:
+        commands.extend([
+            # Fallback to regular venv for VENV2
+            f"{compatible_python} -m venv {venv2_path}",
+            f"source {venv2_path}/bin/activate",
+            "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
+        ])
+        venv2_python_path = f"{venv2_path}/bin/python"
 
     # Install essential packages in VENV2 first
     essential_packages = ["dill", "cloudpickle"]
@@ -537,7 +560,11 @@ def setup_two_venv_environment(
         for cmd in config.venv_post_install_commands:
             commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
 
-    commands.append("deactivate")
+    # Add deactivation command based on environment type
+    if conda_available:
+        commands.append("conda deactivate")
+    else:
+        commands.append("deactivate")
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -549,11 +576,13 @@ def setup_two_venv_environment(
     if exit_status == 0:
         return {
             "venv1_python": f"{venv1_path}/bin/python",
-            "venv2_python": f"{venv2_path}/bin/python",
+            "venv2_python": venv2_python_path,
             "venv1_path": venv1_path,
-            "venv2_path": venv2_path,
+            "venv2_path": venv2_path if not conda_available else conda_env_name,
             "compatible_python": compatible_python,
             "remote_python_version": remote_python_version,
+            "conda_available": conda_available,
+            "conda_env_name": conda_env_name if conda_available else None,
         }
     else:
         error_output = stderr.read().decode()
@@ -763,7 +792,7 @@ dependencies:
     return "Environment setup completed successfully"
 
 
-def generate_two_venv_execution_commands(remote_job_dir: str) -> list:
+def generate_two_venv_execution_commands(remote_job_dir: str, conda_env_name: str = None) -> list:
     """
     Generate the standardized two-venv execution commands.
     
@@ -863,8 +892,8 @@ def generate_two_venv_execution_commands(remote_job_dir: str) -> list:
         "",
         "# Step 2: Use VENV2 to execute the function",
         "deactivate",
-        f"source {remote_job_dir}/venv2_execution/bin/activate",
-        f'{remote_job_dir}/venv2_execution/bin/python -c "',
+        f"conda activate {conda_env_name}" if conda_env_name else f"source {remote_job_dir}/venv2_execution/bin/activate",
+        f'conda run -n {conda_env_name} python -c "' if conda_env_name else f'{remote_job_dir}/venv2_execution/bin/python -c "',
         "import pickle",
         "import sys",
         "import traceback",
@@ -911,8 +940,8 @@ def generate_two_venv_execution_commands(remote_job_dir: str) -> list:
         "    raise",
         '"',
         "",
-        "# Step 3: Use VENV1 to serialize the result",
-        "deactivate",
+        "# Step 3: Use VENV1 to serialize the result", 
+        "conda deactivate" if conda_env_name else "deactivate",
         f"source {remote_job_dir}/venv1_serialization/bin/activate",
         'python -c "',
         "import pickle",

@@ -33,7 +33,7 @@ pre_execution_commands:
 
 # Cluster-specific packages to install in VENV2 (tensor01 has GPU support)
 cluster_packages:
-  # Install PyTorch with CUDA support first (try CUDA 11.8 then fallback)
+  # Install PyTorch with CUDA support for modern Python (conda environment)
   - package: "torch torchvision torchaudio"
     pip_args: "--index-url https://download.pytorch.org/whl/cu118"
     timeout: 600
