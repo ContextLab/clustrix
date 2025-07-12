@@ -375,7 +375,7 @@ def setup_two_venv_environment(
     work_dir: str,
     requirements: Dict[str, str],
     config: Optional[ClusterConfig] = None,
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     """Setup a two-venv environment on remote cluster for cross-version compatibility.
 
     This function creates two separate virtual environments:
@@ -443,16 +443,16 @@ def setup_two_venv_environment(
     # Create VENV1 for serialization compatibility
     venv1_path = f"{work_dir}/venv1_serialization"
 
+    # Check if conda is available on remote system for VENV2
+    conda_available = False
+    conda_env_name = None
+    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
+    if "conda" in stdout.read().decode():
+        conda_available = True
+        conda_env_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
+
     # Create VENV2 for job execution
     venv2_path = f"{work_dir}/venv2_execution"
-    conda_env_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
-
-    # Check if conda is available for creating a modern Python environment
-    conda_available = False
-    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
-    conda_output = stdout.read().decode().strip()
-    if conda_output and "conda" in conda_output:
-        conda_available = True
 
     commands = [
         f"cd {work_dir}",
@@ -464,24 +464,25 @@ def setup_two_venv_environment(
         "deactivate",
     ]
 
-    # Create VENV2 with conda if available (for modern Python + CUDA support)
     if conda_available:
-        commands.extend([
-            # Create conda environment with Python 3.9 for VENV2
-            f"conda create -n {conda_env_name} python=3.9 -y || echo 'Failed to create conda env'",
-            f"conda activate {conda_env_name}",
-            "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
-        ])
-        # Update venv2_python path to use conda environment
-        venv2_python_path = f"conda run -n {conda_env_name} python"
+        # Create VENV2 using conda for modern Python support
+        commands.extend(
+            [
+                # Create conda environment with Python 3.9 for VENV2
+                f"conda create -n {conda_env_name} python=3.9 -y",
+                f"conda activate {conda_env_name}",
+                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
+            ]
+        )
     else:
-        commands.extend([
-            # Fallback to regular venv for VENV2
-            f"{compatible_python} -m venv {venv2_path}",
-            f"source {venv2_path}/bin/activate",
-            "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
-        ])
-        venv2_python_path = f"{venv2_path}/bin/python"
+        # Create VENV2 using regular venv
+        commands.extend(
+            [
+                f"{compatible_python} -m venv {venv2_path}",
+                f"source {venv2_path}/bin/activate",
+                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
+            ]
+        )
 
     # Install essential packages in VENV2 first
     essential_packages = ["dill", "cloudpickle"]
@@ -560,7 +561,7 @@ def setup_two_venv_environment(
         for cmd in config.venv_post_install_commands:
             commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
 
-    # Add deactivation command based on environment type
+    # Add appropriate deactivation command
     if conda_available:
         commands.append("conda deactivate")
     else:
@@ -574,16 +575,25 @@ def setup_two_venv_environment(
     exit_status = stdout.channel.recv_exit_status()
 
     if exit_status == 0:
-        return {
+        result: Dict[str, Any] = {
             "venv1_python": f"{venv1_path}/bin/python",
-            "venv2_python": venv2_python_path,
             "venv1_path": venv1_path,
-            "venv2_path": venv2_path if not conda_available else conda_env_name,
             "compatible_python": compatible_python,
             "remote_python_version": remote_python_version,
-            "conda_available": conda_available,
-            "conda_env_name": conda_env_name if conda_available else None,
         }
+
+        if conda_available:
+            result["venv2_python"] = f"conda run -n {conda_env_name} python"
+            result["venv2_path"] = f"conda:{conda_env_name}"
+            result["conda_env_name"] = conda_env_name
+            result["uses_conda"] = True
+        else:
+            result["venv2_python"] = f"{venv2_path}/bin/python"
+            result["venv2_path"] = venv2_path
+            result["conda_env_name"] = None
+            result["uses_conda"] = False
+
+        return result
     else:
         error_output = stderr.read().decode()
         raise RuntimeError(f"Failed to setup two-venv environment: {error_output}")
@@ -792,16 +802,18 @@ dependencies:
     return "Environment setup completed successfully"
 
 
-def generate_two_venv_execution_commands(remote_job_dir: str, conda_env_name: str = None) -> list:
+def generate_two_venv_execution_commands(
+    remote_job_dir: str, conda_env_name: Optional[str] = None
+) -> list:
     """
     Generate the standardized two-venv execution commands.
-    
+
     This centralizes the two-venv logic to eliminate code duplication across
     different cluster types (SLURM, SSH, PBS, SGE).
-    
+
     Args:
         remote_job_dir: Remote working directory path
-        
+
     Returns:
         List of command strings for two-venv execution
     """
@@ -892,8 +904,16 @@ def generate_two_venv_execution_commands(remote_job_dir: str, conda_env_name: st
         "",
         "# Step 2: Use VENV2 to execute the function",
         "deactivate",
-        f"conda activate {conda_env_name}" if conda_env_name else f"source {remote_job_dir}/venv2_execution/bin/activate",
-        f'conda run -n {conda_env_name} python -c "' if conda_env_name else f'{remote_job_dir}/venv2_execution/bin/python -c "',
+        (
+            f"conda activate {conda_env_name}"
+            if conda_env_name
+            else f"source {remote_job_dir}/venv2_execution/bin/activate"
+        ),
+        (
+            f'conda run -n {conda_env_name} python -c "'
+            if conda_env_name
+            else f'{remote_job_dir}/venv2_execution/bin/python -c "'
+        ),
         "import pickle",
         "import sys",
         "import traceback",
@@ -940,7 +960,7 @@ def generate_two_venv_execution_commands(remote_job_dir: str, conda_env_name: st
         "    raise",
         '"',
         "",
-        "# Step 3: Use VENV1 to serialize the result", 
+        "# Step 3: Use VENV1 to serialize the result",
         "conda deactivate" if conda_env_name else "deactivate",
         f"source {remote_job_dir}/venv1_serialization/bin/activate",
         'python -c "',
@@ -1030,10 +1050,13 @@ def _create_slurm_script(
     python_cmd = config.python_executable if config.python_executable else "python"
 
     # Check if we have two-venv setup
-    if "venv1_serialization" in python_cmd:
+    if hasattr(config, "venv_info") and config.venv_info:
         # Use the centralized two-venv approach for cross-version compatibility
         script_lines.append(f"cd {remote_job_dir}")
-        script_lines.extend(generate_two_venv_execution_commands(remote_job_dir))
+        conda_env_name = config.venv_info.get("conda_env_name", None)
+        script_lines.extend(
+            generate_two_venv_execution_commands(remote_job_dir, conda_env_name)
+        )
     else:
         # Use the original single-venv approach
         script_lines.extend(
@@ -1255,9 +1278,12 @@ def _create_ssh_script(
         script_lines.append("")
 
     # Check if we have two-venv setup
-    if "venv1_serialization" in python_cmd:
+    if hasattr(config, "venv_info") and config.venv_info:
         # Use the centralized two-venv approach for cross-version compatibility
-        script_lines.extend(generate_two_venv_execution_commands(remote_job_dir))
+        conda_env_name = config.venv_info.get("conda_env_name", None)
+        script_lines.extend(
+            generate_two_venv_execution_commands(remote_job_dir, conda_env_name)
+        )
     else:
         # Single-venv approach
         script_lines.extend(

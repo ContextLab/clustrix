@@ -153,6 +153,8 @@ class ClusterExecutor:
             # Update config with venv paths for job script generation
             updated_config = self.config
             updated_config.python_executable = venv_info["venv1_python"]
+            # Store venv_info for script generation
+            updated_config.venv_info = venv_info
             logger.info(
                 f"Two-venv setup successful, using: {venv_info['venv1_python']}"
             )
@@ -166,6 +168,7 @@ class ClusterExecutor:
                 self.config,
             )
             updated_config = self.config
+            updated_config.venv_info = None
 
         # Create job script
         script_content = create_job_script(
@@ -498,6 +501,8 @@ except Exception as e:
             # Update config with venv paths
             updated_config = self.config
             updated_config.python_executable = venv_info["venv1_python"]
+            # Store venv_info for script generation
+            updated_config.venv_info = venv_info
             logger.info(
                 f"Two-venv setup successful, using: {venv_info['venv1_python']}"
             )
@@ -506,6 +511,7 @@ except Exception as e:
             logger.warning(f"Failed to setup two-venv environment: {e}")
             # Fall back to original approach
             updated_config = self.config
+            updated_config.venv_info = None
 
         # Create execution script
         script_content = create_job_script(
