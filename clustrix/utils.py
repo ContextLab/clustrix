@@ -933,7 +933,9 @@ def generate_two_venv_execution_commands(
         "# Step 2: Use VENV2 to execute the function",
         "deactivate",
         (
-            f"conda activate {conda_env_name}"
+            # For conda environments, use conda run directly without activation
+            # For regular venv, activate first then use python
+            f"# Using conda environment {conda_env_name}"
             if conda_env_name
             else f"source {remote_job_dir}/venv2_execution/bin/activate"
         ),
@@ -989,7 +991,12 @@ def generate_two_venv_execution_commands(
         '"',
         "",
         "# Step 3: Use VENV1 to serialize the result",
-        "conda deactivate" if conda_env_name else "deactivate",
+        (
+            "# No deactivation needed for conda run, deactivate only for regular venv"
+            if not conda_env_name
+            else ""
+        ),
+        "deactivate" if not conda_env_name else "",
         f"source {remote_job_dir}/venv1_serialization/bin/activate",
         'python -c "',
         "import pickle",
