@@ -470,8 +470,7 @@ def setup_two_venv_environment(
             [
                 # Create conda environment with Python 3.9 for VENV2
                 f"conda create -n {conda_env_name} python=3.9 -y",
-                f"conda activate {conda_env_name}",
-                "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
+                f"conda run -n {conda_env_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
             ]
         )
     else:
@@ -487,14 +486,24 @@ def setup_two_venv_environment(
     # Install essential packages in VENV2 first
     essential_packages = ["dill", "cloudpickle"]
     for pkg in essential_packages:
-        if pkg in requirements:
-            commands.append(
-                f"pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
-            )
+        if conda_available:
+            if pkg in requirements:
+                commands.append(
+                    f"conda run -n {conda_env_name} pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in conda venv2'"
+                )
+            else:
+                commands.append(
+                    f"conda run -n {conda_env_name} pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in conda venv2'"
+                )
         else:
-            commands.append(
-                f"pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
-            )
+            if pkg in requirements:
+                commands.append(
+                    f"pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
+                )
+            else:
+                commands.append(
+                    f"pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
+                )
 
     # Install packages from local environment requirements (selective)
     if requirements:
@@ -526,9 +535,14 @@ def setup_two_venv_environment(
         if filtered_reqs:
             # Install core scientific packages from local environment
             for pkg, version in filtered_reqs.items():
-                commands.append(
-                    f"pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in venv2'"
-                )
+                if conda_available:
+                    commands.append(
+                        f"conda run -n {conda_env_name} pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in conda venv2'"
+                    )
+                else:
+                    commands.append(
+                        f"pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in venv2'"
+                    )
 
     # Add cluster-specific package installations from config
     if hasattr(config, "cluster_packages") and config.cluster_packages:
@@ -536,9 +550,14 @@ def setup_two_venv_environment(
         for package_spec in config.cluster_packages:
             if isinstance(package_spec, str):
                 # Simple package name or package==version
-                commands.append(
-                    f"pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
-                )
+                if conda_available:
+                    commands.append(
+                        f"conda run -n {conda_env_name} pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
+                    )
+                else:
+                    commands.append(
+                        f"pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
+                    )
             elif isinstance(package_spec, dict):
                 # Complex package specification with options
                 pkg_name = package_spec.get("package", "")
@@ -546,7 +565,12 @@ def setup_two_venv_environment(
                 timeout = package_spec.get("timeout", 300)
 
                 if pkg_name:
-                    install_cmd = f"pip install {pkg_name}"
+                    if conda_available:
+                        install_cmd = (
+                            f"conda run -n {conda_env_name} pip install {pkg_name}"
+                        )
+                    else:
+                        install_cmd = f"pip install {pkg_name}"
                     if pip_args:
                         install_cmd += f" {pip_args}"
                     install_cmd += f" --timeout={timeout} || echo 'Failed to install cluster package: {pkg_name}'"
@@ -559,12 +583,16 @@ def setup_two_venv_environment(
     ):
         commands.append("echo 'Running cluster-specific post-installation commands...'")
         for cmd in config.venv_post_install_commands:
-            commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
+            if conda_available:
+                # Run post-install commands in conda environment
+                commands.append(
+                    f"conda run -n {conda_env_name} {cmd} || echo 'Post-install command failed: {cmd}'"
+                )
+            else:
+                commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
 
-    # Add appropriate deactivation command
-    if conda_available:
-        commands.append("conda deactivate")
-    else:
+    # Add appropriate deactivation command (only needed for regular venv)
+    if not conda_available:
         commands.append("deactivate")
 
     # Execute setup commands
