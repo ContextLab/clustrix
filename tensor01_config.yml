@@ -1,21 +1,20 @@
-# Clustrix configuration for ndoli.dartmouth.edu SLURM cluster
-cluster_type: "slurm"
-cluster_host: "ndoli.dartmouth.edu"
+# Clustrix configuration for tensor01.dartmouth.edu SSH cluster
+cluster_type: "ssh"
+cluster_host: "tensor01.dartmouth.edu"
 username: "f002d6b"
-remote_work_dir: "/dartfs-hpc/rc/home/b/f002d6b/clustrix"
+remote_work_dir: "/tmp/clustrix_tensor01"
 python_executable: "python3"
 
 # Authentication configuration
 use_1password: true
-onepassword_note: "clustrix-ssh-slurm"
+onepassword_note: "clustrix-ssh-gpu"
 use_env_password: true
 password_env_var: "CLUSTRIX_PASSWORD"
 
-# SLURM defaults
-default_cores: 2
-default_memory: "4GB"
-default_time: "00:10:00"
-default_partition: "standard"
+# SSH defaults
+default_cores: 4
+default_memory: "8GB"
+default_time: "00:15:00"
 
 # Cluster-specific environment setup
 module_loads:
@@ -23,6 +22,7 @@ module_loads:
 
 environment_variables:
   OMP_NUM_THREADS: "1"
+  CUDA_VISIBLE_DEVICES: "0"
 
 # Commands to run before creating virtual environment
 pre_execution_commands:

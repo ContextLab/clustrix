@@ -140,20 +140,39 @@ class ClusterExecutor:
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
-        # Setup environment
-        setup_remote_environment(
-            self.ssh_client,
-            remote_job_dir,
-            func_data["requirements"],
-            self.config,
-        )
+        # Setup two-venv environment for cross-version compatibility
+        try:
+            from .utils import setup_two_venv_environment
+
+            logger.info(
+                "Setting up two-venv environment for cross-version compatibility"
+            )
+            venv_info = setup_two_venv_environment(
+                self.ssh_client, remote_job_dir, func_data["requirements"], self.config
+            )
+            # Update config with venv paths for job script generation
+            updated_config = self.config
+            updated_config.python_executable = venv_info["venv1_python"]
+            logger.info(
+                f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+            )
+        except Exception as e:
+            logger.warning(f"Two-venv setup failed, falling back to basic setup: {e}")
+            # Fallback to basic environment setup
+            setup_remote_environment(
+                self.ssh_client,
+                remote_job_dir,
+                func_data["requirements"],
+                self.config,
+            )
+            updated_config = self.config
 
         # Create job script
         script_content = create_job_script(
             cluster_type="slurm",
             job_config=job_config,
             remote_job_dir=remote_job_dir,
-            config=self.config,
+            config=updated_config,
         )
 
         # Upload and submit job script

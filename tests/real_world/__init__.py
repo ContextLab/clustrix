@@ -97,6 +97,14 @@ class TestCredentials:
         """Get Lambda Cloud credentials from available sources."""
         return self._manager.get_lambda_cloud_credentials()
 
+    def get_tensor01_credentials(self) -> Optional[Dict[str, str]]:
+        """Get tensor01 (SSH-GPU) credentials from available sources."""
+        return self._manager.get_tensor01_credentials()
+
+    def get_ndoli_credentials(self) -> Optional[Dict[str, str]]:
+        """Get ndoli (SSH-SLURM) credentials from available sources."""
+        return self._manager.get_ndoli_credentials()
+
     def get_credential_status(self) -> Dict[str, bool]:
         """Get status of all credential types."""
         return self._manager.get_credential_status()

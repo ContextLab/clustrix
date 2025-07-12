@@ -751,49 +751,216 @@ def _create_slurm_script(
 
     # Add execution commands
     python_cmd = config.python_executable if config.python_executable else "python"
-    script_lines.extend(
-        [
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate",
-            f'{python_cmd} -c "',
-            "import pickle",
-            "import sys",
-            "import traceback",
-            "",
-            "try:",
-            "    import dill",
-            "except ImportError:",
-            "    dill = None",
-            "try:",
-            "    import cloudpickle",
-            "except ImportError:",
-            "    cloudpickle = None",
-            "",
-            "try:",
-            "    with open('function_data.pkl', 'rb') as f:",
-            "        data = pickle.load(f)",
-            "    ",
-            "    # Try dill first, then cloudpickle",
-            "    try:",
-            "        func = dill.loads(data['function']) if dill else None",
-            "    except:",
-            "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
-            "    ",
-            "    args = pickle.loads(data['args'])",
-            "    kwargs = pickle.loads(data['kwargs'])",
-            "    ",
-            "    result = func(*args, **kwargs)",
-            "    ",
-            "    with open('result.pkl', 'wb') as f:",
-            "        pickle.dump(result, f, protocol=4)",
-            "        ",
-            "except Exception as e:",
-            "    with open('error.pkl', 'wb') as f:",
-            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-            "    raise",
-            '"',
-        ]
-    )
+
+    # Check if we have two-venv setup
+    if "venv1_serialization" in python_cmd:
+        # Use the two-venv approach for cross-version compatibility
+        script_lines.extend(
+            [
+                f"cd {remote_job_dir}",
+                "",
+                "# Two-venv approach for cross-version compatibility",
+                "# VENV1: Serialization/deserialization with compatible Python",
+                "# VENV2: Function execution with proper environment",
+                "",
+                "# Step 1: Use VENV1 to deserialize function data",
+                f"source {remote_job_dir}/venv1_serialization/bin/activate",
+                f'{python_cmd} -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "try:",
+                "    import dill",
+                "except ImportError:",
+                "    dill = None",
+                "try:",
+                "    import cloudpickle",
+                "except ImportError:",
+                "    cloudpickle = None",
+                "",
+                "print('VENV1 - Deserializing function data')",
+                "print('Python version:', sys.version)",
+                "",
+                "try:",
+                "    with open('function_data.pkl', 'rb') as f:",
+                "        data = pickle.load(f)",
+                "    ",
+                "    # Try to deserialize function",
+                "    func = None",
+                "    try:",
+                "        func = dill.loads(data['function']) if dill else None",
+                "        print('Successfully deserialized function with dill')",
+                "    except Exception as e:",
+                "        print('Dill deserialization failed:', str(e))",
+                "        try:",
+                "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
+                "            print('Successfully deserialized function with cloudpickle')",
+                "        except Exception as e2:",
+                "            print('Cloudpickle deserialization failed:', str(e2))",
+                "            # Try source code fallback",
+                "            func_info = data.get('func_info', {})",
+                "            if func_info.get('source'):",
+                "                print('Using source code fallback')",
+                "                # Remove @cluster decorator from source",
+                "                import textwrap",
+                "                source = func_info['source']",
+                "                lines = source.split('\\n')",
+                "                clean_lines = []",
+                "                for line in lines:",
+                "                    if not line.strip().startswith('@'):",
+                "                        clean_lines.append(line)",
+                "                clean_source = '\\n'.join(clean_lines)",
+                "                clean_source = textwrap.dedent(clean_source)",
+                "                ",
+                "                # Create function from source",
+                "                namespace = {}",
+                "                exec(clean_source, namespace)",
+                "                func = namespace[func_info['name']]",
+                "                print('Successfully created function from source code')",
+                "            else:",
+                "                raise Exception('All deserialization methods failed')",
+                "    ",
+                "    args = pickle.loads(data['args'])",
+                "    kwargs = pickle.loads(data['kwargs'])",
+                "    ",
+                "    # Pass data to VENV2 for execution",
+                "    with open('function_deserialized.pkl', 'wb') as f:",
+                "        if 'clean_source' in locals():",
+                "            # Function was created from source code, pass the source",
+                "            pickle.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+                "        else:",
+                "            # Function was deserialized from binary, pass the function object",
+                "            pickle.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+                "    ",
+                "    print('VENV1 - Function data prepared for VENV2')",
+                "    ",
+                "except Exception as e:",
+                "    print('VENV1 - Error during deserialization:', str(e))",
+                "    traceback.print_exc()",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    raise",
+                '"',
+                "",
+                "# Step 2: Use VENV2 to execute the function",
+                f"source {remote_job_dir}/venv2_execution/bin/activate",
+                f'{remote_job_dir}/venv2_execution/bin/python -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "print('VENV2 - Executing function')",
+                "print('Python version:', sys.version)",
+                "",
+                "try:",
+                "    with open('function_deserialized.pkl', 'rb') as f:",
+                "        exec_data = pickle.load(f)",
+                "    ",
+                "    if 'func' in exec_data:",
+                "        # Function object was passed",
+                "        func = exec_data['func']",
+                "    elif 'source' in exec_data:",
+                "        # Source code was passed, recreate function",
+                "        print('Recreating function from source code in VENV2')",
+                "        namespace = {}",
+                "        exec(exec_data['source'], namespace)",
+                "        func = namespace[exec_data['func_name']]",
+                "    else:",
+                "        raise Exception('No function or source code found')",
+                "    ",
+                "    args = exec_data['args']",
+                "    kwargs = exec_data['kwargs']",
+                "    ",
+                "    # Execute the function",
+                "    print('Function executed successfully')",
+                "    result = func(*args, **kwargs)",
+                "    ",
+                "    with open('result_venv2.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "        ",
+                "    print('VENV2 - Function execution completed')",
+                "    ",
+                "except Exception as e:",
+                "    print('VENV2 - Error during execution:', str(e))",
+                "    traceback.print_exc()",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    raise",
+                '"',
+                "",
+                "# Step 3: Use VENV1 to serialize the result back",
+                f"source {remote_job_dir}/venv1_serialization/bin/activate",
+                f'{python_cmd} -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "print('VENV1 - Serializing result')",
+                "",
+                "try:",
+                "    with open('result_venv2.pkl', 'rb') as f:",
+                "        result = pickle.load(f)",
+                "    ",
+                "    with open('result.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "        ",
+                "    print('Result serialized successfully')",
+                "    ",
+                "except Exception as e:",
+                "    print('VENV1 - Error during result serialization:', str(e))",
+                "    traceback.print_exc()",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    raise",
+                '"',
+            ]
+        )
+    else:
+        # Use the original single-venv approach
+        script_lines.extend(
+            [
+                f"cd {remote_job_dir}",
+                "source venv/bin/activate",
+                f'{python_cmd} -c "',
+                "import pickle",
+                "import sys",
+                "import traceback",
+                "",
+                "try:",
+                "    import dill",
+                "except ImportError:",
+                "    dill = None",
+                "try:",
+                "    import cloudpickle",
+                "except ImportError:",
+                "    cloudpickle = None",
+                "",
+                "try:",
+                "    with open('function_data.pkl', 'rb') as f:",
+                "        data = pickle.load(f)",
+                "    ",
+                "    # Try dill first, then cloudpickle",
+                "    try:",
+                "        func = dill.loads(data['function']) if dill else None",
+                "    except:",
+                "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
+                "    ",
+                "    args = pickle.loads(data['args'])",
+                "    kwargs = pickle.loads(data['kwargs'])",
+                "    ",
+                "    result = func(*args, **kwargs)",
+                "    ",
+                "    with open('result.pkl', 'wb') as f:",
+                "        pickle.dump(result, f, protocol=4)",
+                "        ",
+                "except Exception as e:",
+                "    with open('error.pkl', 'wb') as f:",
+                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "    raise",
+                '"',
+            ]
+        )
 
     return "\n".join(script_lines)
 
@@ -815,6 +982,17 @@ def _create_pbs_script(
 
     if job_config.get("queue"):
         script_lines.append(f"#PBS -q {job_config['queue']}")
+
+    # Add environment setup
+    if config.module_loads:
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
+    if config.environment_variables:
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
+    if config.pre_execution_commands:
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
 
     # Add similar execution logic as SLURM
     script_lines.extend(
@@ -843,68 +1021,84 @@ def _create_sge_script(
         f"#$ -l h_rt={job_config['time']}",
         "#$ -cwd",
         "",
-        f"cd {remote_job_dir}",
-        "source venv/bin/activate",
-        f'{config.python_executable if config.python_executable else "python"} -c "',
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "try:",
-        "    import dill",
-        "except ImportError:",
-        "    dill = None",
-        "try:",
-        "    import cloudpickle",
-        "except ImportError:",
-        "    cloudpickle = None",
-        "",
-        "try:",
-        "    with open('function_data.pkl', 'rb') as f:",
-        "        data = pickle.load(f)",
-        "    ",
-        "    # Try dill first, then cloudpickle, then source code",
-        "    func = None",
-        "    if dill:",
-        "        try:",
-        "            func = dill.loads(data['function'])",
-        "        except Exception as e:",
-        "            pass",
-        "    if func is None and cloudpickle:",
-        "        try:",
-        "            func = cloudpickle.loads(data['function'])",
-        "        except Exception as e:",
-        "            pass",
-        "    if func is None and data.get('function_source'):",
-        "        try:",
-        "            import textwrap",
-        "            source = data['function_source']",
-        "            # Execute the source code to create the function",
-        "            namespace = {}",
-        "            exec(source, namespace)",
-        "            # Get the function name from func_info",
-        "            func_name = data['func_info']['name']",
-        "            func = namespace[func_name]",
-        "        except Exception as e:",
-        "            pass",
-        "    if func is None:",
-        "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
-        "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
-        "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
-        "    ",
-        "    args = pickle.loads(data['args'])",
-        "    kwargs = pickle.loads(data['kwargs'])",
-        "    ",
-        "    result = func(*args, **kwargs)",
-        "    ",
-        "    with open('result.pkl', 'wb') as f:",
-        "        pickle.dump(result, f, protocol=4)",
-        "except Exception as e:",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
     ]
+
+    # Add environment setup
+    if config.module_loads:
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
+    if config.environment_variables:
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
+    if config.pre_execution_commands:
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
+
+    script_lines.extend(
+        [
+            f"cd {remote_job_dir}",
+            "source venv/bin/activate",
+            f'{config.python_executable if config.python_executable else "python"} -c "',
+            "import pickle",
+            "import sys",
+            "import traceback",
+            "",
+            "try:",
+            "    import dill",
+            "except ImportError:",
+            "    dill = None",
+            "try:",
+            "    import cloudpickle",
+            "except ImportError:",
+            "    cloudpickle = None",
+            "",
+            "try:",
+            "    with open('function_data.pkl', 'rb') as f:",
+            "        data = pickle.load(f)",
+            "    ",
+            "    # Try dill first, then cloudpickle, then source code",
+            "    func = None",
+            "    if dill:",
+            "        try:",
+            "            func = dill.loads(data['function'])",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None and cloudpickle:",
+            "        try:",
+            "            func = cloudpickle.loads(data['function'])",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None and data.get('function_source'):",
+            "        try:",
+            "            import textwrap",
+            "            source = data['function_source']",
+            "            # Execute the source code to create the function",
+            "            namespace = {}",
+            "            exec(source, namespace)",
+            "            # Get the function name from func_info",
+            "            func_name = data['func_info']['name']",
+            "            func = namespace[func_name]",
+            "        except Exception as e:",
+            "            pass",
+            "    if func is None:",
+            "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
+            "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
+            "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
+            "    ",
+            "    args = pickle.loads(data['args'])",
+            "    kwargs = pickle.loads(data['kwargs'])",
+            "    ",
+            "    result = func(*args, **kwargs)",
+            "    ",
+            "    with open('result.pkl', 'wb') as f:",
+            "        pickle.dump(result, f, protocol=4)",
+            "except Exception as e:",
+            "    with open('error.pkl', 'wb') as f:",
+            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+            "    raise",
+            '"',
+        ]
+    )
 
     return "\n".join(script_lines)
 
@@ -916,27 +1110,51 @@ def _create_ssh_script(
 
     python_cmd = config.python_executable if config.python_executable else "python"
 
+    # Start with base script structure
+    script_lines = [
+        "#!/bin/bash",
+        f"cd {remote_job_dir}",
+        "",
+    ]
+
+    # Add environment setup (module loads, environment variables, pre-execution commands)
+    if config.module_loads:
+        script_lines.append("# Load required modules")
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
+        script_lines.append("")
+
+    if config.environment_variables:
+        script_lines.append("# Set environment variables")
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
+        script_lines.append("")
+
+    if config.pre_execution_commands:
+        script_lines.append("# Execute pre-execution commands")
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
+        script_lines.append("")
+
     # Check if we have two-venv setup
     if "venv1_serialization" in python_cmd:
         # Use the two-venv approach
-        script_lines = [
-            "#!/bin/bash",
-            f"cd {remote_job_dir}",
-            "",
-            "# Two-venv approach for cross-version compatibility",
-            "# VENV1: Serialization/deserialization",
-            "# VENV2: Function execution",
-            "",
-            "# Step 1: Use VENV1 to deserialize function data",
-            f"source {remote_job_dir}/venv1_serialization/bin/activate",
-        ]
+        script_lines.extend(
+            [
+                "# Two-venv approach for cross-version compatibility",
+                "# VENV1: Serialization/deserialization",
+                "# VENV2: Function execution",
+                "",
+                "# Step 1: Use VENV1 to deserialize function data",
+                f"source {remote_job_dir}/venv1_serialization/bin/activate",
+            ]
+        )
     else:
         # Use the original single-venv approach
-        script_lines = [
-            "#!/bin/bash",
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate || echo 'No venv found, using system Python'",
-        ]
+        script_lines.append(
+            "source venv/bin/activate || echo 'No venv found, using system Python'"
+        )
+        script_lines.append("")
 
     # Add the Python execution part
     if "venv1_serialization" in python_cmd:
