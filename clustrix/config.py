@@ -115,6 +115,12 @@ class ClusterConfig:
     module_loads: Optional[list] = None
     pre_execution_commands: Optional[list] = None
 
+    # Cluster-specific package and setup configuration
+    cluster_packages: Optional[list] = None  # Additional packages to install in VENV2
+    venv_post_install_commands: Optional[list] = (
+        None  # Commands to run after package installation
+    )
+
     def __post_init__(self):
         if self.environment_variables is None:
             self.environment_variables = {}
@@ -122,6 +128,10 @@ class ClusterConfig:
             self.module_loads = []
         if self.pre_execution_commands is None:
             self.pre_execution_commands = []
+        if self.cluster_packages is None:
+            self.cluster_packages = []
+        if self.venv_post_install_commands is None:
+            self.venv_post_install_commands = []
 
         # Auto-install cloud provider dependencies if needed
         self._ensure_cloud_dependencies()

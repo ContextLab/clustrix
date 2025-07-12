@@ -29,3 +29,22 @@ pre_execution_commands:
   - "export PATH=/usr/bin:$PATH"
   - "which python3 || echo 'Python3 not found in PATH'"
   - "module list"
+
+# Cluster-specific packages to install in VENV2 (tensor01 has GPU support)
+cluster_packages:
+  # Install PyTorch with CUDA support first (try CUDA 11.8 then fallback)
+  - package: "torch torchvision torchaudio"
+    pip_args: "--index-url https://download.pytorch.org/whl/cu118"
+    timeout: 600
+  # Install TensorFlow with GPU support
+  - package: "tensorflow"
+    timeout: 600
+  # Install additional GPU utilities
+  - "nvidia-ml-py3"
+  - "gpustat"
+
+# Commands to run after package installation in VENV2
+venv_post_install_commands:
+  - "python -c \"import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA devices:', torch.cuda.device_count() if torch.cuda.is_available() else 'No CUDA')\" || echo 'PyTorch test failed'"
+  - "python -c \"import tensorflow as tf; print('TensorFlow version:', tf.__version__); print('GPU devices:', len(tf.config.list_physical_devices('GPU')) if hasattr(tf.config, 'list_physical_devices') else 'GPU detection unavailable')\" || echo 'TensorFlow test failed'"
+  - "nvidia-smi || echo 'nvidia-smi not available'"

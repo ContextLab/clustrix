@@ -460,7 +460,7 @@ def setup_two_venv_environment(
         "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
     ]
 
-    # Install essential packages in VENV2
+    # Install essential packages in VENV2 first
     essential_packages = ["dill", "cloudpickle"]
     for pkg in essential_packages:
         if pkg in requirements:
@@ -471,6 +471,71 @@ def setup_two_venv_environment(
             commands.append(
                 f"pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
             )
+
+    # Install packages from local environment requirements (selective)
+    if requirements:
+        # Filter out essential packages already installed
+        remaining_reqs = {
+            k: v for k, v in requirements.items() if k not in essential_packages
+        }
+
+        # Only install core scientific packages that are commonly needed
+        core_scientific_packages = {
+            "numpy",
+            "scipy",
+            "pandas",
+            "matplotlib",
+            "seaborn",
+            "scikit-learn",
+            "jupyter",
+            "ipython",
+            "requests",
+        }
+
+        # Filter to only install packages that are in both requirements and core list
+        filtered_reqs = {
+            k: v
+            for k, v in remaining_reqs.items()
+            if k.lower() in core_scientific_packages
+        }
+
+        if filtered_reqs:
+            # Install core scientific packages from local environment
+            for pkg, version in filtered_reqs.items():
+                commands.append(
+                    f"pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in venv2'"
+                )
+
+    # Add cluster-specific package installations from config
+    if hasattr(config, "cluster_packages") and config.cluster_packages:
+        commands.append("echo 'Installing cluster-specific packages...'")
+        for package_spec in config.cluster_packages:
+            if isinstance(package_spec, str):
+                # Simple package name or package==version
+                commands.append(
+                    f"pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
+                )
+            elif isinstance(package_spec, dict):
+                # Complex package specification with options
+                pkg_name = package_spec.get("package", "")
+                pip_args = package_spec.get("pip_args", "")
+                timeout = package_spec.get("timeout", 300)
+
+                if pkg_name:
+                    install_cmd = f"pip install {pkg_name}"
+                    if pip_args:
+                        install_cmd += f" {pip_args}"
+                    install_cmd += f" --timeout={timeout} || echo 'Failed to install cluster package: {pkg_name}'"
+                    commands.append(install_cmd)
+
+    # Add cluster-specific post-installation commands from config
+    if (
+        hasattr(config, "venv_post_install_commands")
+        and config.venv_post_install_commands
+    ):
+        commands.append("echo 'Running cluster-specific post-installation commands...'")
+        for cmd in config.venv_post_install_commands:
+            commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
 
     commands.append("deactivate")
 
