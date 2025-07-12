@@ -45,10 +45,14 @@ def test_tensor01_basic_gpu_detection():
             "python_version": "unknown",
         }
 
-        # Get hostname (modern Python with VENV2)
+        # Get hostname (Python 3.6 compatible)
         try:
             hostname_result = subprocess.run(
-                ["hostname"], capture_output=True, text=True, timeout=5
+                ["hostname"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                universal_newlines=True, 
+                timeout=5
             )
             if hostname_result.returncode == 0:
                 result["hostname"] = hostname_result.stdout.strip()
@@ -66,7 +70,11 @@ def test_tensor01_basic_gpu_detection():
         # Try basic nvidia-smi
         try:
             nvidia_result = subprocess.run(
-                ["nvidia-smi", "-L"], capture_output=True, text=True, timeout=10
+                ["nvidia-smi", "-L"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                universal_newlines=True, 
+                timeout=10
             )
             if nvidia_result.returncode == 0:
                 gpu_lines = nvidia_result.stdout.strip().split("\n")

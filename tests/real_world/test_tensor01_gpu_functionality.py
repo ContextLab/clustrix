@@ -62,14 +62,16 @@ def test_tensor01_cuda_detection():
 
         # Test nvidia-smi availability and get basic GPU info
         try:
+            # Python 3.6 compatible subprocess call
             nvidia_result = subprocess.run(
                 [
                     "nvidia-smi",
                     "--query-gpu=index,name,memory.total,memory.free,memory.used,utilization.gpu,temperature.gpu",
                     "--format=csv,noheader,nounits",
                 ],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=15,
             )
 
@@ -108,8 +110,9 @@ def test_tensor01_cuda_detection():
         try:
             driver_result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=10,
             )
             if driver_result.returncode == 0:
@@ -136,8 +139,9 @@ def test_tensor01_cuda_detection():
         try:
             nvcc_result = subprocess.run(
                 ["nvcc", "--version"],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=10,
             )
             if nvcc_result.returncode == 0:
@@ -150,7 +154,7 @@ def test_tensor01_cuda_detection():
             else:
                 cuda_info["nvcc_available"] = False
                 cuda_info["nvcc_error"] = (
-                    nvcc_result.stderr.decode()
+                    nvcc_result.stderr
                     if nvcc_result.stderr
                     else "nvcc not found"
                 )
@@ -231,11 +235,22 @@ def test_tensor01_cuda_detection():
             cuda_info["nvidia_smi_available"] and cuda_info["gpu_count"] > 0
         )
 
+        # Get hostname using Python 3.6 compatible subprocess
+        try:
+            hostname_result = subprocess.run(
+                ["hostname"], 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.PIPE, 
+                universal_newlines=True, 
+                timeout=5
+            )
+            hostname = hostname_result.stdout.strip() if hostname_result.returncode == 0 else "unknown"
+        except Exception:
+            hostname = "hostname_failed"
+
         return {
             "cuda_info": cuda_info,
-            "hostname": subprocess.run(
-                ["hostname"], capture_output=True, text=True, timeout=5
-            ).stdout.strip(),
+            "hostname": hostname,
             "python_version": sys.version,
             "detection_successful": True,
         }
@@ -418,8 +433,9 @@ def test_tensor01_single_gpu_computation():
                     "--query-gpu=index,utilization.gpu,memory.used",
                     "--format=csv,noheader,nounits",
                 ],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=10,
             )
             if gpu_util_result.returncode == 0:
@@ -616,8 +632,9 @@ def test_tensor01_dual_gpu_computation():
                     "--query-gpu=index,name,utilization.gpu,memory.used",
                     "--format=csv,noheader,nounits",
                 ],
-                capture_output=True,
-                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
                 timeout=10,
             )
             if gpu_util_result.returncode == 0:
