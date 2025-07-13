@@ -8,14 +8,12 @@ from .local_executor import create_local_executor
 from .loop_analysis import find_parallelizable_loops
 from .utils import detect_loops, serialize_function
 from .gpu_utils import (
-    detect_gpu_availability, 
     detect_gpu_parallelizable_operations,
-    create_gpu_parallel_execution_plan
 )
 from .function_flattening import (
     analyze_function_complexity,
     auto_flatten_if_needed,
-    create_simple_subprocess_fallback
+    create_simple_subprocess_fallback,
 )
 
 
@@ -76,10 +74,12 @@ def cluster(
             should_parallelize = (
                 parallel if parallel is not None else config.auto_parallel
             )
-            
+
             # Check if GPU parallelization should be attempted
             should_gpu_parallelize = (
-                auto_gpu_parallel if auto_gpu_parallel is not None else config.auto_gpu_parallel
+                auto_gpu_parallel
+                if auto_gpu_parallel is not None
+                else config.auto_gpu_parallel
             )
 
             if execution_mode == "local":
@@ -178,25 +178,33 @@ def _execute_single(
 ) -> Any:
     """Execute function once on cluster."""
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     # Analyze function complexity and flatten if needed
     complexity_info = analyze_function_complexity(func)
-    
+
     if complexity_info.get("is_complex", False):
-        logger.info(f"Function {func.__name__} is complex (score: {complexity_info['complexity_score']}), attempting automatic flattening")
-        
+        logger.info(
+            f"Function {func.__name__} is complex "
+            f"(score: {complexity_info['complexity_score']}), attempting automatic flattening"
+        )
+
         # Attempt automatic flattening
         flattened_func, flattening_info = auto_flatten_if_needed(func)
-        
+
         if flattening_info and flattening_info.get("success", False):
             logger.info(f"Successfully flattened {func.__name__}")
             func_to_execute = flattened_func
         else:
-            logger.warning(f"Failed to flatten {func.__name__}, using simple subprocess fallback")
+            logger.warning(
+                f"Failed to flatten {func.__name__}, using simple subprocess fallback"
+            )
             func_to_execute = create_simple_subprocess_fallback(func, *args, **kwargs)
     else:
-        logger.debug(f"Function {func.__name__} is simple (score: {complexity_info['complexity_score']}), executing as-is")
+        logger.debug(
+            f"Function {func.__name__} is simple (score: {complexity_info['complexity_score']}), executing as-is"
+        )
         func_to_execute = func
 
     # Serialize function and dependencies
@@ -300,7 +308,7 @@ def _attempt_client_side_gpu_parallelization(
 ) -> Optional[Any]:
     """
     Attempt client-side GPU parallelization (similar to CPU parallelization).
-    
+
     This approach:
     1. Detects GPU availability on remote cluster
     2. Analyzes function for parallelizable operations
@@ -309,62 +317,80 @@ def _attempt_client_side_gpu_parallelization(
     5. Combines results
     """
     import logging
+
     logger = logging.getLogger(__name__)
-    
+
     try:
         # Step 1: Simple GPU detection on remote cluster
         gpu_info = _detect_remote_gpu_count(executor, job_config)
         if not gpu_info or gpu_info.get("count", 0) < 2:
             logger.info("GPU parallelization not beneficial: insufficient GPUs")
             return None
-        
+
         # Step 2: Analyze function for GPU parallelizable operations
         gpu_ops = detect_gpu_parallelizable_operations(func, args, kwargs)
         if not gpu_ops:
-            logger.info("GPU parallelization not beneficial: no parallelizable operations found")
+            logger.info(
+                "GPU parallelization not beneficial: no parallelizable operations found"
+            )
             return None
-        
+
         # Step 3: Create client-side execution plan
-        execution_plan = _create_client_side_gpu_plan(func, args, kwargs, gpu_info, gpu_ops)
+        execution_plan = _create_client_side_gpu_plan(
+            func, args, kwargs, gpu_info, gpu_ops
+        )
         if not execution_plan:
             logger.info("GPU parallelization not beneficial: no viable execution plan")
             return None
-        
+
         # Step 4: Execute GPU parallelization using client-side approach
-        logger.info(f"Executing client-side GPU parallelization with {gpu_info['count']} GPUs")
+        logger.info(
+            f"Executing client-side GPU parallelization with {gpu_info['count']} GPUs"
+        )
         return _execute_client_side_gpu_parallel(executor, execution_plan, job_config)
-        
+
     except Exception as e:
         logger.warning(f"GPU parallelization attempt failed: {e}")
         return None
 
 
-def _detect_remote_gpu_count(executor: ClusterExecutor, job_config: dict) -> Optional[Dict[str, Any]]:
+def _detect_remote_gpu_count(
+    executor: ClusterExecutor, job_config: dict
+) -> Optional[Dict[str, Any]]:
     """Detect GPU count on remote cluster using simple function."""
+
     def simple_gpu_count():
         """Simple GPU count detection."""
         import subprocess
+
         result = subprocess.run(
-            ["python", "-c", "import torch; print(f'GPU_COUNT:{torch.cuda.device_count()}')"],
+            [
+                "python",
+                "-c",
+                "import torch; print(f'GPU_COUNT:{torch.cuda.device_count()}')",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
-            timeout=30
+            timeout=30,
         )
         return {"output": result.stdout}
-    
+
     try:
         from .utils import serialize_function
+
         detect_func_data = serialize_function(simple_gpu_count, (), {})
-        detect_job_id = executor.submit_job(detect_func_data, {"cores": 1, "memory": "2GB"})
+        detect_job_id = executor.submit_job(
+            detect_func_data, {"cores": 1, "memory": "2GB"}
+        )
         result = executor.wait_for_result(detect_job_id)
-        
+
         if "GPU_COUNT:" in result["output"]:
             gpu_count = int(result["output"].split("GPU_COUNT:", 1)[1].strip())
             return {"available": gpu_count > 0, "count": gpu_count}
-        
+
         return None
-        
+
     except Exception:
         return None
 
@@ -374,43 +400,44 @@ def _create_client_side_gpu_plan(
     args: tuple,
     kwargs: dict,
     gpu_info: Dict[str, Any],
-    gpu_ops: List[Dict[str, Any]]
+    gpu_ops: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     """Create client-side GPU execution plan."""
     if not gpu_ops:
         return None
-    
+
     # Select the best operation to parallelize
-    best_op = max(gpu_ops, key=lambda op: {
-        "high": 3, "medium": 2, "low": 1
-    }.get(op.get("estimated_benefit", "low"), 0))
-    
+    best_op = max(
+        gpu_ops,
+        key=lambda op: {"high": 3, "medium": 2, "low": 1}.get(
+            op.get("estimated_benefit", "low"), 0
+        ),
+    )
+
     if best_op.get("estimated_benefit") == "low":
         return None
-    
+
     return {
         "target_operation": best_op,
         "gpu_count": gpu_info["count"],
         "parallelization_type": "client_side",
-        "chunk_strategy": "even_split"
+        "chunk_strategy": "even_split",
     }
 
 
 def _execute_client_side_gpu_parallel(
-    executor: ClusterExecutor,
-    execution_plan: Dict[str, Any],
-    job_config: dict
+    executor: ClusterExecutor, execution_plan: Dict[str, Any], job_config: dict
 ) -> Any:
     """Execute GPU parallelization using client-side approach."""
     gpu_count = execution_plan["gpu_count"]
-    target_op = execution_plan["target_operation"]
-    
+
     # Create simple functions for each GPU (avoiding complexity threshold)
     def create_gpu_specific_function(gpu_id: int):
         """Create a simple function for specific GPU."""
+
         def gpu_specific_task():
             import subprocess
-            
+
             # Simple GPU-specific computation
             gpu_code = f"""
 import torch
@@ -424,59 +451,66 @@ result = y.trace().item()
 
 print(f'GPU_{gpu_id}_RESULT:{{result}}')
 """
-            
+
             result = subprocess.run(
                 ["python", "-c", gpu_code],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 universal_newlines=True,
-                timeout=60
+                timeout=60,
             )
-            
+
             return {"output": result.stdout, "success": result.returncode == 0}
-        
+
         return gpu_specific_task
-    
+
     # Submit jobs to different GPUs in parallel
     job_ids = []
     for gpu_id in range(min(gpu_count, 4)):  # Limit to 4 GPUs to avoid too many jobs
         gpu_func = create_gpu_specific_function(gpu_id)
-        
-        from .utils import serialize_function
-        func_data = serialize_function(gpu_func, (), {})
-        
+
+        from .utils import serialize_function as util_serialize_function
+
+        func_data = util_serialize_function(gpu_func, (), {})
+
         # Modify job config to make this GPU visible
         gpu_job_config = job_config.copy()
         if "environment_variables" not in gpu_job_config:
             gpu_job_config["environment_variables"] = {}
         gpu_job_config["environment_variables"]["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-        
+
         job_id = executor.submit_job(func_data, {"cores": 1, "memory": "4GB"})
         job_ids.append((job_id, gpu_id))
-    
+
     # Collect results from all GPUs
-    gpu_results = {}
+    gpu_results: Dict[str, Optional[float]] = {}
     for job_id, gpu_id in job_ids:
         try:
             result = executor.wait_for_result(job_id)
-            if result.get("success") and f"GPU_{gpu_id}_RESULT:" in result.get("output", ""):
+            if result.get("success") and f"GPU_{gpu_id}_RESULT:" in result.get(
+                "output", ""
+            ):
                 output = result["output"]
-                result_line = [line for line in output.split('\n') if f'GPU_{gpu_id}_RESULT:' in line][0]
-                result_value = float(result_line.split(':', 1)[1])
+                result_line = [
+                    line
+                    for line in output.split("\n")
+                    if f"GPU_{gpu_id}_RESULT:" in line
+                ][0]
+                result_value = float(result_line.split(":", 1)[1])
                 gpu_results[f"gpu_{gpu_id}"] = result_value
             else:
                 gpu_results[f"gpu_{gpu_id}"] = None
-        except Exception as e:
+        except Exception:
             gpu_results[f"gpu_{gpu_id}"] = None
-    
+
     # Return combined results
     successful_gpus = [k for k, v in gpu_results.items() if v is not None]
-    
+
     return {
         "gpu_parallel": True,
         "gpu_count": len(successful_gpus),
         "results": gpu_results,
-        "successful_gpus": successful_gpus
+        "successful_gpus": successful_gpus,
     }
 
 

@@ -18,7 +18,9 @@ from .config import ClusterConfig
 class FileInfo:
     """File information structure."""
 
-    def __init__(self, size: int, modified: float, is_dir: bool, permissions: str, name: str = ""):
+    def __init__(
+        self, size: int, modified: float, is_dir: bool, permissions: str, name: str = ""
+    ):
         """Initialize FileInfo with file metadata."""
         self.size = size
         self.modified = modified  # Unix timestamp
@@ -502,7 +504,11 @@ class ClusterFilesystem:
         permissions = oct(mode_hex & 0o777)[-3:]
 
         return FileInfo(
-            size=size, modified=mtime, is_dir=is_dir, permissions=permissions, name=os.path.basename(path)
+            size=size,
+            modified=mtime,
+            is_dir=is_dir,
+            permissions=permissions,
+            name=os.path.basename(path),
         )
 
     def _remote_exists(self, path: str) -> bool:

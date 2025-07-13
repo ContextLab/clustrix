@@ -18,7 +18,15 @@ import zipfile
 import json
 import paramiko
 
-def test_shared_filesystem_on_slurm(config):
+def test_shared_filesystem_on_slurm():
+    """Test that skips when run in pytest to avoid fixture errors."""
+    import pytest
+    
+    # This is a manual test script, not a proper pytest test
+    # Skip when run by pytest to avoid fixture configuration issues
+    pytest.skip("This is a manual test script - run directly with 'python scripts/test_slurm_shared_filesystem.py'")
+
+def slurm_test_function(config):
     """
     Function to be executed on SLURM cluster to test shared filesystem operations.
     This function will be packaged and executed remotely.
@@ -164,7 +172,7 @@ def main():
     # Package the test function
     print("\n📦 Creating test package...")
     package_info = package_function_for_execution(
-        test_shared_filesystem_on_slurm,
+        slurm_test_function,
         config,
         func_args=(config,)
     )
