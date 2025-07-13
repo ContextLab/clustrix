@@ -6,12 +6,52 @@ import os
 import pytest
 from pathlib import Path
 import tempfile
+import socket
+import subprocess
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
 
 
 # Create global test manager instance
 test_manager = RealWorldTestManager()
+
+
+def is_dartmouth_network():
+    """
+    Check if we're on Dartmouth network (on campus or VPN).
+    
+    Returns:
+        bool: True if on Dartmouth network, False otherwise
+    """
+    try:
+        # Method 1: Check hostname
+        hostname = socket.getfqdn()
+        if '.dartmouth.edu' in hostname:
+            return True
+        
+        # Method 2: Try to resolve a Dartmouth-specific host
+        try:
+            socket.gethostbyname('tensor01.dartmouth.edu')
+            return True
+        except socket.gaierror:
+            pass
+        
+        # Method 3: Check if we can ping tensor01 (VPN test)
+        try:
+            result = subprocess.run(
+                ['ping', '-c', '1', '-W', '3000', 'tensor01.dartmouth.edu'],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5
+            )
+            return result.returncode == 0
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+        
+        return False
+        
+    except Exception:
+        return False
 
 
 @pytest.fixture(scope="session")
@@ -70,6 +110,38 @@ def ssh_credentials(test_credentials):
 
 
 @pytest.fixture
+def require_dartmouth_network():
+    """
+    Fixture that skips test if not on Dartmouth network.
+    
+    Usage:
+        def test_something(require_dartmouth_network):
+            # Test will be skipped if not on Dartmouth VPN
+            pass
+    """
+    if not is_dartmouth_network():
+        pytest.skip("Requires Dartmouth network access (VPN or on-campus)")
+
+
+@pytest.fixture
+def tensor01_credentials(test_credentials, require_dartmouth_network):
+    """tensor01 credentials (requires Dartmouth network)."""
+    creds = test_credentials.get_tensor01_credentials()
+    if not creds:
+        pytest.skip("tensor01 credentials not available")
+    return creds
+
+
+@pytest.fixture
+def ndoli_credentials(test_credentials, require_dartmouth_network):
+    """ndoli credentials (requires Dartmouth network).""" 
+    creds = test_credentials.get_ndoli_credentials()
+    if not creds:
+        pytest.skip("ndoli credentials not available")
+    return creds
+
+
+@pytest.fixture
 def screenshots_dir():
     """Directory for screenshot outputs."""
     screenshots_dir = Path("tests/real_world/screenshots")
@@ -123,6 +195,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "gcp_required: mark test as requiring GCP credentials"
     )
+    config.addinivalue_line(
+        "markers", "dartmouth_network: mark test as requiring Dartmouth network access (VPN or on-campus)"
+    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -142,6 +217,18 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "visual" in item.keywords:
                 item.add_marker(skip_visual)
+    
+    # Skip Dartmouth network tests if not on Dartmouth network
+    if not is_dartmouth_network():
+        skip_dartmouth = pytest.mark.skip(
+            reason="Dartmouth network tests skipped (requires VPN or on-campus access)"
+        )
+        for item in items:
+            if "dartmouth_network" in item.keywords:
+                item.add_marker(skip_dartmouth)
+            # Also skip specific tensor01 and ndoli tests by name
+            if any(keyword in item.name.lower() for keyword in ["tensor01", "ndoli"]):
+                item.add_marker(skip_dartmouth)
 
 
 def pytest_addoption(parser):

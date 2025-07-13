@@ -91,7 +91,9 @@ class ClusterConfig:
 
     # Execution preferences
     auto_parallel: bool = True
+    auto_gpu_parallel: bool = True  # Automatically parallelize across GPUs when available
     max_parallel_jobs: int = 100
+    max_gpu_parallel_jobs: int = 8  # Maximum parallel jobs per GPU
     job_poll_interval: int = 30
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False

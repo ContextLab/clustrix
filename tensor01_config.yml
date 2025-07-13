@@ -23,7 +23,7 @@ module_loads:
 
 environment_variables:
   OMP_NUM_THREADS: "1"
-  CUDA_VISIBLE_DEVICES: "0"
+  # CUDA_VISIBLE_DEVICES: "0"  # Commented out to allow detection of all 8 GPUs
 
 # Commands to run before creating virtual environment
 pre_execution_commands:
