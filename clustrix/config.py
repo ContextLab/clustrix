@@ -121,6 +121,9 @@ class ClusterConfig:
         None  # Commands to run after package installation
     )
 
+    # Runtime venv information (set during execution)
+    venv_info: Optional[dict] = None  # Information about created virtual environments
+
     def __post_init__(self):
         if self.environment_variables is None:
             self.environment_variables = {}
