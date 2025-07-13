@@ -37,6 +37,7 @@ class TestClusterDecorator:
             "partition": None,
             "queue": None,
             "parallel": None,
+            "auto_gpu_parallel": None,
             "environment": None,
             "async_submit": None,
         }
@@ -51,6 +52,7 @@ class TestClusterDecorator:
             time="04:00:00",
             partition="gpu",
             parallel=True,
+            auto_gpu_parallel=True,
             environment="test_env",
         )
         def test_func():
@@ -62,6 +64,7 @@ class TestClusterDecorator:
         assert config["time"] == "04:00:00"
         assert config["partition"] == "gpu"
         assert config["parallel"] is True
+        assert config["auto_gpu_parallel"] is True
         assert config["environment"] == "test_env"
 
     @patch("clustrix.executor.ClusterExecutor")
@@ -154,7 +157,7 @@ class TestClusterDecorator:
         mock_executor.submit_job.return_value = "job123"
         mock_executor.wait_for_result.return_value = {"result": 123}
 
-        @cluster
+        @cluster(auto_gpu_parallel=False)
         def test_func(a, b=10, c=20):
             return a + b + c
 

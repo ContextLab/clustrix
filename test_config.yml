@@ -4,6 +4,7 @@ profiles:
     aks_cluster_name: null
     api_key: null
     async_submit: false
+    auto_gpu_parallel: true
     auto_parallel: true
     aws_access_key: null
     aws_access_key_id: null
@@ -26,6 +27,7 @@ profiles:
     cloud_provider: manual
     cloud_region: null
     cluster_host: null
+    cluster_packages: []
     cluster_port: 22
     cluster_type: local
     conda_env_name: null
@@ -62,6 +64,7 @@ profiles:
     local_cache_dir: ~/.clustrix/cache
     local_parallel_threshold: 1000
     local_work_dir: null
+    max_gpu_parallel_jobs: 8
     max_parallel_jobs: 100
     module_loads: []
     onepassword_note: ''
@@ -76,3 +79,5 @@ profiles:
     use_1password: false
     use_env_password: false
     username: null
+    venv_info: null
+    venv_post_install_commands: []

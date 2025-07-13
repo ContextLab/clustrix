@@ -18,12 +18,18 @@ from .config import ClusterConfig
 class FileInfo:
     """File information structure."""
 
-    def __init__(self, size: int, modified: float, is_dir: bool, permissions: str):
+    def __init__(self, size: int, modified: float, is_dir: bool, permissions: str, name: str = ""):
         """Initialize FileInfo with file metadata."""
         self.size = size
         self.modified = modified  # Unix timestamp
         self.is_dir = is_dir
         self.permissions = permissions
+        self.name = name
+
+    @property
+    def is_file(self):
+        """Check if this is a file (not a directory)."""
+        return not self.is_dir
 
     @property
     def modified_datetime(self):
@@ -35,7 +41,7 @@ class FileInfo:
     def __repr__(self):
         """String representation of FileInfo."""
         return (
-            f"FileInfo(size={self.size}, modified={self.modified}, "
+            f"FileInfo(name='{self.name}', size={self.size}, modified={self.modified}, "
             f"is_dir={self.is_dir}, permissions='{self.permissions}')"
         )
 
@@ -44,7 +50,8 @@ class FileInfo:
         if not isinstance(other, FileInfo):
             return False
         return (
-            self.size == other.size
+            self.name == other.name
+            and self.size == other.size
             and self.modified == other.modified
             and self.is_dir == other.is_dir
             and self.permissions == other.permissions
@@ -374,6 +381,7 @@ class ClusterFilesystem:
             modified=stat.st_mtime,
             is_dir=os.path.isdir(full_path),
             permissions=oct(stat.st_mode)[-3:],
+            name=os.path.basename(path),
         )
 
     def _local_exists(self, path: str) -> bool:
@@ -494,7 +502,7 @@ class ClusterFilesystem:
         permissions = oct(mode_hex & 0o777)[-3:]
 
         return FileInfo(
-            size=size, modified=mtime, is_dir=is_dir, permissions=permissions
+            size=size, modified=mtime, is_dir=is_dir, permissions=permissions, name=os.path.basename(path)
         )
 
     def _remote_exists(self, path: str) -> bool:
