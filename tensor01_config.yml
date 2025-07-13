@@ -49,3 +49,20 @@ venv_post_install_commands:
   - "python -c \"import torch; print('PyTorch version:', torch.__version__); print('CUDA available:', torch.cuda.is_available()); print('CUDA devices:', torch.cuda.device_count() if torch.cuda.is_available() else 'No CUDA')\" || echo 'PyTorch test failed'"
   - "python -c \"import tensorflow as tf; print('TensorFlow version:', tf.__version__); print('GPU devices:', len(tf.config.list_physical_devices('GPU')) if hasattr(tf.config, 'list_physical_devices') else 'GPU detection unavailable')\" || echo 'TensorFlow test failed'"
   - "nvidia-smi || echo 'nvidia-smi not available'"
+
+# VERIFIED WORKING (2025-07-12):
+# - 8x NVIDIA RTX A6000 GPUs with 49GB VRAM each
+# - PyTorch 2.7.1+cu118 with CUDA support  
+# - Python 3.9.23 in conda environment
+# - Basic GPU tensor operations confirmed
+# 
+# FUNCTION DESIGN GUIDELINES:
+# ✅ Simple functions work reliably (< 20 lines, single subprocess)
+# ❌ Complex functions may fail (> 30 lines, multiple operations)
+# 
+# RECOMMENDED PATTERN:
+# @cluster(cores=1, memory="4GB")  
+# def simple_gpu_task():
+#     import subprocess
+#     result = subprocess.run(["python", "-c", "import torch; ..."], ...)
+#     return parsed_result
