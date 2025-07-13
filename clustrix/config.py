@@ -101,6 +101,8 @@ class ClusterConfig:
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
     async_submit: bool = False  # Use asynchronous job submission
+    use_two_venv: bool = True  # Use two-venv setup for cross-version compatibility
+    venv_setup_timeout: int = 300  # Timeout for venv setup in seconds (5 minutes)
 
     # Monitoring settings
     cost_monitoring: bool = False  # Enable cost monitoring for cloud providers

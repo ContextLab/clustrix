@@ -140,27 +140,73 @@ class ClusterExecutor:
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
-        # Setup two-venv environment for cross-version compatibility
-        try:
-            from .utils import setup_two_venv_environment
+        # Setup two-venv environment for cross-version compatibility (if enabled)
+        updated_config = self.config
+        if getattr(self.config, "use_two_venv", True):
+            try:
+                from .utils import setup_two_venv_environment
+                import threading
 
-            logger.info(
-                "Setting up two-venv environment for cross-version compatibility"
-            )
-            venv_info = setup_two_venv_environment(
-                self.ssh_client, remote_job_dir, func_data["requirements"], self.config
-            )
-            # Update config with venv paths for job script generation
-            updated_config = self.config
-            updated_config.python_executable = venv_info["venv1_python"]
-            # Store venv_info for script generation
-            updated_config.venv_info = venv_info
-            logger.info(
-                f"Two-venv setup successful, using: {venv_info['venv1_python']}"
-            )
-        except Exception as e:
-            logger.warning(f"Two-venv setup failed, falling back to basic setup: {e}")
-            # Fallback to basic environment setup
+                logger.info(
+                    "Setting up two-venv environment for cross-version compatibility"
+                )
+
+                # Use threading to implement timeout for venv setup
+                venv_info = None
+                exception_occurred = None
+
+                def setup_venv():
+                    nonlocal venv_info, exception_occurred
+                    try:
+                        venv_info = setup_two_venv_environment(
+                            self.ssh_client,
+                            remote_job_dir,
+                            func_data["requirements"],
+                            self.config,
+                        )
+                    except Exception as e:
+                        exception_occurred = e
+
+                setup_thread = threading.Thread(target=setup_venv)
+                setup_thread.daemon = True
+                setup_thread.start()
+                setup_thread.join(
+                    timeout=getattr(self.config, "venv_setup_timeout", 300)
+                )
+
+                if setup_thread.is_alive():
+                    logger.warning(
+                        "Two-venv setup timed out, falling back to basic setup"
+                    )
+                    raise TimeoutError("Two-venv setup timed out")
+                elif exception_occurred:
+                    raise exception_occurred
+                elif venv_info:
+                    # Update config with venv paths for job script generation
+                    updated_config.python_executable = venv_info["venv1_python"]
+                    # Store venv_info for script generation
+                    updated_config.venv_info = venv_info
+                    logger.info(
+                        f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+                    )
+                else:
+                    raise RuntimeError("Two-venv setup returned no result")
+
+            except Exception as e:
+                logger.warning(
+                    f"Two-venv setup failed, falling back to basic setup: {e}"
+                )
+                # Fallback to basic environment setup
+                setup_remote_environment(
+                    self.ssh_client,
+                    remote_job_dir,
+                    func_data["requirements"],
+                    self.config,
+                )
+                updated_config.venv_info = None
+        else:
+            logger.info("Two-venv setup disabled, using basic environment setup")
+            # Use basic environment setup
             setup_remote_environment(
                 self.ssh_client,
                 remote_job_dir,
@@ -487,30 +533,64 @@ except Exception as e:
         self._upload_file(local_pickle_path, f"{remote_job_dir}/function_data.pkl")
         os.unlink(local_pickle_path)
 
-        # Setup two-venv environment for cross-version compatibility
-        try:
-            from .utils import setup_two_venv_environment
+        # Setup two-venv environment for cross-version compatibility (if enabled)
+        updated_config = self.config
+        if getattr(self.config, "use_two_venv", True):
+            try:
+                from .utils import setup_two_venv_environment
+                import threading
 
-            logger.info(
-                "Setting up two-venv environment for cross-version compatibility"
-            )
-            venv_info = setup_two_venv_environment(
-                self.ssh_client, remote_job_dir, func_data["requirements"], self.config
-            )
+                logger.info(
+                    "Setting up two-venv environment for cross-version compatibility"
+                )
 
-            # Update config with venv paths
-            updated_config = self.config
-            updated_config.python_executable = venv_info["venv1_python"]
-            # Store venv_info for script generation
-            updated_config.venv_info = venv_info
-            logger.info(
-                f"Two-venv setup successful, using: {venv_info['venv1_python']}"
-            )
+                # Use threading to implement timeout for venv setup
+                venv_info = None
+                exception_occurred = None
 
-        except Exception as e:
-            logger.warning(f"Failed to setup two-venv environment: {e}")
-            # Fall back to original approach
-            updated_config = self.config
+                def setup_venv():
+                    nonlocal venv_info, exception_occurred
+                    try:
+                        venv_info = setup_two_venv_environment(
+                            self.ssh_client,
+                            remote_job_dir,
+                            func_data["requirements"],
+                            self.config,
+                        )
+                    except Exception as e:
+                        exception_occurred = e
+
+                setup_thread = threading.Thread(target=setup_venv)
+                setup_thread.daemon = True
+                setup_thread.start()
+                setup_thread.join(
+                    timeout=getattr(self.config, "venv_setup_timeout", 300)
+                )
+
+                if setup_thread.is_alive():
+                    logger.warning(
+                        "Two-venv setup timed out, falling back to basic setup"
+                    )
+                    raise TimeoutError("Two-venv setup timed out")
+                elif exception_occurred:
+                    raise exception_occurred
+                elif venv_info:
+                    # Update config with venv paths
+                    updated_config.python_executable = venv_info["venv1_python"]
+                    # Store venv_info for script generation
+                    updated_config.venv_info = venv_info
+                    logger.info(
+                        f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+                    )
+                else:
+                    raise RuntimeError("Two-venv setup returned no result")
+
+            except Exception as e:
+                logger.warning(f"Failed to setup two-venv environment: {e}")
+                # Fall back to original approach
+                updated_config.venv_info = None
+        else:
+            logger.info("Two-venv setup disabled, using basic environment setup")
             updated_config.venv_info = None
 
         # Create execution script
