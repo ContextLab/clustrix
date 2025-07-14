@@ -401,21 +401,55 @@ class FunctionFlattener:
     def _create_main_function(
         self, original_func: Callable, components: Dict[str, Any]
     ) -> str:
-        """Create simplified main function."""
+        """Create simplified main function with correct signature."""
         func_name = original_func.__name__
 
-        # Build simplified main function
+        # Get original function signature
+        import inspect
+
+        sig = inspect.signature(original_func)
+        params = list(sig.parameters.values())
+
+        # Build parameter string for function definition
+        param_strs = []
+        for param in params:
+            if param.default is param.empty:
+                param_strs.append(param.name)
+            else:
+                # Handle default values
+                default_repr = repr(param.default)
+                param_strs.append(f"{param.name}={default_repr}")
+
+        param_string = ", ".join(param_strs)
+
+        # Build parameter names for passing to subprocess
+        param_names = [param.name for param in params]
+
+        # Build simplified main function with correct signature
         main_code = f"""
-def {func_name}_flattened():
+def {func_name}_flattened({param_string}):
     \"\"\"Flattened version of {func_name} for remote execution.\"\"\"
     import subprocess
+    import json
 
-    # Execute flattened computation using subprocess pattern
-    result = subprocess.run([
-        "python", "-c", \"\"\"
+    # Prepare parameter values for injection into subprocess
+    param_dict = {{{", ".join([f'"{param}": {param}' for param in param_names])}}}
+    
+    # Build the computation code with parameter injection
+    computation_code = \"\"\"
+import json
+
+# Injected parameters
+{chr(10).join([f'{param} = json.loads(r"""{{{param}}}""")' for param in param_names]) if param_names else "# No parameters to inject"}
+
 # Flattened computation code
 {self._build_flattened_computation(components)}
 \"\"\"
+
+    # Execute flattened computation using subprocess pattern
+    formatted_code = computation_code.format(**{{k: json.dumps(v) for k, v in param_dict.items()}}) if param_dict else computation_code
+    result = subprocess.run([
+        "python", "-c", formatted_code
     ], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
        universal_newlines=True, timeout=120)
 
@@ -428,7 +462,6 @@ def {func_name}_flattened():
 
     for line in output_lines:
         if line.startswith('RESULT:'):
-            import json
             try:
                 parsed_result = json.loads(line[7:])  # Remove 'RESULT:' prefix
             except:
@@ -450,10 +483,22 @@ def {func_name}_flattened():
 
         code_parts.append("")  # Blank line
 
+        # Add nested function definitions
+        for nested in components.get("nested_functions", []):
+            if nested.get("source"):
+                code_parts.append(nested["source"])
+                code_parts.append("")
+
         # Add simple operations
         for op in components.get("simple_operations", []):
             if isinstance(op, dict) and "code" in op:
-                code_parts.append(op["code"])
+                code = op["code"]
+                # Convert return statements to result assignments
+                if code.strip().startswith("return "):
+                    result_expr = code.strip()[7:]  # Remove "return "
+                    code_parts.append(f"result = {result_expr}")
+                else:
+                    code_parts.append(code)
 
         # Handle loops (simplified or parallelized)
         for loop in components.get("loops", []):
@@ -776,262 +821,6 @@ class AdvancedFunctionFlattener:
             "error": f"Circular dependencies not yet supported: {dep_info.circular_dependencies}",
             "fallback_strategy": "use_subprocess_pattern",
         }
-
-    def _flatten_function_body(self, func_def: ast.FunctionDef) -> Dict[str, Any]:
-        """Analyze and flatten function body."""
-        components: Dict[str, List[Any]] = {
-            "imports": [],
-            "simple_operations": [],
-            "complex_operations": [],
-            "subprocess_calls": [],
-            "loops": [],
-            "conditionals": [],
-            "nested_functions": [],  # Store extracted nested functions
-        }
-
-        for stmt in func_def.body:
-            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
-                components["imports"].append(_ast_unparse(stmt))
-            elif isinstance(stmt, ast.FunctionDef):
-                # Extract nested function definition
-                nested_func = self._extract_nested_function(stmt)
-                components["nested_functions"].append(nested_func)
-            elif isinstance(stmt, ast.For):
-                components["loops"].append(self._extract_loop(stmt))
-            elif isinstance(stmt, ast.If):
-                components["conditionals"].append(self._extract_conditional(stmt))
-            elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
-                call_info = self._analyze_call(stmt.value)
-                if call_info.get("is_subprocess"):
-                    components["subprocess_calls"].append(call_info)
-                elif call_info.get("complexity", 0) > 3:
-                    components["complex_operations"].append(call_info)
-                else:
-                    components["simple_operations"].append(call_info)
-            else:
-                # Default to simple operation
-                try:
-                    components["simple_operations"].append(
-                        {
-                            "type": "statement",
-                            "code": _ast_unparse(stmt),
-                            "complexity": 1,
-                        }
-                    )
-                except Exception:
-                    components["simple_operations"].append(
-                        {
-                            "type": "statement",
-                            "code": "# Unparseable statement",
-                            "complexity": 1,
-                        }
-                    )
-
-        return components
-
-    def _extract_nested_function(self, func_node: ast.FunctionDef) -> Dict[str, Any]:
-        """Extract nested function definition for hoisting."""
-        try:
-            return {
-                "name": func_node.name,
-                "args": [arg.arg for arg in func_node.args.args],
-                "body": [_ast_unparse(stmt) for stmt in func_node.body],
-                "source": _ast_unparse(func_node),
-                "docstring": (
-                    func_node.body[0].value.s
-                    if (
-                        func_node.body
-                        and isinstance(func_node.body[0], ast.Expr)
-                        and isinstance(func_node.body[0].value, ast.Str)
-                    )
-                    else None
-                ),
-                "type": "nested_function",
-            }
-        except Exception as e:
-            logger.warning(f"Failed to extract nested function {func_node.name}: {e}")
-            return {
-                "name": func_node.name,
-                "type": "nested_function",
-                "extraction_error": str(e),
-                "source": f"# Failed to extract {func_node.name}",
-            }
-
-    def _extract_loop(self, loop_node: ast.For) -> Dict[str, Any]:
-        """Extract loop information for flattening."""
-        try:
-            return {
-                "type": "for_loop",
-                "target": _ast_unparse(loop_node.target),
-                "iter": _ast_unparse(loop_node.iter),
-                "body": [_ast_unparse(stmt) for stmt in loop_node.body],
-                "complexity": len(loop_node.body) * 2,
-                "parallelizable": self._is_loop_parallelizable(loop_node),
-            }
-        except Exception:
-            return {
-                "type": "for_loop",
-                "complexity": 5,
-                "parallelizable": False,
-                "extraction_error": True,
-            }
-
-    def _extract_conditional(self, if_node: ast.If) -> Dict[str, Any]:
-        """Extract conditional information."""
-        try:
-            return {
-                "type": "conditional",
-                "test": _ast_unparse(if_node.test),
-                "body": [_ast_unparse(stmt) for stmt in if_node.body],
-                "orelse": (
-                    [_ast_unparse(stmt) for stmt in if_node.orelse]
-                    if if_node.orelse
-                    else []
-                ),
-                "complexity": len(if_node.body) + len(if_node.orelse or []),
-            }
-        except Exception:
-            return {"type": "conditional", "complexity": 3, "extraction_error": True}
-
-    def _analyze_call(self, call_node: ast.Call) -> Dict[str, Any]:
-        """Analyze function call complexity."""
-        try:
-            call_str = _ast_unparse(call_node)
-
-            is_subprocess = (
-                "subprocess" in call_str or ".run(" in call_str or ".Popen(" in call_str
-            )
-
-            complexity = 1
-            if is_subprocess:
-                complexity = 5
-            elif len(call_str) > 100:
-                complexity = 3
-            elif "torch" in call_str or "cuda" in call_str:
-                complexity = 2
-
-            return {
-                "type": "function_call",
-                "code": call_str,
-                "is_subprocess": is_subprocess,
-                "complexity": complexity,
-                "length": len(call_str),
-            }
-        except Exception:
-            return {"type": "function_call", "complexity": 2, "extraction_error": True}
-
-    def _is_loop_parallelizable(self, loop_node: ast.For) -> bool:
-        """Check if a loop can be parallelized."""
-        # Simple heuristic: loops with independent iterations
-        # More sophisticated analysis could be added here
-        try:
-            # Check for dependencies between iterations
-            for stmt in loop_node.body:
-                if isinstance(stmt, ast.Assign):
-                    # Look for accumulator patterns
-                    if isinstance(stmt.targets[0], ast.Name):
-                        target_name = stmt.targets[0].id
-                        # Check if target is used in value expression
-                        for node in ast.walk(stmt.value):
-                            if isinstance(node, ast.Name) and node.id == target_name:
-                                return False  # Dependency found
-            return True
-        except Exception:
-            return False
-
-    def _create_main_function(
-        self, original_func: Callable, components: Dict[str, Any]
-    ) -> str:
-        """Create simplified main function."""
-        func_name = original_func.__name__
-
-        # Build simplified main function
-        main_code = f"""
-def {func_name}_flattened():
-    \"\"\"Flattened version of {func_name} for remote execution.\"\"\"
-    import subprocess
-
-    # Execute flattened computation using subprocess pattern
-    result = subprocess.run([
-        "python", "-c", \"\"\"
-# Flattened computation code
-{self._build_flattened_computation(components)}
-\"\"\"
-    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-       universal_newlines=True, timeout=120)
-
-    if result.returncode != 0:
-        return {{"success": False, "error": result.stderr}}
-
-    # Parse result from stdout
-    output_lines = result.stdout.strip().split('\\n')
-    parsed_result = None
-
-    for line in output_lines:
-        if line.startswith('RESULT:'):
-            import json
-            try:
-                parsed_result = json.loads(line[7:])  # Remove 'RESULT:' prefix
-            except:
-                parsed_result = line[7:]  # Fallback to string
-            break
-
-    return {{"success": True, "result": parsed_result, "output": result.stdout}}
-"""
-
-        return main_code
-
-    def _build_flattened_computation(self, components: Dict[str, Any]) -> str:
-        """Build the flattened computation code."""
-        code_parts = []
-
-        # Add imports
-        for imp in components.get("imports", []):
-            code_parts.append(imp)
-
-        code_parts.append("")  # Blank line
-
-        # Add simple operations
-        for op in components.get("simple_operations", []):
-            if isinstance(op, dict) and "code" in op:
-                code_parts.append(op["code"])
-
-        # Handle loops (simplified or parallelized)
-        for loop in components.get("loops", []):
-            if loop.get("parallelizable", False):
-                code_parts.append(
-                    f"# Parallelizable loop: {loop.get('target', 'unknown')}"
-                )
-                code_parts.extend(loop.get("body", []))
-            else:
-                code_parts.append(f"# Sequential loop: {loop.get('target', 'unknown')}")
-                code_parts.extend(loop.get("body", []))
-
-        # Add result output
-        code_parts.append("")
-        code_parts.append("# Output result")
-        code_parts.append("import json")
-        code_parts.append(
-            'print(f\'RESULT:{json.dumps(locals().get("result", "no_result"))}\')'
-        )
-
-        return "\\n".join(code_parts)
-
-    def _create_helper_functions(self, components: Dict[str, Any]) -> List[str]:
-        """Create helper functions for complex operations."""
-        helpers = []
-
-        # Create helpers for complex operations
-        for i, op in enumerate(components.get("complex_operations", [])):
-            helper_code = f"""
-def helper_operation_{i}():
-    \"\"\"Helper function for complex operation {i}.\"\"\"
-    {op.get('code', '# No code available')}
-    return result
-"""
-            helpers.append(helper_code)
-
-        return helpers
 
 
 def auto_flatten_if_needed(func: Callable) -> Tuple[Callable, Optional[Dict[str, Any]]]:
