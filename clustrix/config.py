@@ -2,7 +2,7 @@ import json
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 from dataclasses import dataclass, asdict
 
 
@@ -125,6 +125,21 @@ class ClusterConfig:
     cluster_packages: Optional[list] = None  # Additional packages to install in VENV2
     venv_post_install_commands: Optional[list] = (
         None  # Commands to run after package installation
+    )
+
+    # GPU Detection and Support Configuration
+    gpu_detection_enabled: bool = True  # Enable GPU detection in VENV1
+    auto_gpu_packages: bool = (
+        True  # Automatically install GPU-enabled packages in VENV2
+    )
+    cuda_version_preference: Optional[str] = (
+        None  # Preferred CUDA version (e.g., "11.8", "12.1")
+    )
+    gpu_memory_fraction: float = 0.9  # Fraction of GPU memory to use per job
+    prefer_gpu_execution: bool = True  # Prefer GPU nodes when available
+    gpu_requirements: Optional[Dict[str, Any]] = None  # Specific GPU requirements
+    rapids_ecosystem: bool = (
+        False  # Install RAPIDS ecosystem packages (cuDF, cuML, etc.)
     )
 
     # Runtime venv information (set during execution)

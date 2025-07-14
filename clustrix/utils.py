@@ -1452,3 +1452,337 @@ def _create_ssh_script(
         )
 
     return "\n".join(script_lines)
+
+
+def detect_gpu_capabilities(
+    ssh_client, config: Optional[ClusterConfig] = None
+) -> Dict[str, Any]:
+    """
+    Detect GPU capabilities on remote cluster for job distribution.
+
+    This function is designed to run in VENV1 and provides information
+    needed for distributing GPU-enabled jobs across the cluster.
+
+    Args:
+        ssh_client: SSH client connection
+        config: Cluster configuration
+
+    Returns:
+        Dictionary with GPU information including:
+        - gpu_available: bool
+        - gpu_count: int
+        - gpu_devices: List[Dict] with device info
+        - cuda_available: bool
+        - cuda_version: str
+        - pytorch_gpu_support: bool
+        - tensorflow_gpu_support: bool
+    """
+    gpu_info: Dict[str, Any] = {
+        "gpu_available": False,
+        "gpu_count": 0,
+        "gpu_devices": [],
+        "cuda_available": False,
+        "cuda_version": None,
+        "pytorch_gpu_support": False,
+        "tensorflow_gpu_support": False,
+        "detection_method": "unknown",
+        "detection_errors": [],
+    }
+
+    # Method 1: Try nvidia-smi (most reliable)
+    try:
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "nvidia-smi --query-gpu=index,name,memory.total,memory.free,compute_cap --format=csv,noheader,nounits 2>/dev/null"
+        )
+        exit_status = stdout.channel.recv_exit_status()
+
+        if exit_status == 0:
+            smi_output = stdout.read().decode().strip()
+            if smi_output:
+                gpu_info["gpu_available"] = True
+                gpu_info["detection_method"] = "nvidia-smi"
+
+                # Parse nvidia-smi output
+                devices = []
+                for line in smi_output.split("\n"):
+                    if line.strip():
+                        parts = [p.strip() for p in line.split(",")]
+                        if len(parts) >= 5:
+                            devices.append(
+                                {
+                                    "index": int(parts[0]),
+                                    "name": parts[1],
+                                    "memory_total_mb": int(parts[2]),
+                                    "memory_free_mb": int(parts[3]),
+                                    "compute_capability": parts[4],
+                                }
+                            )
+
+                gpu_info["gpu_count"] = len(devices)
+                gpu_info["gpu_devices"] = devices
+    except Exception as e:
+        gpu_info["detection_errors"].append(f"nvidia-smi failed: {str(e)}")
+
+    # Method 2: Check CUDA installation
+    try:
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "nvcc --version 2>/dev/null | grep 'release' | sed 's/.*release \\([0-9.]*\\).*/\\1/'"
+        )
+        exit_status = stdout.channel.recv_exit_status()
+
+        if exit_status == 0:
+            cuda_version = stdout.read().decode().strip()
+            if cuda_version:
+                gpu_info["cuda_available"] = True
+                gpu_info["cuda_version"] = cuda_version
+    except Exception as e:
+        gpu_info["detection_errors"].append(f"CUDA detection failed: {str(e)}")
+
+    # Method 3: Check /proc/driver/nvidia if nvidia-smi fails
+    if not gpu_info["gpu_available"]:
+        try:
+            stdin, stdout, stderr = ssh_client.exec_command(
+                "ls -la /proc/driver/nvidia/gpus/ 2>/dev/null | wc -l"
+            )
+            exit_status = stdout.channel.recv_exit_status()
+
+            if exit_status == 0:
+                gpu_count_str = stdout.read().decode().strip()
+                try:
+                    # Subtract 2 for . and .. entries
+                    gpu_count = max(0, int(gpu_count_str) - 2)
+                    if gpu_count > 0:
+                        gpu_info["gpu_available"] = True
+                        gpu_info["gpu_count"] = gpu_count
+                        gpu_info["detection_method"] = "/proc/driver/nvidia"
+                except ValueError:
+                    pass
+        except Exception as e:
+            gpu_info["detection_errors"].append(
+                f"/proc/driver/nvidia detection failed: {str(e)}"
+            )
+
+    # Method 4: Check for GPU via lspci (fallback)
+    if not gpu_info["gpu_available"]:
+        try:
+            stdin, stdout, stderr = ssh_client.exec_command(
+                "lspci | grep -i nvidia | wc -l"
+            )
+            exit_status = stdout.channel.recv_exit_status()
+
+            if exit_status == 0:
+                nvidia_count_str = stdout.read().decode().strip()
+                try:
+                    nvidia_count = int(nvidia_count_str)
+                    if nvidia_count > 0:
+                        gpu_info["gpu_available"] = True
+                        gpu_info["gpu_count"] = nvidia_count
+                        gpu_info["detection_method"] = "lspci"
+                except ValueError:
+                    pass
+        except Exception as e:
+            gpu_info["detection_errors"].append(f"lspci detection failed: {str(e)}")
+
+    return gpu_info
+
+
+def setup_gpu_enabled_venv2(
+    ssh_client,
+    work_dir: str,
+    requirements: Dict[str, str],
+    gpu_info: Dict[str, Any],
+    config: Optional[ClusterConfig] = None,
+) -> Dict[str, Any]:
+    """
+    Setup VENV2 with GPU support based on remote cluster capabilities.
+
+    This function ensures that VENV2 has appropriate GPU-enabled packages
+    even if the local environment doesn't have GPU support.
+
+    Args:
+        ssh_client: SSH client connection
+        work_dir: Remote working directory
+        requirements: Package requirements from local environment
+        gpu_info: GPU capabilities from detect_gpu_capabilities()
+        config: Cluster configuration
+
+    Returns:
+        Dict with VENV2 setup information
+    """
+    if config is None:
+        from .config import get_config
+
+        config = get_config()
+
+    venv2_info: Dict[str, Any] = {
+        "gpu_packages_installed": False,
+        "cuda_support_added": False,
+        "pytorch_gpu_installed": False,
+        "tensorflow_gpu_installed": False,
+        "installation_errors": [],
+    }
+
+    # Only proceed if GPUs are available on remote cluster
+    if not gpu_info.get("gpu_available", False):
+        return venv2_info
+
+    # Determine if we're using conda or venv
+    conda_env2_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
+    venv2_path = f"{work_dir}/venv2_execution"
+
+    # Check if conda is available
+    conda_available = False
+    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
+    if "conda" in stdout.read().decode():
+        conda_available = True
+
+    commands = []
+
+    # Install GPU-enabled packages based on what's in local requirements
+    gpu_package_mapping = {
+        "torch": {
+            "conda": "pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia",
+            "pip": "torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118",
+        },
+        "tensorflow": {"conda": "tensorflow-gpu", "pip": "tensorflow[and-cuda]"},
+        "cupy": {
+            "conda": "cupy",
+            "pip": "cupy-cuda11x",  # Adjust based on CUDA version
+        },
+        "jax": {"conda": "jax", "pip": "jax[cuda]"},
+    }
+
+    # Check which GPU packages are in local requirements
+    packages_to_install = []
+    for local_pkg in requirements.keys():
+        local_pkg_lower = local_pkg.lower()
+        for gpu_pkg, install_info in gpu_package_mapping.items():
+            if gpu_pkg in local_pkg_lower or local_pkg_lower.startswith(gpu_pkg):
+                packages_to_install.append((gpu_pkg, install_info))
+                break
+
+    # Install GPU-enabled versions
+    for gpu_pkg, install_info in packages_to_install:
+        try:
+            if conda_available:
+                install_cmd = f"conda run -n {conda_env2_name} conda install {install_info['conda']} -y"
+                commands.append(
+                    f"{install_cmd} || echo 'Failed to install {gpu_pkg} via conda'"
+                )
+            else:
+                commands.append(f"source {venv2_path}/bin/activate")
+                install_cmd = f"pip install {install_info['pip']} --timeout=600"
+                commands.append(
+                    f"{install_cmd} || echo 'Failed to install {gpu_pkg} via pip'"
+                )
+                commands.append("deactivate")
+
+            venv2_info["gpu_packages_installed"] = True
+
+            if gpu_pkg == "torch":
+                venv2_info["pytorch_gpu_installed"] = True
+            elif gpu_pkg == "tensorflow":
+                venv2_info["tensorflow_gpu_installed"] = True
+
+        except Exception as e:
+            venv2_info["installation_errors"].append(
+                f"Failed to install {gpu_pkg}: {str(e)}"
+            )
+
+    # Install additional CUDA support packages if needed
+    cuda_support_packages = ["numba", "cudf", "cuml", "cugraph"]  # Rapids ecosystem
+
+    # Only install CUDA support packages if user had scientific computing packages
+    has_scientific_packages = any(
+        pkg in requirements for pkg in ["numpy", "scipy", "pandas", "scikit-learn"]
+    )
+
+    if has_scientific_packages and gpu_info.get("cuda_available", False):
+        for cuda_pkg in cuda_support_packages:
+            try:
+                if conda_available:
+                    # Use conda-forge for rapids packages
+                    install_cmd = f"conda run -n {conda_env2_name} conda install {cuda_pkg} -c conda-forge -c rapidsai -y"
+                    commands.append(
+                        f"{install_cmd} || echo 'Failed to install {cuda_pkg} via conda'"
+                    )
+                else:
+                    commands.append(f"source {venv2_path}/bin/activate")
+                    install_cmd = f"pip install {cuda_pkg} --timeout=300"
+                    commands.append(
+                        f"{install_cmd} || echo 'Failed to install {cuda_pkg} via pip'"
+                    )
+                    commands.append("deactivate")
+
+                venv2_info["cuda_support_added"] = True
+
+            except Exception as e:
+                venv2_info["installation_errors"].append(
+                    f"Failed to install CUDA support package {cuda_pkg}: {str(e)}"
+                )
+
+    # Execute all GPU package installations
+    if commands:
+        full_command = " && ".join(commands)
+        stdin, stdout, stderr = ssh_client.exec_command(full_command)
+        exit_status = stdout.channel.recv_exit_status()
+
+        if exit_status != 0:
+            error_output = stderr.read().decode()
+            venv2_info["installation_errors"].append(
+                f"GPU package installation failed: {error_output}"
+            )
+
+    return venv2_info
+
+
+def enhanced_setup_two_venv_environment(
+    ssh_client,
+    work_dir: str,
+    requirements: Dict[str, str],
+    config: Optional[ClusterConfig] = None,
+) -> Dict[str, Any]:
+    """
+    Enhanced two-venv setup with automatic GPU detection and support.
+
+    This function combines the original two-venv setup with GPU detection
+    and GPU-enabled package installation as per user requirements.
+
+    Args:
+        ssh_client: SSH client connection
+        work_dir: Remote working directory
+        requirements: Package requirements from local environment
+        config: Cluster configuration
+
+    Returns:
+        Dict containing both venv paths and GPU capabilities
+    """
+    if config is None:
+        from .config import get_config
+
+        config = get_config()
+
+    # Step 1: Detect GPU capabilities (for VENV1 job distribution)
+    print("Detecting GPU capabilities on remote cluster...")
+    gpu_info = detect_gpu_capabilities(ssh_client, config)
+
+    # Step 2: Setup basic two-venv environment
+    print("Setting up two-venv environment...")
+    venv_info = setup_two_venv_environment(ssh_client, work_dir, requirements, config)
+
+    # Step 3: Enhanced VENV2 with GPU support if GPUs are available
+    if gpu_info.get("gpu_available", False):
+        print(
+            f"GPU detected ({gpu_info['gpu_count']} devices), setting up GPU-enabled VENV2..."
+        )
+        gpu_venv2_info = setup_gpu_enabled_venv2(
+            ssh_client, work_dir, requirements, gpu_info, config
+        )
+        venv_info.update(gpu_venv2_info)
+    else:
+        print("No GPUs detected, using standard VENV2 setup...")
+
+    # Step 4: Add GPU detection results to venv_info
+    venv_info["gpu_info"] = gpu_info
+
+    return venv_info

@@ -144,11 +144,11 @@ class ClusterExecutor:
         updated_config = self.config
         if getattr(self.config, "use_two_venv", True):
             try:
-                from .utils import setup_two_venv_environment
+                from .utils import enhanced_setup_two_venv_environment
                 import threading
 
                 logger.info(
-                    "Setting up two-venv environment for cross-version compatibility"
+                    "Setting up enhanced two-venv environment with GPU detection"
                 )
 
                 # Use threading to implement timeout for venv setup
@@ -158,7 +158,7 @@ class ClusterExecutor:
                 def setup_venv():
                     nonlocal venv_info, exception_occurred
                     try:
-                        venv_info = setup_two_venv_environment(
+                        venv_info = enhanced_setup_two_venv_environment(
                             self.ssh_client,
                             remote_job_dir,
                             func_data["requirements"],
@@ -537,11 +537,11 @@ except Exception as e:
         updated_config = self.config
         if getattr(self.config, "use_two_venv", True):
             try:
-                from .utils import setup_two_venv_environment
+                from .utils import enhanced_setup_two_venv_environment
                 import threading
 
                 logger.info(
-                    "Setting up two-venv environment for cross-version compatibility"
+                    "Setting up enhanced two-venv environment with GPU detection"
                 )
 
                 # Use threading to implement timeout for venv setup
@@ -551,7 +551,7 @@ except Exception as e:
                 def setup_venv():
                     nonlocal venv_info, exception_occurred
                     try:
-                        venv_info = setup_two_venv_environment(
+                        venv_info = enhanced_setup_two_venv_environment(
                             self.ssh_client,
                             remote_job_dir,
                             func_data["requirements"],
