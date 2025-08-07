@@ -10,11 +10,13 @@ These tests verify that:
 """
 
 import pytest
-import torch
-import numpy as np
 from clustrix import cluster
 from clustrix.config import load_config, configure
 from tests.real_world import credentials
+
+# Skip entire module if torch/numpy not available
+torch = pytest.importorskip("torch")
+np = pytest.importorskip("numpy")
 
 
 @pytest.mark.real_world
