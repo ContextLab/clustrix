@@ -181,4 +181,47 @@ The GitHub Actions CI will fail if code doesn't pass black, flake8, mypy, and py
 
 ## Testing Guidelines
 
+### Test Organization
+
+**Unit Tests** (`tests/` excluding `real_world/`):
+- Run in GitHub Actions CI
+- Mock external dependencies  
+- Fast execution, no external resources required
+- Included in coverage reports
+
+**Real-World Tests** (`tests/real_world/`):
+- **Excluded from GitHub Actions** due to SSH/credential requirements
+- **Run automatically in pre-push hook** when credentials are available
+- Test actual cluster functionality, API calls, SSH connections
+- Marked with `@pytest.mark.real_world`
+
+### Pre-Push Hook Workflow
+
+A custom pre-push hook (`.git/hooks/pre-push`) automatically runs real-world tests when:
+1. Cluster credentials are available (1Password, environment variables, etc.)
+2. Real-world test runner script exists
+
+**Hook behavior:**
+- ✅ **With credentials**: Runs all real-world tests and blocks push on failure
+- ⚠️ **Without credentials**: Skips with warning, allows push
+- 🔧 **Script missing**: Falls back to basic pytest real-world test run
+
+### Running Tests Manually
+
+```bash
+# All unit tests (CI-compatible)
+pytest tests/ -m "not real_world"
+
+# Real-world tests only
+pytest tests/real_world/ -m real_world
+
+# Using real-world test runner (when available)
+python scripts/run_real_world_tests.py --filesystem
+python scripts/run_real_world_tests.py --ssh  
+python scripts/run_real_world_tests.py --api
+python scripts/run_real_world_tests.py --visual
+```
+
+### External Function Validation
+
 - **External Function Validation**: When testing external functions and features (i.e., anything that we cannot directly test locally), we *MUST* validate that those functions work (without resorting to local fallbacks) at least once before we can check the issue off as completed. Use GitHub issue spec criteria and comments to track what has been validated. We can store API keys, usernames, and/or passwords locally (if we can do so securely) in order to enable this. Once we have verified functionality (again, WITHOUT resorting to fallbacks), we can check off that functionality as "tested" and then use mocked functions or objects in pytests to avoid incurring excessive API fees.
