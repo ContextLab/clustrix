@@ -15,6 +15,7 @@ import pytest
 from tests.real_world import TempResourceManager, test_manager
 
 
+@pytest.mark.real_world
 class TestWidgetVisualVerification:
     """Test widget visual appearance and functionality."""
 
@@ -755,6 +756,7 @@ class TestWidgetVisualVerification:
             pytest.skip(f"Widget comparison test failed: {e}")
 
 
+@pytest.mark.real_world
 class TestPlotVisualization:
     """Test plot and visualization output."""
 

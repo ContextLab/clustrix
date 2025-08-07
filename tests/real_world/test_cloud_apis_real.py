@@ -22,6 +22,7 @@ from clustrix.pricing_clients.gcp_pricing import GCPPricingClient
 from tests.real_world import credentials, test_manager
 
 
+@pytest.mark.real_world
 class TestAWSAPIReal:
     """Test real AWS API calls."""
 
@@ -151,6 +152,7 @@ class TestAWSAPIReal:
             pytest.skip(f"AWS EC2 API failed: {e}")
 
 
+@pytest.mark.real_world
 class TestAzureAPIReal:
     """Test real Azure API calls."""
 
@@ -230,6 +232,7 @@ class TestAzureAPIReal:
             pytest.skip(f"Azure compute API failed: {e}")
 
 
+@pytest.mark.real_world
 class TestGCPAPIReal:
     """Test real GCP API calls."""
 
@@ -306,6 +309,7 @@ class TestGCPAPIReal:
             pytest.skip(f"GCP zones API failed: {e}")
 
 
+@pytest.mark.real_world
 class TestLambdaCloudAPIReal:
     """Test real Lambda Cloud API calls."""
 
@@ -370,6 +374,7 @@ class TestLambdaCloudAPIReal:
             pytest.skip(f"Lambda Cloud regions API failed: {e}")
 
 
+@pytest.mark.real_world
 class TestPricingClientsReal:
     """Test real pricing client implementations."""
 
@@ -446,6 +451,7 @@ class TestPricingClientsReal:
             pytest.skip(f"GCP pricing client failed: {e}")
 
 
+@pytest.mark.real_world
 class TestHTTPRequestsReal:
     """Test real HTTP requests used by various components."""
 
@@ -532,6 +538,7 @@ class TestHTTPRequestsReal:
             pytest.skip(f"PyPI API failed: {e}")
 
 
+@pytest.mark.real_world
 class TestDatabaseOperationsReal:
     """Test real database operations (if applicable)."""
 

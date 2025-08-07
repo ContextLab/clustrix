@@ -28,6 +28,7 @@ from clustrix.filesystem import ClusterFilesystem
 from tests.real_world import TempResourceManager, credentials, test_manager
 
 
+@pytest.mark.real_world
 class TestRealSSHOperations:
     """Test SSH operations with real SSH connections."""
 

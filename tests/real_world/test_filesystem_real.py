@@ -31,6 +31,7 @@ from clustrix.config import ClusterConfig
 from tests.real_world import TempResourceManager, test_manager
 
 
+@pytest.mark.real_world
 class TestRealFilesystemOperations:
     """Test filesystem operations with real files and directories."""
 
