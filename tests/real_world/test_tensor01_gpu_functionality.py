@@ -154,9 +154,7 @@ def test_tensor01_cuda_detection():
             else:
                 cuda_info["nvcc_available"] = False
                 cuda_info["nvcc_error"] = (
-                    nvcc_result.stderr
-                    if nvcc_result.stderr
-                    else "nvcc not found"
+                    nvcc_result.stderr if nvcc_result.stderr else "nvcc not found"
                 )
         except Exception as e:
             cuda_info["nvcc_available"] = False
@@ -238,13 +236,17 @@ def test_tensor01_cuda_detection():
         # Get hostname using Python 3.6 compatible subprocess
         try:
             hostname_result = subprocess.run(
-                ["hostname"], 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.PIPE, 
-                universal_newlines=True, 
-                timeout=5
+                ["hostname"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=5,
             )
-            hostname = hostname_result.stdout.strip() if hostname_result.returncode == 0 else "unknown"
+            hostname = (
+                hostname_result.stdout.strip()
+                if hostname_result.returncode == 0
+                else "unknown"
+            )
         except Exception:
             hostname = "hostname_failed"
 

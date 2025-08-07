@@ -20,30 +20,33 @@ from tests.real_world import credentials
 @pytest.mark.real_world
 class TestAutomaticGPUParallelization:
     """Test automatic GPU parallelization functionality."""
-    
+
     def test_auto_gpu_parallel_detection(self):
         """Test that GPU parallelization is automatically detected and enabled."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True  # Enable automatic GPU parallelization
+            auto_gpu_parallel=True,  # Enable automatic GPU parallelization
         )
-        
+
         @cluster(cores=2, memory="8GB")
         def simple_gpu_computation():
             """Simple computation that should trigger GPU parallelization."""
             import subprocess
-            
+
             # Simple check that auto-parallelization was attempted
-            result = subprocess.run([
-                "python", "-c", """
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 gpu_count = torch.cuda.device_count()
 print(f'AVAILABLE_GPUS:{gpu_count}')
@@ -52,81 +55,93 @@ if gpu_count > 1:
     print('MULTI_GPU_AVAILABLE:True')
 else:
     print('MULTI_GPU_AVAILABLE:False')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=30,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = simple_gpu_computation()
         assert result["success"]
         assert "AVAILABLE_GPUS:" in result["output"]
-        
+
         # Check if multiple GPUs are available for parallelization
         output = result["output"]
         if "MULTI_GPU_AVAILABLE:True" in output:
             print("✅ Multiple GPUs available for automatic parallelization")
         else:
             print("⚠️  Only single GPU available")
-    
+
     def test_auto_gpu_parallel_disabled(self):
         """Test that GPU parallelization can be disabled."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=False  # Disable automatic GPU parallelization
+            auto_gpu_parallel=False,  # Disable automatic GPU parallelization
         )
-        
+
         @cluster(cores=1, memory="4GB", auto_gpu_parallel=False)
         def computation_without_gpu_parallel():
             """Computation with GPU parallelization explicitly disabled."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", "print('GPU_PARALLEL_DISABLED:True')"
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
-            
+
+            result = subprocess.run(
+                ["python", "-c", "print('GPU_PARALLEL_DISABLED:True')"],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=30,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = computation_without_gpu_parallel()
         assert result["success"]
         assert "GPU_PARALLEL_DISABLED:True" in result["output"]
 
 
-@pytest.mark.real_world 
+@pytest.mark.real_world
 class TestGPUParallelizationCorrectness:
     """Test that GPU parallelization produces correct results."""
-    
+
     def test_parallel_matrix_multiplication_correctness(self):
         """Test that parallel matrix multiplication produces correct results."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True
+            auto_gpu_parallel=True,
         )
-        
+
         @cluster(cores=2, memory="8GB")
         def parallel_matrix_ops():
             """Parallel matrix operations that should be automatically parallelized."""
             import subprocess
             import json
-            
+
             # Test matrix multiplication across GPUs
-            result = subprocess.run([
-                "python", "-c", """
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 import json
 
@@ -169,60 +184,70 @@ else:
     results['parallel_execution'] = False
 
 print(f'RESULTS:{json.dumps(results)}')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=120)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=120,
+            )
+
             if result.returncode == 0 and "RESULTS:" in result.stdout:
                 results_str = result.stdout.split("RESULTS:", 1)[1]
                 try:
                     return {"success": True, "data": json.loads(results_str)}
                 except:
                     return {"success": False, "error": "Failed to parse results"}
-            
+
             return {"success": False, "error": result.stderr}
-        
+
         result = parallel_matrix_ops()
-        assert result["success"], f"Matrix operation failed: {result.get('error', 'Unknown error')}"
-        
+        assert result[
+            "success"
+        ], f"Matrix operation failed: {result.get('error', 'Unknown error')}"
+
         data = result["data"]
-        
+
         # Verify results are reasonable (traces of random matrices should be non-zero)
         for key, values in data.items():
-            if key.startswith('size_'):
+            if key.startswith("size_"):
                 assert isinstance(values, list)
                 assert len(values) > 0
                 for val in values:
                     assert isinstance(val, (int, float))
                     # Traces of random matrices should be non-zero with high probability
                     assert abs(val) > 1e-6, f"Trace value {val} is suspiciously small"
-        
-        if data.get('parallel_execution'):
+
+        if data.get("parallel_execution"):
             print("✅ Multi-GPU parallel execution verified")
         else:
             print("⚠️  Single GPU execution (expected for systems with 1 GPU)")
-    
+
     def test_parallel_computation_determinism(self):
         """Test that parallel computation can be made deterministic when needed."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True
+            auto_gpu_parallel=True,
         )
-        
+
         @cluster(cores=1, memory="4GB")
         def deterministic_computation():
             """Deterministic computation for reproducibility testing."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 import random
 import numpy as np
@@ -264,56 +289,64 @@ else:
     results.append(round(result_val, 6))
 
 print(f'DETERMINISTIC_RESULTS:{results}')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=60,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = deterministic_computation()
         assert result["success"]
-        
+
         output = result["output"]
         assert "DETERMINISTIC_RESULTS:" in output
-        
+
         # Extract results
         results_str = output.split("DETERMINISTIC_RESULTS:", 1)[1].strip()
         results = eval(results_str)  # Safe since we control the format
-        
+
         # Check that results are reasonable
         assert len(results) > 0
         for val in results:
             assert isinstance(val, (int, float))
-        
+
         print(f"✅ Deterministic computation results: {results}")
 
 
 @pytest.mark.real_world
 class TestGPUParallelizationPerformance:
     """Test performance characteristics of GPU parallelization."""
-    
+
     def test_multi_gpu_performance_scaling(self):
         """Test that multi-GPU computation shows performance scaling."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True
+            auto_gpu_parallel=True,
         )
-        
+
         @cluster(cores=4, memory="16GB")
         def performance_scaling_test():
             """Test performance scaling with multiple GPUs."""
             import subprocess
             import json
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 import time
 import json
@@ -382,37 +415,47 @@ for size in sizes:
     performance_data['tests'][f'size_{size}'] = size_data
 
 print(f'PERFORMANCE:{json.dumps(performance_data)}')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=300)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=300,
+            )
+
             if result.returncode == 0 and "PERFORMANCE:" in result.stdout:
                 perf_str = result.stdout.split("PERFORMANCE:", 1)[1]
                 try:
                     return {"success": True, "data": json.loads(perf_str)}
                 except:
-                    return {"success": False, "error": "Failed to parse performance data"}
-            
+                    return {
+                        "success": False,
+                        "error": "Failed to parse performance data",
+                    }
+
             return {"success": False, "error": result.stderr}
-        
+
         result = performance_scaling_test()
-        assert result["success"], f"Performance test failed: {result.get('error', 'Unknown error')}"
-        
+        assert result[
+            "success"
+        ], f"Performance test failed: {result.get('error', 'Unknown error')}"
+
         data = result["data"]
         gpu_count = data["gpu_count"]
-        
+
         print(f"GPU count: {gpu_count}")
-        
+
         for test_name, test_data in data["tests"].items():
             print(f"\n{test_name}:")
             print(f"  Single GPU time: {test_data['single_gpu_time']:.4f}s")
-            
-            if gpu_count > 1 and 'multi_gpu_time' in test_data:
+
+            if gpu_count > 1 and "multi_gpu_time" in test_data:
                 print(f"  Multi GPU time: {test_data['multi_gpu_time']:.4f}s")
                 print(f"  Speedup: {test_data.get('speedup', 0):.2f}x")
-                
+
                 # Performance should be reasonable (not necessarily faster due to overhead,
                 # but should be in reasonable range)
-                speedup = test_data.get('speedup', 0)
+                speedup = test_data.get("speedup", 0)
                 assert speedup > 0.1, f"Speedup {speedup} is unreasonably low"
                 print(f"✅ Multi-GPU performance test passed")
             else:
@@ -422,29 +465,32 @@ print(f'PERFORMANCE:{json.dumps(performance_data)}')
 @pytest.mark.real_world
 class TestGPUParallelizationEdgeCases:
     """Test edge cases and error handling for GPU parallelization."""
-    
+
     def test_insufficient_gpu_memory_handling(self):
         """Test handling of insufficient GPU memory scenarios."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True
+            auto_gpu_parallel=True,
         )
-        
+
         @cluster(cores=2, memory="8GB")
         def large_memory_test():
             """Test with large memory requirements."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 
 gpu_count = torch.cuda.device_count()
@@ -472,17 +518,22 @@ if gpu_count > 0:
             print(f'LARGE_ALLOCATION:error:{str(e)}')
 else:
     print('NO_GPUS_AVAILABLE')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=60,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = large_memory_test()
         assert result["success"]
-        
+
         output = result["output"]
         print(f"Memory test output:\n{output}")
-        
+
         # Should handle memory constraints gracefully
         if "out_of_memory" in output:
             print("✅ Out of memory handled gracefully")
@@ -490,29 +541,32 @@ else:
             print("✅ Large allocation succeeded")
         else:
             print("⚠️  Memory test completed with other outcome")
-    
+
     def test_mixed_gpu_types_handling(self):
         """Test handling of mixed GPU types (if available)."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
-            auto_gpu_parallel=True
+            auto_gpu_parallel=True,
         )
-        
+
         @cluster(cores=1, memory="4GB")
         def gpu_compatibility_test():
             """Test GPU compatibility and mixed types."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 
 gpu_count = torch.cuda.device_count()
@@ -548,60 +602,72 @@ if gpu_count > 0:
         print('GPU_COMPATIBILITY:single_gpu')
 else:
     print('NO_CUDA_GPUS')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=30,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = gpu_compatibility_test()
         assert result["success"]
-        
+
         output = result["output"]
         print(f"GPU compatibility test:\n{output}")
-        
+
         # Verify GPU information is properly detected
         if "TOTAL_GPUS:" in output:
-            gpu_count_line = [line for line in output.split('\n') if line.startswith('TOTAL_GPUS:')][0]
-            gpu_count = int(gpu_count_line.split(':', 1)[1])
+            gpu_count_line = [
+                line for line in output.split("\n") if line.startswith("TOTAL_GPUS:")
+            ][0]
+            gpu_count = int(gpu_count_line.split(":", 1)[1])
             print(f"✅ Detected {gpu_count} GPUs")
-            
+
             if gpu_count > 1:
                 if "GPU_COMPATIBILITY:homogeneous" in output:
                     print("✅ Homogeneous GPU setup detected")
                 elif "GPU_COMPATIBILITY:mixed" in output:
-                    print("⚠️  Mixed GPU types detected - parallelization may be suboptimal")
+                    print(
+                        "⚠️  Mixed GPU types detected - parallelization may be suboptimal"
+                    )
         else:
             print("⚠️  No GPU information detected")
 
 
-@pytest.mark.real_world 
+@pytest.mark.real_world
 class TestGPUParallelizationFallbacks:
     """Test fallback behavior when GPU parallelization isn't beneficial."""
-    
+
     def test_single_gpu_fallback(self):
         """Test fallback to single GPU when only one GPU is available."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         # Force single GPU environment
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
-            environment_variables={"CUDA_VISIBLE_DEVICES": "0"}  # Only GPU 0
+            environment_variables={"CUDA_VISIBLE_DEVICES": "0"},  # Only GPU 0
         )
-        
+
         @cluster(cores=1, memory="4GB")
         def single_gpu_fallback_test():
             """Test fallback behavior with single GPU."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 import os
 
@@ -623,48 +689,56 @@ elif gpu_count > 1:
     print('MULTI_GPU:available')
 else:
     print('NO_GPU:cpu_fallback')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=30,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = single_gpu_fallback_test()
         assert result["success"]
-        
+
         output = result["output"]
         print(f"Single GPU fallback test:\n{output}")
-        
+
         # Should detect single GPU and use fallback
         assert "DETECTED_GPUS:1" in output
         assert "FALLBACK:single_gpu_mode" in output
         assert "SINGLE_GPU_RESULT:" in output
-        
+
         print("✅ Single GPU fallback working correctly")
-    
+
     def test_no_gpu_fallback(self):
         """Test fallback to CPU when no GPUs are available."""
         load_config("tensor01_config.yml")
-        
+
         tensor01_creds = credentials.get_tensor01_credentials()
         if not tensor01_creds:
             pytest.skip("No tensor01 credentials available")
-        
+
         # Force CPU-only environment
         configure(
             password=tensor01_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
-            environment_variables={"CUDA_VISIBLE_DEVICES": ""}  # No GPUs
+            environment_variables={"CUDA_VISIBLE_DEVICES": ""},  # No GPUs
         )
-        
+
         @cluster(cores=1, memory="2GB")
         def no_gpu_fallback_test():
             """Test fallback behavior with no GPUs."""
             import subprocess
-            
-            result = subprocess.run([
-                "python", "-c", """
+
+            result = subprocess.run(
+                [
+                    "python",
+                    "-c",
+                    """
 import torch
 import os
 
@@ -686,17 +760,22 @@ if not gpu_available or gpu_count == 0:
     print(f'CPU_RESULT:{result}')
 else:
     print('GPU:unexpectedly_available')
-"""
-            ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
-            
+""",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+                timeout=30,
+            )
+
             return {"success": result.returncode == 0, "output": result.stdout}
-        
+
         result = no_gpu_fallback_test()
         assert result["success"]
-        
+
         output = result["output"]
         print(f"No GPU fallback test:\n{output}")
-        
+
         # Should detect no GPUs and fallback to CPU
         if "CUDA_AVAILABLE:False" in output:
             assert "FALLBACK:cpu_mode" in output

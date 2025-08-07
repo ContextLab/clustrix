@@ -436,7 +436,7 @@ class TestRealKubernetesJobSubmission:
             # Simulate some work
             for i in range(5):
                 time.sleep(0.5)
-                lifecycle_events.append(f"Work iteration {i+1}")
+                lifecycle_events.append(f"Work iteration {i + 1}")
 
             lifecycle_events.append("Job completed")
 

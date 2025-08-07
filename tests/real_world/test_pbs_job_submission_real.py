@@ -260,7 +260,7 @@ class TestRealPBSJobSubmission:
                 # Write processed output
                 with open(output_file, "w") as outfile:
                     for i, line in enumerate(lines):
-                        outfile.write(f"Processed line {i+1}: {line}")
+                        outfile.write(f"Processed line {i + 1}: {line}")
 
                 # Verify output
                 with open(output_file, "r") as f:

@@ -286,8 +286,8 @@ class TestGCPAPIReal:
             if not creds:
                 pytest.skip("No GCP credentials available")
 
-            credentials, project = default()
-            client = compute_v1.ZonesClient(credentials=credentials)
+            gcp_credentials, project = default()
+            client = compute_v1.ZonesClient(credentials=gcp_credentials)
 
             # List zones (free operation)
             zones = client.list(project=project)

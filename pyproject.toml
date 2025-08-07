@@ -166,9 +166,14 @@ exclude = [
     ".mypy_cache/",
     ".pytest_cache/",
     "tests/conftest.py",
+    "tests/real_world/",
 ]
 # Only check our package files  
 files = ["clustrix/"]
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -176,3 +181,7 @@ python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
 addopts = "-v --tb=short"
+
+[tool.flake8]
+max-line-length = 88
+extend-ignore = ["E203", "W503"]
