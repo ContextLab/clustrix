@@ -48,7 +48,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json
+        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json -m "not real_world"
 
     - name: Update coverage badge
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'

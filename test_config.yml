@@ -4,6 +4,7 @@ profiles:
     aks_cluster_name: null
     api_key: null
     async_submit: false
+    auto_gpu_packages: true
     auto_gpu_parallel: true
     auto_parallel: true
     aws_access_key: null
@@ -33,6 +34,7 @@ profiles:
     conda_env_name: null
     cost_monitoring: false
     credential_cache_ttl: 300
+    cuda_version_preference: null
     default_cores: 1
     default_memory: 16GB
     default_partition: null
@@ -46,6 +48,9 @@ profiles:
     gcp_service_account_key: null
     gcp_zone: null
     gke_cluster_name: null
+    gpu_detection_enabled: true
+    gpu_memory_fraction: 0.9
+    gpu_requirements: null
     hf_hardware: null
     hf_sdk: null
     hf_token: null
@@ -72,12 +77,16 @@ profiles:
     password: null
     password_env_var: ''
     pre_execution_commands: []
+    prefer_gpu_execution: true
     prefer_local_parallel: false
     python_executable: python
+    rapids_ecosystem: false
     remote_work_dir: /tmp/clustrix
     ssh_port: 22
     use_1password: false
     use_env_password: false
+    use_two_venv: true
     username: null
     venv_info: null
     venv_post_install_commands: []
+    venv_setup_timeout: 300

@@ -85,6 +85,13 @@ class TestFileSystemHybrid:
             mock_ssh_class.return_value = mock_ssh
             mock_ssh.open_sftp.return_value = mock_sftp
 
+            # Mock SSH exec_command to return proper 3-tuple
+            mock_stdin = Mock()
+            mock_stdout = Mock()
+            mock_stderr = Mock()
+            mock_stdout.read.return_value = b"file1.txt\nfile2.py\nsubdir"
+            mock_ssh.exec_command.return_value = (mock_stdin, mock_stdout, mock_stderr)
+
             # Mock SFTP operations
             mock_sftp.listdir.return_value = ["file1.txt", "file2.py", "subdir"]
             mock_sftp.stat.return_value = Mock(
@@ -99,9 +106,10 @@ class TestFileSystemHybrid:
             assert "file2.py" in files
             assert "subdir" in files
 
-            # Verify SSH methods were called
-            mock_ssh.open_sftp.assert_called()
-            mock_sftp.listdir.assert_called_with("/remote/path")
+            # Verify SSH methods were called (ls uses exec_command, not SFTP)
+            mock_ssh.exec_command.assert_called()
+            # mock_ssh.open_sftp.assert_called()  # Not called for ls operation
+            # mock_sftp.listdir.assert_called_with("/remote/path")  # Not used for ls
 
     def test_error_handling_hybrid(self):
         """Test error handling with real and mocked errors."""
