@@ -429,48 +429,8 @@ class FunctionFlattener:
         main_code = f"""
 def {func_name}_flattened({param_string}):
     \"\"\"Flattened version of {func_name} for remote execution.\"\"\"
-    import subprocess
-    import json
-
-    # Prepare parameter values for injection into subprocess
-    param_dict = {{{", ".join([f'"{param}": {param}' for param in param_names])}}}
-    
-    # Build the computation code with parameter injection
-    computation_code = \"\"\"
-import json
-
-# Injected parameters
-{chr(10).join([f'{param} = json.loads(r"""{{{param}}}""")' for param in param_names]) if param_names else "# No parameters to inject"}
-
-# Flattened computation code
-{self._build_flattened_computation(components)}
-\"\"\"
-
-    # Execute flattened computation using subprocess pattern
-    formatted_code = computation_code.format(**{{k: json.dumps(v) for k, v in param_dict.items()}}) if param_dict else computation_code
-    result = subprocess.run([
-        "python", "-c", formatted_code
-    ], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-       universal_newlines=True, timeout=120)
-
-    if result.returncode != 0:
-        return {{"success": False, "error": result.stderr}}
-
-    # Parse result from stdout
-    output_lines = result.stdout.strip().split('\\n')
-    parsed_result = None
-
-    for line in output_lines:
-        if line.startswith('RESULT:'):
-            try:
-                parsed_result = json.loads(line[7:])  # Remove 'RESULT:' prefix
-            except:
-                parsed_result = line[7:]  # Fallback to string
-            break
-
-    return {{"success": True, "result": parsed_result, "output": result.stdout}}
+    {self._build_flattened_computation(components)}
 """
-
         return main_code
 
     def _build_flattened_computation(self, components: Dict[str, Any]) -> str:
