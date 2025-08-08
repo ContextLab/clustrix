@@ -9,7 +9,7 @@ import time
 import logging
 import random
 from functools import wraps
-from typing import Optional, Callable, Any, Dict, List
+from typing import Optional, Callable, Any, Dict, List, Tuple
 from dataclasses import dataclass
 import requests
 from requests.adapters import HTTPAdapter
@@ -81,7 +81,10 @@ class ExponentialBackoffRetry:
                     time.sleep(delay)
 
             # This should never be reached, but just in case
-            raise last_exception
+            if last_exception is not None:
+                raise last_exception
+            else:
+                raise Exception("Maximum retries exceeded with no recorded exception")
 
         return wrapper
 
@@ -159,7 +162,7 @@ class FallbackPricingStrategy:
 
     def __init__(self):
         """Initialize fallback strategy."""
-        self.fallback_sources: List[Callable] = []
+        self.fallback_sources: List[Tuple[int, Callable]] = []
         self.fallback_data: Dict[str, Any] = {}
 
     def add_fallback_source(self, source_func: Callable, priority: int = 0):
@@ -173,7 +176,7 @@ class FallbackPricingStrategy:
         self.fallback_sources.sort(key=lambda x: x[0], reverse=True)
 
     def get_fallback_price(
-        self, instance_type: str, region: str = None, **kwargs
+        self, instance_type: str, region: Optional[str] = None, **kwargs
     ) -> Optional[float]:
         """Get pricing from fallback sources.
 

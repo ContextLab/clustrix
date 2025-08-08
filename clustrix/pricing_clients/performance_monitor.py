@@ -158,7 +158,7 @@ class PricingPerformanceMonitor:
         cache_hit_rate = cache_hits / total_requests if total_requests > 0 else 0
 
         # Per-provider statistics
-        provider_stats = defaultdict(
+        provider_stats: Dict[str, Dict[str, Any]] = defaultdict(
             lambda: {"requests": 0, "errors": 0, "response_times": []}
         )
 
@@ -360,10 +360,9 @@ class CircuitBreaker:
 
     def _should_attempt_reset(self) -> bool:
         """Check if enough time has passed to attempt reset."""
-        return (
-            self.last_failure_time
-            and time.time() - self.last_failure_time >= self.recovery_timeout
-        )
+        if self.last_failure_time is None:
+            return False
+        return time.time() - self.last_failure_time >= self.recovery_timeout
 
     def _on_success(self):
         """Handle successful call."""

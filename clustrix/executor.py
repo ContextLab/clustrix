@@ -3,12 +3,15 @@ import time
 import tempfile
 import pickle
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 import paramiko
 import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
 from .utils import create_job_script, setup_remote_environment
+
+if TYPE_CHECKING:
+    from .cloud_providers.base import CloudProvider
 
 logger = logging.getLogger(__name__)
 
@@ -1451,8 +1454,12 @@ except Exception as e:
 
         return job_id
 
-    def _get_cloud_provider_instance(self, provider: str, job_config: Dict[str, Any]):
+    def _get_cloud_provider_instance(
+        self, provider: str, job_config: Dict[str, Any]
+    ) -> Optional["CloudProvider"]:
         """Get cloud provider instance based on provider name."""
+        cloud_provider: Optional["CloudProvider"] = None
+
         if provider == "lambda":
             from .cloud_providers.lambda_cloud import LambdaCloudProvider
 

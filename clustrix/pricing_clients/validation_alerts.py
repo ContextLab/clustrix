@@ -313,9 +313,13 @@ class PricingValidationEngine:
             return {"message": "No validation results in specified time period"}
 
         # Count results by rule and severity
-        rule_stats = defaultdict(lambda: {"passed": 0, "failed": 0})
-        severity_stats = defaultdict(int)
-        provider_stats = defaultdict(lambda: {"passed": 0, "failed": 0})
+        rule_stats: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {"passed": 0, "failed": 0}
+        )
+        severity_stats: Dict[str, int] = defaultdict(int)
+        provider_stats: Dict[str, Dict[str, int]] = defaultdict(
+            lambda: {"passed": 0, "failed": 0}
+        )
 
         for result in recent_results:
             if result.passed:

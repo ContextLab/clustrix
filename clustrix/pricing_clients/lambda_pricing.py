@@ -63,7 +63,7 @@ class LambdaPricingClient(BasePricingClient):
         }
 
         self.base_url = "https://cloud.lambdalabs.com/api/v1"
-        self.api_key = None
+        self.api_key: Optional[str] = None
         self.authenticated = False
 
     def authenticate(self, api_key: str) -> bool:

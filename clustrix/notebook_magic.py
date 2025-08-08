@@ -2067,7 +2067,6 @@ class EnhancedClusterConfigWidget:
         """Test Azure API connectivity with proper field mapping."""
         try:
             from azure.identity import ClientSecretCredential
-            from azure.mgmt.resource import ResourceManagementClient
             from .field_mappings import (
                 map_widget_fields_to_provider,
                 validate_provider_config,
