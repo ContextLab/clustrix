@@ -36,41 +36,62 @@ class ClusterConfig:
     cloud_auto_configure: bool = False
 
     # AWS-specific settings
+    # NOTE: Both standard boto3 and widget field names are supported for backward compatibility
+    # Field mapping is handled automatically via clustrix.field_mappings module
     aws_profile: Optional[str] = None
-    aws_access_key_id: Optional[str] = None
-    aws_secret_access_key: Optional[str] = None
-    aws_access_key: Optional[str] = None  # Alternative name used by widget
-    aws_secret_key: Optional[str] = None  # Alternative name used by widget
+    aws_access_key_id: Optional[str] = None  # Standard boto3 field name
+    aws_secret_access_key: Optional[str] = None  # Standard boto3 field name
+    aws_access_key: Optional[str] = (
+        None  # Widget field name (mapped to aws_access_key_id)
+    )
+    aws_secret_key: Optional[str] = (
+        None  # Widget field name (mapped to aws_secret_access_key)
+    )
+    aws_session_token: Optional[str] = None  # For temporary credentials
     aws_instance_type: Optional[str] = None
     aws_cluster_type: Optional[str] = None  # ec2 or eks
     eks_cluster_name: Optional[str] = None
     aws_region: Optional[str] = None
 
     # Azure-specific settings
-    azure_subscription_id: Optional[str] = None
+    # NOTE: Field names match widget naming scheme (azure_* prefix)
+    # Mapped to Azure SDK field names via clustrix.field_mappings module
+    azure_subscription_id: Optional[str] = None  # Required for authentication
     azure_resource_group: Optional[str] = None
-    azure_tenant_id: Optional[str] = None
-    azure_client_id: Optional[str] = None
-    azure_client_secret: Optional[str] = None
+    azure_tenant_id: Optional[str] = (
+        None  # Required for service principal authentication
+    )
+    azure_client_id: Optional[str] = (
+        None  # Required for service principal authentication
+    )
+    azure_client_secret: Optional[str] = (
+        None  # Required for service principal authentication
+    )
     azure_instance_type: Optional[str] = None
     aks_cluster_name: Optional[str] = None
     azure_region: Optional[str] = None
 
     # GCP-specific settings
-    gcp_project_id: Optional[str] = None
+    # NOTE: Field names match widget naming scheme (gcp_* prefix)
+    # Mapped to Google Cloud SDK field names via clustrix.field_mappings module
+    gcp_project_id: Optional[str] = None  # Required for authentication
     gcp_zone: Optional[str] = None
-    gcp_service_account_key: Optional[str] = None
+    gcp_service_account_key: Optional[str] = None  # Required: JSON service account key
     gcp_instance_type: Optional[str] = None
     gke_cluster_name: Optional[str] = None
     gcp_region: Optional[str] = None
 
     # Lambda Cloud settings
+    # NOTE: Field names match widget naming scheme (lambda_* prefix)
+    # Mapped to Lambda Cloud API field names via clustrix.field_mappings module
     lambda_instance_type: Optional[str] = None
-    lambda_api_key: Optional[str] = None
+    lambda_api_key: Optional[str] = None  # Required for authentication
 
     # Hugging Face Spaces settings
+    # NOTE: Field names match widget naming scheme (hf_* prefix)
+    # Mapped to HuggingFace API field names via clustrix.field_mappings module
     hf_hardware: Optional[str] = None
-    hf_token: Optional[str] = None
+    hf_token: Optional[str] = None  # Required for authentication
     hf_username: Optional[str] = None
     hf_sdk: Optional[str] = None
 

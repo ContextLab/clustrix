@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 from ..cost_monitoring import BaseCostMonitor, ResourceUsage, CostEstimate
+from ..pricing_clients.lambda_pricing import LambdaPricingClient
 
 logger = logging.getLogger(__name__)
 
@@ -14,8 +15,16 @@ logger = logging.getLogger(__name__)
 class LambdaCostMonitor(BaseCostMonitor):
     """Cost monitoring for Lambda Cloud instances."""
 
-    def __init__(self):
+    def __init__(self, use_pricing_api: bool = True, api_key: Optional[str] = None):
         super().__init__("Lambda Cloud")
+        self.use_pricing_api = use_pricing_api
+
+        # Initialize pricing client
+        self.pricing_client = None
+        if use_pricing_api:
+            self.pricing_client = LambdaPricingClient()
+            if api_key:
+                self.pricing_client.authenticate(api_key)
 
         # Lambda Cloud pricing (as of 2025, approximate rates in USD/hour)
         self.pricing = {
@@ -108,8 +117,36 @@ class LambdaCostMonitor(BaseCostMonitor):
         # Normalize instance type
         instance_type = instance_type.lower().replace("-", "_")
 
-        # Get hourly rate
-        hourly_rate = self.pricing.get(instance_type, self.pricing["default"])
+        # Try to get pricing from API client first
+        hourly_rate = None
+        pricing_source = "hardcoded"
+        pricing_warning = None
+
+        if self.pricing_client:
+            try:
+                api_rate = self.pricing_client.get_instance_pricing(instance_type)
+                if api_rate is not None:
+                    hourly_rate = api_rate
+                    pricing_source = "api"
+                    logger.debug(
+                        f"Using API pricing for {instance_type}: ${hourly_rate:.3f}/hour"
+                    )
+                else:
+                    logger.debug(
+                        f"No API pricing found for {instance_type}, using fallback"
+                    )
+            except Exception as e:
+                logger.warning(f"Error getting API pricing for {instance_type}: {e}")
+
+        # Fall back to hardcoded pricing if API didn't work
+        if hourly_rate is None:
+            hourly_rate = self.pricing.get(instance_type, self.pricing["default"])
+            pricing_source = "hardcoded"
+            if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
+                pricing_warning = (
+                    f"Using potentially outdated pricing data from "
+                    f"{self.pricing_client._hardcoded_pricing_date}"
+                )
 
         # Calculate estimated cost
         estimated_cost = hourly_rate * hours_used
@@ -121,10 +158,24 @@ class LambdaCostMonitor(BaseCostMonitor):
             estimated_cost=estimated_cost,
             currency="USD",
             last_updated=datetime.now(),
+            pricing_source=pricing_source,
+            pricing_warning=pricing_warning,
         )
 
     def get_pricing_info(self) -> Dict[str, float]:
         """Get Lambda Cloud pricing information."""
+        # Try to get comprehensive pricing from API first
+        if self.pricing_client:
+            try:
+                api_pricing = self.pricing_client.get_all_pricing()
+                if api_pricing:
+                    logger.info("Returning Lambda Cloud pricing from API")
+                    return api_pricing
+            except Exception as e:
+                logger.warning(f"Error getting all pricing from API: {e}")
+
+        # Fall back to hardcoded pricing
+        logger.warning("Returning hardcoded Lambda Cloud pricing")
         return self.pricing.copy()
 
     def get_instance_recommendations(

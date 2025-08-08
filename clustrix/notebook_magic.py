@@ -801,6 +801,15 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
+        self.azure_tenant_id = widgets.Text(
+            description="Tenant ID:",
+            placeholder="Azure tenant ID (UUID)",
+            tooltip=(
+                "Azure tenant ID (UUID format). Find in Azure AD > Overview > Tenant information"
+            ),
+            style=style,
+            layout=half_layout,
+        )
 
         # Google Cloud fields
         self.gcp_project_id = widgets.Text(
@@ -1101,6 +1110,7 @@ class EnhancedClusterConfigWidget:
                 widgets.HBox([self.azure_region, self.azure_instance_type]),
                 self.azure_subscription_id,
                 widgets.HBox([self.azure_client_id, self.azure_client_secret]),
+                self.azure_tenant_id,
                 self.cost_monitoring_checkbox,
             ]
         )
@@ -1454,6 +1464,7 @@ class EnhancedClusterConfigWidget:
         self.azure_subscription_id.value = config.get("azure_subscription_id", "")
         self.azure_client_id.value = config.get("azure_client_id", "")
         self.azure_client_secret.value = config.get("azure_client_secret", "")
+        self.azure_tenant_id.value = config.get("azure_tenant_id", "")
 
         # GCP fields
         self.gcp_project_id.value = config.get("gcp_project_id", "")
@@ -1566,6 +1577,8 @@ class EnhancedClusterConfigWidget:
                         config["azure_client_id"] = self.azure_client_id.value
                     if self.azure_client_secret.value:
                         config["azure_client_secret"] = self.azure_client_secret.value
+                    if self.azure_tenant_id.value:
+                        config["azure_tenant_id"] = self.azure_tenant_id.value
 
                 elif self.cluster_type.value == "gcp":
                     config["gcp_region"] = self.gcp_region.value
@@ -1973,131 +1986,238 @@ class EnhancedClusterConfigWidget:
             return False
 
     def _test_aws_connectivity(self, config):
-        """Test AWS API connectivity."""
+        """Test AWS API connectivity with proper field mapping."""
         try:
             import boto3  # type: ignore
             from botocore.exceptions import NoCredentialsError, ClientError  # type: ignore
-
-            # Map widget field names to AWS credential names
-            aws_access_key = config.get("aws_access_key") or config.get(
-                "aws_access_key_id"
+            from .field_mappings import (
+                map_widget_fields_to_provider,
+                validate_provider_config,
             )
-            aws_secret_key = config.get("aws_secret_key") or config.get(
-                "aws_secret_access_key"
-            )
-            aws_region = config.get("aws_region", "us-east-1")
 
-            # Create session with provided credentials if available
-            session_kwargs = {}
-            if aws_access_key and aws_secret_key:
-                session_kwargs.update(
-                    {
-                        "aws_access_key_id": aws_access_key,
-                        "aws_secret_access_key": aws_secret_key,
-                        "region_name": aws_region,
-                    }
-                )
-            else:
-                # Fall back to profile or default credentials
-                profile = config.get("aws_profile")
-                if profile:
-                    session_kwargs["profile_name"] = profile
+            # Map widget fields to AWS provider expectations
+            try:
+                aws_credentials = map_widget_fields_to_provider("aws", config)
+            except KeyError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ AWS configuration incomplete: {e}")
+                return False
+            except ValueError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ AWS configuration error: {e}")
+                return False
 
+            # Validate required fields are present
+            if not validate_provider_config("aws", aws_credentials):
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print("❌ AWS configuration validation failed")
+                return False
+
+            # Create session with mapped credentials
+            session_kwargs = {
+                "aws_access_key_id": aws_credentials["access_key_id"],
+                "aws_secret_access_key": aws_credentials["secret_access_key"],
+                "region_name": aws_credentials.get("region", "us-east-1"),
+            }
+
+            # Add session token if provided (for temporary credentials)
+            if "session_token" in aws_credentials:
+                session_kwargs["aws_session_token"] = aws_credentials["session_token"]
+
+            # Add profile if provided
+            if "profile" in aws_credentials:
+                session_kwargs["profile_name"] = aws_credentials["profile"]
+
+            # Real AWS API authentication test
             session = boto3.Session(**session_kwargs)
-            ec2 = session.client("ec2", region_name=aws_region)
 
-            # Simple API call to test connectivity
-            ec2.describe_regions(MaxResults=1)
+            # Test with AWS STS to verify credentials work
+            sts = session.client("sts")
+            response = sts.get_caller_identity()
+
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("✅ AWS authentication successful!")
+                    print(f"   Account: {response.get('Account', 'Unknown')}")
+                    print(f"   User: {response.get('Arn', 'Unknown')}")
+
             return True
 
         except ImportError:
-            print("ℹ️  boto3 not available for AWS testing")
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("ℹ️  boto3 not available for AWS testing")
+                    print("   Install with: pip install boto3")
             return False
-        except (NoCredentialsError, ClientError):
+        except (NoCredentialsError, ClientError) as e:
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print(f"❌ AWS authentication failed: {e}")
             return False
-        except Exception:
+        except Exception as e:
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print(f"❌ AWS connectivity error: {e}")
             return False
 
     def _test_azure_connectivity(self, config):
-        """Test Azure API connectivity."""
+        """Test Azure API connectivity with proper field mapping."""
         try:
-            from azure.identity import ClientSecretCredential, DefaultAzureCredential
+            from azure.identity import ClientSecretCredential
             from azure.mgmt.resource import ResourceManagementClient
+            from .field_mappings import (
+                map_widget_fields_to_provider,
+                validate_provider_config,
+            )
 
-            # Map widget field names to Azure credential names
-            subscription_id = config.get("azure_subscription_id")
-            client_id = config.get("azure_client_id")
-            client_secret = config.get("azure_client_secret")
-            tenant_id = config.get("azure_tenant_id")
-
-            if not subscription_id:
+            # Map widget fields to Azure provider expectations
+            try:
+                azure_credentials = map_widget_fields_to_provider("azure", config)
+            except KeyError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ Azure configuration incomplete: {e}")
+                return False
+            except ValueError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ Azure configuration error: {e}")
                 return False
 
-            # Use provided credentials if available, otherwise fall back to default
-            if client_id and client_secret and tenant_id:
-                credential = ClientSecretCredential(
-                    tenant_id=tenant_id,
-                    client_id=client_id,
-                    client_secret=client_secret,
-                )
-            else:
-                credential = DefaultAzureCredential()
+            # Validate required fields are present
+            if not validate_provider_config("azure", azure_credentials):
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print("❌ Azure configuration validation failed")
+                        print(
+                            "   Required: subscription_id, client_id, client_secret, tenant_id"
+                        )
+                return False
 
-            # Try to create a resource client and list resource groups
-            resource_client = ResourceManagementClient(credential, subscription_id)
-            list(resource_client.resource_groups.list(top=1))
+            # Real Azure API authentication test
+            credential = ClientSecretCredential(
+                tenant_id=azure_credentials["tenant_id"],
+                client_id=azure_credentials["client_id"],
+                client_secret=azure_credentials["client_secret"],
+            )
+
+            # Get subscription details to verify authentication
+            from azure.mgmt.subscription import SubscriptionClient
+
+            subscription_client = SubscriptionClient(credential)
+            subscription_info = subscription_client.subscriptions.get(
+                azure_credentials["subscription_id"]
+            )
+
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("✅ Azure authentication successful!")
+                    print(f"   Subscription: {subscription_info.display_name}")
+                    print(f"   Tenant: {azure_credentials['tenant_id']}")
+
             return True
 
         except ImportError:
-            print("ℹ️  Azure SDK not available for Azure testing")
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("ℹ️  Azure SDK not available for Azure testing")
+                    print(
+                        "   Install with: pip install azure-identity azure-mgmt-resource azure-mgmt-subscription"
+                    )
             return False
-        except Exception:
+        except Exception as e:
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print(f"❌ Azure authentication failed: {e}")
             return False
 
     def _test_gcp_connectivity(self, config):
-        """Test GCP API connectivity."""
+        """Test GCP API connectivity with proper field mapping."""
         try:
-            import os
-            import tempfile
+            import json
             from google.cloud import resource_manager
             from google.oauth2 import service_account
+            from .field_mappings import (
+                map_widget_fields_to_provider,
+                validate_provider_config,
+            )
 
-            project_id = config.get("gcp_project_id")
-            service_account_key = config.get("gcp_service_account_key")
-
-            if not project_id:
+            # Map widget fields to GCP provider expectations
+            try:
+                gcp_credentials = map_widget_fields_to_provider("gcp", config)
+            except KeyError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ GCP configuration incomplete: {e}")
+                return False
+            except ValueError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ GCP configuration error: {e}")
                 return False
 
-            # Use service account key if provided
-            if service_account_key:
-                # Create temporary credentials file
-                with tempfile.NamedTemporaryFile(
-                    mode="w", suffix=".json", delete=False
-                ) as f:
-                    f.write(service_account_key)
-                    temp_key_file = f.name
+            # Validate required fields are present
+            if not validate_provider_config("gcp", gcp_credentials):
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print("❌ GCP configuration validation failed")
+                        print("   Required: project_id, service_account_key")
+                return False
 
-                try:
-                    # Set up credentials from service account
-                    credentials = service_account.Credentials.from_service_account_file(
-                        temp_key_file
+            # Parse and validate service account JSON
+            try:
+                sa_key_data = json.loads(gcp_credentials["service_account_key"])
+                if (
+                    not isinstance(sa_key_data, dict)
+                    or "private_key" not in sa_key_data
+                ):
+                    if hasattr(self, "status_output"):
+                        with self.status_output:
+                            print("❌ Invalid service account key format")
+                            print("   Expected valid JSON with private_key field")
+                    return False
+            except json.JSONDecodeError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ Invalid JSON in service account key: {e}")
+                return False
+
+            # Real GCP API authentication test
+            credentials = service_account.Credentials.from_service_account_info(
+                sa_key_data
+            )
+
+            # Test with GCP Resource Manager API
+            client = resource_manager.Client(
+                credentials=credentials, project=gcp_credentials["project_id"]
+            )
+
+            # Get project information to verify authentication
+            project = client.fetch_project(gcp_credentials["project_id"])
+
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("✅ GCP authentication successful!")
+                    print(f"   Project: {project.name} ({project.project_id})")
+                    print(
+                        f"   Service Account: {sa_key_data.get('client_email', 'Unknown')}"
                     )
-                    client = resource_manager.Client(credentials=credentials)
-                finally:
-                    # Clean up temporary file
-                    os.unlink(temp_key_file)
-            else:
-                # Fall back to default credentials
-                client = resource_manager.Client()
 
-            # Try to get project information
-            project = client.fetch_project(project_id)
-            return project is not None
+            return True
 
         except ImportError:
-            print("ℹ️  Google Cloud SDK not available for GCP testing")
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print("ℹ️  Google Cloud SDK not available for GCP testing")
+                    print("   Install with: pip install google-cloud-resource-manager")
             return False
-        except Exception:
+        except Exception as e:
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print(f"❌ GCP authentication failed: {e}")
             return False
 
     def _test_lambda_connectivity(self, config):
@@ -2120,60 +2240,74 @@ class EnhancedClusterConfigWidget:
             return False
 
     def _test_huggingface_connectivity(self, config):
-        """Test HuggingFace API connectivity."""
+        """Test HuggingFace API connectivity with proper field mapping."""
         try:
             import requests
-
-            # Map widget field names to HuggingFace credential names
-            hf_token = config.get("hf_token")
-            hf_username = config.get("hf_username")
-
-            if not hf_token:
-                return False
-
-            # Test HuggingFace API connectivity using models endpoint
-            # (whoami endpoint appears to have permission issues with some tokens)
-            headers = {"Authorization": f"Bearer {hf_token}"}
-            response = requests.get(
-                "https://huggingface.co/api/models?limit=1", headers=headers, timeout=10
+            from .field_mappings import (
+                map_widget_fields_to_provider,
+                validate_provider_config,
             )
 
-            # Debug: Print response details for troubleshooting
-            if hasattr(self, "status_output"):
-                with self.status_output:
-                    print(
-                        f"🔍 Debug: HuggingFace API response status: {response.status_code}"
-                    )
-                    if response.status_code != 200:
-                        print(f"🔍 Debug: Response text: {response.text[:200]}...")
+            # Map widget fields to HuggingFace provider expectations
+            try:
+                hf_credentials = map_widget_fields_to_provider("huggingface", config)
+            except KeyError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ HuggingFace configuration incomplete: {e}")
+                return False
+            except ValueError as e:
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print(f"❌ HuggingFace configuration error: {e}")
+                return False
+
+            # Validate required fields are present
+            if not validate_provider_config("huggingface", hf_credentials):
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print("❌ HuggingFace configuration validation failed")
+                        print("   Required: token")
+                return False
+
+            # Real HuggingFace API authentication test
+            headers = {"Authorization": f"Bearer {hf_credentials['token']}"}
+
+            # Test with whoami endpoint for proper authentication validation
+            response = requests.get(
+                "https://huggingface.co/api/whoami", headers=headers, timeout=10
+            )
 
             if response.status_code == 200:
-                # Successfully authenticated and can access models API
-                models = response.json()
-
-                # Debug: Print successful connection info
+                user_data = response.json()
+                if hasattr(self, "status_output"):
+                    with self.status_output:
+                        print("✅ HuggingFace authentication successful!")
+                        print(f"   User: {user_data.get('name', 'Unknown')}")
+                        print(f"   Username: @{user_data.get('login', 'Unknown')}")
+                return True
+            else:
                 if hasattr(self, "status_output"):
                     with self.status_output:
                         print(
-                            f"🔍 Debug: Successfully retrieved {len(models)} model(s)"
+                            f"❌ HuggingFace authentication failed (HTTP {response.status_code})"
                         )
-                        if hf_username:
-                            print(
-                                f"🔍 Debug: Token validated for user: '{hf_username}'"
-                            )
-
-                return True
-
-            return False
+                        if response.status_code == 401:
+                            print("   Invalid or expired token")
+                        elif response.status_code == 403:
+                            print("   Token does not have required permissions")
+                return False
 
         except ImportError:
-            print("ℹ️  requests library not available for HuggingFace testing")
-            return False
-        except Exception as e:
-            # Debug: Print exception details
             if hasattr(self, "status_output"):
                 with self.status_output:
-                    print(f"🔍 Debug: Exception during HuggingFace test: {str(e)}")
+                    print("ℹ️  requests library not available for HuggingFace testing")
+                    print("   Install with: pip install requests")
+            return False
+        except Exception as e:
+            if hasattr(self, "status_output"):
+                with self.status_output:
+                    print(f"❌ HuggingFace connectivity error: {e}")
             return False
 
     def _on_test_config(self, button):

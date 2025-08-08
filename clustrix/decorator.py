@@ -29,6 +29,9 @@ def cluster(
     auto_gpu_parallel: Optional[bool] = None,
     environment: Optional[str] = None,
     async_submit: Optional[bool] = None,
+    provider: Optional[str] = None,
+    instance_type: Optional[str] = None,
+    region: Optional[str] = None,
     **kwargs,
 ):
     """
@@ -44,6 +47,9 @@ def cluster(
         auto_gpu_parallel: Whether to automatically parallelize across GPUs
         environment: Conda environment name
         async_submit: Whether to submit jobs asynchronously (non-blocking)
+        provider: Cloud provider to use ('lambda', 'aws', 'azure', 'gcp', 'huggingface')
+        instance_type: Cloud instance type (e.g., 'gpu_1x_a100' for Lambda Cloud)
+        region: Cloud region (e.g., 'us-east-1')
         **kwargs: Additional job parameters
 
     Returns:
@@ -66,6 +72,39 @@ def cluster(
                 "queue": queue or config.default_queue,
                 "environment": environment or config.conda_env_name,
             }
+
+            # Add cloud provider parameters if specified
+            if provider:
+                job_config["provider"] = provider
+
+            if instance_type:
+                job_config["instance_type"] = instance_type
+
+            if region:
+                job_config["region"] = region
+
+            # Add any additional cloud provider parameters from kwargs
+            cloud_params = [
+                "lambda_api_key",
+                "aws_access_key_id",
+                "aws_secret_access_key",
+                "aws_region",
+                "azure_subscription_id",
+                "azure_tenant_id",
+                "azure_client_id",
+                "azure_client_secret",
+                "gcp_project_id",
+                "gcp_service_account_key",
+                "hf_token",
+                "hf_username",
+                "key_file",
+                "terminate_on_completion",
+                "instance_startup_timeout",
+            ]
+
+            for param in cloud_params:
+                if param in kwargs:
+                    job_config[param] = kwargs[param]
 
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)

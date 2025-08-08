@@ -39,3 +39,6 @@ build/
 **/validation-secrets.json
 **/.op/
 **/op-session-*
+
+# ClaudPoint checkpoint system
+.checkpoints/

@@ -4,6 +4,7 @@ from .base import BasePricingClient, PricingCache
 from .aws_pricing import AWSPricingClient
 from .azure_pricing import AzurePricingClient
 from .gcp_pricing import GCPPricingClient
+from .lambda_pricing import LambdaPricingClient
 
 __all__ = [
     "BasePricingClient",
@@ -11,4 +12,5 @@ __all__ = [
     "AWSPricingClient",
     "AzurePricingClient",
     "GCPPricingClient",
+    "LambdaPricingClient",
 ]

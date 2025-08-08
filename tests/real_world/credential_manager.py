@@ -527,5 +527,30 @@ def print_credential_status() -> None:
     manager.print_credential_status()
 
 
+# Convenience functions for tests
+def get_lambda_credentials() -> Optional[Dict[str, str]]:
+    """Get Lambda Cloud credentials for tests."""
+    manager = get_credential_manager()
+    return manager.get_lambda_cloud_credentials()
+
+
+def get_aws_credentials() -> Optional[Dict[str, str]]:
+    """Get AWS credentials for tests."""
+    manager = get_credential_manager()
+    return manager.get_aws_credentials()
+
+
+def get_azure_credentials() -> Optional[Dict[str, str]]:
+    """Get Azure credentials for tests."""
+    manager = get_credential_manager()
+    return manager.get_azure_credentials()
+
+
+def get_gcp_credentials() -> Optional[Dict[str, str]]:
+    """Get GCP credentials for tests."""
+    manager = get_credential_manager()
+    return manager.get_gcp_credentials()
+
+
 # Set up credentials when module is imported
 setup_test_credentials()
