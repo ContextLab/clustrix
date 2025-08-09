@@ -15,6 +15,35 @@ class CloudProvider(ABC):
         self.authenticated = False
         self.credentials = {}
 
+    def get_credentials_from_manager(self, provider: str) -> Optional[Dict[str, Any]]:
+        """
+        Get credentials for this provider from the FlexibleCredentialManager.
+
+        Args:
+            provider: Provider name (aws, azure, gcp, etc.)
+
+        Returns:
+            Dictionary of credentials or None if not found
+        """
+        try:
+            from ..credential_manager import get_credential_manager
+
+            credential_manager = get_credential_manager()
+            credentials = credential_manager.ensure_credential(provider)
+
+            if credentials:
+                logger.debug(
+                    f"Retrieved {provider} credentials from credential manager"
+                )
+                return credentials
+            else:
+                logger.debug(f"No {provider} credentials found in credential manager")
+                return None
+
+        except Exception as e:
+            logger.debug(f"Failed to get {provider} credentials from manager: {e}")
+            return None
+
     @abstractmethod
     def authenticate(self, **credentials) -> bool:
         """

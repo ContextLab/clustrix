@@ -4,6 +4,14 @@ import getpass
 from .config import configure, load_config, save_config, get_config, ClusterConfig
 from .executor import ClusterExecutor
 from .ssh_utils import setup_ssh_keys, detect_working_ssh_key
+from .cli_credentials import (
+    setup_credentials_interactive,
+    list_credentials_command,
+    test_credentials_command,
+    edit_credentials_command,
+    reset_credentials_command,
+    migrate_credentials_command,
+)
 
 
 @click.group()
@@ -218,6 +226,49 @@ def ssh_setup(host, user, port, alias, key_type, force_refresh):
     except Exception as e:
         click.echo(f"❌ Error during SSH key setup: {e}")
         raise SystemExit(1)
+
+
+# Credential management commands
+@cli.group()
+def credentials():
+    """Manage Clustrix credentials."""
+    pass
+
+
+@credentials.command("setup")
+def credentials_setup():
+    """Interactive credential setup wizard."""
+    setup_credentials_interactive()
+
+
+@credentials.command("list")
+def credentials_list():
+    """List available credentials (values masked)."""
+    list_credentials_command()
+
+
+@credentials.command("test")
+def credentials_test():
+    """Test all configured credentials."""
+    test_credentials_command()
+
+
+@credentials.command("edit")
+def credentials_edit():
+    """Open credential file in editor."""
+    edit_credentials_command()
+
+
+@credentials.command("reset")
+def credentials_reset():
+    """Reset credential file to template."""
+    reset_credentials_command()
+
+
+@credentials.command("migrate")
+def credentials_migrate():
+    """Migrate credentials from 1Password to .env file."""
+    migrate_credentials_command()
 
 
 if __name__ == "__main__":

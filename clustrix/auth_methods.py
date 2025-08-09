@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from .config import ClusterConfig
+from .credential_manager import get_credential_manager
 
 
 @dataclass
@@ -127,6 +128,68 @@ class EnvironmentPasswordMethod(AuthMethod):
                 error=f"Environment variable ${self.config.password_env_var} not set",
                 guidance=f"Set password with: export {self.config.password_env_var}='your_password'",
             )
+
+
+class FlexibleCredentialAuthMethod(AuthMethod):
+    """Flexible credential authentication using the new credential manager."""
+
+    def __init__(self, config: ClusterConfig):
+        super().__init__(config)
+        self.credential_manager = get_credential_manager()
+
+    def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
+        """Always applicable as the new primary credential source."""
+        return True
+
+    def is_available(self) -> bool:
+        """Always available as it's the new default system."""
+        return True
+
+    def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
+        """Attempt authentication using flexible credential manager."""
+        hostname = connection_params.get("hostname", "")
+        username = connection_params.get("username", "")
+
+        # Try SSH credentials first (most common for clusters)
+        ssh_creds = self.credential_manager.ensure_credential("ssh")
+        if ssh_creds:
+            # Check if the SSH credentials match this connection
+            cred_host = ssh_creds.get("host", "")
+            cred_username = ssh_creds.get("username", "")
+
+            # Match hostname (allow partial matches for flexibility)
+            host_match = (
+                hostname == cred_host
+                or hostname.split(".")[0] == cred_host.split(".")[0]
+                or cred_host in hostname
+                or hostname in cred_host
+            )
+
+            # Match username
+            username_match = username == cred_username
+
+            if host_match and username_match:
+                # Return password if available
+                if "password" in ssh_creds:
+                    return AuthResult(
+                        success=True,
+                        method="flexible_credential",
+                        password=ssh_creds["password"],
+                    )
+                # Return SSH key path if available
+                elif "private_key_path" in ssh_creds:
+                    return AuthResult(
+                        success=True,
+                        method="flexible_credential_key",
+                        key_path=ssh_creds["private_key_path"],
+                    )
+
+        # Fallback: return no credentials found (let other methods try)
+        return AuthResult(
+            success=False,
+            error="No matching SSH credentials found in credential manager",
+            guidance="Add SSH credentials using 'clustrix credentials setup' or edit ~/.clustrix/.env",
+        )
 
 
 class OnePasswordAuthMethod(AuthMethod):

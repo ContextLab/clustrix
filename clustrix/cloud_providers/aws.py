@@ -46,10 +46,24 @@ class AWSProvider(CloudProvider):
         Returns:
             bool: True if authentication successful
         """
+        # First try provided credentials
         access_key_id = credentials.get("access_key_id")
         secret_access_key = credentials.get("secret_access_key")
         region = credentials.get("region", "us-east-1")
         session_token = credentials.get("session_token")
+
+        # If credentials not provided, try to get from FlexibleCredentialManager
+        if not access_key_id or not secret_access_key:
+            logger.debug("No AWS credentials provided, trying credential manager...")
+            manager_creds = self.get_credentials_from_manager("aws")
+            if manager_creds:
+                access_key_id = access_key_id or manager_creds.get("access_key_id")
+                secret_access_key = secret_access_key or manager_creds.get(
+                    "secret_access_key"
+                )
+                region = region or manager_creds.get("region", "us-east-1")
+                session_token = session_token or manager_creds.get("session_token")
+                logger.info("Using AWS credentials from credential manager")
 
         if not access_key_id or not secret_access_key:
             logger.error("access_key_id and secret_access_key are required")
@@ -72,8 +86,9 @@ class AWSProvider(CloudProvider):
             self.eks_client = session.client("eks")
             self.iam_client = session.client("iam")
 
-            # Test credentials by making a simple API call
-            self.iam_client.get_user()
+            # Test credentials by making a simple API call that doesn't require IAM permissions
+            sts_client = session.client("sts")
+            sts_client.get_caller_identity()
 
             self.region = region
             self.credentials = {

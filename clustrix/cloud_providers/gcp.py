@@ -51,9 +51,25 @@ class GCPProvider(CloudProvider):
         Returns:
             bool: True if authentication successful
         """
+        # First try provided credentials
         project_id = credentials.get("project_id")
         service_account_key = credentials.get("service_account_key")
         region = credentials.get("region", "us-central1")
+
+        # If credentials not provided, try to get from FlexibleCredentialManager
+        if not all([project_id, service_account_key]):
+            logger.debug(
+                "Incomplete GCP credentials provided, trying credential manager..."
+            )
+            manager_creds = self.get_credentials_from_manager("gcp")
+            if manager_creds:
+                project_id = project_id or manager_creds.get("project_id")
+                service_account_key = (
+                    service_account_key
+                    or manager_creds.get("service_account_json")
+                    or manager_creds.get("service_account_key")
+                )
+                logger.info("Using GCP credentials from credential manager")
 
         if not all([project_id, service_account_key]):
             logger.error("project_id and service_account_key are required")

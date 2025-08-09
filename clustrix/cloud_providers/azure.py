@@ -62,12 +62,28 @@ class AzureProvider(CloudProvider):
         Returns:
             bool: True if authentication successful
         """
+        # First try provided credentials
         subscription_id = credentials.get("subscription_id")
         client_id = credentials.get("client_id")
         client_secret = credentials.get("client_secret")
         tenant_id = credentials.get("tenant_id")
         region = credentials.get("region", "eastus")
         resource_group = credentials.get("resource_group", "clustrix-rg")
+
+        # If credentials not provided, try to get from FlexibleCredentialManager
+        if not all([subscription_id, client_id, client_secret, tenant_id]):
+            logger.debug(
+                "Incomplete Azure credentials provided, trying credential manager..."
+            )
+            manager_creds = self.get_credentials_from_manager("azure")
+            if manager_creds:
+                subscription_id = subscription_id or manager_creds.get(
+                    "subscription_id"
+                )
+                client_id = client_id or manager_creds.get("client_id")
+                client_secret = client_secret or manager_creds.get("client_secret")
+                tenant_id = tenant_id or manager_creds.get("tenant_id")
+                logger.info("Using Azure credentials from credential manager")
 
         if not all([subscription_id, client_id, client_secret, tenant_id]):
             logger.error(

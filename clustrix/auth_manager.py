@@ -3,11 +3,13 @@
 from typing import Optional, List, Dict, Any
 
 from .config import ClusterConfig
+from .credential_manager import get_credential_manager
 from .auth_methods import (
     AuthMethod,
     AuthResult,
     SSHKeyAuthMethod,
     EnvironmentPasswordMethod,
+    FlexibleCredentialAuthMethod,
     OnePasswordAuthMethod,
     WidgetPasswordMethod,
     InteractivePasswordMethod,
@@ -52,7 +54,18 @@ class AuthenticationManager:
                 print("   ✅ Using password from widget")
                 return result.password
 
-        # 2. Try 1Password if configured
+        # 2. Try FlexibleCredentialManager (NEW PRIMARY METHOD)
+        print("   • Checking flexible credential manager...")
+        flexible_method = FlexibleCredentialAuthMethod(self.config)
+        if flexible_method.is_applicable(connection_params):
+            result = flexible_method.attempt_auth(connection_params)
+            if result.success:
+                print("   ✅ Retrieved password from credential manager")
+                return result.password
+            else:
+                print(f"   ⚠️  Credential manager lookup failed: {result.error}")
+
+        # 3. Try 1Password if configured (now fallback)
         if self.config.use_1password:
             print("   • Checking 1Password...")
             onepassword_method = OnePasswordAuthMethod(self.config)
@@ -64,7 +77,7 @@ class AuthenticationManager:
                 else:
                     print(f"   ⚠️  1Password lookup failed: {result.error}")
 
-        # 3. Try environment variable if configured
+        # 4. Try environment variable if configured
         if self.config.use_env_password:
             print(
                 f"   • Checking environment variable ${self.config.password_env_var}..."
@@ -78,7 +91,7 @@ class AuthenticationManager:
                 else:
                     print(f"   ⚠️  Environment variable not set: {result.error}")
 
-        # 4. Fall back to interactive prompt
+        # 5. Fall back to interactive prompt
         print("   • Prompting for password...")
         interactive_method = InteractivePasswordMethod(self.config)
         result = interactive_method.attempt_auth(connection_params)
@@ -86,9 +99,9 @@ class AuthenticationManager:
         if result.success:
             print("   ✅ Password entered interactively")
 
-            # Offer to store in 1Password if enabled
-            if self.config.use_1password and result.password:
-                self._offer_1password_storage(result.password)
+            # Offer to store in .env file (primary) or 1Password (fallback)
+            if result.password:
+                self._offer_credential_storage(result.password)
 
             return result.password
         else:
@@ -133,12 +146,13 @@ class AuthenticationManager:
         return AuthResult(success=False, error="All authentication methods failed")
 
     def _initialize_auth_methods(self) -> List[AuthMethod]:
-        """Initialize authentication methods in simplified 4-step priority order."""
+        """Initialize authentication methods with FlexibleCredentialAuthMethod as primary."""
         methods: List[AuthMethod] = [
             SSHKeyAuthMethod(self.config),
+            FlexibleCredentialAuthMethod(self.config),  # NEW: Primary credential source
         ]
 
-        # Add 1Password if configured
+        # Add 1Password if configured (now acts as fallback)
         if self.config.use_1password:
             onepassword_method = OnePasswordAuthMethod(self.config)
             if onepassword_method.is_available():
@@ -155,6 +169,93 @@ class AuthenticationManager:
         methods.append(InteractivePasswordMethod(self.config))
 
         return methods
+
+    def _offer_credential_storage(self, password: str):
+        """Offer to store credentials in .env file (primary) or 1Password (fallback)."""
+        hostname = self.config.cluster_host
+        username = self.config.username
+
+        if not hostname or not username:
+            return
+
+        # First, offer to store in .env file (primary)
+        if self._should_store_in_env_file():
+            success = self._store_in_env_file(password, hostname, username)
+            if success:
+                return  # Successfully stored in .env, no need for 1Password
+
+        # Fallback to 1Password if .env storage failed or was declined
+        if self.config.use_1password:
+            self._offer_1password_storage(password)
+
+    def _should_store_in_env_file(self) -> bool:
+        """Prompt user to store credentials in .env file."""
+        env_type = detect_environment()
+
+        if env_type == "notebook" and not is_colab():
+            # Use GUI dialog
+            try:
+                import tkinter as tk
+                from tkinter import messagebox
+
+                root = tk.Tk()
+                root.withdraw()
+                result = messagebox.askyesno(
+                    "Store in ~/.clustrix/.env?",
+                    f"Would you like to store credentials for "
+                    f"{self.config.username}@{self.config.cluster_host} "
+                    f"in ~/.clustrix/.env for future use?\n\n"
+                    f"This will enable automatic authentication without prompts.",
+                )
+                root.destroy()
+                return result
+            except Exception:
+                # Fall back to terminal
+                pass
+
+        if env_type in ["cli", "script"] or env_type == "notebook":
+            # Use terminal prompt
+            try:
+                response = input(
+                    f"\nStore credentials for {self.config.cluster_host} in ~/.clustrix/.env for future use? [y/N]: "
+                )
+                return response.lower() in ["y", "yes"]
+            except KeyboardInterrupt:
+                return False
+
+        return False
+
+    def _store_in_env_file(self, password: str, hostname: str, username: str) -> bool:
+        """Store credentials in .env file using credential manager."""
+        try:
+            credential_manager = get_credential_manager()
+
+            # Prepare SSH credentials
+            ssh_credentials = {
+                "SSH_HOST": hostname,
+                "SSH_USERNAME": username,
+                "SSH_PASSWORD": password,
+                "SSH_PORT": str(self.config.ssh_port or 22),
+            }
+
+            # Use the credential manager's file writing function
+            from .cli_credentials import _write_credentials_to_env_file
+
+            success = _write_credentials_to_env_file(
+                credential_manager.env_file, ssh_credentials
+            )
+
+            if success:
+                print("✅ Credentials stored in ~/.clustrix/.env")
+                print("   You can now use passwordless authentication!")
+                return True
+            else:
+                print("❌ Failed to store credentials in .env file")
+                return False
+
+        except Exception as e:
+            print(f"❌ Error storing credentials in .env file: {e}")
+            return False
 
     def _offer_1password_storage(self, password: str):
         """Offer to store password in 1Password after successful interactive auth."""
