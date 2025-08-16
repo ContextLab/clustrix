@@ -32,6 +32,14 @@ def cluster(
     provider: Optional[str] = None,
     instance_type: Optional[str] = None,
     region: Optional[str] = None,
+    # NEW: Kubernetes auto-provisioning parameters
+    platform: Optional[str] = None,
+    auto_provision: Optional[bool] = None,
+    cluster_name: Optional[str] = None,
+    node_count: Optional[int] = None,
+    node_type: Optional[str] = None,
+    kubernetes_version: Optional[str] = None,
+    from_scratch: Optional[bool] = None,
     **kwargs,
 ):
     """
@@ -50,6 +58,16 @@ def cluster(
         provider: Cloud provider to use ('lambda', 'aws', 'azure', 'gcp', 'huggingface')
         instance_type: Cloud instance type (e.g., 'gpu_1x_a100' for Lambda Cloud)
         region: Cloud region (e.g., 'us-east-1')
+
+        # NEW: Kubernetes auto-provisioning parameters
+        platform: Execution platform ('kubernetes' to enable K8s execution)
+        auto_provision: Whether to automatically provision K8s cluster if needed
+        cluster_name: Name for the auto-provisioned cluster
+        node_count: Number of worker nodes in the cluster
+        node_type: Cloud-specific node instance type
+        kubernetes_version: Kubernetes version to install
+        from_scratch: Whether to create all infrastructure from scratch
+
         **kwargs: Additional job parameters
 
     Returns:
@@ -82,6 +100,37 @@ def cluster(
 
             if region:
                 job_config["region"] = region
+
+            # NEW: Add Kubernetes auto-provisioning parameters
+            if platform:
+                job_config["platform"] = platform
+                # If platform is kubernetes, set cluster_type to kubernetes
+                if platform == "kubernetes":
+                    config.cluster_type = "kubernetes"
+
+            if auto_provision is not None:
+                job_config["auto_provision"] = auto_provision
+                config.auto_provision_k8s = auto_provision
+
+            if cluster_name:
+                job_config["cluster_name"] = cluster_name
+                config.k8s_cluster_name = cluster_name
+
+            if node_count is not None:
+                job_config["node_count"] = node_count
+                config.k8s_node_count = node_count
+
+            if node_type:
+                job_config["node_type"] = node_type
+                config.k8s_node_type = node_type
+
+            if kubernetes_version:
+                job_config["kubernetes_version"] = kubernetes_version
+                config.k8s_version = kubernetes_version
+
+            if from_scratch is not None:
+                job_config["from_scratch"] = from_scratch
+                config.k8s_from_scratch = from_scratch
 
             # Add any additional cloud provider parameters from kwargs
             cloud_params = [
@@ -149,12 +198,38 @@ def cluster(
                 if use_async:
                     # Async execution
                     async_executor = AsyncClusterExecutor(config)
+
+                    # NEW: Ensure Kubernetes cluster is ready if auto-provisioning (for async)
+                    if config.cluster_type == "kubernetes" and getattr(
+                        config, "auto_provision_k8s", False
+                    ):
+                        # For async execution, we still need to ensure cluster is ready first
+                        # Create a temporary executor to check readiness
+                        temp_executor = ClusterExecutor(config)
+                        if not temp_executor.ensure_cluster_ready(
+                            timeout=900
+                        ):  # 15 minutes
+                            raise RuntimeError(
+                                "Auto-provisioned Kubernetes cluster failed to become ready"
+                            )
+                        temp_executor.disconnect()
+
                     return async_executor.submit_job_async(
                         func, args, func_kwargs, job_config
                     )
                 else:
                     # Synchronous execution (original behavior)
                     executor = ClusterExecutor(config)
+
+                    # NEW: Ensure Kubernetes cluster is ready if auto-provisioning
+                    if config.cluster_type == "kubernetes" and getattr(
+                        config, "auto_provision_k8s", False
+                    ):
+                        # Give cluster extra time to be ready if auto-provisioned
+                        if not executor.ensure_cluster_ready(timeout=900):  # 15 minutes
+                            raise RuntimeError(
+                                "Auto-provisioned Kubernetes cluster failed to become ready"
+                            )
 
                     # Check for GPU parallelization first (higher priority)
                     if should_gpu_parallelize:
@@ -566,6 +641,12 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     Returns:
         'local' or 'remote'
     """
+    # Check for Kubernetes auto-provisioning
+    if config.cluster_type == "kubernetes" and getattr(
+        config, "auto_provision_k8s", False
+    ):
+        return "remote"
+
     # If no cluster is configured, use local execution
     if not config.cluster_host:
         return "local"

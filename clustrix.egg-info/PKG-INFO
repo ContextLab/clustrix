@@ -50,6 +50,7 @@ Requires-Dist: azure-mgmt-containerservice>=20.0.0; extra == "azure"
 Requires-Dist: kubernetes>=20.13.0; extra == "azure"
 Provides-Extra: gcp
 Requires-Dist: google-cloud-container>=2.15.0; extra == "gcp"
+Requires-Dist: google-cloud-resource-manager>=1.14.0; extra == "gcp"
 Requires-Dist: google-auth>=2.15.0; extra == "gcp"
 Requires-Dist: kubernetes>=20.13.0; extra == "gcp"
 Provides-Extra: cloud
@@ -57,6 +58,7 @@ Requires-Dist: boto3>=1.26.0; extra == "cloud"
 Requires-Dist: azure-identity>=1.12.0; extra == "cloud"
 Requires-Dist: azure-mgmt-containerservice>=20.0.0; extra == "cloud"
 Requires-Dist: google-cloud-container>=2.15.0; extra == "cloud"
+Requires-Dist: google-cloud-resource-manager>=1.14.0; extra == "cloud"
 Requires-Dist: google-auth>=2.15.0; extra == "cloud"
 Requires-Dist: kubernetes>=20.13.0; extra == "cloud"
 Provides-Extra: dev
@@ -82,6 +84,7 @@ Requires-Dist: azure-mgmt-resource>=23.0.0; extra == "test"
 Requires-Dist: azure-mgmt-network>=25.0.0; extra == "test"
 Requires-Dist: google-cloud-compute>=1.11.0; extra == "test"
 Requires-Dist: google-cloud-container>=2.15.0; extra == "test"
+Requires-Dist: google-cloud-resource-manager>=1.14.0; extra == "test"
 Requires-Dist: google-auth>=2.15.0; extra == "test"
 Requires-Dist: kubernetes>=20.13.0; extra == "test"
 Provides-Extra: docs
@@ -100,6 +103,7 @@ Requires-Dist: boto3>=1.26.0; extra == "all"
 Requires-Dist: azure-identity>=1.12.0; extra == "all"
 Requires-Dist: azure-mgmt-containerservice>=20.0.0; extra == "all"
 Requires-Dist: google-cloud-container>=2.15.0; extra == "all"
+Requires-Dist: google-cloud-resource-manager>=1.14.0; extra == "all"
 Requires-Dist: google-auth>=2.15.0; extra == "all"
 Requires-Dist: pytest>=6.0; extra == "all"
 Requires-Dist: pytest-cov>=2.0; extra == "all"
@@ -118,12 +122,12 @@ Dynamic: requires-python
 # Clustrix
 
 [![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
-[![Coverage](https://img.shields.io/badge/coverage-47%25-yellow.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/badge/coverage-64%25-yellow.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Linting: flake8](https://img.shields.io/badge/linting-flake8-blue.svg)](https://github.com/PyCQA/flake8)
 [![Type Checking: mypy](https://img.shields.io/badge/mypy-checked-2a6db2.svg)](https://mypy-lang.org/)
 [![PyPI version](https://img.shields.io/pypi/v/clustrix.svg)](https://pypi.org/project/clustrix/)
-[![Downloads](https://img.shields.io/pypi/dm/clustrix.svg)](https://pypi.org/project/clustrix/)
+[![Downloads](https://static.pepy.tech/badge/clustrix)](https://pepy.tech/project/clustrix)
 [![Documentation](https://readthedocs.org/projects/clustrix/badge/?version=latest)](https://clustrix.readthedocs.io/en/latest/?badge=latest)
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -133,9 +137,11 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 ## Features
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
+- **Automated SSH Key Setup**: Create and deplot SSH keys to enable secure passwordless authentication with one click or API call
 - **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
 - **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
+- **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Native Cost Monitoring**: Built-in cost tracking for all major cloud providers
 - **Kubernetes Support**: Deploy to EKS, GKE, AKS, or any Kubernetes cluster
@@ -318,7 +324,141 @@ environment_variables:
   CUDA_VISIBLE_DEVICES: "0,1"
 ```
 
+## SSH Key Automation
+
+Clustrix provides automated SSH key setup to eliminate the manual process of generating and deploying SSH keys to clusters. This feature transforms a 15-30 minute manual setup into a **15-second automated process**.
+
+### Quick Setup Methods
+
+#### Method 1: Jupyter Widget (Recommended)
+The easiest way is using the interactive widget that appears when you import Clustrix:
+
+```python
+import clustrix
+# Look for the "SSH Key Setup" section in the widget interface
+```
+
+1. Enter your cluster hostname and username
+2. Enter your password  
+3. Click "Setup SSH Keys"
+4. ✅ Done! Secure access in <15 seconds
+
+#### Method 2: CLI Command
+```bash
+# Basic setup
+clustrix ssh-setup --host cluster.university.edu --user your_username
+
+# With custom alias for easy access
+clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
+
+# Now you can connect with: ssh my_hpc
+```
+
+#### Method 3: Python API
+```python
+from clustrix import setup_ssh_keys_with_fallback
+from clustrix.config import ClusterConfig
+
+config = ClusterConfig(
+    cluster_type="slurm",
+    cluster_host="cluster.university.edu", 
+    username="your_username"
+)
+
+result = setup_ssh_keys_with_fallback(config)
+if result["success"]:
+    print("✅ SSH keys setup successfully!")
+```
+
+### Key Features
+
+- **🔒 Secure**: Ed25519 keys with proper permissions (600/644)
+- **🧹 Smart Cleanup**: Automatically removes conflicting old keys
+- **🔄 Key Rotation**: Force refresh to generate new keys
+- **🌐 Cross-platform**: Works on Windows, macOS, Linux  
+- **🏢 Enterprise Ready**: Handles Kerberos clusters gracefully
+- **💡 Smart Fallbacks**: Environment-specific password retrieval
+
+### Password Fallback System
+
+No need to enter passwords manually! Clustrix automatically retrieves passwords from:
+
+- **Google Colab**: Colab secrets (stored securely)
+- **Environment Variables**: `CLUSTRIX_PASSWORD_*` or `CLUSTER_PASSWORD`
+- **Interactive Prompts**: GUI popups in notebooks, terminal prompts in CLI
+
+### Enterprise Cluster Support
+
+For university/enterprise clusters using Kerberos authentication:
+```bash
+# Clustrix deploys keys successfully, then use Kerberos for auth
+kinit your_netid@UNIVERSITY.EDU
+ssh your_netid@cluster.university.edu
+```
+
+**📖 For complete details, try the interactive [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
+
 ## Advanced Usage
+
+### Unified Filesystem Utilities
+
+Clustrix provides unified filesystem operations that work seamlessly across local and remote clusters:
+
+```python
+from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists, cluster_glob
+from clustrix.config import ClusterConfig
+
+# Configure for local or remote operations
+config = ClusterConfig(
+    cluster_type="slurm",  # or "local" for local operations
+    cluster_host="cluster.edu",
+    username="researcher",
+    remote_work_dir="/scratch/project"
+)
+
+# List directory contents (works locally and remotely)
+files = cluster_ls("data/", config)
+
+# Find files by pattern
+csv_files = cluster_find("*.csv", "datasets/", config)
+
+# Check file existence
+if cluster_exists("results/output.json", config):
+    print("Results already computed!")
+
+# Get file information
+file_info = cluster_stat("large_dataset.h5", config)
+print(f"Dataset size: {file_info.size / 1e9:.1f} GB")
+
+# Use with @cluster decorator for data-driven workflows
+@cluster(cores=8)
+def process_datasets(config):
+    # Find all data files on the cluster
+    data_files = cluster_glob("*.csv", "input/", config)
+    
+    results = []
+    for filename in data_files:  # Loop gets parallelized automatically
+        # Check file size before processing
+        file_info = cluster_stat(filename, config)
+        if file_info.size > 100_000_000:  # Large files
+            result = process_large_file(filename, config)
+        else:
+            result = process_small_file(filename, config)
+        results.append(result)
+    
+    return results
+```
+
+**Available filesystem operations:**
+
+- `cluster_ls()` - List directory contents
+- `cluster_find()` - Find files by pattern (recursive)
+- `cluster_stat()` - Get file information (size, modified time, permissions)
+- `cluster_exists()` - Check if file/directory exists
+- `cluster_isdir()` / `cluster_isfile()` - Check file type
+- `cluster_glob()` - Pattern matching for files
+- `cluster_du()` - Directory usage information
+- `cluster_count_files()` - Count files matching pattern
 
 ### Cost Monitoring
 
@@ -530,6 +670,33 @@ clustrix status
 5. **Result Collection**: Automatically retrieves results once execution completes
 6. **Cleanup**: Optionally cleans up temporary files and environments
 
+### Important Notes
+
+**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) cannot be serialized for remote execution because their source code is not available. This affects:
+- Interactive Python sessions (`python` command)
+- Some notebook environments that don't preserve function source
+
+**✅ Recommended Approach**: Define functions in:
+- Python files (`.py` scripts)
+- Jupyter notebooks 
+- IPython environments
+- Any environment where `inspect.getsource()` can access the function source code
+
+```python
+# ❌ This won't work in interactive Python REPL
+>>> @cluster(cores=2)
+... def my_function(x):
+...     return x * 2
+>>> my_function(5)  # Error: source code not available
+
+# ✅ This works in .py files and notebooks
+@cluster(cores=2)
+def my_function(x):
+    return x * 2
+
+result = my_function(5)  # Works correctly
+```
+
 ## Supported Cluster Types
 
 - **SLURM**: Full support for Slurm Workload Manager
@@ -630,7 +797,6 @@ processed_data = process_large_dataset('/path/to/large_file.csv')
 Clustrix maintains high code quality standards:
 
 - **Testing**: Comprehensive test suite with pytest
-- **Coverage**: Currently at 47% and improving
 - **Code Style**: Enforced with Black formatter
 - **Linting**: Checked with flake8
 - **Type Checking**: Validated with mypy

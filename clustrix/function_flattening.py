@@ -423,7 +423,7 @@ class FunctionFlattener:
         param_string = ", ".join(param_strs)
 
         # Build parameter names for passing to subprocess
-        param_names = [param.name for param in params]
+        [param.name for param in params]
 
         # Build simplified main function with correct signature
         main_code = f"""

@@ -35,6 +35,19 @@ class ClusterConfig:
     cloud_region: Optional[str] = None
     cloud_auto_configure: bool = False
 
+    # NEW: Kubernetes auto-provisioning settings
+    auto_provision_k8s: bool = False
+    k8s_provider: str = "aws"  # aws, gcp, azure, huggingface, lambda
+    k8s_from_scratch: bool = True  # Always provision infrastructure
+    k8s_auto_cleanup: bool = True
+    k8s_cluster_name: Optional[str] = None
+
+    # NEW: Cluster specifications (provider-specific defaults)
+    k8s_node_count: int = 2
+    k8s_node_type: Optional[str] = None  # t3.medium, e2-standard-4, etc.
+    k8s_version: str = "1.28"
+    k8s_region: Optional[str] = None
+
     # AWS-specific settings
     # NOTE: Both standard boto3 and widget field names are supported for backward compatibility
     # Field mapping is handled automatically via clustrix.field_mappings module

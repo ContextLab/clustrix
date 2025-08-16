@@ -2137,7 +2137,7 @@ class EnhancedClusterConfigWidget:
         """Test GCP API connectivity with proper field mapping."""
         try:
             import json
-            from google.cloud import resource_manager
+            from google.cloud import resourcemanager
             from google.oauth2 import service_account
             from .field_mappings import (
                 map_widget_fields_to_provider,
@@ -2190,12 +2190,11 @@ class EnhancedClusterConfigWidget:
             )
 
             # Test with GCP Resource Manager API
-            client = resource_manager.Client(
-                credentials=credentials, project=gcp_credentials["project_id"]
-            )
+            client = resourcemanager.ProjectsClient(credentials=credentials)
 
             # Get project information to verify authentication
-            project = client.fetch_project(gcp_credentials["project_id"])
+            project_name = f"projects/{gcp_credentials['project_id']}"
+            project = client.get_project(name=project_name)
 
             if hasattr(self, "status_output"):
                 with self.status_output:
@@ -2241,7 +2240,6 @@ class EnhancedClusterConfigWidget:
     def _test_huggingface_connectivity(self, config):
         """Test HuggingFace API connectivity with proper field mapping."""
         try:
-            import requests
             from .field_mappings import (
                 map_widget_fields_to_provider,
                 validate_provider_config,
@@ -2269,32 +2267,23 @@ class EnhancedClusterConfigWidget:
                         print("   Required: token")
                 return False
 
-            # Real HuggingFace API authentication test
-            headers = {"Authorization": f"Bearer {hf_credentials['token']}"}
+            # Real HuggingFace API authentication test using huggingface_hub
+            try:
+                from huggingface_hub import whoami
 
-            # Test with whoami endpoint for proper authentication validation
-            response = requests.get(
-                "https://huggingface.co/api/whoami", headers=headers, timeout=10
-            )
+                # Test authentication with the token
+                user_data = whoami(token=hf_credentials["token"])
 
-            if response.status_code == 200:
-                user_data = response.json()
                 if hasattr(self, "status_output"):
                     with self.status_output:
                         print("✅ HuggingFace authentication successful!")
-                        print(f"   User: {user_data.get('name', 'Unknown')}")
-                        print(f"   Username: @{user_data.get('login', 'Unknown')}")
+                        print(f"   User: {user_data.get('fullname', 'Unknown')}")
+                        print(f"   Username: @{user_data.get('name', 'Unknown')}")
                 return True
-            else:
+            except Exception as auth_error:
                 if hasattr(self, "status_output"):
                     with self.status_output:
-                        print(
-                            f"❌ HuggingFace authentication failed (HTTP {response.status_code})"
-                        )
-                        if response.status_code == 401:
-                            print("   Invalid or expired token")
-                        elif response.status_code == 403:
-                            print("   Token does not have required permissions")
+                        print(f"❌ HuggingFace authentication failed: {auth_error}")
                 return False
 
         except ImportError:

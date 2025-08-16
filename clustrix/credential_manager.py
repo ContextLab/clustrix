@@ -105,6 +105,9 @@ class DotEnvCredentialSource(CredentialSource):
                     "LAMBDA_CLOUD_ENDPOINT", "https://cloud.lambdalabs.com/api/v1"
                 ),
             },
+            "local": {
+                "type": "local",  # Local provider needs no real credentials
+            },
         }
 
         if provider not in provider_mappings:
@@ -127,6 +130,7 @@ class DotEnvCredentialSource(CredentialSource):
             "kubernetes",
             "huggingface",
             "lambda_cloud",
+            "local",
         ]
 
         for provider in providers:
@@ -264,6 +268,9 @@ class EnvironmentCredentialSource(CredentialSource):
                     "LAMBDA_CLOUD_ENDPOINT", "https://cloud.lambdalabs.com/api/v1"
                 ),
             },
+            "local": {
+                "type": "local",  # Local provider needs no real credentials
+            },
         }
 
         if provider not in provider_mappings:
@@ -286,6 +293,7 @@ class EnvironmentCredentialSource(CredentialSource):
             "kubernetes",
             "huggingface",
             "lambda_cloud",
+            "local",
         ]
 
         for provider in providers:
@@ -360,11 +368,12 @@ class FlexibleCredentialManager:
         self.env_file = self.config_dir / ".env"
 
         # Initialize credential sources in priority order
+        # 1Password should be last since it requires manual authentication
         self.sources = [
             DotEnvCredentialSource(self.env_file),
-            OnePasswordCredentialSource(),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
+            OnePasswordCredentialSource(),  # Last resort - requires manual auth
         ]
 
         # Ensure setup is complete
@@ -656,6 +665,7 @@ class FlexibleCredentialManager:
             "kubernetes",
             "huggingface",
             "lambda_cloud",
+            "local",
         ]
         for provider in providers:
             credentials = self.ensure_credential(provider)
@@ -685,6 +695,99 @@ class FlexibleCredentialManager:
                 status["providers"][provider] = empty_status
 
         return status
+
+    def ensure_kubernetes_provider_credentials(
+        self, k8s_provider: str
+    ) -> Optional[Dict[str, str]]:
+        """Get credentials for Kubernetes provisioning provider with provider-specific mapping.
+
+        Args:
+            k8s_provider: Kubernetes provider name (aws, gcp, azure, huggingface, lambda)
+
+        Returns:
+            Credentials dictionary with provider-specific keys or None
+        """
+        logger.info(f"🔑 Getting credentials for Kubernetes provider: {k8s_provider}")
+
+        # Handle local providers specially - no credentials needed
+        if k8s_provider in ["local", "local-docker"]:
+            logger.info(f"✅ Local provider - no external credentials required")
+            return {"type": "local"}
+
+        # Map k8s provider names to credential provider names
+        provider_mapping = {
+            "aws": "aws",
+            "gcp": "gcp",
+            "azure": "azure",
+            "huggingface": "huggingface",
+            "lambda": "lambda_cloud",
+        }
+
+        credential_provider = provider_mapping.get(k8s_provider)
+        if not credential_provider:
+            logger.error(f"❌ Unsupported Kubernetes provider: {k8s_provider}")
+            return None
+
+        # Get basic credentials
+        credentials = self.ensure_credential(credential_provider)
+        if not credentials:
+            logger.error(f"❌ No credentials found for {k8s_provider}")
+            return None
+
+        # Apply provider-specific transformations for Kubernetes provisioning
+        if k8s_provider == "aws":
+            # AWS EKS needs standard boto3 format
+            transformed = {
+                "access_key_id": credentials.get("access_key_id"),
+                "secret_access_key": credentials.get("secret_access_key"),
+                "region": credentials.get("region", "us-west-2"),
+            }
+        elif k8s_provider == "gcp":
+            # GCP GKE needs project ID and service account
+            transformed = {
+                "project_id": credentials.get("project_id"),
+                "service_account_path": credentials.get("service_account_path"),
+                "service_account_json": credentials.get("service_account_json"),
+            }
+        elif k8s_provider == "azure":
+            # Azure AKS needs full service principal
+            transformed = {
+                "subscription_id": credentials.get("subscription_id"),
+                "tenant_id": credentials.get("tenant_id"),
+                "client_id": credentials.get("client_id"),
+                "client_secret": credentials.get("client_secret"),
+            }
+        elif k8s_provider == "huggingface":
+            # HuggingFace Spaces needs token and username
+            transformed = {
+                "token": credentials.get("token"),
+                "username": credentials.get("username"),
+            }
+        elif k8s_provider == "lambda":
+            # Lambda Cloud needs API key
+            transformed = {
+                "api_key": credentials.get("api_key"),
+                "endpoint": credentials.get(
+                    "endpoint", "https://cloud.lambdalabs.com/api/v1"
+                ),
+            }
+        elif k8s_provider in ["local", "local-docker"]:
+            # Local provisioner needs no special credentials
+            transformed = {"type": "local"}
+        else:
+            transformed = dict(credentials)
+
+        # Filter out None values
+        filtered = {k: v for k, v in transformed.items() if v is not None}
+
+        if filtered:
+            logger.info(
+                f"✅ Credentials prepared for {k8s_provider} Kubernetes provisioning"
+            )
+            return filtered
+        else:
+            logger.error(f"❌ Missing required credential fields for {k8s_provider}")
+            return None
 
 
 # Global credential manager instance
@@ -730,3 +833,11 @@ def get_credential_status() -> Dict[str, Any]:
     """Get comprehensive credential system status."""
     manager = get_credential_manager()
     return manager.get_credential_status()
+
+
+def ensure_kubernetes_provider_credentials(
+    k8s_provider: str,
+) -> Optional[Dict[str, str]]:
+    """Get credentials for Kubernetes provisioning provider with provider-specific mapping."""
+    manager = get_credential_manager()
+    return manager.ensure_kubernetes_provider_credentials(k8s_provider)

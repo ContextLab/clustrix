@@ -15,6 +15,7 @@ profiles:
     aws_region: null
     aws_secret_access_key: null
     aws_secret_key: null
+    aws_session_token: null
     azure_client_id: null
     azure_client_secret: null
     azure_instance_type: null

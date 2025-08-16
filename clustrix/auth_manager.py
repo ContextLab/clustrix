@@ -65,19 +65,7 @@ class AuthenticationManager:
             else:
                 print(f"   ⚠️  Credential manager lookup failed: {result.error}")
 
-        # 3. Try 1Password if configured (now fallback)
-        if self.config.use_1password:
-            print("   • Checking 1Password...")
-            onepassword_method = OnePasswordAuthMethod(self.config)
-            if onepassword_method.is_applicable(connection_params):
-                result = onepassword_method.attempt_auth(connection_params)
-                if result.success:
-                    print("   ✅ Retrieved password from 1Password")
-                    return result.password
-                else:
-                    print(f"   ⚠️  1Password lookup failed: {result.error}")
-
-        # 4. Try environment variable if configured
+        # 3. Try environment variable if configured (BEFORE 1Password)
         if self.config.use_env_password:
             print(
                 f"   • Checking environment variable ${self.config.password_env_var}..."
@@ -90,6 +78,18 @@ class AuthenticationManager:
                     return result.password
                 else:
                     print(f"   ⚠️  Environment variable not set: {result.error}")
+
+        # 4. Try 1Password if configured (now LAST fallback before interactive)
+        if self.config.use_1password:
+            print("   • Checking 1Password...")
+            onepassword_method = OnePasswordAuthMethod(self.config)
+            if onepassword_method.is_applicable(connection_params):
+                result = onepassword_method.attempt_auth(connection_params)
+                if result.success:
+                    print("   ✅ Retrieved password from 1Password")
+                    return result.password
+                else:
+                    print(f"   ⚠️  1Password lookup failed: {result.error}")
 
         # 5. Fall back to interactive prompt
         print("   • Prompting for password...")

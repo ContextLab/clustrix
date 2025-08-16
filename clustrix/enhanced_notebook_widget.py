@@ -263,11 +263,14 @@ def create_enhanced_cluster_widget(
     use_1password.observe(on_1password_toggle, names="value")
     use_env_password.observe(on_env_toggle, names="value")
 
-    # Initialize field visibility
+    # Initialize field visibility WITHOUT triggering validation
     if use_1password.value:
-        on_1password_toggle({"new": True})
+        # Just show the fields, don't validate (which triggers 1Password popup)
+        onepassword_note.layout.display = "flex"
+        onepassword_help.layout.display = "block"
     if use_env_password.value:
-        on_env_toggle({"new": True})
+        password_env_var.layout.display = "flex"
+        password_help.layout.display = "block"
 
     # =============================================================================
     # Enhanced SSH Setup Handler

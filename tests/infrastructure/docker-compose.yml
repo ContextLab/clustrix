@@ -1,0 +1,126 @@
+# Docker Compose configuration for local test infrastructure
+# This provides real infrastructure for testing without cloud costs
+
+version: '3.8'
+
+services:
+  # Local Kubernetes using Kind (Kubernetes in Docker)
+  kind-control-plane:
+    image: kindest/node:v1.27.3
+    container_name: clustrix-test-k8s
+    privileged: true
+    ports:
+      - "6443:6443"  # Kubernetes API
+      - "30000-32767:30000-32767"  # NodePort range
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - kind-data:/var/lib/containerd
+    environment:
+      - KUBECONFIG=/etc/kubernetes/admin.conf
+    networks:
+      - clustrix-test
+
+  # MinIO for S3-compatible storage testing
+  minio:
+    image: minio/minio:latest
+    container_name: clustrix-test-minio
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+      - MINIO_DEFAULT_BUCKETS=test-bucket,results-bucket
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - clustrix-test
+
+  # PostgreSQL for metadata storage testing
+  postgres:
+    image: postgres:15
+    container_name: clustrix-test-postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=clustrix
+      - POSTGRES_PASSWORD=testpass
+      - POSTGRES_DB=clustrix_test
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clustrix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clustrix-test
+
+  # Redis for caching and job queue testing
+  redis:
+    image: redis:7-alpine
+    container_name: clustrix-test-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - clustrix-test
+
+  # SSH server for testing SSH-based clusters
+  ssh-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.ssh
+    container_name: clustrix-test-ssh
+    ports:
+      - "2222:22"
+    volumes:
+      - ssh-data:/home/testuser
+      - ./test_keys:/home/testuser/.ssh:ro
+    environment:
+      - SSH_USER=testuser
+      - SSH_PASSWORD=testpass
+    networks:
+      - clustrix-test
+
+  # Mock SLURM controller (simplified)
+  slurm-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile.slurm
+    container_name: clustrix-test-slurm
+    ports:
+      - "6817:6817"  # Slurm default port
+      - "6818:6818"  # Slurmctld port
+    volumes:
+      - slurm-data:/var/spool/slurm
+    environment:
+      - SLURM_CLUSTER_NAME=test-cluster
+      - SLURM_CONTROL_MACHINE=slurm-mock
+    networks:
+      - clustrix-test
+
+volumes:
+  kind-data:
+  minio-data:
+  postgres-data:
+  redis-data:
+  ssh-data:
+  slurm-data:
+
+networks:
+  clustrix-test:
+    driver: bridge

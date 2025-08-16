@@ -402,6 +402,76 @@ class RealWorldCredentialManager:
 
         return None
 
+    def get_kubernetes_credentials(self) -> Optional[Dict[str, str]]:
+        """Get Kubernetes credentials from available sources."""
+        # Try 1Password first (local development)
+        if self.is_local_development and self._op_manager:
+            try:
+                # Try to get Kubernetes cluster credentials
+                kubeconfig = self._op_manager.get_credential(
+                    "clustrix-kubernetes-validation", "kubeconfig"
+                )
+                namespace = self._op_manager.get_credential(
+                    "clustrix-kubernetes-validation", "namespace"
+                )
+                context = self._op_manager.get_credential(
+                    "clustrix-kubernetes-validation", "context"
+                )
+
+                if kubeconfig:
+                    result = {
+                        "kubeconfig_content": kubeconfig,
+                        "namespace": namespace or "default",
+                    }
+                    if context:
+                        result["context"] = context
+                    return result
+
+            except Exception as e:
+                logger.debug(
+                    f"Failed to get Kubernetes credentials from 1Password: {e}"
+                )
+
+        # GitHub Actions: Use repository secrets
+        if self.is_github_actions:
+            kubeconfig = os.getenv("KUBECONFIG_CONTENT")
+            namespace = os.getenv("K8S_NAMESPACE")
+
+            if kubeconfig:
+                result = {
+                    "kubeconfig_content": kubeconfig,
+                    "namespace": namespace or "default",
+                }
+                context = os.getenv("K8S_CONTEXT")
+                if context:
+                    result["context"] = context
+                return result
+
+        # Fall back to environment variables and local kubeconfig
+        kubeconfig_path = os.getenv("KUBECONFIG") or os.path.expanduser(
+            "~/.kube/config"
+        )
+        if os.path.exists(kubeconfig_path):
+            namespace = os.getenv("K8S_NAMESPACE", "default")
+            context = os.getenv("K8S_CONTEXT")
+
+            result = {
+                "kubeconfig_path": kubeconfig_path,
+                "namespace": namespace,
+            }
+            if context:
+                result["context"] = context
+            return result
+
+        # Check if running in-cluster
+        if os.path.exists("/var/run/secrets/kubernetes.io/serviceaccount/token"):
+            return {
+                "in_cluster": True,
+                "namespace": os.getenv("K8S_NAMESPACE", "default"),
+            }
+
+        return None
+
     def get_credential_status(self) -> Dict[str, bool]:
         """Get status of all credential types."""
         return {
@@ -410,6 +480,7 @@ class RealWorldCredentialManager:
             "gcp": self.get_gcp_credentials() is not None,
             "ssh": self.get_ssh_credentials() is not None,
             "slurm": self.get_slurm_credentials() is not None,
+            "kubernetes": self.get_kubernetes_credentials() is not None,
             "huggingface": self.get_huggingface_credentials() is not None,
             "lambda_cloud": self.get_lambda_cloud_credentials() is not None,
             "1password": self.is_1password_available(),

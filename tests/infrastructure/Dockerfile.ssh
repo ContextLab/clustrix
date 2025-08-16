@@ -1,0 +1,47 @@
+# Dockerfile for SSH test server
+FROM ubuntu:22.04
+
+# Install SSH server and Python
+RUN apt-get update && apt-get install -y \
+    openssh-server \
+    python3 \
+    python3-pip \
+    python3-venv \
+    sudo \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create test user
+RUN useradd -m -s /bin/bash testuser && \
+    echo "testuser:testpass" | chpasswd && \
+    usermod -aG sudo testuser && \
+    echo "testuser ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Setup SSH
+RUN mkdir /var/run/sshd && \
+    sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config && \
+    sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config && \
+    sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Create SSH directory for testuser
+USER testuser
+RUN mkdir -p /home/testuser/.ssh && \
+    chmod 700 /home/testuser/.ssh
+
+# Install Python packages as testuser
+RUN python3 -m pip install --user \
+    numpy \
+    pandas \
+    scikit-learn \
+    cloudpickle \
+    dill
+
+USER root
+
+# Copy SSH keys if they exist (for key-based auth testing)
+COPY --chown=testuser:testuser test_keys/* /home/testuser/.ssh/ 2>/dev/null || true
+
+EXPOSE 22
+
+CMD ["/usr/sbin/sshd", "-D"]

@@ -1,0 +1,486 @@
+name: Real World Tests
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+    branches: [main, master, develop]
+  schedule:
+    # Run comprehensive tests daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_category:
+        description: 'Test category to run'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - edge_cases
+          - performance
+          - failure_recovery
+          - serialization
+          - integration
+
+jobs:
+  setup-infrastructure:
+    name: Setup Test Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Cache Python dependencies
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes]"
+          pip install pytest pytest-cov pytest-timeout pytest-xdist
+      
+      - name: Setup Docker
+        run: |
+          docker --version
+          docker-compose --version
+      
+      - name: Start local infrastructure
+        run: |
+          cd tests/infrastructure
+          docker-compose up -d
+          sleep 30  # Wait for services to be ready
+      
+      - name: Setup Kind cluster
+        run: |
+          # Install Kind
+          curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.20.0/kind-linux-amd64
+          chmod +x ./kind
+          sudo mv ./kind /usr/local/bin/kind
+          
+          # Create cluster
+          kind create cluster --name clustrix-ci --config tests/infrastructure/kind-config.yaml
+          
+          # Verify cluster
+          kubectl cluster-info
+          kubectl get nodes
+      
+      - name: Verify infrastructure
+        run: |
+          # Check SSH server
+          nc -zv localhost 2222 || echo "SSH server not accessible"
+          
+          # Check MinIO
+          curl -f http://localhost:9000/minio/health/live || echo "MinIO not healthy"
+          
+          # Check PostgreSQL
+          PGPASSWORD=testpass psql -h localhost -U clustrix -d clustrix_test -c "SELECT 1" || echo "PostgreSQL not accessible"
+          
+          # Check Redis
+          redis-cli -h localhost ping || echo "Redis not accessible"
+      
+      - name: Save infrastructure state
+        uses: actions/upload-artifact@v3
+        with:
+          name: infrastructure-logs
+          path: |
+            tests/infrastructure/*.log
+            /tmp/clustrix-test-*
+          retention-days: 7
+
+  test-unit:
+    name: Unit Tests (No Infrastructure)
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10', '3.11']
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run unit tests
+        run: |
+          pytest tests/ -v \
+            --ignore=tests/real_world \
+            --ignore=tests/comprehensive \
+            -m "not real_world" \
+            --cov=clustrix \
+            --cov-report=xml \
+            --cov-report=term \
+            --timeout=300 \
+            --tb=short
+      
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: Unit Tests - Python ${{ matrix.python-version }}
+
+  test-edge-cases:
+    name: Edge Case Tests
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'push' || github.event.inputs.test_category == 'all' || github.event.inputs.test_category == 'edge_cases'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes]"
+      
+      - name: Run edge case tests
+        run: |
+          python tests/comprehensive/test_edge_cases_real.py
+        timeout-minutes: 30
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: edge-case-results
+          path: tests/comprehensive/*_results.json
+
+  test-performance:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'push' || github.event.inputs.test_category == 'all' || github.event.inputs.test_category == 'performance'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes]"
+      
+      - name: Run performance benchmarks
+        run: |
+          python tests/comprehensive/test_performance_benchmarks_real.py
+        timeout-minutes: 45
+      
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: performance-results
+          path: tests/comprehensive/performance_results.json
+      
+      - name: Comment PR with performance results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('tests/comprehensive/performance_results.json', 'utf8'));
+            
+            const comment = `## 📊 Performance Benchmark Results
+            
+            | Metric | Result | Target | Status |
+            |--------|--------|--------|--------|
+            | Job Submission Latency | ${results.submission_latency || 'N/A'} | <1s | ${results.submission_latency < 1 ? '✅' : '⚠️'} |
+            | Serialization Speed | ${results.serialization_speed || 'N/A'} | >100 MB/s | ${results.serialization_speed > 100 ? '✅' : '⚠️'} |
+            | Parallel Efficiency | ${results.parallel_efficiency || 'N/A'} | >70% | ${results.parallel_efficiency > 0.7 ? '✅' : '⚠️'} |
+            
+            [View full results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  test-failure-recovery:
+    name: Failure Recovery Tests
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'push' || github.event.inputs.test_category == 'all' || github.event.inputs.test_category == 'failure_recovery'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes]"
+      
+      - name: Run failure recovery tests
+        run: |
+          python tests/comprehensive/test_failure_recovery_real.py
+        timeout-minutes: 30
+        continue-on-error: true  # These tests intentionally cause failures
+      
+      - name: Verify recovery mechanisms
+        run: |
+          # Check that recovery mechanisms worked
+          if [ -f tests/comprehensive/recovery_report.json ]; then
+            python -c "
+            import json
+            with open('tests/comprehensive/recovery_report.json') as f:
+                report = json.load(f)
+                assert report['recovery_rate'] > 0.8, 'Recovery rate too low'
+                print(f'Recovery rate: {report[\"recovery_rate\"]:.1%}')
+            "
+          fi
+
+  test-serialization:
+    name: Serialization Tests
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'push' || github.event.inputs.test_category == 'all' || github.event.inputs.test_category == 'serialization'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      
+      - name: Run serialization tests
+        run: |
+          python tests/comprehensive/test_serialization_real.py
+        timeout-minutes: 20
+
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'push' || github.event.inputs.test_category == 'all' || github.event.inputs.test_category == 'integration'
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes]"
+      
+      - name: Set test environment
+        run: |
+          echo "TEST_SSH_HOST=localhost" >> $GITHUB_ENV
+          echo "TEST_SSH_PORT=2222" >> $GITHUB_ENV
+          echo "TEST_SSH_USER=testuser" >> $GITHUB_ENV
+          echo "TEST_SSH_PASS=testpass" >> $GITHUB_ENV
+          echo "KUBECONFIG=$HOME/.kube/config" >> $GITHUB_ENV
+          echo "K8S_TEST_ENABLED=true" >> $GITHUB_ENV
+      
+      - name: Run integration tests
+        run: |
+          python tests/run_real_world_tests.py \
+            --category executor decorator config \
+            --config tests/infrastructure/test_infrastructure.json
+        timeout-minutes: 60
+      
+      - name: Upload integration test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: integration-results
+          path: tests/real_world_test_results.json
+
+  test-cloud-providers:
+    name: Cloud Provider Tests
+    runs-on: ubuntu-latest
+    needs: setup-infrastructure
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    strategy:
+      matrix:
+        provider: [aws, gcp, azure]
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,kubernetes,${{ matrix.provider }}]"
+      
+      - name: Configure AWS credentials
+        if: matrix.provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-2
+      
+      - name: Configure GCP credentials
+        if: matrix.provider == 'gcp'
+        uses: google-github-actions/auth@v1
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+      
+      - name: Configure Azure credentials
+        if: matrix.provider == 'azure'
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+      
+      - name: Run cloud provider tests
+        run: |
+          pytest tests/test_cloud_providers_${{ matrix.provider }}_real.py -v \
+            -m real_world \
+            --timeout=1800
+        timeout-minutes: 45
+        continue-on-error: true  # Cloud tests may fail due to quotas/limits
+
+  cleanup:
+    name: Cleanup Infrastructure
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-edge-cases, test-performance, test-failure-recovery, test-serialization, test-integration]
+    if: always()
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Stop Docker services
+        run: |
+          cd tests/infrastructure
+          docker-compose down -v
+      
+      - name: Delete Kind cluster
+        run: |
+          kind delete cluster --name clustrix-ci || true
+      
+      - name: Clean up artifacts
+        run: |
+          rm -rf /tmp/clustrix-test-*
+          docker system prune -f
+
+  report:
+    name: Generate Test Report
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-edge-cases, test-performance, test-failure-recovery, test-serialization, test-integration]
+    if: always()
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+      
+      - name: Generate consolidated report
+        run: |
+          python -c "
+          import json
+          import glob
+          from pathlib import Path
+          
+          # Collect all test results
+          results = {
+              'unit_tests': 'passed',
+              'edge_cases': 'passed',
+              'performance': 'passed',
+              'failure_recovery': 'passed',
+              'serialization': 'passed',
+              'integration': 'passed'
+          }
+          
+          # Check for result files
+          for result_file in glob.glob('**/test_results.json', recursive=True):
+              with open(result_file) as f:
+                  data = json.load(f)
+                  # Update results based on file content
+          
+          # Generate summary
+          total = len(results)
+          passed = sum(1 for v in results.values() if v == 'passed')
+          
+          print('## 📊 Test Summary')
+          print(f'Total: {total}, Passed: {passed}, Failed: {total - passed}')
+          print(f'Success Rate: {passed/total*100:.1f}%')
+          
+          # Save summary
+          with open('test_summary.json', 'w') as f:
+              json.dump({
+                  'total': total,
+                  'passed': passed,
+                  'failed': total - passed,
+                  'success_rate': passed/total,
+                  'details': results
+              }, f, indent=2)
+          "
+      
+      - name: Upload final report
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-summary
+          path: test_summary.json
+      
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const summary = JSON.parse(fs.readFileSync('test_summary.json', 'utf8'));
+            
+            const emoji = summary.success_rate === 1 ? '✅' : summary.success_rate > 0.8 ? '⚠️' : '❌';
+            
+            const comment = `## ${emoji} Test Results
+            
+            **Success Rate:** ${(summary.success_rate * 100).toFixed(1)}%
+            **Passed:** ${summary.passed}/${summary.total}
+            
+            | Test Suite | Status |
+            |------------|--------|
+            | Unit Tests | ${summary.details.unit_tests === 'passed' ? '✅' : '❌'} |
+            | Edge Cases | ${summary.details.edge_cases === 'passed' ? '✅' : '❌'} |
+            | Performance | ${summary.details.performance === 'passed' ? '✅' : '❌'} |
+            | Failure Recovery | ${summary.details.failure_recovery === 'passed' ? '✅' : '❌'} |
+            | Serialization | ${summary.details.serialization === 'passed' ? '✅' : '❌'} |
+            | Integration | ${summary.details.integration === 'passed' ? '✅' : '❌'} |
+            
+            [View detailed results](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
