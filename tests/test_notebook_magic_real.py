@@ -23,31 +23,32 @@ from clustrix.config import ClusterConfig
 from clustrix import cluster
 
 
+@pytest.fixture
+def ipython_environment():
+    """Create or get IPython environment if available."""
+    try:
+        from IPython import get_ipython
+        from IPython.terminal.interactiveshell import TerminalInteractiveShell
+
+        # Get existing IPython instance or create one
+        ip = get_ipython()
+        if ip is None:
+            ip = TerminalInteractiveShell.instance()
+
+        return ip
+    except ImportError:
+        pytest.skip("IPython not available")
+
+
+@pytest.fixture
+def temp_config_dir():
+    """Create temporary directory for config files."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+
 class TestNotebookMagicReal:
     """Test notebook magic with real execution."""
-
-    @pytest.fixture
-    def temp_config_dir(self):
-        """Create temporary directory for config files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield Path(tmpdir)
-
-    @pytest.fixture
-    def ipython_environment(self):
-        """Create or get IPython environment if available."""
-        try:
-            from IPython import get_ipython
-            from IPython.terminal.interactiveshell import TerminalInteractiveShell
-
-            # Get existing IPython instance or create one
-            ip = get_ipython()
-            if ip is None:
-                # Create a new IPython instance for testing
-                ip = TerminalInteractiveShell.instance()
-
-            return ip
-        except ImportError:
-            pytest.skip("IPython not available")
 
     def test_default_configs_structure(self):
         """
@@ -90,8 +91,8 @@ class TestNotebookMagicReal:
         """
         # Create test config files
         yaml_config = temp_config_dir / "clustrix.yml"
-        json_config = temp_config_dir / "clustrix.json"
-        custom_config = temp_config_dir / "custom_cluster.yaml"
+        json_config = temp_config_dir / "config.yml"
+        custom_config = temp_config_dir / "config.yaml"
 
         # Write YAML config
         yaml_data = {
@@ -124,11 +125,11 @@ class TestNotebookMagicReal:
             yaml.dump(custom_data, f)
 
         # Test detection
-        configs = detect_config_files(str(temp_config_dir))
+        configs = detect_config_files([str(temp_config_dir)])
 
         # Verify all configs were found
         assert len(configs) >= 3
-        config_paths = [c[1] for c in configs]
+        config_paths = [str(c) for c in configs]
         assert str(yaml_config) in config_paths
         assert str(json_config) in config_paths
         assert str(custom_config) in config_paths

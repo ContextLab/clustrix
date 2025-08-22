@@ -9,7 +9,7 @@ import json
 import yaml
 import re
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Union
 import logging
 
 try:
@@ -337,9 +337,13 @@ def detect_config_files(search_dirs: Optional[List[str]] = None) -> List[Path]:
     return config_files
 
 
-def load_config_from_file(file_path: Path) -> Dict[str, Any]:
+def load_config_from_file(file_path: Union[Path, str]) -> Dict[str, Any]:
     """Load configuration from a YAML or JSON file."""
     try:
+        # Convert string to Path if needed
+        if isinstance(file_path, str):
+            file_path = Path(file_path)
+
         with open(file_path, "r") as f:
             if file_path.suffix.lower() in [".yml", ".yaml"]:
                 return yaml.safe_load(f) or {}
