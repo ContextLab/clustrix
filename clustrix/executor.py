@@ -634,42 +634,42 @@ try:
         if func_source and '__main__' in str(e):
             # Function was defined in __main__, try to recreate from source
             print(f'Recreating function from source due to __main__ issue')
-            
+
             # Create a temporary module to execute the function in
             temp_module = types.ModuleType('temp_func_module')
             temp_module.__dict__.update(globals())
-            
+
             # Clean the function source - remove decorators
             import re
             # Remove @cluster decorator lines (handle multi-line decorators)
             lines = func_source.split('\\n')
             cleaned_lines = []
             skip_until_def = False
-            
+
             for line in lines:
                 if line.strip().startswith('@cluster'):
                     skip_until_def = True
                     continue
                 elif skip_until_def and line.strip().startswith(')'):
                     skip_until_def = True  # Keep skipping until we see def
-                    continue  
+                    continue
                 elif skip_until_def and line.strip().startswith('def '):
                     skip_until_def = False
                     cleaned_lines.append(line)
                 elif not skip_until_def:
                     cleaned_lines.append(line)
-            
+
             cleaned_source = '\\n'.join(cleaned_lines)
-            
+
             # Execute the cleaned function source in the temporary module
             exec(cleaned_source, temp_module.__dict__)
-            
+
             # Extract the function (assume it's the first function defined)
             for name, obj in temp_module.__dict__.items():
                 if callable(obj) and hasattr(obj, '__code__') and not name.startswith('_'):
                     func = obj
                     break
-                    
+
             if func is None:
                 raise RuntimeError('Could not extract function from source code')
         else:

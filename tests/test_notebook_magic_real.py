@@ -17,7 +17,7 @@ from clustrix.notebook_magic import (
     load_config_from_file,
     validate_ip_address,
     validate_hostname,
-    load_clustrix,
+    load_ipython_extension,
 )
 from clustrix.config import ClusterConfig
 from clustrix import cluster
@@ -262,7 +262,7 @@ class TestNotebookMagicReal:
         ip = ipython_environment
 
         # Load the magic
-        load_clustrix(ip)
+        load_ipython_extension(ip)
 
         # Verify magic is registered
         assert "clustrix" in ip.magics_manager.magics["line"]
@@ -290,7 +290,7 @@ class TestNotebookMagicReal:
         ip = ipython_environment
 
         # Load the magic
-        load_clustrix(ip)
+        load_ipython_extension(ip)
 
         # Configure for local execution
         config_file = temp_config_dir / "local.yml"
@@ -419,7 +419,7 @@ class TestNotebookMagicIntegrationWorkflows:
         ip = ipython_environment
 
         # Load clustrix magic
-        load_clustrix(ip)
+        load_ipython_extension(ip)
 
         # Create configuration file as user would
         config_file = temp_config_dir / "my_cluster.yml"
@@ -504,7 +504,7 @@ print(f"Analysis complete: {results['total_variance_explained']:.2%} variance ex
         ip = ipython_environment
 
         # Load clustrix
-        load_clustrix(ip)
+        load_ipython_extension(ip)
 
         # Configure for local parallel execution
         ip.run_line_magic("clustrix", "config local_multicore")

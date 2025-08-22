@@ -74,11 +74,13 @@ class TestAWSProvider:
             mock_ec2 = MagicMock()
             mock_eks = MagicMock()
             mock_iam = MagicMock()
+            mock_sts = MagicMock()
 
             mock_session.client.side_effect = lambda service: {
                 "ec2": mock_ec2,
                 "eks": mock_eks,
                 "iam": mock_iam,
+                "sts": mock_sts,
             }[service]
 
             yield {
@@ -87,6 +89,7 @@ class TestAWSProvider:
                 "ec2": mock_ec2,
                 "eks": mock_eks,
                 "iam": mock_iam,
+                "sts": mock_sts,
             }
 
     def test_authenticate_success(self, mock_boto3):

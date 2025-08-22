@@ -711,7 +711,7 @@ class FlexibleCredentialManager:
 
         # Handle local providers specially - no credentials needed
         if k8s_provider in ["local", "local-docker"]:
-            logger.info(f"✅ Local provider - no external credentials required")
+            logger.info("✅ Local provider - no external credentials required")
             return {"type": "local"}
 
         # Map k8s provider names to credential provider names

@@ -11,18 +11,18 @@ import os
 from pathlib import Path
 
 # Import reference workflows
-from reference_workflows.basic_usage import (
+from tests.reference_workflows.basic_usage import (
     test_basic_data_analysis_workflow,
     test_simple_computation_workflow,
     test_file_processing_workflow,
 )
 
-from reference_workflows.kubernetes_workflows import (
+from tests.reference_workflows.kubernetes_workflows import (
     test_kubernetes_auto_provisioning_workflow,
     test_kubernetes_multi_node_workflow,
 )
 
-from reference_workflows.data_analysis_workflows import (
+from tests.reference_workflows.data_analysis_workflows import (
     test_pandas_analysis_workflow,
     test_numpy_computation_workflow,
     test_machine_learning_workflow,

@@ -184,7 +184,7 @@ class LocalDockerKubernetesProvisioner(BaseKubernetesProvisioner):
 
     def _create_kind_config(self, cluster_spec: ClusterSpec) -> Dict[str, Any]:
         """Create kind cluster configuration."""
-        config = {
+        config: Dict[str, Any] = {
             "kind": "Cluster",
             "apiVersion": "kind.x-k8s.io/v1alpha4",
             "nodes": [],

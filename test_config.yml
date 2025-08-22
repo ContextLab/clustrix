@@ -7,6 +7,7 @@ profiles:
     auto_gpu_packages: true
     auto_gpu_parallel: true
     auto_parallel: true
+    auto_provision_k8s: false
     aws_access_key: null
     aws_access_key_id: null
     aws_cluster_type: null
@@ -57,13 +58,21 @@ profiles:
     hf_token: null
     hf_username: null
     job_poll_interval: 30
+    k8s_auto_cleanup: true
     k8s_backoff_limit: 3
+    k8s_cluster_name: null
+    k8s_from_scratch: true
     k8s_image: python:3.11-slim
     k8s_job_ttl_seconds: 3600
     k8s_namespace: default
+    k8s_node_count: 2
+    k8s_node_type: null
+    k8s_provider: aws
     k8s_pull_policy: IfNotPresent
+    k8s_region: null
     k8s_remote: false
     k8s_service_account: null
+    k8s_version: '1.28'
     key_file: null
     lambda_api_key: null
     lambda_instance_type: null
