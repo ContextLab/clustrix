@@ -117,9 +117,9 @@ class TestAWSProvider:
         from clustrix.cloud_providers.aws import AWSProvider
         from botocore.exceptions import ClientError
 
-        # Make get_user fail
-        mock_boto3["iam"].get_user.side_effect = ClientError(
-            {"Error": {"Code": "InvalidUserID.NotFound"}}, "GetUser"
+        # Make get_caller_identity fail (this is what authenticate actually uses)
+        mock_boto3["sts"].get_caller_identity.side_effect = ClientError(
+            {"Error": {"Code": "InvalidClientTokenId"}}, "GetCallerIdentity"
         )
 
         provider = AWSProvider()

@@ -634,7 +634,14 @@ class TestClusterExecutorEdgeCases:
     @patch("paramiko.SSHClient")
     def test_setup_ssh_connection_no_username(self, mock_ssh_class, mock_getenv):
         """Test SSH setup uses environment USER when no username specified."""
-        mock_getenv.return_value = "envuser"
+
+        # Return different values for different env vars
+        def getenv_side_effect(key, default=None):
+            if key == "USER":
+                return "envuser"
+            return default
+
+        mock_getenv.side_effect = getenv_side_effect
         config = ClusterConfig(cluster_host="test.cluster.com", username=None)
         executor = ClusterExecutor(config)
 
@@ -643,8 +650,8 @@ class TestClusterExecutorEdgeCases:
 
         executor._setup_ssh_connection()
 
-        # Should use environment USER
-        mock_getenv.assert_called_with("USER")
+        # Should have called getenv for USER
+        assert any(call[0][0] == "USER" for call in mock_getenv.call_args_list)
         connect_call = mock_ssh.connect.call_args[1]
         assert connect_call["username"] == "envuser"
 

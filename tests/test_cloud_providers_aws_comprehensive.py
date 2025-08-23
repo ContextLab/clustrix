@@ -100,19 +100,33 @@ class TestAWSProviderComprehensive:
         """Test comprehensive authentication error scenarios."""
         from clustrix.cloud_providers.aws import ClientError, NoCredentialsError
 
-        # Test missing credentials
-        result = provider.authenticate()
-        assert result is False
+        # Mock credential manager to return no credentials
+        with patch.object(provider, "get_credentials_from_manager", return_value=None):
+            # Test missing credentials
+            result = provider.authenticate()
+            assert result is False
 
-        result = provider.authenticate(access_key_id="key-only")
-        assert result is False
+            result = provider.authenticate(access_key_id="key-only")
+            assert result is False
 
         # Test NoCredentialsError
         mock_session = Mock()
         mock_boto3.Session.return_value = mock_session
+
+        # Create mock clients including STS
+        mock_ec2_client = Mock()
+        mock_eks_client = Mock()
         mock_iam_client = Mock()
-        mock_session.client.return_value = mock_iam_client
-        mock_iam_client.get_user.side_effect = NoCredentialsError()
+        mock_sts_client = Mock()
+
+        mock_session.client.side_effect = lambda service: {
+            "ec2": mock_ec2_client,
+            "eks": mock_eks_client,
+            "iam": mock_iam_client,
+            "sts": mock_sts_client,
+        }.get(service, Mock())
+
+        mock_sts_client.get_caller_identity.side_effect = NoCredentialsError()
 
         result = provider.authenticate(
             access_key_id="test-key", secret_access_key="test-secret"
@@ -122,9 +136,9 @@ class TestAWSProviderComprehensive:
         # Test various ClientError scenarios
         error_codes = ["AccessDenied", "InvalidUserID.NotFound", "TokenRefreshRequired"]
         for error_code in error_codes:
-            mock_iam_client.get_user.side_effect = ClientError(
+            mock_sts_client.get_caller_identity.side_effect = ClientError(
                 {"Error": {"Code": error_code, "Message": f"Test {error_code}"}},
-                "GetUser",
+                "GetCallerIdentity",
             )
             result = provider.authenticate(
                 access_key_id="test-key", secret_access_key="test-secret"

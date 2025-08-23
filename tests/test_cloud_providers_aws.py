@@ -49,15 +49,21 @@ class TestAWSProvider:
         mock_ec2_client = Mock()
         mock_eks_client = Mock()
         mock_iam_client = Mock()
+        mock_sts_client = Mock()
 
         mock_session.client.side_effect = lambda service: {
             "ec2": mock_ec2_client,
             "eks": mock_eks_client,
             "iam": mock_iam_client,
+            "sts": mock_sts_client,
         }[service]
 
-        # Mock successful IAM call
-        mock_iam_client.get_user.return_value = {"User": {"UserName": "test-user"}}
+        # Mock successful STS call (used by authenticate)
+        mock_sts_client.get_caller_identity.return_value = {
+            "UserId": "AIDAI23HXD2O5EXAMPLE",
+            "Account": "123456789012",
+            "Arn": "arn:aws:iam::123456789012:user/test-user",
+        }
 
         result = provider.authenticate(
             access_key_id="test-access-key",
@@ -86,9 +92,24 @@ class TestAWSProvider:
         mock_session = Mock()
         mock_boto3.Session.return_value = mock_session
 
+        # Create mock clients
+        mock_ec2_client = Mock()
+        mock_eks_client = Mock()
         mock_iam_client = Mock()
-        mock_session.client.return_value = mock_iam_client
-        mock_iam_client.get_user.return_value = {"User": {"UserName": "test-user"}}
+        mock_sts_client = Mock()
+
+        mock_session.client.side_effect = lambda service: {
+            "ec2": mock_ec2_client,
+            "eks": mock_eks_client,
+            "iam": mock_iam_client,
+            "sts": mock_sts_client,
+        }.get(service, Mock())
+
+        mock_sts_client.get_caller_identity.return_value = {
+            "UserId": "AIDAI23HXD2O5EXAMPLE",
+            "Account": "123456789012",
+            "Arn": "arn:aws:iam::123456789012:user/test-user",
+        }
 
         result = provider.authenticate(
             access_key_id="test-access-key",
@@ -125,9 +146,21 @@ class TestAWSProvider:
 
         mock_session = Mock()
         mock_boto3.Session.return_value = mock_session
+
+        # Create mock clients
+        mock_ec2_client = Mock()
+        mock_eks_client = Mock()
         mock_iam_client = Mock()
-        mock_session.client.return_value = mock_iam_client
-        mock_iam_client.get_user.side_effect = NoCredentialsError()
+        mock_sts_client = Mock()
+
+        mock_session.client.side_effect = lambda service: {
+            "ec2": mock_ec2_client,
+            "eks": mock_eks_client,
+            "iam": mock_iam_client,
+            "sts": mock_sts_client,
+        }.get(service, Mock())
+
+        mock_sts_client.get_caller_identity.side_effect = NoCredentialsError()
 
         result = provider.authenticate(
             access_key_id="test-access-key", secret_access_key="test-secret-key"
@@ -144,10 +177,22 @@ class TestAWSProvider:
 
         mock_session = Mock()
         mock_boto3.Session.return_value = mock_session
+
+        # Create mock clients
+        mock_ec2_client = Mock()
+        mock_eks_client = Mock()
         mock_iam_client = Mock()
-        mock_session.client.return_value = mock_iam_client
-        mock_iam_client.get_user.side_effect = ClientError(
-            {"Error": {"Code": "AccessDenied"}}, "GetUser"
+        mock_sts_client = Mock()
+
+        mock_session.client.side_effect = lambda service: {
+            "ec2": mock_ec2_client,
+            "eks": mock_eks_client,
+            "iam": mock_iam_client,
+            "sts": mock_sts_client,
+        }.get(service, Mock())
+
+        mock_sts_client.get_caller_identity.side_effect = ClientError(
+            {"Error": {"Code": "AccessDenied"}}, "GetCallerIdentity"
         )
 
         result = provider.authenticate(
@@ -163,9 +208,21 @@ class TestAWSProvider:
         """Test authentication with unexpected error."""
         mock_session = Mock()
         mock_boto3.Session.return_value = mock_session
+
+        # Create mock clients
+        mock_ec2_client = Mock()
+        mock_eks_client = Mock()
         mock_iam_client = Mock()
-        mock_session.client.return_value = mock_iam_client
-        mock_iam_client.get_user.side_effect = Exception("Network error")
+        mock_sts_client = Mock()
+
+        mock_session.client.side_effect = lambda service: {
+            "ec2": mock_ec2_client,
+            "eks": mock_eks_client,
+            "iam": mock_iam_client,
+            "sts": mock_sts_client,
+        }.get(service, Mock())
+
+        mock_sts_client.get_caller_identity.side_effect = Exception("Network error")
 
         result = provider.authenticate(
             access_key_id="test-access-key", secret_access_key="test-secret-key"
