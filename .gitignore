@@ -42,3 +42,7 @@ build/
 
 # ClaudPoint checkpoint system
 .checkpoints/
+.ccpm_tracking.json
+.ccpm_backup/
+.claude/epics/
+.claude/prds/
