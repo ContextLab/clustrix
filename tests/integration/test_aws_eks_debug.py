@@ -23,10 +23,10 @@ print(f"   Region: {aws_creds.get('region', 'us-east-1')}")
 spec = ClusterSpec(
     cluster_name="test-debug",
     provider="aws",
-    region=aws_creds.get('region', 'us-east-1'),
+    region=aws_creds.get("region", "us-east-1"),
     node_count=1,
     node_type="t3.small",
-    kubernetes_version="1.27"
+    kubernetes_version="1.27",
 )
 
 print(f"\nCluster spec created: {spec.cluster_name}")
@@ -36,27 +36,27 @@ print("\nInitializing provisioner...")
 try:
     provisioner = AWSEKSFromScratchProvisioner(aws_creds, spec.region)
     print("✅ Provisioner initialized")
-    
+
     # Check AWS connectivity
     print("\nTesting AWS connectivity...")
     import boto3
-    
+
     eks = boto3.client(
-        'eks',
-        aws_access_key_id=aws_creds['access_key_id'],
-        aws_secret_access_key=aws_creds['secret_access_key'],
-        region_name=spec.region
+        "eks",
+        aws_access_key_id=aws_creds["access_key_id"],
+        aws_secret_access_key=aws_creds["secret_access_key"],
+        region_name=spec.region,
     )
-    
+
     clusters = eks.list_clusters()
     print(f"✅ Can list EKS clusters. Found: {clusters.get('clusters', [])}")
-    
+
     # Test VPC creation
     print("\nWould create VPC with:")
     print(f"  - Name: eks-vpc-{spec.cluster_name}")
     print(f"  - CIDR: 10.0.0.0/16")
     print(f"  - Region: {spec.region}")
-    
+
 except Exception as e:
     print(f"❌ Error: {e}")
     traceback.print_exc()

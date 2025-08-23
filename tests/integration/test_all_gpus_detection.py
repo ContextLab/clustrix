@@ -7,16 +7,17 @@ from clustrix import cluster
 from clustrix.config import load_config, configure
 from tests.real_world import credentials
 
+
 def test_all_gpus_detection():
     """Test detection of all available GPUs dynamically."""
-    
+
     load_config("tensor01_config.yml")
-    
+
     tensor01_creds = credentials.get_tensor01_credentials()
     if not tensor01_creds:
         print("No credentials available")
         return False
-    
+
     # Configure WITHOUT specifying CUDA_VISIBLE_DEVICES to detect all GPUs
     configure(
         password=tensor01_creds.get("password"),
@@ -24,13 +25,17 @@ def test_all_gpus_detection():
         job_poll_interval=5,
         # No CUDA_VISIBLE_DEVICES - let it detect all available GPUs
     )
-    
+
     @cluster(cores=1, memory="4GB")
     def detect_all_gpus():
         """Detect all available GPUs dynamically."""
         import subprocess
+
         result = subprocess.run(
-            ["python", "-c", """
+            [
+                "python",
+                "-c",
+                """
 import torch
 import os
 
@@ -52,44 +57,47 @@ if cuda_available and gpu_count > 0:
             print(f'GPU_{i}:info_unavailable')
 else:
     print('NO_GPUS_DETECTED')
-"""],
+""",
+            ],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             universal_newlines=True,
-            timeout=60
+            timeout=60,
         )
         return {"success": result.returncode == 0, "output": result.stdout}
-    
+
     print("Testing dynamic detection of all GPUs...")
     try:
         result = detect_all_gpus()
-        
+
         if result["success"]:
             output = result["output"]
             print(f"✅ GPU detection completed!")
             print(f"Output:\n{output}")
-            
+
             # Parse results
-            lines = output.split('\n')
-            gpu_count_line = [line for line in lines if 'TOTAL_GPU_COUNT:' in line]
-            
+            lines = output.split("\n")
+            gpu_count_line = [line for line in lines if "TOTAL_GPU_COUNT:" in line]
+
             if gpu_count_line:
-                total_gpus = int(gpu_count_line[0].split(':', 1)[1])
+                total_gpus = int(gpu_count_line[0].split(":", 1)[1])
                 print(f"\n🎉 DETECTED {total_gpus} TOTAL GPUs on tensor01!")
-                
+
                 # Count GPU info lines
-                gpu_info_lines = [line for line in lines if line.startswith('GPU_') and ':' in line]
+                gpu_info_lines = [
+                    line for line in lines if line.startswith("GPU_") and ":" in line
+                ]
                 print(f"📋 GPU Details ({len(gpu_info_lines)} devices):")
                 for gpu_line in gpu_info_lines:
                     print(f"   {gpu_line}")
-                
+
                 if total_gpus == 8:
                     print("✅ CONFIRMED: All 8 GPUs detected as expected!")
                 elif total_gpus > 0:
                     print(f"⚠️  Detected {total_gpus} GPUs (expected 8)")
                 else:
                     print("❌ No GPUs detected")
-                
+
                 return total_gpus
             else:
                 print("❌ Could not parse GPU count")
@@ -97,10 +105,11 @@ else:
         else:
             print(f"❌ Detection failed")
             return 0
-            
+
     except Exception as e:
         print(f"❌ Test exception: {e}")
         return 0
+
 
 if __name__ == "__main__":
     gpu_count = test_all_gpus_detection()

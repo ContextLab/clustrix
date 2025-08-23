@@ -7,16 +7,17 @@ from clustrix import cluster
 from clustrix.config import load_config, configure
 from tests.real_world import credentials
 
+
 def test_multi_gpu_access():
     """Test accessing multiple GPUs manually."""
-    
+
     load_config("tensor01_config.yml")
-    
+
     tensor01_creds = credentials.get_tensor01_credentials()
     if not tensor01_creds:
         print("No credentials available")
         return False
-    
+
     # Configure with multiple GPUs visible and AUTO GPU PARALLELIZATION DISABLED
     configure(
         password=tensor01_creds.get("password"),
@@ -25,16 +26,19 @@ def test_multi_gpu_access():
         auto_gpu_parallel=False,  # Disable to avoid complexity threshold
         environment_variables={
             "CUDA_VISIBLE_DEVICES": "0,1,2,3"  # Make 4 GPUs visible
-        }
+        },
     )
-    
+
     @cluster(cores=1, memory="4GB", auto_gpu_parallel=False)
     def simple_multi_gpu_access():
         """Simple multi-GPU access test."""
         import subprocess
-        
-        result = subprocess.run([
-            "python", "-c", """
+
+        result = subprocess.run(
+            [
+                "python",
+                "-c",
+                """
 import torch
 import os
 
@@ -54,20 +58,25 @@ if gpu_count >= 2:
     print('MULTI_GPU_ACCESS:success')
 else:
     print('MULTI_GPU_ACCESS:insufficient_gpus')
-"""
-        ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=60)
-        
+""",
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True,
+            timeout=60,
+        )
+
         return {"success": result.returncode == 0, "output": result.stdout}
-    
+
     print("Testing multi-GPU access (no auto-parallelization)...")
     try:
         result = simple_multi_gpu_access()
-        
+
         if result["success"]:
             output = result["output"]
             print(f"✅ Test completed!")
             print(f"Output:\n{output}")
-            
+
             if "MULTI_GPU_ACCESS:success" in output:
                 print("🎉 Multi-GPU access working!")
                 return True
@@ -80,10 +89,11 @@ else:
         else:
             print(f"❌ Test failed")
             return False
-            
+
     except Exception as e:
         print(f"❌ Test exception: {e}")
         return False
+
 
 if __name__ == "__main__":
     success = test_multi_gpu_access()
