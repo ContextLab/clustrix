@@ -46,3 +46,12 @@ build/
 .ccpm_backup/
 .claude/epics/
 .claude/prds/
+
+# Backup and temporary files
+notes/
+*.bak
+*_old.*
+*.backup
+*~
+.DS_Store
+Thumbs.db
