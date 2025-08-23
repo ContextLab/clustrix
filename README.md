@@ -752,6 +752,28 @@ pre-commit install
 pre-commit run --all-files
 ```
 
+## Additional Documentation
+
+For more detailed information on specific topics, see the organized documentation in the `docs/` directory:
+
+### Cloud Provider Setup
+- **[AWS Setup Guide](docs/aws/AWS_PERMISSIONS_SETUP_GUIDE.md)** - Complete AWS permissions configuration
+- **[AWS Console Quick Steps](docs/aws/AWS_CONSOLE_QUICK_STEPS.md)** - Fast AWS setup guide
+- **[AWS EKS Policy Setup](docs/aws/ADD_CUSTOM_EKS_POLICY.md)** - EKS-specific policy configuration
+- **[AWS EKS Troubleshooting](docs/aws/AWS_EKS_TROUBLESHOOTING.md)** - Common AWS access issues
+
+### GPU Computing
+- **[GPU Parallelization Design](docs/gpu/GPU_PARALLELIZATION_DESIGN.md)** - Comprehensive GPU parallelization guide
+- **[GPU Detection Fix](docs/gpu/GPU_DETECTION_FIX.md)** - GPU detection troubleshooting
+
+### Technical Design
+- **[Function Dependency Design](docs/design/function_dependency_design.md)** - Function dependency resolution architecture
+- **[Complexity Threshold Analysis](docs/design/COMPLEXITY_THRESHOLD_ANALYSIS.md)** - Function complexity analysis and optimization
+
+### Complete Documentation
+- **[Full Documentation](https://clustrix.readthedocs.io)** - Complete API reference and tutorials
+- **[SSH Setup Tutorial](docs/ssh_key_automation_tutorial.ipynb)** - Interactive SSH key automation guide
+
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
