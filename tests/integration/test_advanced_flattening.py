@@ -3,9 +3,6 @@
 Test the new advanced function flattening with dependency resolution.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.function_flattening import AdvancedFunctionFlattener, auto_flatten_if_needed, analyze_function_complexity
 from clustrix.dependency_resolution import FunctionDependencyAnalyzer

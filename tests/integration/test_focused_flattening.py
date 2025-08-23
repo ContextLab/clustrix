@@ -3,9 +3,6 @@
 Focused test of function flattening without full project analysis.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.function_flattening import analyze_function_complexity, auto_flatten_if_needed
 import logging

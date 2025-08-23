@@ -3,11 +3,7 @@
 Test Dartmouth network detection functionality.
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'tests', 'real_world'))
-
-from conftest import is_dartmouth_network
+from tests.real_world.conftest import is_dartmouth_network
 
 def test_dartmouth_network_detection():
     """Test the Dartmouth network detection function."""

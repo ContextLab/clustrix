@@ -4,9 +4,6 @@ Comprehensive test suite for function flattening capabilities.
 Tests nested functions, inline functions, closures, and edge cases.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.function_flattening import auto_flatten_if_needed, analyze_function_complexity
 from clustrix import cluster

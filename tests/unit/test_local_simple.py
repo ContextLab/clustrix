@@ -9,7 +9,7 @@ import time
 from clustrix import cluster
 from clustrix.config import ClusterConfig
 import clustrix.config as config_module
-from test_functions import simple_computation as base_simple_computation
+from tests.unit.test_functions import simple_computation as base_simple_computation
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)

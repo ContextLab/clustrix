@@ -3,9 +3,6 @@
 Test GPU detection and VENV setup functionality.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
 from clustrix.config import ClusterConfig

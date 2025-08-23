@@ -3,9 +3,6 @@
 Test the signature fix for flattened functions.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.function_flattening import analyze_function_complexity, auto_flatten_if_needed
 import logging

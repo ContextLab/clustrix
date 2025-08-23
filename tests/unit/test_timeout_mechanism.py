@@ -3,9 +3,6 @@
 Test the timeout mechanism for two-venv setup.
 """
 
-import sys
-import os
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.config import load_config, configure, get_config
 from clustrix import cluster

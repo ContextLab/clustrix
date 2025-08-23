@@ -3,10 +3,8 @@
 Test actual GPU computations and verify we get correct mathematical results back.
 """
 
-import sys
 import os
 import math
-sys.path.insert(0, '/Users/jmanning/clustrix')
 
 from clustrix.config import load_config, configure, get_config
 from clustrix import cluster
