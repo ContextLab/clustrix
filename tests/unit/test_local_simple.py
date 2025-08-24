@@ -5,11 +5,17 @@ Simple test of local Kubernetes execution without pytest.
 """
 
 import logging
+import os
+import sys
 import time
+
 from clustrix import cluster
 from clustrix.config import ClusterConfig
 import clustrix.config as config_module
-from tests.unit.test_functions import simple_computation as base_simple_computation
+
+# Import local test functions
+sys.path.append(os.path.dirname(__file__))
+from test_functions import simple_computation as base_simple_computation  # noqa: E402
 
 # Set up logging
 logging.basicConfig(level=logging.DEBUG)

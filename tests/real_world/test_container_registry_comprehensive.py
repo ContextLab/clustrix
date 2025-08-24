@@ -21,16 +21,20 @@ Supports multiple registry types:
 - Private: Self-hosted registries
 """
 
-import pytest
 import logging
-import time
 import os
 import subprocess
+import sys
+import time
 from typing import Dict, Any, Optional, List
 
-# Import credential manager and test utilities
-from .credential_manager import get_credential_manager
+import pytest
+
 from clustrix import ClusterExecutor
+
+# Import credential manager and test utilities
+sys.path.append(os.path.dirname(__file__))
+from credential_manager import get_credential_manager  # noqa: E402
 
 # Configure logging for detailed test debugging
 logging.basicConfig(level=logging.INFO)
@@ -374,7 +378,7 @@ else:
     def test_kubernetes_with_custom_images(self):
         """Test Kubernetes job execution with alternative container images."""
         # This requires Kubernetes cluster + custom image configuration
-        from tests.real_world.test_kubernetes_comprehensive import (
+        from test_kubernetes_comprehensive import (
             create_test_kubernetes_config,
         )
 
