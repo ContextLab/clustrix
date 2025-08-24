@@ -11,13 +11,11 @@ from pathlib import Path
 def check_tests():
     """Run tests and return pass/fail status."""
     print("🧪 Running tests...")
-    result = subprocess.run(
-        ["pytest", "tests/", "-q"], capture_output=True, text=True
-    )
+    result = subprocess.run(["pytest", "tests/", "-q"], capture_output=True, text=True)
     passed = result.returncode == 0
     if passed:
         # Extract test counts from output
-        lines = result.stdout.strip().split('\n')
+        lines = result.stdout.strip().split("\n")
         for line in lines:
             if " passed" in line:
                 print(f"✅ Tests: {line}")
@@ -75,8 +73,9 @@ def check_mypy():
     """Check if code passes mypy type checking."""
     print("\n🔤 Checking type annotations (mypy)...")
     result = subprocess.run(
-        ["mypy", "clustrix/", "--ignore-missing-imports"], 
-        capture_output=True, text=True
+        ["mypy", "clustrix/", "--ignore-missing-imports"],
+        capture_output=True,
+        text=True,
     )
     if result.returncode == 0:
         print("✅ Type checking passed")
@@ -89,33 +88,44 @@ def check_mypy():
 def main():
     """Run all checks and display summary."""
     print("🚀 Clustrix Code Quality Check\n" + "=" * 40)
-    
+
     results = {
         "tests": check_tests(),
         "coverage": check_coverage(),
         "black": check_black(),
         "flake8": check_flake8(),
-        "mypy": check_mypy()
+        "mypy": check_mypy(),
     }
-    
+
     print("\n" + "=" * 40)
     print("📋 Summary:")
-    
+
     all_passed = all(v for v in results.values() if v is not None)
-    
+
     if all_passed:
         print("✅ All checks passed! 🎉")
     else:
         print("❌ Some checks failed. Please fix the issues above.")
-    
+
     # Display badge URLs
     if results["coverage"] is not None:
         print(f"\n🏷️  Coverage badge URL:")
-        color = "brightgreen" if results["coverage"] >= 80 else \
-                "green" if results["coverage"] >= 60 else \
-                "yellow" if results["coverage"] >= 40 else \
-                "orange" if results["coverage"] >= 20 else "red"
-        print(f"   https://img.shields.io/badge/coverage-{results['coverage']}%25-{color}.svg")
+        color = (
+            "brightgreen"
+            if results["coverage"] >= 80
+            else (
+                "green"
+                if results["coverage"] >= 60
+                else (
+                    "yellow"
+                    if results["coverage"] >= 40
+                    else "orange" if results["coverage"] >= 20 else "red"
+                )
+            )
+        )
+        print(
+            f"   https://img.shields.io/badge/coverage-{results['coverage']}%25-{color}.svg"
+        )
 
 
 if __name__ == "__main__":
