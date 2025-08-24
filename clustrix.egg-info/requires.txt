@@ -5,6 +5,7 @@ dill>=0.3.4
 click>=8.0.0
 requests>=2.25.0
 huggingface_hub>=0.16.0
+python-dotenv>=1.0.0
 
 [all]
 ipywidgets>=7.6.0

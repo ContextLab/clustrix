@@ -48,7 +48,7 @@ jobs:
 
     - name: Test with pytest
       run: |
-        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json -m "not real_world"
+        pytest tests/unit/ tests/integration/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json -m "not real_world"
 
     - name: Update coverage badge
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'
@@ -96,7 +96,7 @@ jobs:
         
     - name: Run integration tests
       run: |
-        pytest tests/test_integration.py -v -x
+        pytest tests/integration/ -v -x -m "not real_world"
         
     - name: Test example scripts
       run: |
@@ -143,5 +143,5 @@ jobs:
     - name: Test notebook execution
       run: |
         pip install jupyter nbconvert
-        jupyter nbconvert --to script docs/notebooks/basic_usage.ipynb
+        jupyter nbconvert --to script docs/source/notebooks/basic_usage.ipynb
         # Note: Full notebook execution would require cluster setup

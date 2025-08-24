@@ -35,6 +35,7 @@ Requires-Dist: dill>=0.3.4
 Requires-Dist: click>=8.0.0
 Requires-Dist: requests>=2.25.0
 Requires-Dist: huggingface_hub>=0.16.0
+Requires-Dist: python-dotenv>=1.0.0
 Provides-Extra: widget
 Requires-Dist: ipywidgets>=7.6.0; extra == "widget"
 Requires-Dist: jupyter>=1.0; extra == "widget"
@@ -792,27 +793,108 @@ def process_large_dataset(file_path, chunk_size=10000):
 processed_data = process_large_dataset('/path/to/large_file.csv')
 ```
 
+## Testing Philosophy
+
+Clustrix follows a strict **NO MOCKS** testing policy. All tests use real infrastructure to ensure reliability:
+
+- **✅ Real Infrastructure**: Tests run on actual clusters, containers, and cloud services
+- **✅ Real Computations**: Genuine data processing validates functionality
+- **✅ Real Failures**: Actual error conditions test recovery mechanisms
+- **❌ No Mock Objects**: Zero use of `@patch`, `Mock()`, or simulations
+
+### Running Tests
+
+```bash
+# Quick unit tests (local execution)
+pytest tests/ -m "not real_world"
+
+# Comprehensive real-world tests (requires infrastructure)
+python tests/run_real_world_tests.py
+
+# Setup local test infrastructure (Docker-based)
+python tests/infrastructure/setup_test_infrastructure.py setup
+
+# Run specific test categories
+pytest tests/comprehensive/test_edge_cases_real.py
+pytest tests/comprehensive/test_performance_benchmarks_real.py
+pytest tests/comprehensive/test_failure_recovery_real.py
+```
+
+### Test Infrastructure
+
+Clustrix provides Docker-based local test infrastructure for cost-free testing:
+
+- **Kubernetes**: Kind (Kubernetes in Docker) cluster
+- **SSH Server**: OpenSSH test server on port 2222
+- **SLURM Mock**: Simulated SLURM scheduler
+- **MinIO**: S3-compatible object storage
+- **PostgreSQL**: Database for state management
+- **Redis**: Cache and message queue
+
+### Test Categories
+
+1. **Unit Tests**: Core functionality with local execution
+2. **Integration Tests**: Multi-component interactions with real services
+3. **Edge Cases**: Boundary conditions and unusual scenarios
+4. **Performance**: Latency, throughput, and scalability benchmarks
+5. **Failure Recovery**: Error handling and resilience testing
+
 ## Code Quality
 
 Clustrix maintains high code quality standards:
 
-- **Testing**: Comprehensive test suite with pytest
+- **Testing**: Real-world tests following NO MOCKS principle
 - **Code Style**: Enforced with Black formatter
 - **Linting**: Checked with flake8
 - **Type Checking**: Validated with mypy
+- **CI/CD**: GitHub Actions for automated testing
 
 To check code quality locally:
 
 ```bash
-# Run all quality checks
-python scripts/check_quality.py
+# Run comprehensive quality check (auto-retries until clean)
+python scripts/pre_push_check.py
 
 # Run individual checks
 pytest --cov=clustrix --cov-report=term
-black --check clustrix/
+black clustrix/
 flake8 clustrix/
 mypy clustrix/
 ```
+
+### Pre-commit Hooks
+
+Pre-commit hooks automatically run quality checks before each commit:
+
+```bash
+# Install pre-commit hooks
+pre-commit install
+
+# Manual run
+pre-commit run --all-files
+```
+
+## Additional Documentation
+
+For more detailed information on specific topics, see the organized documentation in the `docs/` directory:
+
+### Cloud Provider Setup
+- **[AWS Setup Guide](docs/aws/AWS_PERMISSIONS_SETUP_GUIDE.md)** - Complete AWS permissions configuration
+- **[AWS Console Quick Steps](docs/aws/AWS_CONSOLE_QUICK_STEPS.md)** - Fast AWS setup guide
+- **[AWS EKS Policy Setup](docs/aws/ADD_CUSTOM_EKS_POLICY.md)** - EKS-specific policy configuration
+- **[AWS EKS Troubleshooting](docs/aws/AWS_EKS_TROUBLESHOOTING.md)** - Common AWS access issues
+
+### GPU Computing
+- **[GPU Parallelization Design](docs/gpu/GPU_PARALLELIZATION_DESIGN.md)** - Comprehensive GPU parallelization guide
+- **[GPU Detection Fix](docs/gpu/GPU_DETECTION_FIX.md)** - GPU detection troubleshooting
+
+### Technical Design
+- **[Function Dependency Design](docs/design/function_dependency_design.md)** - Function dependency resolution architecture
+- **[Complexity Threshold Analysis](docs/design/COMPLEXITY_THRESHOLD_ANALYSIS.md)** - Function complexity analysis and optimization
+
+### Complete Documentation
+- **[Full Documentation](https://clustrix.readthedocs.io)** - Complete API reference and tutorials
+- **[SSH Setup Tutorial](docs/ssh_key_automation_tutorial.ipynb)** - Interactive SSH key automation guide
 
 ## Contributing
 

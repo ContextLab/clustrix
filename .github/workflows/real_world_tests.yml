@@ -119,9 +119,7 @@ jobs:
       
       - name: Run unit tests
         run: |
-          pytest tests/ -v \
-            --ignore=tests/real_world \
-            --ignore=tests/comprehensive \
+          pytest tests/unit/ tests/integration/ -v \
             -m "not real_world" \
             --cov=clustrix \
             --cov-report=xml \
@@ -156,7 +154,7 @@ jobs:
       
       - name: Run edge case tests
         run: |
-          python tests/comprehensive/test_edge_cases_real.py
+          pytest tests/real_world/ -v -k "edge_case" -m "real_world" --timeout=1800
         timeout-minutes: 30
       
       - name: Upload test results
@@ -164,7 +162,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: edge-case-results
-          path: tests/comprehensive/*_results.json
+          path: tests/real_world/*_results.json
 
   test-performance:
     name: Performance Benchmarks
@@ -186,7 +184,7 @@ jobs:
       
       - name: Run performance benchmarks
         run: |
-          python tests/comprehensive/test_performance_benchmarks_real.py
+          pytest tests/real_world/ -v -k "performance" -m "real_world" --timeout=2700
         timeout-minutes: 45
       
       - name: Upload benchmark results
@@ -194,7 +192,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: performance-results
-          path: tests/comprehensive/performance_results.json
+          path: tests/real_world/performance_results.json
       
       - name: Comment PR with performance results
         if: github.event_name == 'pull_request'
@@ -202,7 +200,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const results = JSON.parse(fs.readFileSync('tests/comprehensive/performance_results.json', 'utf8'));
+            const results = JSON.parse(fs.readFileSync('tests/real_world/performance_results.json', 'utf8'));
             
             const comment = `## 📊 Performance Benchmark Results
             
@@ -241,17 +239,17 @@ jobs:
       
       - name: Run failure recovery tests
         run: |
-          python tests/comprehensive/test_failure_recovery_real.py
+          pytest tests/real_world/ -v -k "failure_recovery" -m "real_world" --timeout=1800
         timeout-minutes: 30
         continue-on-error: true  # These tests intentionally cause failures
       
       - name: Verify recovery mechanisms
         run: |
           # Check that recovery mechanisms worked
-          if [ -f tests/comprehensive/recovery_report.json ]; then
+          if [ -f tests/real_world/recovery_report.json ]; then
             python -c "
             import json
-            with open('tests/comprehensive/recovery_report.json') as f:
+            with open('tests/real_world/recovery_report.json') as f:
                 report = json.load(f)
                 assert report['recovery_rate'] > 0.8, 'Recovery rate too low'
                 print(f'Recovery rate: {report[\"recovery_rate\"]:.1%}')
@@ -278,7 +276,7 @@ jobs:
       
       - name: Run serialization tests
         run: |
-          python tests/comprehensive/test_serialization_real.py
+          pytest tests/real_world/ -v -k "serialization" -m "real_world" --timeout=1200
         timeout-minutes: 20
 
   test-integration:
@@ -310,9 +308,9 @@ jobs:
       
       - name: Run integration tests
         run: |
-          python tests/run_real_world_tests.py \
-            --category executor decorator config \
-            --config tests/infrastructure/test_infrastructure.json
+          pytest tests/real_world/ -v -m "real_world" \
+            --timeout=3600 \
+            --tb=short
         timeout-minutes: 60
       
       - name: Upload integration test results
@@ -320,7 +318,9 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: integration-results
-          path: tests/real_world_test_results.json
+          path: |
+            tests/real_world/*_results.json
+            tests/real_world/test_results.json
 
   test-cloud-providers:
     name: Cloud Provider Tests
@@ -365,7 +365,8 @@ jobs:
       
       - name: Run cloud provider tests
         run: |
-          pytest tests/test_cloud_providers_${{ matrix.provider }}_real.py -v \
+          pytest tests/real_world/ -v \
+            -k "${{ matrix.provider }}" \
             -m real_world \
             --timeout=1800
         timeout-minutes: 45

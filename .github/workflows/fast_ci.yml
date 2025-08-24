@@ -46,9 +46,7 @@ jobs:
       
       - name: Run quick unit tests
         run: |
-          pytest tests/ -v \
-            --ignore=tests/real_world \
-            --ignore=tests/comprehensive \
+          pytest tests/unit/ -v \
             -m "not real_world and not slow" \
             --timeout=60 \
             -x \
