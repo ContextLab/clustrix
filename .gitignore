@@ -1,30 +1,100 @@
+# IDE and Editor Files
 .idea/*
-*.pyc
-*.DS_Store
-!*.gitkeep
-clustrix.egg-info
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-# Test notebooks with hardcoded credentials
-test_ssh_setup.ipynb
+# Python artifacts
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Package artifacts  
+build/
+dist/
+*.egg-info/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+
+# Virtual environments
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+py*-test/
 clustrix_test_env/
 
-# Personal configuration files and coverage data
-clustrix.yml
+# Testing and Coverage
 .coverage*
 coverage.json
-jupyter.log
-py310-test/
-.ipynb_checkpoints/
-
-# Build and documentation artifacts
-docs/build/
 htmlcov/
-*.log
+.pytest_cache/
+.cache/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+test-results/
+*.cover
+.hypothesis/
+
+# Test artifacts and reports
 *_report_*.json
 *validation*.json
-dist/
-build/
-*.egg-info/
+test_results/
+tests/temp/
+tests/screenshots/*.png
+!tests/screenshots/screenshot_instructions.json
+audit_results.json
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+jupyter.log
+
+# Personal test notebooks and credentials
+test_ssh_setup.ipynb
+test_enhanced_widget.ipynb
+test_modern_widget_notebook.ipynb
+test_widget_colab.ipynb
+colab_test_modern_widget.ipynb
+
+# Keep documentation and example notebooks
+!docs/notebooks/*.ipynb
+!docs/source/notebooks/*.ipynb
+!examples/*.ipynb
+!clustrix_demo.ipynb
+
+# Personal test files and credentials
+*_config.yml
+!test_config.yml
+clustrix.yml
+ndoli_config.yml
+tensor01_config.yml
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*_old.*
+*.backup
+.tmp/
+tmp/
 
 # Clustrix security - prevent credential leaks
 **/.clustrix/credentials/**
@@ -34,11 +104,12 @@ build/
 **/clustrix-*.key
 **/*-credentials.json
 **/*-service-account.json
-.env.local
-.env.validation
+.env*
+!.env.example
 **/validation-secrets.json
 **/.op/
 **/op-session-*
+aws_provision_test.log
 
 # ClaudPoint checkpoint system
 .checkpoints/
@@ -47,11 +118,18 @@ build/
 .claude/epics/
 .claude/prds/
 
-# Backup and temporary files
-notes/
-*.bak
-*_old.*
-*.backup
-*~
-.DS_Store
-Thumbs.db
+# Documentation build artifacts
+docs/build/
+docs/_build/
+
+# Development and debugging
+debug_*.py
+!debug_*.py.example
+working_functions.py
+user_analysis.py
+user_workflow_test.py
+cleanup_test_resources.py
+destroy_cluster.py
+
+# Keep important files but ignore user-specific versions
+!*.gitkeep
