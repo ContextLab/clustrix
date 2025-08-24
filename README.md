@@ -584,6 +584,48 @@ result = my_function(5)  # Works correctly
 - **Kubernetes**: Execute jobs as Kubernetes pods
 - **SSH**: Direct execution via SSH (no scheduler)
 
+## Repository Structure
+
+The Clustrix repository follows standard Python project organization:
+
+```
+clustrix/
+├── clustrix/              # Main package source code
+│   ├── __init__.py       # Package initialization and public API
+│   ├── decorator.py      # @cluster decorator implementation
+│   ├── config.py         # Configuration management
+│   ├── executor_*.py     # Execution engines (core, connections, schedulers, etc.)
+│   ├── filesystem.py     # Cross-cluster filesystem utilities
+│   ├── utils.py          # Core utilities and job management
+│   ├── cli.py            # Command line interface
+│   ├── kubernetes/       # Kubernetes providers (AWS, GCP, Azure, etc.)
+│   └── pricing_clients/  # Cost monitoring integrations
+├── tests/                # Test suite organized by category
+│   ├── unit/            # Fast unit tests (run in CI)
+│   ├── integration/     # Integration tests (run in CI)
+│   ├── real_world/      # Tests requiring actual cluster access
+│   ├── comprehensive/   # Performance and edge case tests
+│   └── infrastructure/  # Test infrastructure setup
+├── docs/                # Documentation and tutorials
+│   ├── source/          # Sphinx documentation source
+│   ├── notebooks/       # Tutorial notebooks
+│   └── *.md             # Various documentation files
+├── scripts/             # Utility scripts for development
+│   ├── check_quality.py        # Code quality validation
+│   ├── pre_push_check.py       # Pre-push validation script
+│   └── run_real_world_tests.py # Real world test runner
+└── .github/             # CI/CD configuration
+    ├── workflows/       # GitHub Actions workflows
+    └── ISSUE_TEMPLATE/  # Issue templates
+```
+
+### Development Workflow
+
+- **Testing**: Use `pytest tests/unit/ tests/integration/` for development testing
+- **Quality Checks**: Run `python scripts/check_quality.py` before committing
+- **Real World Tests**: Use `python scripts/run_real_world_tests.py` when credentials available
+- **Documentation**: Build with `cd docs && make html`
+
 ## Dependencies
 
 Clustrix automatically handles dependency management by:
