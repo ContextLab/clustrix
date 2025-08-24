@@ -24,7 +24,7 @@ importlib.reload(clustrix.notebook_magic)
 # Import after reload to get the refreshed module
 DEFAULT_CONFIGS = clustrix.notebook_magic.DEFAULT_CONFIGS
 if WIDGET_DEPS_AVAILABLE:
-    ClusterConfigWidget = clustrix.notebook_magic.ClusterConfigWidget
+    ClusterConfigWidget = clustrix.notebook_magic.EnhancedClusterConfigWidget
 
 
 class TestWidgetConfigurationFixes:
