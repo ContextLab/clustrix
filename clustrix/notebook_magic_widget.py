@@ -19,20 +19,15 @@ from .notebook_magic_config import (
 )
 
 try:
-    from IPython.display import display as _display, HTML as _HTML
-    import ipywidgets as _widgets  # type: ignore
-    from IPython import get_ipython
+    from IPython.display import display, HTML
+    import ipywidgets as widgets  # type: ignore
 
     IPYTHON_AVAILABLE = True
-    # Make functions available at module level for testing
-    display = _display
-    HTML = _HTML
-    widgets = _widgets
 except ImportError:
     IPYTHON_AVAILABLE = False
     from .notebook_magic_mocks import display, HTML, widgets
 
-from .config import configure, get_config
+from .config import configure
 
 logger = logging.getLogger(__name__)
 
@@ -921,31 +916,31 @@ class EnhancedClusterConfigWidget:
 
             if provider == "aws":
                 # Get AWS regions and instance types
-                regions = provider_instance.get_regions()
+                regions = provider_instance.get_available_regions()
                 if regions:
                     self.aws_region_field.options = regions
 
-                instance_types = provider_instance.get_instance_types()
+                instance_types = provider_instance.get_available_instance_types()
                 if instance_types:
                     self.aws_instance_type_field.options = instance_types
 
             elif provider == "azure":
                 # Get Azure regions and VM sizes
-                regions = provider_instance.get_regions()
+                regions = provider_instance.get_available_regions()
                 if regions:
                     self.azure_region_field.options = regions
 
-                vm_sizes = provider_instance.get_vm_sizes()
+                vm_sizes = provider_instance.get_available_instance_types()
                 if vm_sizes:
                     self.azure_instance_type_field.options = vm_sizes
 
             elif provider == "gcp":
                 # Get GCP regions and machine types
-                regions = provider_instance.get_regions()
+                regions = provider_instance.get_available_regions()
                 if regions:
                     self.gcp_region_field.options = regions
 
-                machine_types = provider_instance.get_machine_types()
+                machine_types = provider_instance.get_available_instance_types()
                 if machine_types:
                     self.gcp_instance_type_field.options = machine_types
 
@@ -1573,7 +1568,6 @@ class EnhancedClusterConfigWidget:
             from .field_mappings import (
                 map_widget_fields_to_provider,
                 validate_provider_config,
-                FIELD_MAPPINGS,
             )
 
             # Map widget fields to provider fields
