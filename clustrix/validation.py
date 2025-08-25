@@ -1,7 +1,6 @@
 """Real cluster validation utilities for enhanced authentication."""
 
 import os
-import subprocess
 import time
 from typing import Dict, Optional
 import paramiko
@@ -120,71 +119,6 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
         return False
 
 
-def validate_1password_integration(note_name: Optional[str] = None) -> bool:
-    """
-    Validate 1Password CLI integration works.
-
-    Args:
-        note_name: Optional specific note to test
-
-    Returns:
-        True if 1Password CLI working, False otherwise
-    """
-    print("🔐 Testing 1Password CLI integration...")
-
-    try:
-        # Check if 1Password CLI is installed
-        result = subprocess.run(
-            ["op", "--version"], capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            version = result.stdout.strip()
-            print(f"✅ 1Password CLI found: {version}")
-        else:
-            print("❌ 1Password CLI not found")
-            print("💡 Install with: brew install 1password-cli")
-            return False
-
-        # Check if signed in
-        result = subprocess.run(
-            ["op", "account", "list"], capture_output=True, text=True, timeout=5
-        )
-        if result.returncode == 0:
-            print("✅ 1Password CLI authenticated")
-
-            # Test note access if specified
-            if note_name:
-                result = subprocess.run(
-                    ["op", "item", "get", note_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                )
-                if result.returncode == 0:
-                    print(f"✅ Successfully accessed note '{note_name}'")
-                    return True
-                else:
-                    print(f"⚠️  Could not access note '{note_name}': {result.stderr}")
-                    return False
-
-            return True
-        else:
-            print("❌ 1Password CLI not authenticated")
-            print("💡 Sign in with: op signin")
-            return False
-
-    except subprocess.TimeoutExpired:
-        print("⚠️  1Password CLI check timed out")
-        return False
-    except FileNotFoundError:
-        print("❌ 1Password CLI not found")
-        print("💡 Install with: brew install 1password-cli")
-        return False
-    except Exception as e:
-        print(f"❌ 1Password validation error: {e}")
-        return False
-
-
 def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
     """
     Run comprehensive validation of all authentication methods.
@@ -201,13 +135,6 @@ def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
     print("=" * 60)
 
     results = {}
-
-    # Test 1Password if enabled
-    if config.use_1password:
-        results["1password"] = validate_1password_integration(config.onepassword_note)
-    else:
-        print("ℹ️  1Password integration disabled")
-        results["1password"] = False
 
     # Test environment variable if enabled
     if config.use_env_password:
@@ -290,7 +217,6 @@ def validate_on_test_clusters(username: Optional[str] = None) -> None:
             cluster_type=cluster_info["type"],
             cluster_host=cluster_info["host"],
             username=username,
-            use_1password=True,
             use_env_password=True,
             password_env_var="CLUSTER_PASSWORD",
         )

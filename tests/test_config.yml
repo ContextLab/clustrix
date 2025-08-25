@@ -82,7 +82,6 @@ profiles:
     max_gpu_parallel_jobs: 8
     max_parallel_jobs: 100
     module_loads: []
-    onepassword_note: ''
     package_manager: auto
     password: null
     password_env_var: ''
@@ -93,7 +92,6 @@ profiles:
     rapids_ecosystem: false
     remote_work_dir: /tmp/clustrix
     ssh_port: 22
-    use_1password: false
     use_env_password: false
     use_two_venv: true
     username: null

@@ -142,8 +142,6 @@ class ClusterConfig:
     cost_monitoring: bool = False  # Enable cost monitoring for cloud providers
 
     # Enhanced Authentication Options
-    use_1password: bool = False  # Enable 1Password integration
-    onepassword_note: str = ""  # 1Password secure note name
     use_env_password: bool = False  # Enable environment variable password
     password_env_var: str = ""  # Name of environment variable containing password
     cache_credentials: bool = True  # Cache credentials in memory

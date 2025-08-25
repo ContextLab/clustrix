@@ -10,7 +10,6 @@ from .auth_methods import (
     SSHKeyAuthMethod,
     EnvironmentPasswordMethod,
     FlexibleCredentialAuthMethod,
-    OnePasswordAuthMethod,
     WidgetPasswordMethod,
     InteractivePasswordMethod,
     detect_environment,
@@ -79,19 +78,7 @@ class AuthenticationManager:
                 else:
                     print(f"   ⚠️  Environment variable not set: {result.error}")
 
-        # 4. Try 1Password if configured (now LAST fallback before interactive)
-        if self.config.use_1password:
-            print("   • Checking 1Password...")
-            onepassword_method = OnePasswordAuthMethod(self.config)
-            if onepassword_method.is_applicable(connection_params):
-                result = onepassword_method.attempt_auth(connection_params)
-                if result.success:
-                    print("   ✅ Retrieved password from 1Password")
-                    return result.password
-                else:
-                    print(f"   ⚠️  1Password lookup failed: {result.error}")
-
-        # 5. Fall back to interactive prompt
+        # 4. Fall back to interactive prompt
         print("   • Prompting for password...")
         interactive_method = InteractivePasswordMethod(self.config)
         result = interactive_method.attempt_auth(connection_params)
@@ -99,7 +86,7 @@ class AuthenticationManager:
         if result.success:
             print("   ✅ Password entered interactively")
 
-            # Offer to store in .env file (primary) or 1Password (fallback)
+            # Offer to store in .env file
             if result.password:
                 self._offer_credential_storage(result.password)
 
@@ -131,14 +118,6 @@ class AuthenticationManager:
                 if result.success:
                     print(f"   ✅ {method_name} authentication successful")
 
-                    # If password was entered interactively, offer 1Password storage
-                    if (
-                        result.method == "interactive"
-                        and result.password
-                        and self.config.use_1password
-                    ):
-                        self._offer_1password_storage(result.password)
-
                     return result
                 else:
                     print(f"   ⚠️  {method_name} failed: {result.error}")
@@ -151,12 +130,6 @@ class AuthenticationManager:
             SSHKeyAuthMethod(self.config),
             FlexibleCredentialAuthMethod(self.config),  # NEW: Primary credential source
         ]
-
-        # Add 1Password if configured (now acts as fallback)
-        if self.config.use_1password:
-            onepassword_method = OnePasswordAuthMethod(self.config)
-            if onepassword_method.is_available():
-                methods.append(onepassword_method)
 
         # Add environment variable if configured
         if self.config.use_env_password:
@@ -171,22 +144,16 @@ class AuthenticationManager:
         return methods
 
     def _offer_credential_storage(self, password: str):
-        """Offer to store credentials in .env file (primary) or 1Password (fallback)."""
+        """Offer to store credentials in .env file."""
         hostname = self.config.cluster_host
         username = self.config.username
 
         if not hostname or not username:
             return
 
-        # First, offer to store in .env file (primary)
+        # Offer to store in .env file
         if self._should_store_in_env_file():
-            success = self._store_in_env_file(password, hostname, username)
-            if success:
-                return  # Successfully stored in .env, no need for 1Password
-
-        # Fallback to 1Password if .env storage failed or was declined
-        if self.config.use_1password:
-            self._offer_1password_storage(password)
+            self._store_in_env_file(password, hostname, username)
 
     def _should_store_in_env_file(self) -> bool:
         """Prompt user to store credentials in .env file."""
@@ -257,133 +224,11 @@ class AuthenticationManager:
             print(f"❌ Error storing credentials in .env file: {e}")
             return False
 
-    def _offer_1password_storage(self, password: str):
-        """Offer to store password in 1Password after successful interactive auth."""
-        if not self.config.use_1password:
-            return
-
-        # Check if 1Password is available
-        onepassword_method = OnePasswordAuthMethod(self.config)
-        if not onepassword_method.is_available():
-            return
-
-        # Check if already stored
-        note_name = (
-            self.config.onepassword_note or f"clustrix-{self.config.cluster_host}"
-        )
-
-        try:
-            # Try to get existing note
-            existing_password = onepassword_method._get_password_from_note(note_name)
-            if existing_password:
-                return  # Already stored
-        except Exception:
-            pass  # Not found, can proceed
-
-        # Prompt user
-        if self._should_store_in_1password():
-            self._store_in_1password(password, note_name)
-
-    def _should_store_in_1password(self) -> bool:
-        """Prompt user to store in 1Password."""
-        env_type = detect_environment()
-
-        if env_type == "notebook" and not is_colab():
-            # Use GUI dialog
-            try:
-                import tkinter as tk
-                from tkinter import messagebox
-
-                root = tk.Tk()
-                root.withdraw()
-                result = messagebox.askyesno(
-                    "Store in 1Password?",
-                    f"Would you like to store the password for "
-                    f"{self.config.username}@{self.config.cluster_host} "
-                    f"in 1Password for future use?",
-                )
-                root.destroy()
-                return result
-            except Exception:
-                # Fall back to terminal
-                pass
-
-        if env_type in ["cli", "script"] or env_type == "notebook":
-            # Use terminal prompt
-            try:
-                response = input(
-                    f"\nStore password for {self.config.cluster_host} in 1Password for future use? [y/N]: "
-                )
-                return response.lower() in ["y", "yes"]
-            except KeyboardInterrupt:
-                return False
-
-        return False
-
-    def _store_in_1password(self, password: str, note_name: str):
-        """Store credentials in 1Password."""
-        try:
-            onepassword_method = OnePasswordAuthMethod(self.config)
-
-            if (
-                self.config.cluster_host
-                and self.config.username
-                and onepassword_method.store_password(
-                    self.config.cluster_host, self.config.username, password
-                )
-            ):
-                print(f"✅ Password stored in 1Password as '{note_name}'")
-
-                # Update config to use 1Password
-                if not self.config.onepassword_note:
-                    self.config.onepassword_note = note_name
-                    # Note: In a real implementation, we'd want to persist this
-                    # self.config.save_to_file(config_file_path)
-
-            else:
-                print("❌ Failed to store password in 1Password")
-
-        except Exception as e:
-            print(f"❌ Error storing in 1Password: {e}")
-
     def validate_configuration(self) -> Dict[str, Optional[bool]]:
         """Validate the current authentication configuration."""
         results: Dict[str, Optional[bool]] = {}
 
         print("🔍 Validating authentication configuration...")
-
-        # Check 1Password if enabled
-        if self.config.use_1password:
-            onepassword_method = OnePasswordAuthMethod(self.config)
-            results["1password_available"] = onepassword_method.is_available()
-
-            if results["1password_available"]:
-                print("   ✅ 1Password CLI available")
-
-                if self.config.onepassword_note:
-                    # Try to access the specific note
-                    try:
-                        password = onepassword_method._get_password_from_note(
-                            self.config.onepassword_note
-                        )
-                        results["1password_note_accessible"] = password is not None
-                        if password:
-                            print(
-                                f"   ✅ 1Password note '{self.config.onepassword_note}' accessible"
-                            )
-                        else:
-                            print(
-                                f"   ⚠️  1Password note '{self.config.onepassword_note}' found but no password"
-                            )
-                    except Exception as e:
-                        results["1password_note_accessible"] = False
-                        print(f"   ❌ Cannot access 1Password note: {e}")
-                else:
-                    results["1password_note_accessible"] = None
-                    print("   ℹ️  No specific 1Password note configured")
-            else:
-                print("   ❌ 1Password CLI not available")
-                results["1password_note_accessible"] = False
 
         # Check environment variable if enabled
         if self.config.use_env_password:
