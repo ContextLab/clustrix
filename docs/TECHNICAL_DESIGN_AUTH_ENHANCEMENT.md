@@ -2,12 +2,12 @@
 
 ## Overview
 
-This document outlines the technical design for implementing enhanced authentication methods in Clustrix, addressing issue #66. The design focuses on providing seamless authentication fallbacks, 1Password integration, and Kerberos/GSSAPI support for enterprise clusters.
+This document outlines the technical design for implementing enhanced authentication methods in Clustrix, addressing issue #66. The design focuses on providing seamless authentication fallbacks using environment variables and SSH keys for enterprise clusters.
 
 ## Goals
 
 1. **Seamless Authentication**: Users should be able to connect to clusters without manual intervention when possible
-2. **Security**: Credentials should be stored and handled securely, leveraging 1Password when available
+2. **Security**: Credentials should be stored and handled securely using environment variables and SSH keys
 3. **Flexibility**: Support multiple authentication methods with intelligent fallback mechanisms
 4. **User Experience**: Clear feedback and guidance when authentication requires user action
 5. **Continuous Validation**: Validate on real clusters (tensor01.dartmouth.edu and ndoli.dartmouth.edu) from the first implementation step
@@ -25,10 +25,9 @@ This document outlines the technical design for implementing enhanced authentica
    - Environment-aware password retrieval
    - Support for Colab, notebooks, CLI, and scripts
 
-3. **Secure Credentials** (`clustrix/secure_credentials.py`)
-   - 1Password CLI integration
-   - Secure storage patterns
-   - Currently used only in validation scripts
+3. **Environment Variable Support** (`clustrix/auth_fallbacks.py`)
+   - Environment-aware password retrieval from secure variables
+   - Support for Colab, notebooks, CLI, and scripts
 
 4. **Widget Interface** (`clustrix/notebook_magic.py`)
    - Cluster configuration widget with SSH setup
@@ -62,11 +61,6 @@ This document outlines the technical design for implementing enhanced authentica
 └─────────────────────┘            │ No
                                    v
 ┌─────────────────────┐     ┌─────────────────────┐
-│  1Password Lookup   │────>│     Success?        │
-│  (if configured)    │     └──────┬──────────────┘
-└─────────────────────┘            │ No
-                                   v
-┌─────────────────────┐     ┌─────────────────────┐
 │ Environment Variable │────>│     Success?        │
 │  (if configured)    │     └──────┬──────────────┘
 └─────────────────────┘            │ No
@@ -76,10 +70,10 @@ This document outlines the technical design for implementing enhanced authentica
 │      Check          │     └──────┬──────────────┘
 └─────────────────────┘            │ No
                                    v
-┌─────────────────────┐     ┌─────────────────────┐
-│  Interactive Prompt │────>│  Offer 1Password    │
-│  (CLI/GUI based)   │     │      Storage        │
-└─────────────────────┘     └─────────────────────┘
+┌─────────────────────┐
+│  Interactive Prompt │
+│  (CLI/GUI based)    │
+└─────────────────────┘
 ```
 
 ### Component Design
@@ -95,9 +89,6 @@ class ClusterConfig:
     # Existing fields...
     
     # Authentication options
-    use_1password: bool = False
-    onepassword_note: str = ""
-    
     use_env_password: bool = False
     password_env_var: str = ""  # Name of environment variable containing password
     
@@ -151,20 +142,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
         value='<h4>Authentication Options</h4>'
     )
     
-    # 1Password Option
-    use_1password = widgets.Checkbox(
-        value=config.use_1password if config else False,
-        description='Use 1Password',
-        style={'description_width': 'initial'}
-    )
-    
-    onepassword_note = widgets.Text(
-        value=config.onepassword_note if config else '',
-        placeholder='e.g., clustrix-tensor01 (optional)',
-        description='Note name:',
-        layout=widgets.Layout(display='none')  # Hidden by default
-    )
-    
     # Environment Variable Option
     use_env_password = widgets.Checkbox(
         value=config.use_env_password if config else False,
@@ -200,21 +177,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
     status_output = widgets.Output()
     
     # Dynamic field visibility handlers
-    def on_1password_toggle(change):
-        """Show/hide 1Password note field"""
-        if change['new']:
-            onepassword_note.layout.display = 'flex'
-            # Check 1Password availability
-            if not SecureCredentialManager.is_available():
-                auth_status.value = '<span style="color: orange">⚠️ 1Password CLI not found - install with: brew install 1password-cli</span>'
-                use_1password.value = False
-                onepassword_note.layout.display = 'none'
-            else:
-                auth_status.value = '<span style="color: green">✅ 1Password enabled</span>'
-        else:
-            onepassword_note.layout.display = 'none'
-            update_auth_status()
-    
     def on_env_toggle(change):
         """Show/hide environment variable field"""
         if change['new']:
@@ -226,8 +188,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
     def update_auth_status():
         """Update authentication status display"""
         methods = []
-        if use_1password.value:
-            methods.append("1Password")
         if use_env_password.value:
             methods.append("Environment Variable")
         
@@ -237,7 +197,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
             auth_status.value = '<i>Using standard authentication</i>'
     
     # Attach observers
-    use_1password.observe(on_1password_toggle, names='value')
     use_env_password.observe(on_env_toggle, names='value')
     
     def on_setup_ssh_keys(b):
@@ -250,8 +209,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
                 cluster_type=cluster_type.value,
                 cluster_host=hostname.value,
                 username=username.value,
-                use_1password=use_1password.value,
-                onepassword_note=onepassword_note.value,
                 use_env_password=use_env_password.value,
                 password_env_var=password_env_var.value
             )
@@ -319,8 +276,6 @@ def create_cluster_widget(config: ClusterConfig = None) -> widgets.VBox:
     
     auth_section = widgets.VBox([
         auth_header,
-        use_1password,
-        onepassword_note,
         use_env_password,
         password_env_var,
         auth_status
@@ -350,7 +305,6 @@ class AuthenticationManager:
     
     def __init__(self, config: ClusterConfig):
         self.config = config
-        self.credential_manager = SecureCredentialManager() if config.use_1password else None
         self.widget_password = None
         self.password_cache = {}  # Cache with TTL
     
@@ -364,48 +318,14 @@ class AuthenticationManager:
             self.widget_password = None  # Clear after use
             return password
         
-        # 2. Try 1Password if configured
-        if self.config.use_1password:
-            password = self._try_1password()
-            if password:
-                return password
-        
-        # 3. Try environment variable if configured
+        # 2. Try environment variable if configured
         if self.config.use_env_password:
             password = self._try_env_var()
             if password:
                 return password
         
-        # 4. Fall back to interactive prompt
+        # 3. Fall back to interactive prompt
         return self._interactive_prompt()
-    
-    def _try_1password(self) -> Optional[str]:
-        """Try to get password from 1Password"""
-        if not self.credential_manager or not self.credential_manager.is_available():
-            print("⚠️  1Password CLI not available")
-            return None
-        
-        try:
-            note_name = self.config.onepassword_note
-            if not note_name:
-                # Try default patterns
-                note_name = f"clustrix-{self.config.cluster_host}"
-            
-            print(f"🔐 Checking 1Password for '{note_name}'...")
-            
-            credentials = self.credential_manager.get_credentials(note_name)
-            password = self._extract_password(credentials)
-            
-            if password:
-                print("✅ Found password in 1Password")
-                return password
-            else:
-                print(f"⚠️  No password found in 1Password note '{note_name}'")
-                
-        except Exception as e:
-            print(f"⚠️  1Password lookup failed: {e}")
-        
-        return None
     
     def _try_env_var(self) -> Optional[str]:
         """Try to get password from environment variable"""
@@ -447,72 +367,8 @@ class AuthenticationManager:
             # Fallback to basic input
             password = getpass.getpass(prompt)
         
-        if password and self.config.use_1password:
-            # Offer to store in 1Password
-            self._offer_1password_storage(password)
         
         return password
-    
-    def _offer_1password_storage(self, password: str):
-        """Offer to store password in 1Password"""
-        if not self.credential_manager or not self.credential_manager.is_available():
-            return
-        
-        # Check if already stored
-        note_name = f"clustrix-{self.config.cluster_host}"
-        try:
-            existing = self.credential_manager.get_credentials(note_name)
-            if existing:
-                return  # Already stored
-        except:
-            pass  # Not found, can proceed
-        
-        # Prompt user
-        env_type = detect_environment()
-        
-        if env_type == 'notebook':
-            # GUI prompt
-            import tkinter as tk
-            from tkinter import messagebox
-            
-            root = tk.Tk()
-            root.withdraw()
-            result = messagebox.askyesno(
-                "Store in 1Password?",
-                f"Would you like to store the password for {self.config.username}@{self.config.cluster_host} in 1Password?"
-            )
-            root.destroy()
-            
-            should_store = result
-        else:
-            # Terminal prompt
-            response = input("\nStore password in 1Password for future use? [y/N]: ")
-            should_store = response.lower() in ['y', 'yes']
-        
-        if should_store:
-            self._store_in_1password(password, note_name)
-    
-    def _store_in_1password(self, password: str, note_name: str):
-        """Store password in 1Password"""
-        note_content = f"""Clustrix SSH Cluster Credentials
-- hostname: {self.config.cluster_host}
-- username: {self.config.username}
-- password: {password}
-- created: {datetime.now().isoformat()}
-
-This note was automatically created by Clustrix for secure cluster access.
-"""
-        
-        try:
-            self.credential_manager.create_secure_note(note_name, note_content)
-            print(f"✅ Password stored in 1Password as '{note_name}'")
-            
-            # Update config
-            self.config.onepassword_note = note_name
-            self.config.save()
-            
-        except Exception as e:
-            print(f"❌ Failed to store in 1Password: {e}")
 ```
 
 #### 4. Real Cluster Validation Framework
@@ -624,18 +480,6 @@ def add_auth_arguments(parser):
     auth_group = parser.add_argument_group('authentication options')
     
     auth_group.add_argument(
-        '--use-1password',
-        action='store_true',
-        help='Use 1Password for credential storage'
-    )
-    
-    auth_group.add_argument(
-        '--1password-note',
-        type=str,
-        help='1Password secure note name containing credentials'
-    )
-    
-    auth_group.add_argument(
         '--use-env-password',
         action='store_true',
         help='Use environment variable for password'
@@ -675,22 +519,22 @@ def add_auth_arguments(parser):
    - Test complete flow
    - **Validate**: End-to-end test on both tensor01 and ndoli
 
-### Phase 2: 1Password Integration (Week 2)
+### Phase 2: Enhanced Environment Variable Support (Week 2)
 
-1. **Day 1-2: Core 1Password**
-   - Extend secure credentials for auth
-   - Implement note parsing
-   - **Validate**: Test 1Password retrieval on tensor01
+1. **Day 1-2: Advanced Environment Setup**
+   - Support multiple environment variable patterns
+   - Add secure environment variable validation
+   - **Validate**: Test multiple environment variable patterns on tensor01
 
-2. **Day 3-4: Storage Flow**
-   - Implement storage offering
-   - Add config persistence
-   - **Validate**: Test storage and retrieval cycle
+2. **Day 3-4: Integration Testing**
+   - Test with different shell environments
+   - Add environment variable caching and TTL
+   - **Validate**: Test environment variable persistence and security
 
 3. **Day 5: Polish**
-   - Error handling
-   - User feedback
-   - **Validate**: Complete 1Password flow on both clusters
+   - Error handling for missing variables
+   - User feedback and documentation
+   - **Validate**: Complete environment variable flow on both clusters
 
 ### Phase 3: Advanced Features (Week 3)
 
@@ -777,7 +621,6 @@ def validate_implementation(feature_name: str):
             cluster_type=cluster['type'],
             cluster_host=cluster['host'],
             username=os.environ.get('USER'),
-            use_1password=True,
             use_env_password=True,
             password_env_var='CLUSTER_PASSWORD'
         )
@@ -904,10 +747,10 @@ class TestAuthenticationManager:
    - No scanning of all environment variables
    - Clear documentation of which variable is used
 
-3. **1Password Integration**
-   - Require explicit user consent
-   - Validate 1Password CLI authenticity
-   - Use secure note format with clear structure
+3. **Environment Variable Security**
+   - Only read from explicitly specified variables
+   - Validate environment variable names before access
+   - Clear documentation of security implications
 
 ## Success Metrics
 
@@ -923,16 +766,16 @@ class TestAuthenticationManager:
 
 3. **Security**
    - No password leaks in logs or errors
-   - Secure storage in 1Password
-   - Proper environment variable handling
+   - Secure environment variable handling
+   - Proper credential caching with appropriate TTL
 
 ## Conclusion
 
 This enhanced design provides a complete authentication solution with:
-- User-specified environment variable support
-- Dynamic widget UI with checkboxes and conditional fields
+- User-specified environment variable support for secure credential management
+- Dynamic widget UI with environment variable configuration
 - Continuous validation on real clusters from day one
 - Comprehensive fallback chain with clear user feedback
-- Secure password handling throughout the system
+- Secure password and credential handling throughout the system
 
 The implementation plan ensures that every feature is validated on both tensor01.dartmouth.edu (simple SSH) and ndoli.dartmouth.edu (Kerberos/GSSAPI) before moving to the next phase.
