@@ -1,6 +1,6 @@
 # Clustrix
 
-[![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
+[![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
 [![Coverage](https://img.shields.io/badge/coverage-10%25-red.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Linting: flake8](https://img.shields.io/badge/linting-flake8-blue.svg)](https://github.com/PyCQA/flake8)
