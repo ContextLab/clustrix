@@ -1,109 +1,107 @@
 # Credential Setup for Real-World Testing
 
-This guide explains how to set up credentials for Clustrix real-world testing, supporting both local development (with 1Password) and GitHub Actions (with repository secrets).
+This guide explains how to set up credentials for Clustrix real-world testing, supporting both local development (with environment variables) and GitHub Actions (with repository secrets).
 
 ## Overview
 
 The credential system supports two modes:
-- **Local Development**: Uses 1Password CLI for secure credential storage
+- **Local Development**: Uses environment variables for secure credential storage
 - **GitHub Actions**: Uses repository secrets for CI/CD workflows
 
 ## Local Development Setup
 
-### 1. Install 1Password CLI
+### 1. Environment Variable Configuration
 
-**macOS:**
+Create a `.env` file in your project root (this file should be added to `.gitignore` for security):
+
 ```bash
-brew install --cask 1password-cli
+# .env file for local development - DO NOT COMMIT TO GIT
+
+# AWS Credentials
+TEST_AWS_ACCESS_KEY=your-access-key-here
+TEST_AWS_SECRET_KEY=your-secret-key-here  
+TEST_AWS_REGION=us-east-1
+
+# GCP Credentials
+TEST_GCP_PROJECT_ID=your-project-id
+TEST_GCP_SERVICE_ACCOUNT_PATH=/path/to/service-account.json
+TEST_GCP_REGION=us-central1
+
+# Azure Credentials
+TEST_AZURE_SUBSCRIPTION_ID=your-subscription-id
+TEST_AZURE_TENANT_ID=your-tenant-id
+TEST_AZURE_CLIENT_ID=your-client-id
+TEST_AZURE_CLIENT_SECRET=your-client-secret
+
+# SSH Cluster Credentials
+TEST_SSH_HOST=your-ssh-host
+TEST_SSH_USERNAME=your-username
+TEST_SSH_PASSWORD=your-password
+TEST_SSH_PRIVATE_KEY_PATH=/path/to/private-key
+
+# SLURM Cluster Credentials
+TEST_SLURM_HOST=your-slurm-host
+TEST_SLURM_USERNAME=your-username
+TEST_SLURM_PASSWORD=your-password
+
+# HuggingFace Credentials
+HUGGINGFACE_TOKEN=your-hf-token
+HUGGINGFACE_USERNAME=your-username
+
+# Lambda Cloud Credentials
+LAMBDA_CLOUD_API_KEY=your-api-key
 ```
 
-**Linux:**
+### 2. Alternative: Export Environment Variables
+
+If you prefer not to use a `.env` file, export variables directly:
+
 ```bash
-# Download from https://developer.1password.com/docs/cli/get-started/
-curl -sS https://downloads.1password.com/linux/keys/1password.asc | gpg --dearmor --output /usr/share/keyrings/1password-archive-keyring.gpg
-echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/1password-archive-keyring.gpg] https://downloads.1password.com/linux/debian/amd64 stable main' | tee /etc/apt/sources.list.d/1password.list
-apt update && apt install 1password-cli
+# AWS
+export TEST_AWS_ACCESS_KEY="your-access-key"
+export TEST_AWS_SECRET_KEY="your-secret-key"
+export TEST_AWS_REGION="us-east-1"
+
+# GCP  
+export TEST_GCP_PROJECT_ID="your-project-id"
+export TEST_GCP_SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
+
+# Azure
+export TEST_AZURE_SUBSCRIPTION_ID="your-subscription-id"
+export TEST_AZURE_TENANT_ID="your-tenant-id"
+export TEST_AZURE_CLIENT_ID="your-client-id"
+export TEST_AZURE_CLIENT_SECRET="your-client-secret"
+
+# SSH
+export TEST_SSH_HOST="your-ssh-host"
+export TEST_SSH_USERNAME="your-username"
+export TEST_SSH_PASSWORD="your-password"
+export TEST_SSH_PRIVATE_KEY_PATH="/path/to/private-key"
+
+# SLURM
+export TEST_SLURM_HOST="your-slurm-host"
+export TEST_SLURM_USERNAME="your-username"
+export TEST_SLURM_PASSWORD="your-password"
+
+# HuggingFace
+export HUGGINGFACE_TOKEN="your-token"
+export HUGGINGFACE_USERNAME="your-username"
+
+# Lambda Cloud
+export LAMBDA_CLOUD_API_KEY="your-api-key"
 ```
 
-**Windows:**
-Download from https://developer.1password.com/docs/cli/get-started/
-
-### 2. Configure 1Password CLI
+### 3. Test Local Setup
 
 ```bash
-# Sign in to 1Password
-op signin
-
-# Verify authentication
-op account list
-```
-
-### 3. Create 1Password Items
-
-Create the following items in your 1Password vault (use "Private" vault or create a dedicated "clustrix-dev" vault):
-
-#### AWS Credentials (`clustrix-aws-validation`)
-- **Type**: Login or API Credential
-- **Fields**:
-  - `aws_access_key_id`: Your AWS Access Key ID
-  - `aws_secret_access_key`: Your AWS Secret Access Key
-  - `aws_region`: AWS region (e.g., us-east-1)
-
-#### GCP Credentials (`clustrix-gcp-validation`)
-- **Type**: Login or API Credential
-- **Fields**:
-  - `project_id`: Your GCP Project ID
-  - `service_account_json`: Full service account JSON key content
-  - `region`: GCP region (e.g., us-central1)
-
-#### Azure Credentials (`clustrix-azure-validation`)
-- **Type**: Login or API Credential
-- **Fields**:
-  - `subscription_id`: Azure subscription ID
-  - `tenant_id`: Azure tenant ID
-  - `client_id`: Azure client ID
-  - `client_secret`: Azure client secret
-
-#### SSH Credentials (`clustrix-ssh-validation`)
-- **Type**: Login or Server
-- **Fields**:
-  - `hostname`: SSH server hostname or IP
-  - `username`: SSH username
-  - `private_key`: SSH private key (PEM format)
-  - `password`: SSH password (optional if using key)
-  - `port`: SSH port (default: 22)
-
-#### SLURM Credentials (`clustrix-slurm-validation`)
-- **Type**: Login or Server
-- **Fields**:
-  - `hostname`: SLURM cluster hostname
-  - `username`: SLURM username
-  - `password`: SLURM password
-  - `port`: SSH port (default: 22)
-
-#### HuggingFace Credentials (`clustrix-huggingface-validation`)
-- **Type**: Login or API Credential
-- **Fields**:
-  - `token`: HuggingFace API token
-  - `username`: HuggingFace username
-
-#### Lambda Cloud Credentials (`clustrix-lambda-cloud-validation`)
-- **Type**: Login or API Credential
-- **Fields**:
-  - `api_key`: Lambda Cloud API key
-  - `endpoint`: API endpoint (default: https://cloud.lambdalabs.com/api/v1)
-
-### 4. Test Local Setup
-
-```bash
-# Test 1Password integration
-python scripts/test_real_world_credentials.py
-
-# Check credential status
+# Check environment variable setup
 python scripts/run_real_world_tests.py --check-creds
 
-# Test specific credential access
+# Test credential access
 python scripts/test_credential_access.py
+
+# Verify specific services
+python scripts/test_real_world_credentials.py
 ```
 
 ## GitHub Actions Setup
@@ -156,44 +154,6 @@ export HF_TOKEN="your-hf-token"
 python scripts/run_real_world_tests.py --check-creds
 ```
 
-## Environment Variable Fallback
-
-If neither 1Password nor GitHub Actions is available, the system falls back to environment variables:
-
-```bash
-# AWS
-export TEST_AWS_ACCESS_KEY="your-access-key"
-export TEST_AWS_SECRET_KEY="your-secret-key"
-export TEST_AWS_REGION="us-east-1"
-
-# Azure
-export TEST_AZURE_SUBSCRIPTION_ID="your-subscription-id"
-export TEST_AZURE_TENANT_ID="your-tenant-id"
-export TEST_AZURE_CLIENT_ID="your-client-id"
-export TEST_AZURE_CLIENT_SECRET="your-client-secret"
-
-# GCP
-export TEST_GCP_PROJECT_ID="your-project-id"
-export TEST_GCP_SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
-
-# SSH
-export TEST_SSH_HOST="your-ssh-host"
-export TEST_SSH_USERNAME="your-username"
-export TEST_SSH_PASSWORD="your-password"
-export TEST_SSH_PRIVATE_KEY_PATH="/path/to/private-key"
-
-# SLURM
-export TEST_SLURM_HOST="your-slurm-host"
-export TEST_SLURM_USERNAME="your-username"
-export TEST_SLURM_PASSWORD="your-password"
-
-# HuggingFace
-export HUGGINGFACE_TOKEN="your-token"
-export HUGGINGFACE_USERNAME="your-username"
-
-# Lambda Cloud
-export LAMBDA_CLOUD_API_KEY="your-api-key"
-```
 
 ## Running Tests
 
@@ -240,33 +200,32 @@ Tests run automatically on push/PR. To run expensive tests:
 
 ## Security Best Practices
 
-### 1Password
-- Use dedicated vault for Clustrix credentials
-- Enable CLI integration in 1Password app
-- Use temporary tokens where possible
+### Environment Variables
+- Always use `.env` files for local development (add to `.gitignore`)
+- Use temporary/limited-scope credentials for testing
+- Never commit credentials to version control
+- Rotate credentials regularly
+- Use least-privilege access policies
 
 ### GitHub Actions
 - Use repository secrets, not environment variables in workflow files
 - Limit secret access to necessary workflows
 - Rotate secrets regularly
 
-### Environment Variables
-- Use `.env` files for local development (add to `.gitignore`)
-- Never commit credentials to version control
-- Use temporary/limited-scope credentials for testing
 
 ## Troubleshooting
 
-### 1Password Issues
+### Environment Variable Issues
 ```bash
-# Check 1Password status
-op account list
+# Check if variables are set
+echo $TEST_AWS_ACCESS_KEY
+echo $TEST_SSH_USERNAME
 
-# Re-authenticate
-op signin
+# Test environment variables are loaded
+python -c "import os; print(os.environ.get('TEST_AWS_ACCESS_KEY', 'Not set'))"
 
-# Test credential access
-op item get "clustrix-aws-validation" --field aws_access_key_id
+# Check .env file loading
+python -c "from dotenv import load_dotenv; load_dotenv(); import os; print(os.environ.get('TEST_AWS_ACCESS_KEY', 'Not set'))"
 ```
 
 ### GitHub Actions Issues
@@ -274,7 +233,7 @@ op item get "clustrix-aws-validation" --field aws_access_key_id
 # Check workflow logs
 # Go to Actions tab → Select workflow run → Check logs
 
-# Test locally with secrets
+# Test locally with environment variables
 export GITHUB_ACTIONS=true
 export CLUSTRIX_USERNAME="..."
 python scripts/test_real_world_credentials.py
@@ -299,8 +258,8 @@ ssh -vvv user@host
 
 ### Rotation Process
 1. Create new credentials in respective services
-2. Update 1Password items
-3. Update GitHub repository secrets
+2. Update local environment variables in `.env` file
+3. Update GitHub repository secrets  
 4. Test with new credentials
 5. Revoke old credentials
 
@@ -313,8 +272,8 @@ ssh -vvv user@host
 - Lambda Cloud dashboard for GPU usage
 
 ### Access Monitoring
-- 1Password access logs
-- GitHub Actions workflow logs
+- Local environment variable usage logs
+- GitHub Actions workflow logs  
 - Cloud provider audit logs
 
 ## Support
@@ -323,4 +282,5 @@ For issues with credential setup:
 1. Check the troubleshooting section above
 2. Run `python scripts/test_real_world_credentials.py` for diagnostics
 3. Review workflow logs in GitHub Actions
-4. Check 1Password CLI documentation: https://developer.1password.com/docs/cli/
+4. Verify environment variables are properly set and loaded
+5. Ensure `.env` file is in the correct location and not committed to git
