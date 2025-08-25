@@ -65,14 +65,14 @@ This directory contains essential utility scripts for development and maintenanc
 ### Setup and Configuration
 
 #### `setup_validation_credentials.py`
-**Purpose**: Secure credential setup using 1Password  
+**Purpose**: Secure credential setup using environment variables  
 **Usage**: `python scripts/setup_validation_credentials.py`  
 **Features**:
-- Guides through 1Password vault setup
+- Guides through environment variable setup
 - Tests credential accessibility
 - Supports multiple cloud providers (AWS, GCP, Lambda Cloud, HuggingFace)
-- Fallback to environment variables
-- **Security**: Uses 1Password CLI for secure credential storage
+- Uses .env files for local development
+- **Security**: Uses environment variables for secure credential storage
 
 ## Workflow Integration
 
@@ -139,7 +139,7 @@ The following categories of files were removed during cleanup:
 
 ## Security Considerations
 
-- **Credential Management**: All sensitive credentials are managed through 1Password CLI
+- **Credential Management**: All sensitive credentials are managed through environment variables
 - **Environment Isolation**: Real-world tests run in isolated environments
 - **Access Control**: API keys have minimal required permissions
 - **Secret Scanning**: No credentials are stored in repository files
@@ -160,7 +160,7 @@ Most scripts depend on:
 - **Core**: `clustrix` package installed in development mode
 - **Quality Tools**: `black`, `flake8`, `mypy`, `pytest`
 - **External Services**: For real-world testing only
-- **1Password CLI**: For secure credential management
+- **Environment Variables**: For secure credential management
 
 Install development dependencies:
 ```bash

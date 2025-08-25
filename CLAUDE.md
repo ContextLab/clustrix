@@ -198,7 +198,7 @@ The GitHub Actions CI will fail if code doesn't pass black, flake8, mypy, and py
 ### Pre-Push Hook Workflow
 
 A custom pre-push hook (`.git/hooks/pre-push`) automatically runs real-world tests when:
-1. Cluster credentials are available (1Password, environment variables, etc.)
+1. Cluster credentials are available (environment variables, etc.)
 2. Real-world test runner script exists
 
 **Hook behavior:**
