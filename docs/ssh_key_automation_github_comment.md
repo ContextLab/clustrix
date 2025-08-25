@@ -53,7 +53,7 @@ Check existing keys → Generate if needed → Deploy using password → Verify 
 
 ## Testing Strategy
 - Test on SLURM cluster (ndoli) and SSH cluster (tensor01)
-- Use 1Password for initial passwords during testing
+- Use environment variables for initial passwords during testing
 - Verify passwordless access works end-to-end
 - Test with actual clustrix job submissions
 - Validate key rotation functionality

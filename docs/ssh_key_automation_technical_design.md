@@ -273,7 +273,7 @@ def validate_ssh_automation(cluster_configs: List[Dict]):
     """
     Test SSH key automation on real clusters:
     1. Clean existing keys
-    2. Get password from 1Password
+    2. Get password from environment variables
     3. Run setup_ssh_keys()
     4. Verify passwordless access
     5. Test with clustrix job submission
