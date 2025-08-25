@@ -9,6 +9,14 @@ on:
       - 'setup.py'
       - 'pyproject.toml'
       - 'requirements*.txt'
+  push:
+    branches: [develop]  # Only run on develop pushes to avoid duplication with main Tests workflow
+    paths:
+      - 'clustrix/**'
+      - 'tests/**'
+      - 'setup.py'
+      - 'pyproject.toml'
+      - 'requirements*.txt'
 
 jobs:
   quick-checks:
