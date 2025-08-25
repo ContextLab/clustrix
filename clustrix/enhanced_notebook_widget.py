@@ -16,7 +16,6 @@ from .auth_manager import AuthenticationManager
 from .validation import (
     validate_cluster_auth,
     validate_ssh_key_auth,
-    validate_1password_integration,
 )
 
 
@@ -31,7 +30,6 @@ def create_enhanced_cluster_widget(
     - Conditional field visibility based on checkbox state
     - Integration with AuthenticationManager
     - Real-time validation feedback
-    - 1Password storage offering
     """
     if not IPYTHON_AVAILABLE:
         raise ImportError(
@@ -117,27 +115,6 @@ def create_enhanced_cluster_widget(
         value='<small style="color: #666;">Used for SSH key setup and authentication fallback</small>'
     )
 
-    # 1Password Option with conditional field
-    use_1password = widgets.Checkbox(
-        value=config.use_1password,
-        description="Use 1Password",
-        style={"description_width": "initial"},
-        tooltip="Enable 1Password CLI integration for secure credential storage",
-    )
-
-    onepassword_note = widgets.Text(
-        value=config.onepassword_note,
-        placeholder="e.g., clustrix-tensor01 (optional)",
-        description="Note name:",
-        style=style,
-        layout=widgets.Layout(width="100%", display="none"),  # Hidden by default
-    )
-
-    onepassword_help = widgets.HTML(
-        value='<small style="color: #666;">Leave blank to use default naming: clustrix-{hostname}</small>',
-        layout=widgets.Layout(display="none"),
-    )
-
     # Environment Variable Option with conditional field
     use_env_password = widgets.Checkbox(
         value=config.use_env_password,
@@ -204,31 +181,6 @@ def create_enhanced_cluster_widget(
     # Dynamic Field Visibility Handlers
     # =============================================================================
 
-    def on_1password_toggle(change):
-        """Show/hide 1Password note field and update status"""
-        if change["new"]:
-            onepassword_note.layout.display = "flex"
-            onepassword_help.layout.display = "block"
-
-            # Check 1Password availability
-            if validate_1password_integration():
-                auth_status.value = (
-                    '<div style="padding: 10px; border-radius: 4px; background: #d4edda; border: 1px solid #c3e6cb;">'
-                    "✅ 1Password CLI available and authenticated</div>"
-                )
-            else:
-                auth_status.value = (
-                    '<div style="padding: 10px; border-radius: 4px; background: #f8d7da; border: 1px solid #f5c6cb;">'
-                    "⚠️ 1Password CLI not found - install with: <code>brew install 1password-cli</code></div>"
-                )
-                use_1password.value = False
-                onepassword_note.layout.display = "none"
-                onepassword_help.layout.display = "none"
-        else:
-            onepassword_note.layout.display = "none"
-            onepassword_help.layout.display = "none"
-            update_auth_status()
-
     def on_env_toggle(change):
         """Show/hide environment variable field"""
         if change["new"]:
@@ -242,8 +194,6 @@ def create_enhanced_cluster_widget(
     def update_auth_status():
         """Update authentication status based on current selections"""
         methods = []
-        if use_1password.value:
-            methods.append("1Password")
         if use_env_password.value:
             methods.append("Environment Variable")
 
@@ -260,17 +210,12 @@ def create_enhanced_cluster_widget(
             )
 
     # Attach observers
-    use_1password.observe(on_1password_toggle, names="value")
     use_env_password.observe(on_env_toggle, names="value")
 
     # Initialize field visibility WITHOUT triggering validation
-    if use_1password.value:
-        # Just show the fields, don't validate (which triggers 1Password popup)
-        onepassword_note.layout.display = "flex"
-        onepassword_help.layout.display = "block"
     if use_env_password.value:
         password_env_var.layout.display = "flex"
-        password_help.layout.display = "block"
+        env_var_help.layout.display = "block"
 
     # =============================================================================
     # Enhanced SSH Setup Handler
@@ -287,8 +232,6 @@ def create_enhanced_cluster_widget(
                 cluster_host=hostname.value,
                 username=username.value,
                 ssh_port=port.value,
-                use_1password=use_1password.value,
-                onepassword_note=onepassword_note.value,
                 use_env_password=use_env_password.value,
                 password_env_var=password_env_var.value,
             )
@@ -298,14 +241,8 @@ def create_enhanced_cluster_widget(
             print(f"    Cluster type: {cluster_type.value}")
 
             # Show configured authentication methods
-            if widget_config.use_1password or widget_config.use_env_password:
+            if widget_config.use_env_password:
                 print("\\n🔧 Authentication methods configured:")
-                if widget_config.use_1password:
-                    note_name = (
-                        widget_config.onepassword_note
-                        or f"clustrix-{widget_config.cluster_host}"
-                    )
-                    print(f"    • 1Password (note: {note_name})")
                 if widget_config.use_env_password:
                     print(
                         f"    • Environment variable: ${widget_config.password_env_var}"
@@ -330,7 +267,6 @@ def create_enhanced_cluster_widget(
                 print("⚠️  No working authentication methods found")
                 print("   Please either:")
                 print("   • Enter a password in the password field, or")
-                print("   • Configure 1Password with valid credentials, or")
                 print("   • Set the specified environment variable")
                 return
 
@@ -424,8 +360,6 @@ def create_enhanced_cluster_widget(
                 cluster_host=hostname.value,
                 username=username.value,
                 ssh_port=port.value,
-                use_1password=use_1password.value,
-                onepassword_note=onepassword_note.value,
                 use_env_password=use_env_password.value,
                 password_env_var=password_env_var.value,
             )
@@ -470,10 +404,6 @@ def create_enhanced_cluster_widget(
             auth_header,
             password_input,
             password_help,
-            widgets.HTML("<br>"),
-            use_1password,
-            onepassword_note,
-            onepassword_help,
             widgets.HTML("<br>"),
             use_env_password,
             password_env_var,

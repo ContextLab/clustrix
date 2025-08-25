@@ -711,17 +711,6 @@ class ModernClustrixWidget:
             layout=widgets.Layout(width="150px", height="35px"),
         )
 
-        # 6.3 "1Password:" Label (right-aligned)
-        onepassword_label = widgets.HTML(
-            value="<div style='text-align: right; width: 80px;'>1Password:</div>"
-        )
-
-        # 6.4 1Password Checkbox
-        self.widgets["use_1password"] = widgets.Checkbox(
-            value=False,
-            layout=widgets.Layout(width="20px", height="35px"),
-        )
-
         # 6.5 "Home dir:" Label (right-aligned)
         home_dir_label = widgets.HTML(
             value="<div style='text-align: right; width: 80px;'>Home dir:</div>"
@@ -782,7 +771,7 @@ class ModernClustrixWidget:
             ),
         )
 
-        # Secondary container for other auth options (Env var, 1Password)
+        # Secondary container for other auth options (Env var only)
         other_auth_container = widgets.VBox(
             [
                 widgets.HBox(
@@ -792,18 +781,6 @@ class ModernClustrixWidget:
                             value="<div style='width: 10px;'></div>"
                         ),  # Spacer
                         self.widgets["local_env_var"],
-                    ],
-                    layout=widgets.Layout(
-                        justify_content="flex-start", align_items="center"
-                    ),
-                ),
-                widgets.HBox(
-                    [
-                        onepassword_label,
-                        widgets.HTML(
-                            value="<div style='width: 10px;'></div>"
-                        ),  # Spacer
-                        self.widgets["use_1password"],
                     ],
                     layout=widgets.Layout(
                         justify_content="flex-start", align_items="center"
@@ -839,7 +816,7 @@ class ModernClustrixWidget:
                 self.widgets["remote_row4"],  # Host, port
                 self.widgets["remote_row5"],  # SSH key, refresh
                 self.widgets["remote_row6"],  # Username, Password, Home dir (styled)
-                other_auth_container,  # Env var, 1Password
+                other_auth_container,  # Env var
                 remote_action_row,  # SSH setup button
             ],
             layout=widgets.Layout(display="none", margin="10px 0px"),
@@ -1536,7 +1513,6 @@ class ModernClustrixWidget:
                     "cluster_port": self.widgets["port"].value,
                     "username": self.widgets["username"].value,
                     "key_file": self.widgets["ssh_key_file"].value,
-                    "use_1password": self.widgets["use_1password"].value,
                     "password_env_var": self.widgets["local_env_var"].value,
                 }
             )
@@ -1580,8 +1556,6 @@ class ModernClustrixWidget:
             self.widgets["username"].value = config.username or ""
         if hasattr(config, "key_file"):
             self.widgets["ssh_key_file"].value = config.key_file or "~/.ssh/id_rsa"
-        if hasattr(config, "use_1password"):
-            self.widgets["use_1password"].value = config.use_1password
         if hasattr(config, "password_env_var"):
             self.widgets["local_env_var"].value = config.password_env_var or ""
 
