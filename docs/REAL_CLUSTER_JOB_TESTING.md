@@ -61,7 +61,7 @@ These tests are resource-intensive and run longer:
 
 2. **Set up credentials:**
    - Follow the [Credential Setup Guide](CREDENTIAL_SETUP.md)
-   - Ensure 1Password CLI is configured (local development)
+   - Ensure environment variables are configured (local development)
    - Or set up GitHub Actions secrets (CI/CD)
 
 3. **Verify cluster access:**
@@ -435,7 +435,7 @@ python scripts/run_cluster_job_tests.py --cluster slurm
 
 ### Credential Security
 
-1. **Use secure credential storage** - 1Password or GitHub secrets
+1. **Use secure credential storage** - Environment variables or GitHub secrets
 2. **Rotate credentials regularly** - Follow security best practices
 3. **Limit credential scope** - Use minimal required permissions
 4. **Never commit credentials** - Keep them out of version control
@@ -508,7 +508,7 @@ jobs:
 
 For local development:
 
-1. **Set up 1Password CLI** - Follow credential setup guide
+1. **Set up environment variables** - Follow credential setup guide
 2. **Configure cluster access** - Ensure SSH keys and permissions
 3. **Run tests incrementally** - Start with basic tests
 4. **Monitor resource usage** - Be mindful of cluster load

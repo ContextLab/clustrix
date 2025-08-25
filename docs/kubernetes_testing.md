@@ -114,18 +114,7 @@ export K8S_IMAGE=python:3.11-slim     # Container image (default: python:3.11-sl
 export K8S_CONTEXT=my-cluster         # Specific context (optional)
 ```
 
-### Method 2: 1Password Integration
-
-Add Kubernetes credentials to 1Password:
-
-**Item Name**: `clustrix-kubernetes-validation`
-
-**Fields**:
-- `kubeconfig`: Complete kubeconfig file content
-- `namespace`: Kubernetes namespace (optional, defaults to 'default')  
-- `context`: Specific context to use (optional)
-
-### Method 3: GitHub Actions / CI
+### Method 2: GitHub Actions / CI
 
 Set repository secrets:
 - `KUBECONFIG_CONTENT`: Base64-encoded kubeconfig file
