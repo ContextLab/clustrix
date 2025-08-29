@@ -349,3 +349,6 @@ class TestRealFilesystemOperations:
 
                 # Restore permissions for cleanup
                 ro_dir.chmod(0o755)
+
+
+# Test comment in real_world
