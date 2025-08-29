@@ -1,30 +1,54 @@
-.idea/*
+# Python
 *.pyc
-*.DS_Store
+__pycache__/
+*.pyo
+*.pyd
+.Python
 !*.gitkeep
-clustrix.egg-info
 
-# Test notebooks with hardcoded credentials
-test_ssh_setup.ipynb
-clustrix_test_env/
+# IDE and Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
 
-# Personal configuration files and coverage data
-clustrix.yml
-.coverage*
-coverage.json
-jupyter.log
-py310-test/
-.ipynb_checkpoints/
-
-# Build and documentation artifacts
-docs/build/
-htmlcov/
-*.log
-*_report_*.json
-*validation*.json
+# Build and distribution
 dist/
 build/
 *.egg-info/
+clustrix.egg-info
+
+# Test artifacts
+.pytest_cache/
+test-reports/
+*.xml
+.coverage
+.coverage.*
+coverage.json
+htmlcov/
+.tox/
+
+# Personal configuration files
+clustrix.yml
+jupyter.log
+py310-test/
+clustrix_test_env/
+
+# Notebook checkpoints and test files
+.ipynb_checkpoints/
+test_ssh_setup.ipynb
+
+# Documentation artifacts
+docs/build/
+
+# Logs and temporary files
+*.log
+*_report_*.json
+*validation*.json
+*.bak
+*.tmp
+.DS_Store
 
 # Clustrix security - prevent credential leaks
 **/.clustrix/credentials/**
