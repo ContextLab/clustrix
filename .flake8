@@ -15,3 +15,6 @@ per-file-ignores =
     clustrix/executor.py:F841
     clustrix/local_executor.py:F401,F811,F841
     clustrix/utils.py:E501
+    # Test files are more lenient - allow unused imports, redefinitions, etc.
+    tests/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731
+    tests/*/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731

@@ -20,15 +20,14 @@ repos:
     rev: 7.0.0
     hooks:
       - id: flake8
-        args: [
-          "--max-line-length=88",
-          "--extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824"
-        ]
+        # Use the configuration from .flake8 file instead of inline args
         files: ^(clustrix/|tests/)
         
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
     hooks:
       - id: mypy
+        # Only check clustrix/ package, not tests (consistent with pyproject.toml)
+        files: ^clustrix/
         args: ["--ignore-missing-imports"]
         additional_dependencies: [types-PyYAML, types-requests, types-paramiko]
