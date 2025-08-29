@@ -205,6 +205,3 @@ class TestConfigContent:
         assert config.remote_work_dir == "/scratch/user/clustrix"
         assert config.local_cache_dir == "/tmp/clustrix_cache"
         assert config.key_file == "/home/user/.ssh/cluster_key"
-
-
-# Test comment
