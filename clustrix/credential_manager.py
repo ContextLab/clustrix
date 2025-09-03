@@ -1,8 +1,8 @@
 """Flexible credential management with automatic .env file creation.
 
 This module implements simplified credential management following the orchestrator pattern,
-eliminating manual 1Password confirmations by automatically creating and managing
-~/.clustrix/.env with secure permissions and multiple fallback sources.
+automatically creating and managing ~/.clustrix/.env with secure permissions and
+multiple fallback sources.
 """
 
 import os
@@ -152,69 +152,6 @@ class DotEnvCredentialSource(CredentialSource):
                         os.environ[key] = value
         except Exception as e:
             logger.debug(f"Failed to manually load .env file: {e}")
-
-
-class OnePasswordCredentialSource(CredentialSource):
-    """Credential source that uses existing 1Password integration as fallback."""
-
-    def __init__(self):
-        self._op_manager = None
-        self._validation_creds = None
-
-        # Try to import existing 1Password integration
-        try:
-            from .secure_credentials import (
-                SecureCredentialManager,
-                ValidationCredentials,
-            )
-
-            self._op_manager = SecureCredentialManager()
-            self._validation_creds = ValidationCredentials()
-        except ImportError:
-            logger.debug("1Password integration not available")
-
-    def is_available(self) -> bool:
-        """Check if 1Password CLI is available."""
-        if not self._op_manager:
-            return False
-        return self._op_manager.is_op_available()
-
-    def get_credentials(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials from 1Password using existing integration."""
-        if not self.is_available() or not self._validation_creds:
-            return None
-
-        try:
-            if provider == "aws":
-                return self._validation_creds.get_aws_credentials()
-            elif provider == "azure":
-                return self._validation_creds.get_azure_credentials()
-            elif provider == "gcp":
-                return self._validation_creds.get_gcp_credentials()
-            elif provider == "huggingface":
-                return self._validation_creds.get_huggingface_credentials()
-            elif provider == "lambda_cloud":
-                return self._validation_creds.get_lambda_cloud_credentials()
-            # SSH and Kubernetes would need additional implementation
-
-        except Exception as e:
-            logger.debug(f"Failed to get {provider} credentials from 1Password: {e}")
-
-        return None
-
-    def list_available_providers(self) -> List[str]:
-        """List providers available from 1Password."""
-        if not self.is_available():
-            return []
-
-        available = []
-        providers = ["aws", "azure", "gcp", "huggingface", "lambda_cloud"]
-
-        for provider in providers:
-            if self.get_credentials(provider):
-                available.append(provider)
-
-        return available
 
 
 class EnvironmentCredentialSource(CredentialSource):
@@ -368,12 +305,10 @@ class FlexibleCredentialManager:
         self.env_file = self.config_dir / ".env"
 
         # Initialize credential sources in priority order
-        # 1Password should be last since it requires manual authentication
         self.sources = [
             DotEnvCredentialSource(self.env_file),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
-            OnePasswordCredentialSource(),  # Last resort - requires manual auth
         ]
 
         # Ensure setup is complete
@@ -412,7 +347,7 @@ class FlexibleCredentialManager:
 # Created automatically - uncomment and add your credentials below
 # File permissions: 600 (owner read/write only)
 #
-# Priority order: .env file → 1Password → environment variables → GitHub Actions
+# Priority order: .env file → environment variables → GitHub Actions
 
 # ============================================================================
 # AWS Credentials (for AWS EC2, Batch, pricing APIs)

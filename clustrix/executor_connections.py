@@ -57,8 +57,7 @@ class ConnectionManager:
             connect_kwargs["password"] = self.config.password
         else:
             # Try to get SSH credentials from credential manager
-            # This ensures we check .env, environment variables, GitHub Actions,
-            # and ONLY THEN 1Password (which requires manual auth)
+            # This ensures we check .env, environment variables, and GitHub Actions
             try:
                 from .credential_manager import FlexibleCredentialManager
 

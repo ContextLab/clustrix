@@ -865,71 +865,15 @@ def reset_credentials_command():
 
 
 def migrate_credentials_command():
-    """Migrate credentials from 1Password to .env file."""
-    print("🔄 1Password to .env Migration")
+    """Legacy migration command - 1Password support has been removed."""
+    print("🔄 1Password Migration")
     print("=" * 50)
-
-    # Try to access 1Password credentials
-    try:
-        from .secure_credentials import ValidationCredentials
-
-        op_creds = ValidationCredentials()
-    except ImportError:
-        print("❌ 1Password integration not available")
-        return
-
-    manager = get_credential_manager()
-    migrated_credentials = {}
-
-    # Try to migrate each provider
-    providers = ["aws", "azure", "gcp", "huggingface", "lambda_cloud"]
-
-    for provider in providers:
-        print(f"\n🔍 Checking {provider.upper()} in 1Password...")
-
-        try:
-            if provider == "aws":
-                creds = op_creds.get_aws_credentials()
-            elif provider == "azure":
-                creds = op_creds.get_azure_credentials()
-            elif provider == "gcp":
-                creds = op_creds.get_gcp_credentials()
-            elif provider == "huggingface":
-                creds = op_creds.get_huggingface_credentials()
-            elif provider == "lambda_cloud":
-                creds = op_creds.get_lambda_cloud_credentials()
-            else:
-                continue
-
-            if creds:
-                print(f"  ✅ Found {provider} credentials")
-
-                # Map to .env format
-                if provider == "aws":
-                    migrated_credentials.update(
-                        {
-                            "AWS_ACCESS_KEY_ID": creds.get("aws_access_key_id"),
-                            "AWS_SECRET_ACCESS_KEY": creds.get("aws_secret_access_key"),
-                            "AWS_REGION": creds.get("aws_region", "us-east-1"),
-                        }
-                    )
-                # Add other provider mappings as needed
-
-            else:
-                print(f"  ❌ No {provider} credentials found")
-
-        except Exception as e:
-            print(f"  ⚠️ Error accessing {provider}: {e}")
-
-    if migrated_credentials:
-        print(f"\n💾 Migrating {len(migrated_credentials)} credentials...")
-        success = _write_credentials_to_env_file(manager.env_file, migrated_credentials)
-
-        if success:
-            print("✅ Migration completed successfully!")
-            print("🔍 Testing migrated credentials...")
-            test_credentials_command()
-        else:
-            print("❌ Migration failed")
-    else:
-        print("ℹ️ No credentials found to migrate")
+    print("❌ 1Password support has been removed from Clustrix.")
+    print("")
+    print("Please use one of these methods to set up credentials:")
+    print("  • 'clustrix credentials setup' - Interactive credential setup")
+    print("  • Edit ~/.clustrix/.env manually")
+    print("  • Use environment variables")
+    print("  • Use GitHub Actions secrets")
+    print("")
+    print("For more information, run 'clustrix credentials --help'")

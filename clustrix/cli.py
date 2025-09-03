@@ -267,7 +267,7 @@ def credentials_reset():
 
 @credentials.command("migrate")
 def credentials_migrate():
-    """Migrate credentials from 1Password to .env file."""
+    """Legacy migration command - 1Password support removed."""
     migrate_credentials_command()
 
 

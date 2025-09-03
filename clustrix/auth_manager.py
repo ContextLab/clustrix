@@ -64,7 +64,7 @@ class AuthenticationManager:
             else:
                 print(f"   ⚠️  Credential manager lookup failed: {result.error}")
 
-        # 3. Try environment variable if configured (BEFORE 1Password)
+        # 3. Try environment variable if configured
         if self.config.use_env_password:
             print(
                 f"   • Checking environment variable ${self.config.password_env_var}..."
