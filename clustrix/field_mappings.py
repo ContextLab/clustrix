@@ -125,7 +125,7 @@ def map_widget_fields_to_provider(
     # Add optional defaults for missing fields
     defaults = OPTIONAL_FIELD_DEFAULTS.get(provider, {})
     if defaults:
-        for field, default_value in defaults.items():
+        for field, default_value in defaults.items():  # type: ignore[attr-defined]
             if field not in provider_config:
                 provider_config[field] = default_value
                 logger.debug(f"Added default {field}: {default_value}")

@@ -5,7 +5,7 @@ repos:
         name: Auto-format with black (auto-fix)
         entry: python scripts/pre_commit_auto_format.py
         language: system
-        files: ^(clustrix/|tests/unit/|tests/integration/|examples/|scripts/).*\.py$
+        files: ^(clustrix/|tests/).*\.py$
         pass_filenames: false
         
   - repo: https://github.com/psf/black
@@ -14,23 +14,20 @@ repos:
       - id: black
         name: Black formatting verification
         language_version: python3
-        files: ^(clustrix/|tests/unit/|tests/integration/|examples/|scripts/)
+        files: ^(clustrix/|tests/)
         
   - repo: https://github.com/pycqa/flake8
     rev: 7.0.0
     hooks:
       - id: flake8
-        args: [
-          "--max-line-length=88",
-          "--extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824,E402",
-          "--exclude=tests/real_world/,tests/comprehensive/,debug_*.py,user_*.py,cleanup_*.py,destroy_*.py"
-        ]
-        files: ^(clustrix/|tests/unit/|tests/integration/|examples/|scripts/)
+        # Use the configuration from .flake8 file instead of inline args
+        files: ^(clustrix/|tests/)
         
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.8.0
     hooks:
       - id: mypy
-        args: ["--ignore-missing-imports", "--exclude", "tests/real_world/|tests/comprehensive/|debug_|user_|cleanup_|destroy_"]
-        files: ^(clustrix/|tests/unit/|tests/integration/|examples/|scripts/).*\.py$
+        # Only check clustrix/ package, not tests (consistent with pyproject.toml)
+        files: ^clustrix/
+        args: ["--ignore-missing-imports"]
         additional_dependencies: [types-PyYAML, types-requests, types-paramiko]

@@ -1,100 +1,54 @@
-# IDE and Editor Files
-.idea/*
+# Python
+*.pyc
+__pycache__/
+*.pyo
+*.pyd
+.Python
+!*.gitkeep
+
+# IDE and Editor files
+.idea/
 .vscode/
 *.swp
 *.swo
 *~
-.DS_Store
-Thumbs.db
 
-# Python artifacts
-*.pyc
-*.pyo
-*.pyd
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-
-# Package artifacts  
-build/
+# Build and distribution
 dist/
+build/
 *.egg-info/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-pip-wheel-metadata/
-share/python-wheels/
+clustrix.egg-info
 
-# Virtual environments
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-py*-test/
-clustrix_test_env/
-
-# Testing and Coverage
-.coverage*
+# Test artifacts
+.pytest_cache/
+test-reports/
+*.xml
+.coverage
+.coverage.*
 coverage.json
 htmlcov/
-.pytest_cache/
-.cache/
-.mypy_cache/
-.dmypy.json
-dmypy.json
-test-results/
-*.cover
-.hypothesis/
+.tox/
 
-# Test artifacts and reports
-*_report_*.json
-*validation*.json
-test_results/
-tests/temp/
-tests/screenshots/*.png
-!tests/screenshots/screenshot_instructions.json
-audit_results.json
-
-# Jupyter Notebooks
-.ipynb_checkpoints/
-jupyter.log
-
-# Personal test notebooks and credentials
-test_ssh_setup.ipynb
-test_enhanced_widget.ipynb
-test_modern_widget_notebook.ipynb
-test_widget_colab.ipynb
-colab_test_modern_widget.ipynb
-
-# Keep documentation and example notebooks
-!docs/notebooks/*.ipynb
-!docs/source/notebooks/*.ipynb
-!examples/*.ipynb
-!clustrix_demo.ipynb
-
-# Personal test files and credentials
-*_config.yml
-!test_config.yml
+# Personal configuration files
 clustrix.yml
-ndoli_config.yml
-tensor01_config.yml
+jupyter.log
+py310-test/
+clustrix_test_env/
+
+# Notebook checkpoints and test files
+.ipynb_checkpoints/
+test_ssh_setup.ipynb
+
+# Documentation artifacts
+docs/build/
 
 # Logs and temporary files
 *.log
-*.tmp
-*.temp
+*_report_*.json
+*validation*.json
 *.bak
-*_old.*
-*.backup
-.tmp/
-tmp/
+*.tmp
+.DS_Store
 
 # Clustrix security - prevent credential leaks
 **/.clustrix/credentials/**
@@ -104,67 +58,11 @@ tmp/
 **/clustrix-*.key
 **/*-credentials.json
 **/*-service-account.json
-.env*
-!.env.example
+.env.local
+.env.validation
 **/validation-secrets.json
 **/.op/
 **/op-session-*
-aws_provision_test.log
 
 # ClaudPoint checkpoint system
 .checkpoints/
-.ccpm_tracking.json
-.ccpm_backup/
-.claude/epics/
-.claude/prds/
-
-# Documentation build artifacts
-docs/build/
-docs/_build/
-
-# Development and debugging scripts that tend to accumulate
-debug_*.py
-!debug_*.py.example
-check_*.py
-!check_*.py.example
-working_functions.py
-user_analysis.py
-user_workflow_test.py
-user_*.py
-!user_*.py.example
-fix_*.py
-!fix_*.py.example
-
-# AWS and infrastructure scripts moved to proper locations  
-cleanup_test_resources.py
-destroy_cluster.py
-
-# Test notebooks that tend to accumulate in root
-test_*.ipynb
-*_test*.ipynb
-experiment_*.ipynb
-demo_*.ipynb
-!docs/notebooks/clustrix_demo.ipynb
-
-# Analysis and exploration scripts
-analysis_*.py
-explore_*.py
-experiment_*.py
-prototype_*.py
-
-# Generated output files
-output_*.json
-results_*.json
-report_*.json
-*.output
-*.result
-
-# Cache and temporary directories that can accumulate
-.cache_*/
-.temp_*/
-temp_*/ 
-.scratch/
-scratch/
-
-# Keep important files but ignore user-specific versions
-!*.gitkeep
