@@ -23,7 +23,7 @@ jobs:
     name: Quick Checks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: quick-checks
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -125,7 +125,7 @@ print('✅ Execution test passed')
     runs-on: ubuntu-latest
     needs: quick-checks
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Build test container
         run: |
@@ -168,7 +168,7 @@ print('✅ Container test passed')
     runs-on: ubuntu-latest
     needs: quick-checks
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Run Trivy security scan
         uses: aquasecurity/trivy-action@master
