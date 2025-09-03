@@ -13,8 +13,8 @@ from clustrix import cluster
 from clustrix.config import ClusterConfig
 import clustrix.config as config_module
 
-# Import local test functions
-sys.path.append(os.path.dirname(__file__))
+# Import test functions from unit tests
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "unit"))
 from test_functions import simple_computation as base_simple_computation  # noqa: E402
 
 # Set up logging
