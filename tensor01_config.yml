@@ -1,0 +1,45 @@
+# Test configuration for tensor01-like cluster setup
+# This is used by unit tests and does not contain real credentials
+cluster_type: "ssh"
+cluster_host: "localhost"  # Use localhost for testing
+username: "testuser"
+remote_work_dir: "/tmp/clustrix_test"
+python_executable: "python3"
+
+# Mock authentication (for testing only - no real credentials)
+use_env_password: false
+# Use mock password to prevent authentication prompts
+password: "test_password_mock"
+
+# SSH defaults for testing
+default_cores: 4
+default_memory: "8GB"
+default_time: "00:15:00"
+
+# Mock cluster environment setup
+module_loads:
+  - "python"
+  - "cuda"
+
+environment_variables:
+  OMP_NUM_THREADS: "1"
+
+# Mock pre-execution commands
+pre_execution_commands:
+  - "export PATH=/usr/bin:$PATH"
+  - "which python3 || echo 'Python3 not found in PATH'"
+
+# Mock cluster packages (for testing)
+cluster_packages:
+  - "torch"
+  - "tensorflow"
+  - "nvidia-ml-py3"
+  - "gpustat"
+
+# Mock post-install commands
+venv_post_install_commands:
+  - "python -c \"import torch; print('PyTorch version:', torch.__version__)\" || echo 'PyTorch test failed'"
+  - "python -c \"import tensorflow as tf; print('TensorFlow version:', tf.__version__)\" || echo 'TensorFlow test failed'"
+
+# Test configuration note
+# This config is used for unit testing and does not contain real cluster credentials

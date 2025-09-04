@@ -1,0 +1,33 @@
+# Test configuration for ndoli-like SLURM cluster setup
+# This is used by unit tests and does not contain real credentials
+cluster_type: "slurm"
+cluster_host: "localhost"  # Use localhost for testing
+username: "testuser"
+remote_work_dir: "/tmp/clustrix_test"
+python_executable: "python3"
+
+# Mock authentication (for testing only)
+use_env_password: false
+password: "test_password_mock"
+
+# SLURM defaults for testing
+default_cores: 2
+default_memory: "4GB"
+default_time: "00:10:00"
+default_partition: "standard"
+
+# Mock cluster environment setup
+module_loads:
+  - "python"
+
+environment_variables:
+  OMP_NUM_THREADS: "1"
+
+# Mock pre-execution commands
+pre_execution_commands:
+  - "export PATH=/usr/bin:$PATH"
+  - "which python3 || echo 'Python3 not found in PATH'"
+  - "module list"
+
+# Test configuration note
+# This config is used for unit testing and does not contain real cluster credentials
