@@ -59,8 +59,22 @@ jobs:
             --timeout=60 \
             -x \
             --tb=short \
-            --maxfail=3
+            --maxfail=3 \
+            --cov=clustrix \
+            --cov-report=xml \
+            --cov-report=term-missing \
+            --cov-branch
         timeout-minutes: 5
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fast-ci-coverage
+          path: |
+            coverage.xml
+            .coverage
+          retention-days: 7
 
   local-integration:
     name: Local Integration Test
