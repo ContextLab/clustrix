@@ -398,19 +398,24 @@ class AWSProvider(CloudProvider):
                 )[0]["ImageId"]
 
             # Create instance
-            response = self.ec2_client.run_instances(
-                ImageId=ami_id,
-                InstanceType=instance_type,
-                MinCount=1,
-                MaxCount=1,
-                KeyName=key_name,
-                TagSpecifications=[
+            run_params = {
+                "ImageId": ami_id,
+                "InstanceType": instance_type,
+                "MinCount": 1,
+                "MaxCount": 1,
+                "TagSpecifications": [
                     {
                         "ResourceType": "instance",
                         "Tags": [{"Key": "Name", "Value": instance_name}],
                     }
                 ],
-            )
+            }
+
+            # Only include KeyName if provided
+            if key_name:
+                run_params["KeyName"] = key_name
+
+            response = self.ec2_client.run_instances(**run_params)
 
             instance = response["Instances"][0]
             instance_id = instance["InstanceId"]
