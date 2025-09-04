@@ -181,19 +181,36 @@ module = "tests.*"
 ignore_errors = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/integration"]
+testpaths = ["tests"]
 python_files = "test_*.py"
-python_classes = "Test*" 
+python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short"
+addopts = "-v --tb=short --strict-markers -n auto --dist loadfile"
+cache_dir = ".pytest_cache"
 markers = [
-    "real_world: marks tests as real world tests (deselect with '-m \"not real_world\"')",
-    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
-    "unit: marks tests as unit tests",
-    "integration: marks tests as integration tests",
+    "unit: fast unit tests with no external dependencies",
+    "integration: tests that use external resources (databases, APIs, etc.)",
+    "expensive: tests that may incur costs (cloud APIs, etc.)",
+    "visual: tests requiring manual visual verification", 
+    "ssh_required: tests requiring SSH access",
+    "aws_required: tests requiring AWS credentials",
+    "azure_required: tests requiring Azure credentials", 
+    "gcp_required: tests requiring GCP credentials",
+    "real_world: tests using real external resources",
+    "slow: tests that take longer than 30 seconds",
+    "performance: marks tests for performance regression",
+    "dartmouth_network: tests requiring Dartmouth network access"
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:paramiko.*",
+    "ignore::UserWarning:cryptography.*",
+    "ignore::pytest.PytestUnknownMarkWarning"
 ]
 
 [tool.coverage.run]
+branch = true
 source = ["clustrix"]
 omit = [
     "*/tests/*",
@@ -204,6 +221,8 @@ omit = [
     "*/.venv/*",
     "setup.py",
 ]
+data_file = ".coverage"
+concurrency = ["thread", "multiprocessing"]
 
 [tool.coverage.report]
 exclude_lines = [
@@ -218,11 +237,25 @@ exclude_lines = [
     "class .*\\bProtocol\\):",
     "@(abc\\.)?abstractmethod",
 ]
+precision = 2
 show_missing = true
 skip_covered = false
+fail_under = 90
+sort = "Miss"
 
 [tool.coverage.html]
 directory = "htmlcov"
+show_contexts = true
+skip_covered = false
+skip_empty = false
+title = "Clustrix Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
+
+[tool.coverage.json]
+output = "coverage.json"
+show_contexts = true
 
 [tool.flake8]
 max-line-length = 88
