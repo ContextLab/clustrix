@@ -493,3 +493,106 @@ class TestConnectionManager:
             result = connection_manager_k8s.ensure_cluster_ready(timeout=60)
 
         assert result is False
+
+    def test_connect_ssh_already_connected(self, connection_manager_ssh):
+        """Test connect method when SSH client already exists."""
+        connection_manager_ssh.ssh_client = Mock()  # Already connected
+
+        # Should not try to setup again
+        with patch(
+            "clustrix.executor_connections.ConnectionManager.setup_ssh_connection"
+        ) as mock_setup:
+            connection_manager_ssh.connect()
+            mock_setup.assert_not_called()
+
+    def test_connect_unknown_cluster_type(self):
+        """Test connect method with unknown cluster type."""
+        config = ClusterConfig(cluster_type="unknown")
+        manager = ConnectionManager(config)
+
+        # Should not raise an error, just do nothing
+        manager.connect()
+        assert manager.ssh_client is None
+        assert manager.k8s_client is None
+
+    def test_cleanup_auto_provisioned_cluster_no_attributes(
+        self, connection_manager_k8s
+    ):
+        """Test cleanup when no auto-provisioned attributes exist."""
+        # Should not raise errors when attributes don't exist
+        connection_manager_k8s.cleanup_auto_provisioned_cluster()
+
+    def test_cleanup_auto_provisioned_cluster_exception(self, connection_manager_k8s):
+        """Test cleanup handles exceptions gracefully."""
+        # Mock provisioner that raises exception during cleanup
+        mock_provisioner = Mock()
+        mock_cluster_info = {"cluster_id": "test-cluster"}
+
+        connection_manager_k8s._k8s_provisioner = mock_provisioner
+        connection_manager_k8s._k8s_cluster_info = mock_cluster_info
+        connection_manager_k8s.config.k8s_cleanup_on_exit = True
+
+        mock_provisioner.destroy_cluster_infrastructure.side_effect = Exception(
+            "Cleanup failed"
+        )
+
+        # Should not raise exception, just log error
+        connection_manager_k8s.cleanup_auto_provisioned_cluster()
+
+    def test_get_cluster_status_no_cluster_name(self, connection_manager_k8s):
+        """Test get_cluster_status when cluster info exists but no cluster_id."""
+        mock_provisioner = Mock()
+        mock_cluster_info = {}  # No cluster_id
+
+        connection_manager_k8s._k8s_provisioner = mock_provisioner
+        connection_manager_k8s._k8s_cluster_info = mock_cluster_info
+
+        status = connection_manager_k8s.get_cluster_status()
+
+        expected = {"status": "UNKNOWN", "ready": False}
+        assert status == expected
+
+    def test_ensure_cluster_ready_no_cluster_name(self, connection_manager_k8s):
+        """Test ensure_cluster_ready when cluster info exists but no cluster_id."""
+        mock_provisioner = Mock()
+        mock_cluster_info = {}  # No cluster_id
+
+        connection_manager_k8s._k8s_provisioner = mock_provisioner
+        connection_manager_k8s._k8s_cluster_info = mock_cluster_info
+
+        result = connection_manager_k8s.ensure_cluster_ready()
+
+        assert result is False
+
+    @patch("clustrix.executor_connections.time")
+    def test_ensure_cluster_ready_exception_handling(
+        self, mock_time_module, connection_manager_k8s
+    ):
+        """Test ensure_cluster_ready handles exceptions during status checks."""
+        mock_provisioner = Mock()
+        mock_cluster_info = {"cluster_id": "test-cluster"}
+
+        connection_manager_k8s._k8s_provisioner = mock_provisioner
+        connection_manager_k8s._k8s_cluster_info = mock_cluster_info
+
+        # Mock time progression
+        mock_time_module.time.side_effect = [
+            0,
+            10,
+            60,
+            120,
+        ]  # Exceed timeout after exception
+        mock_time_module.sleep.return_value = None
+
+        # Mock cluster status check to raise exception first time, then timeout
+        with patch.object(connection_manager_k8s, "get_cluster_status") as mock_status:
+            mock_status.side_effect = [
+                Exception("API Error"),
+                {"ready": False, "status": "CREATING"},
+            ]
+
+            result = connection_manager_k8s.ensure_cluster_ready(timeout=60)
+
+        assert result is False
+        # Should have been called at least once (exception handling tested)
+        assert mock_status.call_count >= 1
