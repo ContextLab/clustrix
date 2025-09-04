@@ -96,6 +96,7 @@ test = [
     "coverage>=6.0",
     "pytest-xdist>=2.0",
     "pytest-mock>=3.0",
+    "pytest-benchmark>=3.4.0",
     "boto3>=1.26.0",
     "azure-identity>=1.12.0",
     "azure-mgmt-compute>=30.0.0",
@@ -185,7 +186,7 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*"
 python_functions = "test_*"
-addopts = "-v --tb=short --strict-markers -n auto --dist loadfile"
+addopts = "-v --tb=short --strict-markers -n 4 --dist loadfile"
 cache_dir = ".pytest_cache"
 markers = [
     "unit: fast unit tests with no external dependencies",
@@ -202,12 +203,14 @@ markers = [
     "dartmouth_network: tests requiring Dartmouth network access"
 ]
 filterwarnings = [
-    "ignore::DeprecationWarning",
+    "ignore::DeprecationWarning", 
     "ignore::PendingDeprecationWarning",
     "ignore::UserWarning:paramiko.*",
     "ignore::UserWarning:cryptography.*",
-    "ignore::pytest.PytestUnknownMarkWarning"
+    "ignore::pytest.PytestUnknownMarkWarning",
+    "ignore::pytest.PytestDeprecationWarning:pytest_asyncio.*"
 ]
+asyncio_mode = "strict"
 
 [tool.coverage.run]
 branch = true
