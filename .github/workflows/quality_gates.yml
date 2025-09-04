@@ -1,0 +1,383 @@
+name: Quality Gates
+
+on:
+  push:
+    branches: [ master, main, develop ]
+  pull_request:
+    branches: [ master, main, develop ]
+  schedule:
+    # Run daily at 6 AM UTC to monitor infrastructure health
+    - cron: '0 6 * * *'
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  infrastructure-health:
+    name: Infrastructure Health Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,test]"
+        pip install tomli
+    
+    - name: Cache infrastructure data
+      uses: actions/cache@v4
+      with:
+        path: .pytest_cache/infrastructure_*
+        key: infrastructure-${{ runner.os }}-${{ hashFiles('scripts/infrastructure_health.py', 'scripts/performance_regression.py') }}
+        restore-keys: |
+          infrastructure-${{ runner.os }}-
+    
+    - name: Run infrastructure health check
+      run: |
+        python scripts/infrastructure_health.py --check --save --json > infrastructure_health.json
+    
+    - name: Upload health report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: infrastructure-health-report
+        path: |
+          infrastructure_health.json
+          .pytest_cache/infrastructure_health.json
+        retention-days: 7
+    
+    - name: Comment infrastructure issues on PR
+      if: failure() && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          try {
+            const report = JSON.parse(fs.readFileSync('infrastructure_health.json', 'utf8'));
+            const issues = report.health_checks.filter(check => check.status !== 'healthy');
+            
+            if (issues.length > 0) {
+              const comment = `## 🏥 Infrastructure Health Issues
+          
+          The following infrastructure issues were detected:
+          
+          ${issues.map(issue => `- **${issue.name}**: ${issue.message} (${issue.severity})`).join('\n')}
+          
+          **Reliability Score**: ${report.reliability_score.toFixed(1)}/100.0
+          **False Positive Rate**: ${(report.false_positive_rate * 100).toFixed(2)}%
+          
+          Please address these issues before merging to ensure infrastructure reliability.`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: comment
+              });
+            }
+          } catch (error) {
+            console.log('Could not post infrastructure health comment:', error.message);
+          }
+
+  test-discovery:
+    name: Test Discovery Validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,test]"
+    
+    - name: Run test discovery
+      run: |
+        python scripts/test_discovery.py --all --output test_discovery.json
+    
+    - name: Upload discovery report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-discovery-report
+        path: |
+          test_discovery.json
+        retention-days: 7
+    
+    - name: Validate test discovery results
+      run: |
+        python -c "
+        import json
+        import sys
+        
+        try:
+            with open('test_discovery.json') as f:
+                report = json.load(f)
+            
+            summary = report.get('summary', {})
+            total_tests = summary.get('total_tests', 0)
+            valid_tests = summary.get('valid_tests', 0)
+            
+            if total_tests == 0:
+                print('❌ No tests discovered')
+                sys.exit(1)
+            
+            discovery_rate = (valid_tests / total_tests) * 100 if total_tests > 0 else 0
+            
+            print(f'📊 Test Discovery Results:')
+            print(f'  - Total tests: {total_tests}')
+            print(f'  - Valid tests: {valid_tests}')
+            print(f'  - Discovery rate: {discovery_rate:.1f}%')
+            
+            if discovery_rate < 95:
+                print(f'❌ Test discovery rate {discovery_rate:.1f}% is below 95% threshold')
+                sys.exit(1)
+            else:
+                print(f'✅ Test discovery rate {discovery_rate:.1f}% meets threshold')
+        
+        except Exception as e:
+            print(f'❌ Failed to validate test discovery: {e}')
+            sys.exit(1)
+        "
+
+  quality-enforcement:
+    name: Quality Gates Enforcement
+    runs-on: ubuntu-latest
+    needs: [infrastructure-health, test-discovery]
+    timeout-minutes: 15
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,test]"
+        pip install tomli
+    
+    - name: Cache performance baselines
+      uses: actions/cache@v4
+      with:
+        path: .pytest_cache/performance_*
+        key: performance-baselines-${{ runner.os }}-${{ hashFiles('scripts/performance_regression.py') }}
+        restore-keys: |
+          performance-baselines-${{ runner.os }}-
+    
+    - name: Run unit tests for quality assessment
+      run: |
+        pytest tests/unit/ --cov=clustrix --cov-report=json --cov-report=xml -m "not real_world" -q
+    
+    - name: Check for PR-specific quality gates
+      if: github.event_name == 'pull_request'
+      run: |
+        python scripts/quality_gates.py --check-pr --json > quality_gates_pr.json
+    
+    - name: Enforce quality gates
+      run: |
+        python scripts/quality_gates.py --enforce --json > quality_gates.json
+    
+    - name: Upload quality reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: quality-gates-report
+        path: |
+          quality_gates.json
+          quality_gates_pr.json
+          coverage.json
+          coverage.xml
+        retention-days: 7
+    
+    - name: Comment quality gates on PR
+      if: always() && github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          try {
+            // Try PR-specific report first, fallback to general report
+            let reportPath = 'quality_gates_pr.json';
+            if (!fs.existsSync(reportPath)) {
+              reportPath = 'quality_gates.json';
+            }
+            
+            const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+            const status = report.overall_status;
+            const metrics = report.metrics || {};
+            
+            let emoji = '✅';
+            let statusText = 'PASSED';
+            
+            if (status === 'failed') {
+              emoji = '❌';
+              statusText = 'FAILED';
+            } else if (status === 'warning') {
+              emoji = '⚠️';
+              statusText = 'WARNING';
+            }
+            
+            const comment = `## ${emoji} Quality Gates ${statusText}
+            
+            **Summary:**
+            - Total Gates: ${metrics.total_gates || 0}
+            - Passed: ${metrics.passed_gates || 0}
+            - Failed: ${metrics.failed_gates || 0}
+            - Pass Rate: ${(metrics.pass_rate || 0).toFixed(1)}%
+            
+            ${metrics.critical_failures > 0 ? `🚨 **Critical Failures**: ${metrics.critical_failures}` : ''}
+            ${metrics.error_failures > 0 ? `❌ **Error Failures**: ${metrics.error_failures}` : ''}
+            ${metrics.warnings > 0 ? `⚠️ **Warnings**: ${metrics.warnings}` : ''}
+            
+            ${report.recommendations && report.recommendations.length > 0 ? `
+            **Recommendations:**
+            ${report.recommendations.map(rec => `- ${rec}`).join('\n')}
+            ` : ''}
+            
+            <details>
+            <summary>View detailed quality report</summary>
+            
+            \`\`\`json
+            ${JSON.stringify(report, null, 2)}
+            \`\`\`
+            </details>`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+            
+          } catch (error) {
+            console.log('Could not post quality gates comment:', error.message);
+          }
+
+  performance-monitoring:
+    name: Performance Monitoring
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[dev,test]"
+    
+    - name: Cache performance baselines
+      uses: actions/cache@v4
+      with:
+        path: .pytest_cache/performance_*
+        key: performance-baselines-${{ runner.os }}-${{ hashFiles('tests/**/*.py') }}
+        restore-keys: |
+          performance-baselines-${{ runner.os }}-
+    
+    - name: Establish performance baseline (if needed)
+      run: |
+        # Try to check for regressions, establish baseline if none exists
+        python scripts/performance_regression.py --check || python scripts/performance_regression.py --baseline
+    
+    - name: Profile test performance
+      run: |
+        python scripts/performance_regression.py --profile --json > performance_profile.json
+    
+    - name: Check for performance regressions
+      run: |
+        python scripts/performance_regression.py --alert --json > performance_alerts.json
+      continue-on-error: true
+    
+    - name: Upload performance reports
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: performance-reports
+        path: |
+          performance_profile.json
+          performance_alerts.json
+          .pytest_cache/performance_*
+        retention-days: 30
+    
+    - name: Comment performance alerts on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          
+          try {
+            if (fs.existsSync('performance_alerts.json')) {
+              const alerts = JSON.parse(fs.readFileSync('performance_alerts.json', 'utf8'));
+              
+              const criticalAlerts = alerts.filter(alert => alert.severity === 'critical');
+              const errorAlerts = alerts.filter(alert => alert.severity === 'error');
+              const warningAlerts = alerts.filter(alert => alert.severity === 'warning');
+              
+              if (criticalAlerts.length > 0 || errorAlerts.length > 0) {
+                let comment = `## 🐌 Performance Regression Detected\n\n`;
+                
+                if (criticalAlerts.length > 0) {
+                  comment += `### 🚨 Critical Regressions (${criticalAlerts.length})\n`;
+                  criticalAlerts.forEach(alert => {
+                    comment += `- **${alert.metric_name}**: ${alert.deviation_percent.toFixed(1)}% slower (${alert.current_value.toFixed(2)} vs ${alert.baseline_mean.toFixed(2)})\n`;
+                  });
+                  comment += `\n`;
+                }
+                
+                if (errorAlerts.length > 0) {
+                  comment += `### ❌ Error Regressions (${errorAlerts.length})\n`;
+                  errorAlerts.forEach(alert => {
+                    comment += `- **${alert.metric_name}**: ${alert.deviation_percent.toFixed(1)}% slower\n`;
+                  });
+                  comment += `\n`;
+                }
+                
+                if (warningAlerts.length > 0) {
+                  comment += `### ⚠️ Warning Regressions (${warningAlerts.length})\n`;
+                  warningAlerts.forEach(alert => {
+                    comment += `- **${alert.metric_name}**: ${alert.deviation_percent.toFixed(1)}% slower\n`;
+                  });
+                }
+                
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              }
+            }
+          } catch (error) {
+            console.log('Could not post performance comment:', error.message);
+          }

@@ -47,6 +47,18 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[dev,test,kubernetes,widget]"
+        # Install tomli for pyproject.toml parsing
+        pip install tomli
+
+    - name: Infrastructure health check
+      run: |
+        python scripts/infrastructure_health.py --check --save
+      continue-on-error: false
+
+    - name: Test discovery validation
+      run: |
+        python scripts/test_discovery.py --validate
+      continue-on-error: false
 
     - name: Lint with black
       run: |
@@ -55,6 +67,13 @@ jobs:
     - name: Lint with flake8
       run: |
         flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824 --exit-zero
+
+    - name: Performance baseline check
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      run: |
+        # Establish baseline on first run or check for regressions
+        python scripts/performance_regression.py --check || python scripts/performance_regression.py --baseline
+      continue-on-error: true
 
     - name: Test with pytest
       run: |
@@ -92,23 +111,11 @@ jobs:
         MINIMUM_GREEN: 90
         MINIMUM_ORANGE: 80
 
-    - name: Coverage quality gate
+    - name: Quality gates enforcement
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
-        python -c "
-        import json
-        with open('coverage.json') as f:
-            data = json.load(f)
-        total_coverage = data['totals']['percent_covered']
-        branch_coverage = data['totals']['percent_covered_display']
-        print(f'Total coverage: {total_coverage:.2f}%')
-        print(f'Branch coverage: {branch_coverage}')
-        if total_coverage < 90:
-            print(f'❌ Coverage {total_coverage:.2f}% is below threshold of 90%')
-            exit(1)
-        else:
-            print(f'✅ Coverage {total_coverage:.2f}% meets threshold of 90%')
-        "
+        python scripts/quality_gates.py --enforce
+      continue-on-error: false
 
     - name: Update coverage badge
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'
@@ -125,6 +132,22 @@ jobs:
         git push
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Performance regression check
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      run: |
+        python scripts/performance_regression.py --check
+      continue-on-error: true
+
+    - name: Upload infrastructure reports
+      if: always() && matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      uses: actions/upload-artifact@v4
+      with:
+        name: infrastructure-reports
+        path: |
+          .pytest_cache/infrastructure_health.json
+          .pytest_cache/performance_*.json
+        retention-days: 30
 
     - name: Test installation
       run: |
