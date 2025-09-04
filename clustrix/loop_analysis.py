@@ -769,15 +769,27 @@ class SafeRangeEvaluator(ast.NodeVisitor):
 
         try:
             if isinstance(node.op, ast.Add):
-                return left + right
+                result = left + right
             elif isinstance(node.op, ast.Sub):
-                return left - right
+                result = left - right
             elif isinstance(node.op, ast.Mult):
-                return left * right
+                result = left * right
             elif isinstance(node.op, ast.FloorDiv):
-                return left // right if right != 0 else None
+                if right != 0:
+                    result = left // right
+                else:
+                    return None
             else:
                 return None
+
+            # Ensure we return an integer only
+            if isinstance(result, int):
+                return result
+            elif isinstance(result, float) and result.is_integer():
+                return int(result)
+            else:
+                return None
+
         except Exception:
             return None
 
