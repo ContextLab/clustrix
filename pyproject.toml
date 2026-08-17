@@ -83,6 +83,11 @@ cloud = [
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
+    # tests/comprehensive/* and several tests/*_real.py modules import numpy and
+    # pandas at module scope to exercise array/dataframe serialization. Without
+    # them those modules raise ModuleNotFoundError during collection (see #130).
+    "numpy>=1.19",
+    "pandas>=1.1",
     "black==25.1.0; python_version >= '3.9'",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
     "flake8>=3.8", 
     "mypy>=0.812",
