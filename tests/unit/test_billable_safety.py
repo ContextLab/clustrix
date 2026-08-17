@@ -60,7 +60,10 @@ def _collect_integration(opt_in: bool, tmp_home):
     env.pop(OPT_IN_VAR, None)
     if opt_in:
         env[OPT_IN_VAR] = "1"
+    # HOME on POSIX, USERPROFILE on Windows -- set both so credential discovery
+    # is redirected regardless of platform.
     env["HOME"] = str(tmp_home)
+    env["USERPROFILE"] = str(tmp_home)
 
     # Hard network block for the subprocess.
     #
@@ -79,7 +82,8 @@ def _collect_integration(opt_in: bool, tmp_home):
         "    raise _Blocked('network disabled by test_billable_safety')\n"
         "socket.socket.connect = _deny\n"
         "socket.socket.connect_ex = _deny\n"
-        "socket.create_connection = _deny\n"
+        "socket.create_connection = _deny\n",
+        encoding="utf-8",
     )
     env["PYTHONPATH"] = os.pathsep.join(
         [str(tmp_home), env.get("PYTHONPATH", "")]
@@ -110,7 +114,8 @@ def _collect_integration(opt_in: bool, tmp_home):
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,
-        text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=300,
     )
 
@@ -121,7 +126,7 @@ def test_integration_tests_are_not_collected_by_default(tmp_path):
     This is the core guarantee: the default suite is free to run.
     """
     result = _collect_integration(opt_in=False, tmp_home=tmp_path)
-    combined = result.stdout + result.stderr
+    combined = (result.stdout or "") + (result.stderr or "")
 
     assert _collected_nothing(combined), (
         "tests/integration was collected without opt-in.\n"
@@ -136,7 +141,7 @@ def test_default_collection_does_not_import_billable_modules(tmp_path):
     and call exit() at module scope, so importing them is itself the harm.
     """
     result = _collect_integration(opt_in=False, tmp_home=tmp_path)
-    combined = result.stdout + result.stderr
+    combined = (result.stdout or "") + (result.stderr or "")
 
     for marker in (
         "Testing EKS permissions",  # printed at import by test_eks_permissions
@@ -157,7 +162,7 @@ def test_integration_tests_are_still_reachable_with_opt_in(tmp_path):
     otherwise we have silently dropped the tests instead of protecting them.
     """
     result = _collect_integration(opt_in=True, tmp_home=tmp_path)
-    combined = result.stdout + result.stderr
+    combined = (result.stdout or "") + (result.stderr or "")
 
     assert not _collected_nothing(combined), (
         "tests/integration collected nothing even with opt-in; the guard is "
@@ -174,16 +179,17 @@ def test_every_integration_file_is_declared_billable(path):
     """Every file under tests/integration must be covered by the opt-in gate.
 
     A new file dropped into this directory must not be able to run for free.
-    The gate is directory-wide, so this asserts the directory conftest exists
-    and names the file's suffix -- i.e. that nothing escapes by being added
-    later.
+    The gate is directory-wide rather than a per-file allowlist, so this
+    asserts the gate itself is in place and blocks at collection time. Every
+    file in the directory is covered by construction, including files added
+    after this test was written.
     """
     conftest = INTEGRATION_DIR / "conftest.py"
     assert conftest.exists(), (
         "tests/integration/conftest.py is missing; without it the directory "
         "collects for free."
     )
-    source = conftest.read_text()
+    source = conftest.read_text(encoding="utf-8")
     assert (
         OPT_IN_VAR in source
     ), f"tests/integration/conftest.py does not reference {OPT_IN_VAR}"
