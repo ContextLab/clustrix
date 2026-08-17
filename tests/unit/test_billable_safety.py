@@ -160,37 +160,31 @@ def test_bare_pytest_is_not_refused_by_the_guard(tmp_path):
     """A bare `pytest` must still run. See #130.
 
     This is the counterpart to the refusal tests, and it guards a trap that
-    already sprang once. The guard originally inspected `config.args`, which
-    reads like "what the user asked for" but is not: when no path is given on
-    the command line, pytest populates `config.args` from `testpaths` in
-    pyproject.toml. `testpaths` used to list `tests/integration`, so the moment
-    the project's config actually took effect, a bare `pytest` matched the
-    guard and aborted the entire suite with the billable-resources refusal.
+    already sprang once. The guard reads `config.args` -- the *effective*
+    target list -- which is what makes it resistant to indirect targeting
+    (see `test_indirect_targeting_of_integration_is_refused`). The cost of
+    reading it is that when no path is given, pytest fills `config.args` from
+    `testpaths`. While `testpaths` named `tests/integration`, that made a bare
+    `pytest` match the guard and abort the whole suite.
 
-    Two independent changes fixed it: the guard now reads
-    `config.invocation_params.args` (the real argv), and `testpaths` no longer
-    names `tests/integration`. Either one alone is sufficient, which is why
-    both are kept -- belt and braces.
+    The fix is therefore in the config, not the guard: `testpaths` is `["tests"]`.
+    That keeps `config.args` readable (so PYTEST_ADDOPTS and `-o testpaths=`
+    cannot sneak past) while leaving a default run collectible.
 
-    Measured on this branch, undoing one is survivable and undoing both is not:
-
-        guard source            testpaths                       bare pytest
-        invocation_params.args  ["tests"]                       ok
-        invocation_params.args  ["tests/unit","tests/integration"] ok
-        config.args             ["tests"]                       ok
-        config.args             ["tests/unit","tests/integration"] REFUSED
-
-    So this test is a guard on the *combination*, not on either edit alone.
-    That is the honest scope: it is the last line of defence rather than the
-    first, and it fails loudly the moment the suite becomes unrunnable.
+    Note this is the opposite resolution from the one first attempted here.
+    Narrowing the guard to `invocation_params.args` also unblocked bare
+    `pytest`, but it opened three real bypasses, because what the operator
+    types is not what pytest collects. Reverting `testpaths` to name
+    `tests/integration` will make this test fail -- correctly, since every
+    default run would then be aimed at billable tests.
     """
     result = _collect_integration(opt_in=False, tmp_home=tmp_path, target=NO_TARGET)
     combined = (result.stdout or "") + (result.stderr or "")
 
     assert "Refusing to run" not in combined, (
-        "A bare `pytest` was refused by the billable-resources guard. The guard "
-        "is matching testpaths-derived arguments instead of what the operator "
-        "typed (see #130).\n" + combined[-2000:]
+        "A bare `pytest` was refused by the billable-resources guard, so the "
+        "default suite cannot run at all. `testpaths` is probably naming "
+        "tests/integration again (see #130).\n" + combined[-2000:]
     )
     assert result.returncode == 0, (
         f"A bare `pytest --collect-only` failed (exit {result.returncode}).\n"
@@ -198,6 +192,123 @@ def test_bare_pytest_is_not_refused_by_the_guard(tmp_path):
     )
     assert (_collected_count(combined) or 0) > 0, (
         "A bare `pytest` collected nothing at all.\n" + combined[-2000:]
+    )
+
+
+def _run_pytest(tmp_home, argv_extra, env_extra=None, cwd=None):
+    """Run pytest in a scrubbed subprocess with arbitrary argv and env.
+
+    Same isolation contract as `_collect_integration` (throwaway HOME, blocked
+    sockets, credentials stripped) but without assuming the shape of the
+    command, so indirect targeting routes can be exercised.
+    """
+    env = dict(os.environ)
+    env.pop(OPT_IN_VAR, None)
+    env["HOME"] = str(tmp_home)
+    env["USERPROFILE"] = str(tmp_home)
+    sitecustomize = tmp_home / "sitecustomize.py"
+    sitecustomize.write_text(
+        "import socket\n"
+        "def _deny(*a, **k):\n"
+        "    raise OSError('network disabled by test_billable_safety')\n"
+        "socket.socket.connect = _deny\n"
+        "socket.socket.connect_ex = _deny\n"
+        "socket.create_connection = _deny\n",
+        encoding="utf-8",
+    )
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(tmp_home), env.get("PYTHONPATH", "")]
+    ).rstrip(os.pathsep)
+    for leaked in (
+        "AWS_ACCESS_KEY_ID",
+        "AWS_SECRET_ACCESS_KEY",
+        "AWS_SESSION_TOKEN",
+        "AWS_PROFILE",
+        "AZURE_CLIENT_SECRET",
+        "GOOGLE_APPLICATION_CREDENTIALS",
+        "LAMBDA_CLOUD_API_KEY",
+    ):
+        env.pop(leaked, None)
+    env.update(env_extra or {})
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-o", "addopts="]
+        + list(argv_extra),
+        cwd=str(cwd or REPO_ROOT),
+        env=env,
+        capture_output=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=300,
+    )
+
+
+# Each entry is an *indirect* way to aim pytest at tests/integration -- one
+# that does not put the path anywhere in the typed argv, or that spells it
+# relative to something other than the repo root. Every one of these was a
+# working bypass at some point during #130 and is now refused. See the module
+# docstring of tests/conftest.py for why config.args is the right thing to read.
+_TARGET = "tests/integration/test_timeout_mechanism.py"
+INDIRECT_TARGETING = [
+    pytest.param(
+        {"argv_extra": ["-o", f"testpaths={_TARGET}"]},
+        id="testpaths-overridden-on-command-line",
+    ),
+    pytest.param(
+        {"env_extra": {"PYTEST_ADDOPTS": _TARGET}},
+        id="path-injected-through-PYTEST_ADDOPTS",
+    ),
+    pytest.param(
+        {"argv_extra": ["--pyargs", "tests.integration.test_timeout_mechanism"]},
+        id="dotted-module-name-via-pyargs",
+    ),
+    pytest.param(
+        {
+            "argv_extra": ["integration/test_timeout_mechanism.py"],
+            "from_tests_dir": True,
+        },
+        id="path-relative-to-a-subdirectory-cwd",
+    ),
+]
+
+
+@pytest.mark.parametrize("case", INDIRECT_TARGETING)
+def test_indirect_targeting_of_integration_is_refused(case, tmp_path):
+    """Aiming pytest at tests/integration without typing the path is refused.
+
+    The guard originally read `config.invocation_params.args` -- literally what
+    the operator typed. That is not the same as what pytest will collect:
+    `testpaths`, `-o testpaths=` and `PYTEST_ADDOPTS` all feed `config.args`
+    without appearing in the typed argv, and a path spelled relative to a
+    subdirectory did not resolve against the repo root. Each of these collected
+    billable modules while the guard believed nothing had been targeted.
+
+    Money is the reason this is parametrized rather than merged into one test:
+    a single assertion that stops at the first failure would hide the others.
+    """
+    case = dict(case)
+    from_tests_dir = case.pop("from_tests_dir", False)
+    result = _run_pytest(
+        tmp_path,
+        argv_extra=case.get("argv_extra", []),
+        env_extra=case.get("env_extra"),
+        cwd=(REPO_ROOT / "tests") if from_tests_dir else None,
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+
+    collected = [
+        line
+        for line in combined.splitlines()
+        if "integration/test_timeout_mechanism" in line.replace("\\", "/")
+        and "::" in line
+    ]
+    assert not collected, (
+        "Billable integration tests were collected through an indirect route "
+        "the guard did not see:\n" + "\n".join(collected[:10])
+    )
+    assert "Refusing to run" in combined, (
+        f"The guard did not refuse this run (exit {result.returncode}). It is "
+        f"reading something narrower than the effective target list.\n"
+        + combined[-2000:]
     )
 
 

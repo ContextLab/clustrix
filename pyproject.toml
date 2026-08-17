@@ -219,6 +219,19 @@ markers = [
     "dartmouth_network: marks tests that require access to the Dartmouth campus network",
     "performance: marks performance benchmark tests",
 ]
+# Carried over from the deleted pytest.ini, where it never took effect. These
+# suppress third-party noise only; nothing here hides a warning raised by
+# clustrix itself.
+# NB: markers visual/ssh_required/aws_required/azure_required/gcp_required are
+# deliberately NOT listed. tests/real_world/conftest.py registers them with
+# addinivalue_line at the point they are used, so --strict-markers is satisfied
+# there and they stay scoped to the suite that actually defines them.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:paramiko.*",
+    "ignore::UserWarning:cryptography.*",
+]
 
 [tool.coverage.run]
 source = ["clustrix"]

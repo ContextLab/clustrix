@@ -23,9 +23,18 @@ import pytest
 
 EXPECTED_CONFIG_NAME = "pyproject.toml"
 
-# Config files pytest will prefer over pyproject.toml if they exist at the
-# rootdir, in pytest's own precedence order. Any of these silently wins.
-SHADOWING_CONFIG_NAMES = ("pytest.ini", ".pytest.ini", "tox.ini", "setup.cfg")
+# Config files pytest prefers over pyproject.toml.
+#
+# pytest's search order (_pytest/config/findpaths.py) is:
+#     pytest.ini, .pytest.ini, pyproject.toml, tox.ini, setup.cfg
+#
+# Only the first two outrank pyproject.toml, so only those two can shadow it.
+# tox.ini and setup.cfg are deliberately NOT listed: they are checked *after*
+# pyproject.toml and cannot take precedence over it. Listing them would also
+# forbid a perfectly ordinary pytest-free setup.cfg holding flake8 or metadata
+# config -- verified: with such a file present pytest still reports
+# `configfile: pyproject.toml`.
+SHADOWING_CONFIG_NAMES = ("pytest.ini", ".pytest.ini")
 
 # Markers this project defines and relies on. Registration is what makes
 # ``-m <marker>`` a usable selector and what lets --strict-markers catch typos.
@@ -57,13 +66,14 @@ def test_no_shadowing_config_file_exists(pytestconfig):
 
     ``test_pytest_reads_the_intended_config`` only catches a shadow that is
     live during *this* run. A config file that exists but happens not to win
-    (for instance because the run was launched from a subdirectory with a
-    different rootdir) would slip past it, so check the tree directly.
+    (for instance because the run was launched with ``--rootdir`` pointed
+    elsewhere) would slip past it, so check the repository tree directly rather
+    than trusting the resolved rootdir.
     """
-    rootdir = pathlib.Path(str(pytestconfig.rootpath))
-    strays = [name for name in SHADOWING_CONFIG_NAMES if (rootdir / name).exists()]
+    repo_root = pathlib.Path(__file__).resolve().parents[2]
+    strays = [name for name in SHADOWING_CONFIG_NAMES if (repo_root / name).exists()]
     assert not strays, (
-        f"found {strays} at {rootdir}; pytest prefers these over "
+        f"found {strays} at {repo_root}; pytest prefers these over "
         f"{EXPECTED_CONFIG_NAME} and stops searching once one is selected, so "
         f"{EXPECTED_CONFIG_NAME} would be silently ignored (see #130)"
     )

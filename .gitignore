@@ -26,7 +26,6 @@ test-reports/
 .coverage
 .coverage.*
 coverage.json
-coverage_detailed_report.txt
 htmlcov/
 .tox/
 # Written by the benchmark tests in tests/real_world/ at run time.
