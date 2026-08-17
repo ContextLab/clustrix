@@ -199,7 +199,13 @@ testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*" 
 python_functions = "test_*"
-addopts = "-v --tb=short"
+# --strict-markers makes an undeclared marker a collection error rather than a
+# warning. Keep it: without it a typo'd marker silently does nothing and the
+# test it decorates stops being selectable with no signal at all.
+# Do NOT add "-n" here without first moving pytest-xdist from the [test] extra
+# into [dev] -- otherwise `pip install -e ".[dev]"` yields an env where pytest
+# cannot start (see #110).
+addopts = "-v --tb=short --strict-markers"
 # Every marker used anywhere under tests/ must appear here: --strict-markers
 # turns an undeclared marker into a hard collection error. Verify with
 #     grep -rhoE "@pytest\.mark\.[a-zA-Z_]+" tests/ | sort -u
