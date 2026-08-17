@@ -39,11 +39,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          # pytest-timeout is required: the test step below passes
-          # --timeout=60, and without the plugin pytest exits 4 with
-          # "unrecognized arguments". This job had been failing on every run
-          # for that reason (see #130).
-          pip install black flake8 mypy pytest pytest-timeout
+          pip install black flake8 mypy pytest
           pip install -e .
       
       - name: Format check with Black
