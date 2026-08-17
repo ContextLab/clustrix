@@ -66,3 +66,6 @@ docs/build/
 
 # ClaudPoint checkpoint system
 .checkpoints/
+
+# CCPM settings backups - contain local credentials, must never be committed (see #111)
+.ccpm_backup/
