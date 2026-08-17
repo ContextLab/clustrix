@@ -90,8 +90,10 @@ def test_strict_markers_is_active(pytestconfig):
     """--strict-markers must be live, or marker typos silently do nothing.
 
     This is the setting that makes the two tests above self-enforcing: without
-    it, a mistyped ``@pytest.mark.reel_world`` is accepted as a no-op and the
-    test it decorates quietly stops being selectable.
+    it, a marker name mistyped as "reel_world" instead of "real_world" is
+    accepted as a no-op and the test it decorates quietly stops being
+    selectable. (Spelled without the decorator prefix on purpose, so the
+    grep-based marker audit in pyproject.toml does not trip over this line.)
 
     --strict-markers reaches us through ``addopts``, so a run that deliberately
     clears addopts (``pytest -o addopts=``, used when comparing collection

@@ -200,11 +200,18 @@ python_files = "test_*.py"
 python_classes = "Test*" 
 python_functions = "test_*"
 addopts = "-v --tb=short"
+# Every marker used anywhere under tests/ must appear here: --strict-markers
+# turns an undeclared marker into a hard collection error. Verify with
+#     grep -rhoE "@pytest\.mark\.[a-zA-Z_]+" tests/ | sort -u
+# and note that tests/unit/test_pytest_config.py asserts these stay registered.
 markers = [
     "real_world: marks tests as real world tests (deselect with '-m \"not real_world\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
+    "expensive: marks tests that provision billable resources (applied automatically to tests/integration; see #109)",
+    "dartmouth_network: marks tests that require access to the Dartmouth campus network",
+    "performance: marks performance benchmark tests",
 ]
 
 [tool.coverage.run]
