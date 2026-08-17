@@ -34,10 +34,20 @@ def pytest_configure(config):
     keep working and silently skip the directory, while someone who asked for
     these tests by name gets told why they got nothing, rather than an
     inscrutable empty run.
+
+    Reads `config.invocation_params.args` -- what the operator actually typed --
+    and NOT `config.args`. The two differ in exactly the case that matters: when
+    no path is given on the command line, pytest populates `config.args` from
+    `testpaths` in pyproject.toml, which lists `tests`. Keying off `config.args`
+    therefore made a bare `pytest` abort with this very error the moment the
+    project's config became effective (see #130). `invocation_params.args`
+    contains flags as well as paths, so entries starting with "-" are skipped.
     """
     if _billable_tests_enabled():
         return
-    for arg in config.args:
+    for arg in config.invocation_params.args:
+        if str(arg).startswith("-"):
+            continue
         # strip pytest's "::TestClass::test_name" node-id suffix
         candidate = pathlib.Path(str(arg).split("::")[0])
         if not candidate.is_absolute():

@@ -51,11 +51,21 @@ def _collected_count(output: str):
     return max(int(m) for m in matches)
 
 
+# Sentinel for "run pytest with no path argument at all", which is a distinct
+# case from "run it against the default target": with no path on the command
+# line pytest fills its target list from `testpaths` in pyproject.toml. That
+# path is what regressed in #130 and needs its own coverage.
+NO_TARGET = object()
+
+
 def _collect_integration(opt_in: bool, tmp_home, target=None):
     """Run `pytest --collect-only` against tests/integration in a subprocess.
 
+    Pass `target=NO_TARGET` to omit the path argument entirely.
+
     `-o addopts=` strips the project's default addopts so this does not depend
-    on xdist being installed.
+    on xdist being installed. It deliberately does not touch `testpaths`, so a
+    NO_TARGET run still exercises testpaths resolution.
 
     The subprocess gets a throwaway HOME and a scrubbed environment. This is
     deliberate: a test whose job is to prove the suite cannot spend money must
@@ -106,19 +116,12 @@ def _collect_integration(opt_in: bool, tmp_home, target=None):
         "LAMBDA_CLOUD_API_KEY",
     ):
         env.pop(leaked, None)
+    argv = [sys.executable, "-m", "pytest"]
+    if target is not NO_TARGET:
+        argv.append(str(target if target is not None else INTEGRATION_DIR))
+    argv += ["--collect-only", "-q", "-o", "addopts=", "-p", "no:cacheprovider"]
     return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(target if target is not None else INTEGRATION_DIR),
-            "--collect-only",
-            "-q",
-            "-o",
-            "addopts=",
-            "-p",
-            "no:cacheprovider",
-        ],
+        argv,
         cwd=str(REPO_ROOT),
         env=env,
         capture_output=True,
@@ -150,6 +153,39 @@ def test_default_suite_does_not_collect_integration_tests(tmp_path):
         not collected_integration
     ), "The default suite collected integration tests:\n" + "\n".join(
         collected_integration[:10]
+    )
+
+
+def test_bare_pytest_is_not_refused_by_the_guard(tmp_path):
+    """A bare `pytest` must still run. See #130.
+
+    This is the counterpart to the refusal tests, and it guards a trap that
+    already sprang once. The guard originally inspected `config.args`, which
+    reads like "what the user asked for" but is not: when no path is given on
+    the command line, pytest populates `config.args` from `testpaths` in
+    pyproject.toml. `testpaths` used to list `tests/integration`, so the moment
+    the project's config actually took effect, a bare `pytest` matched the
+    guard and aborted the entire suite with the billable-resources refusal.
+
+    The fix was to read `config.invocation_params.args` -- the real argv -- so
+    the guard fires on explicit targeting only. Reverting that change, or
+    putting `tests/integration` back into `testpaths`, breaks bare `pytest`
+    for everyone, and nothing else in the suite would notice.
+    """
+    result = _collect_integration(opt_in=False, tmp_home=tmp_path, target=NO_TARGET)
+    combined = (result.stdout or "") + (result.stderr or "")
+
+    assert "Refusing to run" not in combined, (
+        "A bare `pytest` was refused by the billable-resources guard. The guard "
+        "is matching testpaths-derived arguments instead of what the operator "
+        "typed (see #130).\n" + combined[-2000:]
+    )
+    assert result.returncode == 0, (
+        f"A bare `pytest --collect-only` failed (exit {result.returncode}).\n"
+        + combined[-2000:]
+    )
+    assert (_collected_count(combined) or 0) > 0, (
+        "A bare `pytest` collected nothing at all.\n" + combined[-2000:]
     )
 
 
