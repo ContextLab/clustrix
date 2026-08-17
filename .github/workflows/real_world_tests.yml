@@ -129,7 +129,11 @@ jobs:
       
       - name: Run unit tests
         run: |
-          pytest tests/unit/ tests/integration/ -v \
+          # tests/integration/ is deliberately excluded: it provisions real,
+          # billable cloud resources and is gated behind CLUSTRIX_ALLOW_BILLABLE
+          # (see #109). This job is named "No Infrastructure" -- targeting that
+          # directory here contradicted its own purpose.
+          pytest tests/unit/ -v \
             -m "not real_world" \
             --cov=clustrix \
             --cov-report=xml \

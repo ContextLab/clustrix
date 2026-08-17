@@ -21,6 +21,7 @@ machinery rather than asserting against a stubbed pytest.
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 
@@ -30,20 +31,27 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 INTEGRATION_DIR = REPO_ROOT / "tests" / "integration"
 OPT_IN_VAR = "CLUSTRIX_ALLOW_BILLABLE"
 
-# Phrases pytest uses when a run selected nothing. Kept in one place so the
-# "gate" and "not a deletion" tests cannot drift apart.
-_EMPTY_COLLECTION_PHRASES = (
-    "no tests collected",
-    "no tests ran",
-    "collected 0 items",
-)
+_COUNT_RE = re.compile(r"(\d+)(?:/\d+)? tests? collected")
 
 
-def _collected_nothing(output: str) -> bool:
-    return any(phrase in output for phrase in _EMPTY_COLLECTION_PHRASES)
+def _collected_count(output: str):
+    """Parse the number of tests pytest actually collected.
+
+    Deliberately NOT prose-matching on "no tests collected": that phrase also
+    appears when collection *errors out*, so an import-error storm could
+    masquerade as a working gate. Returns None when no count line is present,
+    which callers must treat as "could not verify" rather than as zero.
+    """
+    matches = _COUNT_RE.findall(output)
+    if not matches:
+        # pytest prints "no tests ran"/"no tests collected" with no number.
+        if "no tests collected" in output or "no tests ran" in output:
+            return 0
+        return None
+    return max(int(m) for m in matches)
 
 
-def _collect_integration(opt_in: bool, tmp_home):
+def _collect_integration(opt_in: bool, tmp_home, target=None):
     """Run `pytest --collect-only` against tests/integration in a subprocess.
 
     `-o addopts=` strips the project's default addopts so this does not depend
@@ -103,7 +111,7 @@ def _collect_integration(opt_in: bool, tmp_home):
             sys.executable,
             "-m",
             "pytest",
-            str(INTEGRATION_DIR),
+            str(target if target is not None else INTEGRATION_DIR),
             "--collect-only",
             "-q",
             "-o",
@@ -120,17 +128,48 @@ def _collect_integration(opt_in: bool, tmp_home):
     )
 
 
-def test_integration_tests_are_not_collected_by_default(tmp_path):
-    """Without explicit opt-in, tests/integration must collect zero tests.
+def test_default_suite_does_not_collect_integration_tests(tmp_path):
+    """The documented command must not pull in tests/integration at all.
 
-    This is the core guarantee: the default suite is free to run.
+    Targets `tests/` -- the command a developer actually runs -- rather than
+    the integration directory itself, so this asserts the real-world property
+    instead of a proxy for it.
+    """
+    result = _collect_integration(
+        opt_in=False, tmp_home=tmp_path, target=REPO_ROOT / "tests"
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+
+    collected_integration = [
+        line
+        for line in combined.splitlines()
+        if line.strip().startswith("tests/integration/")
+        or line.strip().startswith("tests\\integration\\")
+    ]
+    assert (
+        not collected_integration
+    ), "The default suite collected integration tests:\n" + "\n".join(
+        collected_integration[:10]
+    )
+
+
+def test_explicitly_targeting_integration_is_refused(tmp_path):
+    """Naming the directory or a file in it must fail loudly, not silently.
+
+    `collect_ignore_glob` only filters directory traversal, so an explicitly
+    named path bypassed it entirely and pytest imported the module -- which is
+    the actual hazard, since several of them call boto3 at import. A
+    pre-collection guard now refuses the run, and it must say why.
     """
     result = _collect_integration(opt_in=False, tmp_home=tmp_path)
     combined = (result.stdout or "") + (result.stderr or "")
 
-    assert _collected_nothing(combined), (
-        "tests/integration was collected without opt-in.\n"
-        f"exit={result.returncode}\n{combined[-3000:]}"
+    assert (
+        result.returncode != 0
+    ), f"Explicitly targeting tests/integration succeeded (exit 0).\n{combined[-2000:]}"
+    assert OPT_IN_VAR in combined, (
+        f"The refusal does not tell the user how to opt in ({OPT_IN_VAR} not "
+        f"mentioned).\n{combined[-2000:]}"
     )
 
 
@@ -164,25 +203,50 @@ def test_integration_tests_are_still_reachable_with_opt_in(tmp_path):
     result = _collect_integration(opt_in=True, tmp_home=tmp_path)
     combined = (result.stdout or "") + (result.stderr or "")
 
-    assert not _collected_nothing(combined), (
+    count = _collected_count(combined)
+    assert count is not None and count > 0, (
         "tests/integration collected nothing even with opt-in; the guard is "
         f"deleting tests rather than gating them.\n{combined[-3000:]}"
     )
+    # Deliberately no assertion on returncode: collection errors from
+    # optional missing dependencies legitimately produce exit 2, and that is a
+    # property of the environment, not of the gate under test.
 
 
 @pytest.mark.parametrize(
     "path",
-    sorted(INTEGRATION_DIR.glob("*.py")),
+    sorted(INTEGRATION_DIR.rglob("test_*.py")),
     ids=lambda p: p.name,
 )
-def test_every_integration_file_is_declared_billable(path):
-    """Every file under tests/integration must be covered by the opt-in gate.
+def test_no_integration_file_is_collectable_by_default(path, tmp_path):
+    """Every individual file under tests/integration must be un-collectable.
 
-    A new file dropped into this directory must not be able to run for free.
-    The gate is directory-wide rather than a per-file allowlist, so this
-    asserts the gate itself is in place and blocks at collection time. Every
-    file in the directory is covered by construction, including files added
-    after this test was written.
+    This is per-file on purpose. An earlier version of this test took a `path`
+    parameter and then ignored it, grepping conftest.py 48 identical times --
+    it proved nothing about any specific file. This version actually targets
+    each file, which is the invocation form that defeated the original
+    directory-level gate.
+
+    Uses rglob so a file added in a subdirectory cannot escape.
+    """
+    result = _collect_integration(opt_in=False, tmp_home=tmp_path, target=path)
+    combined = (result.stdout or "") + (result.stderr or "")
+
+    count = _collected_count(combined)
+    assert count in (
+        0,
+        None,
+    ), f"{path.name} collected {count} tests without opt-in.\n{combined[-2000:]}"
+    assert (
+        result.returncode != 0 or count == 0
+    ), f"{path.name} ran successfully without opt-in.\n{combined[-2000:]}"
+
+
+def test_the_gate_itself_is_present_and_blocks_at_collection_time():
+    """The gate must stop collection, not merely skip at runtime.
+
+    Several modules under tests/integration reach real cloud APIs at import,
+    so a runtime skip would be too late.
     """
     conftest = INTEGRATION_DIR / "conftest.py"
     assert conftest.exists(), (
@@ -195,6 +259,41 @@ def test_every_integration_file_is_declared_billable(path):
     ), f"tests/integration/conftest.py does not reference {OPT_IN_VAR}"
     assert "collect_ignore" in source, (
         "tests/integration/conftest.py must prevent collection (collect_ignore), "
-        "not merely skip at runtime -- several modules make live AWS calls at "
-        "import time."
+        "not merely skip at runtime."
     )
+
+
+# Files in tests/integration that execute real work at module scope. Naming one
+# of these on the command line used to bypass the directory gate entirely,
+# because pytest's collect_ignore_glob does not apply to paths given explicitly
+# as arguments -- it only filters directory traversal.
+_IMPORT_UNSAFE_FILES = (
+    "test_aws_eks_debug.py",
+    "test_eks_permissions.py",
+)
+
+
+@pytest.mark.parametrize("filename", _IMPORT_UNSAFE_FILES)
+def test_naming_a_billable_file_directly_does_not_execute_it(tmp_path, filename):
+    """`pytest tests/integration/<file>.py` must not run the module.
+
+    Regression test for a hole found while red-teaming the original fix:
+    collect_ignore_glob filters directory traversal but NOT explicitly-named
+    command-line paths, so this invocation imported the module and executed its
+    module-scope boto3 calls.
+    """
+    target = INTEGRATION_DIR / filename
+    result = _collect_integration(opt_in=False, tmp_home=tmp_path, target=target)
+    combined = (result.stdout or "") + (result.stderr or "")
+
+    for evidence in (
+        "Getting AWS credentials",
+        "Testing EKS permissions",
+        "Got credentials for account",
+        "Cluster spec created",
+        "botocore",
+    ):
+        assert evidence not in combined, (
+            f"{filename} executed at import when named directly "
+            f"(saw {evidence!r}).\n{combined[-2000:]}"
+        )

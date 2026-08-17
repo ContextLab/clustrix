@@ -34,6 +34,7 @@ Be aware that doing so may create real, chargeable cloud resources.
 """
 
 import os
+import pathlib
 
 import pytest
 
@@ -53,13 +54,26 @@ if not billable_tests_enabled():
     collect_ignore_glob = ["*.py"]
 
 
-def pytest_collection_modifyitems(config, items):
-    """Mark everything here as integration + expensive when it does run.
+_THIS_DIR = pathlib.Path(__file__).parent.resolve()
 
-    Only reachable under opt-in (otherwise nothing is collected). This keeps
-    ``-m`` selection meaningful for anyone who has opted in, e.g.
+
+def pytest_collection_modifyitems(config, items):
+    """Mark tests *from this directory* as integration + expensive.
+
+    Only reachable under opt-in (otherwise nothing here is collected). This
+    keeps ``-m`` selection meaningful for anyone who has opted in, e.g.
     ``-m "not expensive"`` to run the cheaper integration tests.
+
+    The path filter is essential and easy to get wrong: pytest passes the
+    hook the **entire session's** item list, not just items collected from
+    this directory. Marking unconditionally would tag every test in the whole
+    suite as `expensive`, so `-m "not expensive"` would select nothing at all.
     """
     for item in items:
-        item.add_marker(pytest.mark.integration)
-        item.add_marker(pytest.mark.expensive)
+        try:
+            item_path = pathlib.Path(str(item.fspath)).resolve()
+        except Exception:  # pragma: no cover - defensive, path may be virtual
+            continue
+        if item_path == _THIS_DIR or _THIS_DIR in item_path.parents:
+            item.add_marker(pytest.mark.integration)
+            item.add_marker(pytest.mark.expensive)

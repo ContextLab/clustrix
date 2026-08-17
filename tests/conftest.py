@@ -1,8 +1,56 @@
+import os
+import pathlib
 import pytest
 import tempfile
 import shutil
 from unittest.mock import Mock, patch
 from clustrix.config import ClusterConfig, configure
+
+_INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
+_OPT_IN_VAR = "CLUSTRIX_ALLOW_BILLABLE"
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _billable_tests_enabled():
+    return os.environ.get(_OPT_IN_VAR, "").strip().lower() in _TRUTHY
+
+
+def pytest_configure(config):
+    """Refuse to start when a run explicitly targets tests/integration.
+
+    See issue #109. `tests/integration/conftest.py` sets `collect_ignore_glob`,
+    which keeps the directory out of ordinary runs -- but that only filters
+    *directory traversal*. A path named explicitly as a pytest argument is not
+    filtered by it, so
+
+        pytest tests/integration/test_timeout_mechanism.py
+
+    collected and imported the module anyway. Those modules reach real cloud
+    APIs, so the check has to happen before collection begins.
+
+    This runs at configure time, which is before any test module is imported.
+
+    Deliberately scoped to *explicit* targeting: a plain `pytest tests/` must
+    keep working and silently skip the directory, while someone who asked for
+    these tests by name gets told why they got nothing, rather than an
+    inscrutable empty run.
+    """
+    if _billable_tests_enabled():
+        return
+    for arg in config.args:
+        # strip pytest's "::TestClass::test_name" node-id suffix
+        candidate = pathlib.Path(str(arg).split("::")[0])
+        if not candidate.is_absolute():
+            candidate = (pathlib.Path(str(config.rootpath)) / candidate).resolve()
+        else:
+            candidate = candidate.resolve()
+        if candidate == _INTEGRATION_DIR or _INTEGRATION_DIR in candidate.parents:
+            raise pytest.UsageError(
+                f"Refusing to run {arg!r}: tests/integration provisions real, "
+                f"billable cloud resources (AWS EKS/EC2). Set {_OPT_IN_VAR}=1 to "
+                f"run them deliberately, e.g.\n"
+                f"    {_OPT_IN_VAR}=1 pytest {arg}"
+            )
 
 
 @pytest.fixture
