@@ -83,6 +83,11 @@ cloud = [
 dev = [
     "pytest>=6.0",
     "pytest-cov>=2.0",
+    # tests/comprehensive/* and several tests/*_real.py modules import numpy and
+    # pandas at module scope to exercise array/dataframe serialization. Without
+    # them those modules raise ModuleNotFoundError during collection (see #130).
+    "numpy>=1.19",
+    "pandas>=1.1",
     "black==25.1.0; python_version >= '3.9'",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
     "flake8>=3.8", 
     "mypy>=0.812",
@@ -181,16 +186,51 @@ module = "tests.*"
 ignore_errors = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/integration"]
+# This is the project's ONLY pytest config. Do not add pytest.ini, tox.ini or
+# setup.cfg: pytest selects the first config file it finds by precedence and
+# then stops searching, so any of those would silently shadow this block --
+# which is exactly what happened for months under #130. Enforced by
+# tests/unit/test_pytest_config.py.
+#
+# testpaths must NOT list tests/integration. Those tests provision billable
+# cloud resources and are gated by tests/integration/conftest.py (#109); naming
+# the directory here would make a bare `pytest` resolve to it.
+testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*" 
 python_functions = "test_*"
-addopts = "-v --tb=short"
+# --strict-markers makes an undeclared marker a collection error rather than a
+# warning. Keep it: without it a typo'd marker silently does nothing and the
+# test it decorates stops being selectable with no signal at all.
+# Do NOT add "-n" here without first moving pytest-xdist from the [test] extra
+# into [dev] -- otherwise `pip install -e ".[dev]"` yields an env where pytest
+# cannot start (see #110).
+addopts = "-v --tb=short --strict-markers"
+# Every marker used anywhere under tests/ must appear here: --strict-markers
+# turns an undeclared marker into a hard collection error. Verify with
+#     grep -rhoE "@pytest\.mark\.[a-zA-Z_]+" tests/ | sort -u
+# and note that tests/unit/test_pytest_config.py asserts these stay registered.
 markers = [
     "real_world: marks tests as real world tests (deselect with '-m \"not real_world\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
+    "expensive: marks tests that provision billable resources (applied automatically to tests/integration; see #109)",
+    "dartmouth_network: marks tests that require access to the Dartmouth campus network",
+    "performance: marks performance benchmark tests",
+]
+# Carried over from the deleted pytest.ini, where it never took effect. These
+# suppress third-party noise only; nothing here hides a warning raised by
+# clustrix itself.
+# NB: markers visual/ssh_required/aws_required/azure_required/gcp_required are
+# deliberately NOT listed. tests/real_world/conftest.py registers them with
+# addinivalue_line at the point they are used, so --strict-markers is satisfied
+# there and they stay scoped to the suite that actually defines them.
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::UserWarning:paramiko.*",
+    "ignore::UserWarning:cryptography.*",
 ]
 
 [tool.coverage.run]

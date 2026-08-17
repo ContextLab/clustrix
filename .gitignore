@@ -28,6 +28,8 @@ test-reports/
 coverage.json
 htmlcov/
 .tox/
+# Written by the benchmark tests in tests/real_world/ at run time.
+performance_test_results/
 
 # Personal configuration files
 clustrix.yml

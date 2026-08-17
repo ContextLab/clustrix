@@ -566,9 +566,12 @@ for key, value in env_info.items():
             ), "Core Python modules should be available"
 
             logger.info("✅ Container runtime environment validation successful")
-            logger.info(
-                f"Environment details: {len(output.split('\\n'))} properties checked"
-            )
+            # NB: the split() must stay outside the f-string -- an f-string
+            # expression may not contain a backslash before Python 3.12, and
+            # this project supports >=3.8, so inlining it is a SyntaxError that
+            # breaks collection of the whole module.
+            property_count = len(output.split("\n"))
+            logger.info(f"Environment details: {property_count} properties checked")
 
         except subprocess.TimeoutExpired:
             assert False, "Environment validation timed out"

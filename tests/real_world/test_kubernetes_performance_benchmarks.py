@@ -1035,7 +1035,6 @@ class TestKubernetesPerformanceBenchmarks:
 
         logger.info(f"📁 Benchmark results saved: {json_filename}")
 
-    @pytest.mark.cleanup
     def test_benchmark_cleanup_verification(self, performance_results_dir):
         """Verify all benchmark resources have been cleaned up."""
         logger.info("🧪 Verifying benchmark resource cleanup")
