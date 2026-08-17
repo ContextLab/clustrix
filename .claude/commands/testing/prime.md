@@ -92,7 +92,7 @@ environment:
 framework: pytest
 test_command: pytest
 test_directory: tests
-config_file: pytest.ini
+config_file: pyproject.toml   # [tool.pytest.ini_options]; see #130
 options:
   - -v
   - --tb=short

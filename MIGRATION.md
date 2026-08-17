@@ -76,16 +76,33 @@ from clustrix.filesystem import cluster_ls, cluster_find
 **Pytest configuration updated** to properly discover tests:
 
 ```toml
-# pyproject.toml
+# pyproject.toml -- the project's only pytest config file
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/integration"]
+testpaths = ["tests"]
+addopts = "-v --tb=short --strict-markers"
 markers = [
     "real_world: marks tests as real world tests",
     "slow: marks tests as slow",
-    "unit: marks tests as unit tests", 
+    "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
+    "expensive: marks tests that provision billable resources",
+    "dartmouth_network: marks tests needing the Dartmouth campus network",
+    "performance: marks performance benchmark tests",
 ]
 ```
+
+> **Note (see #130).** This block only became effective later. A `pytest.ini`
+> in the repo root used the section header `[tool:pytest]`, which is valid only
+> in `setup.cfg`; pytest still selected that file and stopped searching, so
+> nothing here was applied. `pytest.ini` has since been deleted and
+> `pyproject.toml` is now the single source. Do not reintroduce `pytest.ini`,
+> `tox.ini` or `setup.cfg` -- pytest prefers all three over `pyproject.toml`
+> and would silently shadow it again.
+>
+> `testpaths` is `["tests"]`, not `["tests/unit", "tests/integration"]`: with no
+> path on the command line pytest resolves its targets from `testpaths`, and
+> naming the integration directory there points a bare `pytest` at tests that
+> provision billable cloud resources.
 
 ### CI/CD Updates
 **GitHub Actions workflows updated** for new structure:
