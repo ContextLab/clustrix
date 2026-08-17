@@ -38,11 +38,16 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e ".[dev,test,kubernetes,widget]"
 
+    # Linting is version-independent, so run it once on the primary target
+    # rather than on all 13 matrix combinations. This also keeps the black pin
+    # off Python 3.8, which black 25.1.0 does not support (see #110).
     - name: Lint with black
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
         black --check clustrix/ tests/
 
     - name: Lint with flake8
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
         flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824 --exit-zero
 
