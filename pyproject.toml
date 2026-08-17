@@ -186,7 +186,16 @@ module = "tests.*"
 ignore_errors = true
 
 [tool.pytest.ini_options]
-testpaths = ["tests/unit", "tests/integration"]
+# This is the project's ONLY pytest config. Do not add pytest.ini, tox.ini or
+# setup.cfg: pytest selects the first config file it finds by precedence and
+# then stops searching, so any of those would silently shadow this block --
+# which is exactly what happened for months under #130. Enforced by
+# tests/unit/test_pytest_config.py.
+#
+# testpaths must NOT list tests/integration. Those tests provision billable
+# cloud resources and are gated by tests/integration/conftest.py (#109); naming
+# the directory here would make a bare `pytest` resolve to it.
+testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*" 
 python_functions = "test_*"

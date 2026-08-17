@@ -167,10 +167,22 @@ def test_bare_pytest_is_not_refused_by_the_guard(tmp_path):
     the project's config actually took effect, a bare `pytest` matched the
     guard and aborted the entire suite with the billable-resources refusal.
 
-    The fix was to read `config.invocation_params.args` -- the real argv -- so
-    the guard fires on explicit targeting only. Reverting that change, or
-    putting `tests/integration` back into `testpaths`, breaks bare `pytest`
-    for everyone, and nothing else in the suite would notice.
+    Two independent changes fixed it: the guard now reads
+    `config.invocation_params.args` (the real argv), and `testpaths` no longer
+    names `tests/integration`. Either one alone is sufficient, which is why
+    both are kept -- belt and braces.
+
+    Measured on this branch, undoing one is survivable and undoing both is not:
+
+        guard source            testpaths                       bare pytest
+        invocation_params.args  ["tests"]                       ok
+        invocation_params.args  ["tests/unit","tests/integration"] ok
+        config.args             ["tests"]                       ok
+        config.args             ["tests/unit","tests/integration"] REFUSED
+
+    So this test is a guard on the *combination*, not on either edit alone.
+    That is the honest scope: it is the last line of defence rather than the
+    first, and it fails loudly the moment the suite becomes unrunnable.
     """
     result = _collect_integration(opt_in=False, tmp_home=tmp_path, target=NO_TARGET)
     combined = (result.stdout or "") + (result.stderr or "")
