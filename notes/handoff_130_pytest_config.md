@@ -1,5 +1,24 @@
 # Handoff: fix #130 — pytest.ini is dead config shadowing pyproject.toml
 
+> ## ✅ EXECUTED AND MERGED — 2026-08-17. Do not run this plan again.
+>
+> Landed as PR #134, squashed to `760432c` on `master`. Issue #130 is closed.
+> Outcome, corrections, and what this plan got wrong: `session_130_pytest_config_execution.md`.
+>
+> **This document is kept for its analysis, not as a to-do list.** Two of its
+> instructions were wrong and were reversed during execution:
+>
+> 1. **Step 1's core recommendation is unsafe.** It says to switch the #109
+>    guard to `config.invocation_params.args`. Doing so opens real
+>    money-safety bypasses (`PYTEST_ADDOPTS=`, `-o testpaths=`), because what
+>    the operator types is not what pytest collects. The guard reads
+>    `config.args` on `master` today; that is safe only because Step 2's
+>    `testpaths = ["tests"]` also landed. Do not "restore" Step 1 as written.
+> 2. **Step 0's baseline was not clean.** It had 6 collection errors that had
+>    to be fixed before Step 4's gate could mean anything.
+>
+> Its §8 "Things that will trip you up" is still accurate and still useful.
+
 **Written:** 2026-08-17 · **For:** a fresh session picking this up cold
 **Issue:** ContextLab/clustrix#130 · **Parent:** #108 · **Related:** #110, #113, #115, #117
 
