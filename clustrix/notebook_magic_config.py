@@ -169,29 +169,36 @@ def _as_mapping(value: Any) -> Dict[str, Any]:
 
 
 def load_config_from_file(file_path: Union[Path, str]) -> Dict[str, Any]:
-    """Load configuration from a YAML or JSON file.
+    """Load configuration from a YAML or JSON file, tolerating a bad one.
 
-    Always returns a mapping. YAML happily parses a file of prose into a bare
-    string, so an unrecognised extension used to return a `str` from a
-    function annotated `-> Dict[str, Any]`; every caller then had to guess.
+    Returns an empty mapping for anything it cannot read or parse. That is a
+    deliberate contract -- four tests pin it -- because this is the widget's
+    "Load" path, where a raised exception would escape into a notebook cell
+    rather than the widget's own output area. The caller reports the empty
+    result to the user.
+
+    Use `clustrix.config.load_config` when a bad file should be an error: it
+    raises, and it names the offending settings.
+
+    Always returns a *mapping*. YAML happily parses a file of prose into a bare
+    string, so an unrecognised extension used to return a `str` from a function
+    annotated `-> Dict[str, Any]`; every caller then had to guess.
     """
     try:
-        # Convert string to Path if needed
-        if isinstance(file_path, str):
-            file_path = Path(file_path)
+        path = Path(file_path) if isinstance(file_path, str) else file_path
+        content = path.read_text()
+        suffix = path.suffix.lower()
 
-        # Read and parse the file
-        content = file_path.read_text()
-        if file_path.suffix.lower() in [".yml", ".yaml"]:
+        if suffix in (".yml", ".yaml"):
             return _as_mapping(yaml.safe_load(content))
-        elif file_path.suffix.lower() == ".json":
+        if suffix == ".json":
             return _as_mapping(json.loads(content))
-        else:
-            # Try YAML first, then JSON
-            try:
-                return _as_mapping(yaml.safe_load(content))
-            except yaml.YAMLError:
-                return _as_mapping(json.loads(content))
+
+        # Unknown extension: try both.
+        try:
+            return _as_mapping(yaml.safe_load(content))
+        except yaml.YAMLError:
+            return _as_mapping(json.loads(content))
     except Exception:
         return {}
 

@@ -544,8 +544,11 @@ class TestMagicCommands:
                 call.args[2]
                 for call in mock_ipython.register_magic_function.call_args_list
             ]
-            assert registered == ["remote", "clusterfy"]
-            # Note: No print message expected since widget displays automatically
+            # %clustrix is a line magic (status / config / config <profile> /
+        # load <file>); %%remote opens the widget; %%clusterfy is its
+        # deprecated alias.
+        assert registered == ["clustrix", "remote", "clusterfy"]
+        # Note: No print message expected since widget displays automatically
 
     def test_clusterfy_magic_without_ipython(self):
         """Test magic command fails gracefully without IPython."""

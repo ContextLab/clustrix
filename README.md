@@ -591,7 +591,8 @@ clustrix/
 │   └── pricing_clients/  # Cost monitoring integrations
 ├── tests/                # Test suite organized by category
 │   ├── unit/            # Fast unit tests (run in CI)
-│   ├── integration/     # Integration tests (run in CI)
+│   ├── integration/     # Provisions REAL billable AWS resources;
+│   │                    # refuses to run without CLUSTRIX_ALLOW_BILLABLE=1
 │   ├── real_world/      # Tests requiring actual cluster access
 │   ├── comprehensive/   # Performance and edge case tests
 │   └── infrastructure/  # Test infrastructure setup
@@ -611,7 +612,9 @@ clustrix/
 
 ### Development Workflow
 
-- **Testing**: Use `pytest tests/unit/ tests/integration/` for development testing
+- **Testing**: Use `pytest tests/unit/` for development testing.
+  `tests/integration/` provisions real, billable AWS resources and is
+  refused unless `CLUSTRIX_ALLOW_BILLABLE=1` is set deliberately (#109).
 - **Quality Checks**: Run `python scripts/check_quality.py` before committing
 - **Real World Tests**: Use `python scripts/run_real_world_tests.py` when credentials available
 - **Documentation**: Build with `cd docs && make html`
@@ -713,7 +716,7 @@ command. `scripts/collect_execution_evidence.py` is that command, and
 The existing test suite does not meet that goal yet. It is being worked
 towards, and the README should not be read as saying it has been reached:
 
-- Roughly a quarter of the test modules still use `unittest.mock`. Migrating
+- 42 of 197 test modules (21%) still use `unittest.mock`. Migrating
   them is in progress; the claim that this project uses zero mocks was not true.
 - The main CI workflow runs `tests/unit/` plus a local-only slice of the
   integration tests. The SSH, scheduler and cloud tests need credentials CI

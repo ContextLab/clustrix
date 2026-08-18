@@ -3,7 +3,7 @@ import yaml
 import os
 from pathlib import Path
 from typing import Dict, Optional, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 
 
 @dataclass
@@ -317,6 +317,29 @@ def load_config(config_path: str) -> None:
             config_data = yaml.safe_load(f)
         else:
             config_data = json.load(f)
+
+    if not isinstance(config_data, dict):
+        raise ValueError(
+            f"{config_path} does not contain a configuration mapping "
+            f"(parsed as {type(config_data).__name__})."
+        )
+
+    # An unknown key used to surface as a bare
+    # "ClusterConfig.__init__() got an unexpected keyword argument
+    # 'cleanup_remote_files'", which names the internals rather than the file
+    # the user wrote, and stops at the first offender.
+    known = {f.name for f in fields(ClusterConfig)}
+    unknown = sorted(set(config_data) - known)
+    if unknown:
+        import difflib
+
+        hints = []
+        for name in unknown:
+            close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+            hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
+        raise ValueError(
+            f"{config_path} contains unknown setting(s): {'; '.join(hints)}"
+        )
 
     _config = ClusterConfig(**config_data)
 
