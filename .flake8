@@ -16,5 +16,11 @@ per-file-ignores =
     clustrix/local_executor.py:F401,F811,F841
     clustrix/utils.py:E501
     # Test files are more lenient - allow unused imports, redefinitions, etc.
-    tests/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731
-    tests/*/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731
+    # E402 (import not at top): the standalone validation and debug scripts
+    # under tests/ adjust sys.path, or set an environment variable clustrix
+    # reads at import time, before importing the package they exercise. That
+    # ordering is the point of them running standalone, and it accounts for
+    # every E402 in the tree -- 30 files, all of that shape.
+    tests/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731,E402
+    tests/*/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731,E402
+    tests/*/*/*.py:F401,F811,F841,F541,E722,E501,E226,E712,F402,W293,E713,E731,E402

@@ -373,7 +373,7 @@ module load python
 # Set environment variables
 export OMP_NUM_THREADS=1
 
-# Change to work directory  
+# Change to work directory
 cd /dartfs-hpc/rc/home/b/f002d6b/clustrix
 
 # Create test directory if it doesn't exist

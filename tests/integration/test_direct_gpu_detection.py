@@ -31,24 +31,28 @@ def test_direct_gpu_detection():
         import subprocess
         import os
 
-        # Show environment first
-        cuda_env = os.environ.get("CUDA_VISIBLE_DEVICES", "NOT_SET")
-
         # Simple GPU count check
         result = subprocess.run(
             [
                 "python",
                 "-c",
-                f"""
+                # A plain string, not an f-string. This program is meant to
+                # run on the far side of `python -c`, but every {...} in it was
+                # being interpolated *here*: {torch.__version__}, {i},
+                # {props.name} and {e} are all undefined locally, so the test
+                # raised NameError before it could send anything. The one value
+                # that genuinely came from this side, CUDA_VISIBLE_DEVICES, is
+                # read remotely instead.
+                """
 import os
-print(f'CUDA_VISIBLE_DEVICES_ENV: {cuda_env}')
+print(f'CUDA_VISIBLE_DEVICES_ENV: {os.environ.get("CUDA_VISIBLE_DEVICES", "NOT_SET")}')
 
 try:
     import torch
     print(f'TORCH_VERSION: {torch.__version__}')
     print(f'CUDA_AVAILABLE: {torch.cuda.is_available()}')
     print(f'GPU_COUNT: {torch.cuda.device_count()}')
-    
+
     if torch.cuda.is_available():
         for i in range(torch.cuda.device_count()):
             props = torch.cuda.get_device_properties(i)
@@ -61,11 +65,11 @@ except Exception as e:
 # Try nvidia-smi as backup
 try:
     import subprocess
-    result = subprocess.run(['nvidia-smi', '--list-gpus'], 
-                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
-                          universal_newlines=True, timeout=10)
+    result = subprocess.run(['nvidia-smi', '--list-gpus'],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            universal_newlines=True, timeout=10)
     if result.returncode == 0:
-        gpu_lines = [line for line in result.stdout.strip().split('\\n') if line.strip()]
+        gpu_lines = [ln for ln in result.stdout.strip().split('\\n') if ln.strip()]
         print(f'NVIDIA_SMI_GPU_COUNT: {len(gpu_lines)}')
         for i, line in enumerate(gpu_lines):
             print(f'NVIDIA_GPU_{i}: {line}')

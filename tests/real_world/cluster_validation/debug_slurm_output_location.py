@@ -116,7 +116,7 @@ echo "This should be in the submission directory"
 #SBATCH --error=slurm-%j.err
 
 echo "Test 4: Pattern-based output"
-echo "This should be in slurm-\$SLURM_JOB_ID.out"
+echo "This should be in slurm-\\$SLURM_JOB_ID.out"
 """
 
         stdin, stdout, stderr = ssh_client.exec_command(

@@ -10,7 +10,7 @@ import sys
 import argparse
 import subprocess
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import Dict
 
 
 class RealWorldTestRunner:
@@ -24,8 +24,6 @@ class RealWorldTestRunner:
     def check_dependencies(self) -> bool:
         """Check if required dependencies are installed."""
         try:
-            import pytest
-            import clustrix
 
             print("✅ Required dependencies available")
             return True

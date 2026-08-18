@@ -27,9 +27,8 @@ def test_simple_cluster_detection():
         current_hostname == target_host
         or target_host in current_hostname
         or current_hostname in target_host
-        or
         # Domain matching
-        len(current_hostname.split(".")) > 1
+        or len(current_hostname.split(".")) > 1
         and len(target_host.split(".")) > 1
         and current_hostname.split(".")[1:] == target_host.split(".")[1:]
     )
