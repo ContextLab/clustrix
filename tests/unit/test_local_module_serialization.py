@@ -124,3 +124,120 @@ class TestWhatCountsAsLocal:
         """Arguments arrive wrapped in the args tuple, one container deep."""
         found = {m.__name__ for m in _referenced_local_modules((Widget(1),))}
         assert "mypkg.mathutils" in found
+
+
+class TestFailuresAreLoudNotSilent:
+    """The worst outcome is a payload that looks fine and fails on the cluster."""
+
+    def test_an_unembeddable_module_raises_here_not_there(self, tmp_path, monkeypatch):
+        """Some objects cannot be embedded at all, and that must be said now.
+
+        A function that takes a module-level lock cannot be serialized by
+        value. The attempt raised, and the code fell through to a dill payload
+        that referenced the module by name -- so the user saw
+        ModuleNotFoundError minutes later, on the cluster, naming a module
+        sitting on their own disk. It must fail here, with the real reason.
+
+        (A lock the function does not touch is fine: cloudpickle embeds only
+        what is actually referenced.)
+        """
+        package = tmp_path / "lockpkg"
+        package.mkdir()
+        (package / "__init__.py").write_text("")
+        (package / "util.py").write_text("import threading\nLOCK = threading.Lock()\n")
+        monkeypatch.syspath_prepend(str(tmp_path))
+        from lockpkg.util import LOCK
+
+        def guarded(x):
+            with LOCK:
+                return x * 2
+
+        with pytest.raises(RuntimeError, match="Cannot send your local module"):
+            serialize_function(guarded, (1,), {})
+
+    def test_an_unreferenced_unpicklable_object_is_not_a_problem(
+        self, tmp_path, monkeypatch
+    ):
+        """Embedding is per-object, so a bystander lock must not block a job."""
+        package = tmp_path / "okpkg"
+        package.mkdir()
+        (package / "__init__.py").write_text("")
+        (package / "util.py").write_text(
+            "import threading\nLOCK = threading.Lock()\n\ndef helper(x):\n    return x + 1\n"
+        )
+        monkeypatch.syspath_prepend(str(tmp_path))
+        from okpkg.util import helper
+
+        def uses_helper(x):
+            return helper(x)
+
+        assert serialize_function(uses_helper, (1,), {})["function"]
+
+
+class TestTheWalkIsBounded:
+    """This runs on every submission, so it must not be pathological."""
+
+    def test_a_million_element_argument_is_cheap(self):
+        """Scalars cannot reference a module, so they are never enqueued."""
+        import time
+
+        payload = list(range(1_000_000))
+        start = time.time()
+        _referenced_local_modules((payload,))
+        assert time.time() - start < 1.0
+
+    def test_a_self_referential_argument_terminates(self):
+        cycle: list = []
+        cycle.append(cycle)
+        assert _referenced_local_modules((cycle,)) == []
+
+    def test_mutually_referencing_containers_terminate(self):
+        left: dict = {}
+        right = {"left": left}
+        left["right"] = right
+        assert _referenced_local_modules((left,)) == []
+
+
+class TestRegistryHygiene:
+    """cloudpickle's by-value registry is process-global state."""
+
+    def test_the_registry_is_left_as_it_was_found(self):
+        import cloudpickle
+
+        before = set(cloudpickle.list_registry_pickle_by_value())
+        serialize_function(uses_local_function, (4,), {})
+        assert set(cloudpickle.list_registry_pickle_by_value()) == before
+
+    def test_a_users_own_registration_survives(self):
+        """Unregistering the user's module would change how their code pickles."""
+        import cloudpickle
+
+        import mypkg.mathutils
+
+        cloudpickle.register_pickle_by_value(mypkg.mathutils)
+        try:
+            serialize_function(uses_local_function, (4,), {})
+            registry = {
+                getattr(m, "__name__", m)
+                for m in cloudpickle.list_registry_pickle_by_value()
+            }
+            assert "mypkg.mathutils" in registry
+        finally:
+            cloudpickle.unregister_pickle_by_value(mypkg.mathutils)
+
+    def test_concurrent_serialization_keeps_modules_embedded(self):
+        """Two threads racing the registry used to hand one of them a
+        by-reference payload that failed remotely."""
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as pool:
+            sizes = [
+                len(f.result()["function"])
+                for f in [
+                    pool.submit(serialize_function, uses_local_function, (4,), {})
+                    for _ in range(5)
+                ]
+            ]
+        # An embedded module is several hundred bytes; a bare reference is ~300.
+        assert min(sizes) == max(sizes), f"payload sizes diverged: {sizes}"
+        assert min(sizes) > 500, f"payload dropped to by-reference: {sizes}"

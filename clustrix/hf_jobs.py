@@ -324,11 +324,24 @@ class HFJobsManager:
         )
         encoded = base64.b64encode(payload).decode()
         if len(encoded) > MAX_PAYLOAD_BYTES:
+            # Say which part is big. The old message blamed "closing over" the
+            # data, which is wrong as often as not: a module-level table in the
+            # user's own package gets embedded with that package, and nothing
+            # in the message pointed at it.
+            breakdown = ", ".join(
+                f"{part}={len(func_data[part])}B"
+                for part in ("function", "args", "kwargs")
+                if func_data.get(part)
+            )
             raise ValueError(
                 f"Serialized function and arguments are {len(encoded)} bytes, "
                 f"over the {MAX_PAYLOAD_BYTES}-byte limit for a HuggingFace "
-                "Jobs payload. Pass large data through a Hub dataset and load "
-                "it inside the function instead of closing over it."
+                f"Jobs payload ({breakdown}). Large arguments should be passed "
+                "through a Hub dataset and loaded inside the function. A large "
+                "'function' usually means a big module-level object in one of "
+                "your project's modules, which is embedded along with the "
+                "module: move it behind a function, or install the package so "
+                "the worker imports it instead of receiving a copy."
             )
 
         flavor = self._flavor(job_config)

@@ -3,6 +3,7 @@ import logging
 import contextlib
 import os
 import re
+import threading
 import sys
 import pickle
 import inspect
@@ -176,6 +177,18 @@ def _installed_roots() -> tuple:
 _INSTALLED_ROOTS = _installed_roots()
 
 
+#: Ceiling on the object graph walked when looking for project-local modules.
+#: Generous for real code; a backstop against a pathological argument.
+_MAX_WALK_NODES = 20000
+
+#: Values that can never carry a module reference, so never worth enqueueing.
+_SCALAR_TYPES = (bool, int, float, complex, str, bytes, bytearray, type(None))
+
+
+def _is_scalar(value: Any) -> bool:
+    return type(value) in _SCALAR_TYPES
+
+
 def _referenced_local_modules(obj: Any) -> List[Any]:
     """Project-local modules `obj` reaches, directly or through other locals.
 
@@ -189,6 +202,7 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
     found: Dict[str, Any] = {}
     seen: set = set()
     queue = [obj]
+    budget = _MAX_WALK_NODES
 
     while queue:
         current = queue.pop()
@@ -196,12 +210,33 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
             continue
         seen.add(id(current))
 
+        budget -= 1
+        if budget < 0:
+            # A pathological structure must not stall submission. Whatever was
+            # found so far is still embedded; anything missed fails loudly on
+            # the worker rather than silently here.
+            logger.warning(
+                "Stopped scanning for project-local modules after %d objects; "
+                "found %s.",
+                _MAX_WALK_NODES,
+                sorted(found) or "none",
+            )
+            break
+
         # Only functions carry a real __globals__ dict. Reading the attribute
         # off a class yields the member descriptor from `types.FunctionType`,
         # which is not a mapping.
         namespace = None
         if inspect.isfunction(current):
             namespace = current.__globals__
+            # Names bound in an enclosing scope live in closure cells, not in
+            # globals. `from mypkg.util import helper` inside a function makes
+            # `helper` a cell, and a walk of globals alone never sees it.
+            for cell in current.__closure__ or ():
+                try:
+                    queue.append(cell.cell_contents)
+                except ValueError:
+                    pass  # an empty cell in a recursive definition
         elif inspect.ismodule(current):
             namespace = vars(current)
         elif inspect.isclass(current):
@@ -236,12 +271,14 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
                     namespace = vars(module)
 
         # Arguments arrive wrapped in the args tuple and kwargs dict, so the
-        # instances that matter are one or more containers deep.
+        # instances that matter are one or more containers deep. Scalars are
+        # never enqueued: a million-element list of ints would otherwise cost a
+        # million entries in `seen`, on every submission, for nothing.
         if isinstance(current, (tuple, list, set, frozenset)):
-            queue.extend(current)
+            queue.extend(v for v in current if not _is_scalar(v))
         elif isinstance(current, dict):
-            queue.extend(current.keys())
-            queue.extend(current.values())
+            queue.extend(v for v in current.keys() if not _is_scalar(v))
+            queue.extend(v for v in current.values() if not _is_scalar(v))
 
         if namespace:
             for value in list(namespace.values()):
@@ -253,35 +290,64 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
     return list(found.values())
 
 
+#: cloudpickle's by-value registry is process-global, so registering around a
+#: dump is a read-modify-write on shared state. AsyncClusterExecutor serializes
+#: on a ThreadPoolExecutor, where two unsynchronized threads both snapshot the
+#: registry before either registers, and the first to finish unregisters the
+#: module out from under the second -- whose payload then silently reverts to
+#: by-reference and fails on the cluster. One lock, and a refcount so
+#: overlapping users share a single registration.
+_BY_VALUE_LOCK = threading.RLock()
+_BY_VALUE_REFCOUNTS: Dict[str, int] = {}
+
+
 @contextlib.contextmanager
 def _pickled_by_value(modules: List[Any]):
     """Have cloudpickle embed `modules` instead of importing them remotely.
 
-    The registry is process-global, so anything already registered is left
-    exactly as it was found.
+    Modules the caller registered themselves are left exactly as found.
     """
-    registered = []
-    try:
-        already = set(cloudpickle.list_registry_pickle_by_value())
-    except Exception:
-        already = set()
-    for module in modules:
-        name = getattr(module, "__name__", None)
-        if name and name not in already:
-            try:
-                cloudpickle.register_pickle_by_value(module)
-                registered.append(module)
-            except Exception:
-                # Not every module can be embedded; the rest still can.
-                pass
+    if not hasattr(cloudpickle, "list_registry_pickle_by_value"):
+        # Guaranteed by the cloudpickle>=2.0 requirement. If it is missing we
+        # cannot tell our registrations from the user's, and unregistering
+        # theirs would silently change how *their* code serializes.
+        raise RuntimeError(
+            "cloudpickle is too old to embed project-local modules safely; "
+            "clustrix requires cloudpickle>=2.0."
+        )
+
+    held = []
+    with _BY_VALUE_LOCK:
+        preexisting = {
+            getattr(m, "__name__", m)
+            for m in cloudpickle.list_registry_pickle_by_value()
+        }
+        for module in modules:
+            name = getattr(module, "__name__", None)
+            if not name:
+                continue
+            if name in preexisting and name not in _BY_VALUE_REFCOUNTS:
+                continue  # the user registered this one; not ours to touch
+            if _BY_VALUE_REFCOUNTS.get(name):
+                _BY_VALUE_REFCOUNTS[name] += 1
+                held.append(name)
+                continue
+            cloudpickle.register_pickle_by_value(module)
+            _BY_VALUE_REFCOUNTS[name] = 1
+            held.append(name)
     try:
         yield
     finally:
-        for module in registered:
-            try:
-                cloudpickle.unregister_pickle_by_value(module)
-            except Exception:
-                pass
+        with _BY_VALUE_LOCK:
+            for name in held:
+                remaining = _BY_VALUE_REFCOUNTS.get(name, 0) - 1
+                if remaining > 0:
+                    _BY_VALUE_REFCOUNTS[name] = remaining
+                    continue
+                _BY_VALUE_REFCOUNTS.pop(name, None)
+                module = sys.modules.get(name)
+                if module is not None:
+                    cloudpickle.unregister_pickle_by_value(module)
 
 
 def _dumps_by_value(obj: Any) -> bytes:
@@ -299,11 +365,24 @@ def _dumps_by_value(obj: Any) -> bytes:
     except Exception:
         pass
     if local_modules:
+        # No silent degradation here. Falling back to a by-reference payload
+        # would produce exactly the ModuleNotFoundError this branch exists to
+        # prevent -- minutes later, on the cluster, naming a module the user
+        # can plainly see on their own disk.
         try:
             with _pickled_by_value(local_modules):
                 return cloudpickle.dumps(obj, protocol=4)
-        except Exception:
-            pass
+        except Exception as e:
+            names = ", ".join(
+                sorted(getattr(m, "__name__", "?") for m in local_modules)
+            )
+            raise RuntimeError(
+                f"Cannot send your local module(s) [{names}] to the cluster: {e}. "
+                "Something reachable from them cannot be serialized -- a lock, "
+                "an open file, a database handle or similar held at module "
+                "level. Move it inside a function, or install the package so "
+                "the worker imports it instead of receiving a copy."
+            ) from e
 
     try:
         return dill.dumps(obj, protocol=4, recurse=True)
