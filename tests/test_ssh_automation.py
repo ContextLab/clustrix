@@ -229,12 +229,11 @@ class TestSSHKeyNaming:
             username="testuser",
         )
 
-        with patch(
-            "clustrix.ssh_utils.detect_existing_ssh_key", return_value=None
-        ), patch("pathlib.Path.exists", return_value=False), patch(
-            "clustrix.ssh_utils.generate_ssh_key"
-        ) as mock_generate, patch(
-            "clustrix.ssh_utils.deploy_public_key", return_value=True
+        with (
+            patch("clustrix.ssh_utils.detect_existing_ssh_key", return_value=None),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("clustrix.ssh_utils.generate_ssh_key") as mock_generate,
+            patch("clustrix.ssh_utils.deploy_public_key", return_value=True),
         ):
 
             mock_generate.return_value = ("/path/to/key", "/path/to/key.pub")
@@ -254,12 +253,11 @@ class TestSSHKeyNaming:
             username="testuser",
         )
 
-        with patch(
-            "clustrix.ssh_utils.detect_existing_ssh_key", return_value=None
-        ), patch("pathlib.Path.exists", return_value=False), patch(
-            "clustrix.ssh_utils.generate_ssh_key"
-        ) as mock_generate, patch(
-            "clustrix.ssh_utils.deploy_public_key", return_value=True
+        with (
+            patch("clustrix.ssh_utils.detect_existing_ssh_key", return_value=None),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("clustrix.ssh_utils.generate_ssh_key") as mock_generate,
+            patch("clustrix.ssh_utils.deploy_public_key", return_value=True),
         ):
 
             mock_generate.return_value = ("/path/to/key", "/path/to/key.pub")
@@ -281,12 +279,11 @@ class TestSSHKeyErrorHandling:
             username="testuser",
         )
 
-        with patch(
-            "clustrix.ssh_utils.detect_existing_ssh_key", return_value=None
-        ), patch("pathlib.Path.exists", return_value=False), patch(
-            "clustrix.ssh_utils.generate_ssh_key"
-        ) as mock_generate, patch(
-            "clustrix.ssh_utils.deploy_public_key", return_value=False
+        with (
+            patch("clustrix.ssh_utils.detect_existing_ssh_key", return_value=None),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("clustrix.ssh_utils.generate_ssh_key") as mock_generate,
+            patch("clustrix.ssh_utils.deploy_public_key", return_value=False),
         ):
 
             mock_generate.return_value = ("/path/to/key", "/path/to/key.pub")
@@ -305,11 +302,11 @@ class TestSSHKeyErrorHandling:
             username="testuser",
         )
 
-        with patch(
-            "clustrix.ssh_utils.detect_existing_ssh_key", return_value=None
-        ), patch("pathlib.Path.exists", return_value=False), patch(
-            "clustrix.ssh_utils.generate_ssh_key"
-        ) as mock_generate:
+        with (
+            patch("clustrix.ssh_utils.detect_existing_ssh_key", return_value=None),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("clustrix.ssh_utils.generate_ssh_key") as mock_generate,
+        ):
 
             mock_generate.side_effect = SSHKeyGenerationError("Key generation failed")
 

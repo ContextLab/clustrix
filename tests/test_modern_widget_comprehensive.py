@@ -340,9 +340,10 @@ class TestWidgetComponents:
         assert "refresh_keys" in widget.widgets
         assert "password" in widget.widgets
 
-        # Check authentication options
+        # Check authentication options. The 1Password checkbox was removed
+        # deliberately in issue #97, so it is no longer expected here.
         assert "local_env_var" in widget.widgets
-        assert "use_1password" in widget.widgets
+        assert "use_1password" not in widget.widgets
         assert "home_dir" in widget.widgets
 
         # Check SSH setup button

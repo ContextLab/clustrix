@@ -621,6 +621,29 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
+        # Module loads and pre-execution commands.
+        #
+        # Both are real ClusterConfig fields that utils.py emits into every job
+        # script, and neither had a widget after the #80 refactor -- so saving
+        # a profile through this widget silently erased a user's `module load`
+        # lines, which on an HPC cluster is the difference between a job that
+        # runs and one that cannot find its compiler.
+        self.module_loads_field = widgets.Textarea(
+            description="Module Loads:",
+            placeholder="python/3.12\ncuda/12.1",
+            tooltip="Environment modules to load, one per line",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
+        self.pre_exec_commands_field = widgets.Textarea(
+            description="Pre-exec Commands:",
+            placeholder="source /path/to/setup.sh",
+            tooltip="Shell commands to run before the job, one per line",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
         # Job queue/partition
         self.queue_field = widgets.Text(
             description="Queue/Partition:",
@@ -719,6 +742,8 @@ class EnhancedClusterConfigWidget:
             self.package_manager,
             self.cost_monitoring_checkbox,
             self.env_vars_field,
+            self.module_loads_field,
+            self.pre_exec_commands_field,
             self.queue_field,
             self.ssh_key_field,
         ]
@@ -1168,6 +1193,11 @@ class EnhancedClusterConfigWidget:
         else:
             self.env_vars_field.value = ""
 
+        self.module_loads_field.value = "\n".join(config.get("module_loads", []) or [])
+        self.pre_exec_commands_field.value = "\n".join(
+            config.get("pre_execution_commands", []) or []
+        )
+
         self.queue_field.value = config.get("queue", "")
         self.ssh_key_field.value = config.get("ssh_key_path", "")
 
@@ -1291,6 +1321,17 @@ class EnhancedClusterConfigWidget:
                     config["environment_variables"] = env_vars
             except json.JSONDecodeError:
                 pass  # Ignore invalid JSON
+
+        # One entry per line, blanks dropped.
+        for field, key in (
+            (self.module_loads_field, "module_loads"),
+            (self.pre_exec_commands_field, "pre_execution_commands"),
+        ):
+            entries = [
+                line.strip() for line in field.value.splitlines() if line.strip()
+            ]
+            if entries:
+                config[key] = entries
 
         # Remove empty string values
         config = {k: v for k, v in config.items() if v != ""}
@@ -2029,6 +2070,8 @@ class EnhancedClusterConfigWidget:
             [
                 widgets.HBox([self.package_manager, self.cost_monitoring_checkbox]),
                 self.env_vars_field,
+                self.module_loads_field,
+                self.pre_exec_commands_field,
                 widgets.HBox([self.queue_field, widgets.HTML("")]),
             ]
         )

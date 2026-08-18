@@ -83,9 +83,12 @@ class TestClusterExecutorReal:
 
         result_data = 42
 
-        with patch("tempfile.NamedTemporaryFile") as mock_tempfile, patch(
-            "builtins.open", mock_open(read_data=pickle.dumps(result_data))
-        ), patch("os.unlink"), patch("os.path.exists", return_value=True):
+        with (
+            patch("tempfile.NamedTemporaryFile") as mock_tempfile,
+            patch("builtins.open", mock_open(read_data=pickle.dumps(result_data))),
+            patch("os.unlink"),
+            patch("os.path.exists", return_value=True),
+        ):
             mock_file = Mock()
             mock_file.name = "/tmp/result.pkl"
             mock_tempfile.return_value.__enter__.return_value = mock_file

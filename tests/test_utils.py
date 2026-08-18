@@ -567,9 +567,10 @@ class TestSerializationEdgeCases:
         def test_func(x):
             return x * 3
 
-        with patch(
-            "cloudpickle.loads", side_effect=Exception("Cloudpickle failed")
-        ), patch("dill.loads", return_value=test_func):
+        with (
+            patch("cloudpickle.loads", side_effect=Exception("Cloudpickle failed")),
+            patch("dill.loads", return_value=test_func),
+        ):
             result_func, args, kwargs = deserialize_function(mock_data)
             assert result_func(5) == 15
             assert args == (5,)

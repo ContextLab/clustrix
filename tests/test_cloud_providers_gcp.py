@@ -166,9 +166,10 @@ class TestGCPProvider:
             mock_creds
         )
 
-        with patch("clustrix.cloud_providers.gcp.compute_v1") as mock_compute, patch(
-            "clustrix.cloud_providers.gcp.container_v1"
-        ) as mock_container:
+        with (
+            patch("clustrix.cloud_providers.gcp.compute_v1") as mock_compute,
+            patch("clustrix.cloud_providers.gcp.container_v1") as mock_container,
+        ):
             mock_compute_client = Mock()
             mock_compute.InstancesClient.return_value = mock_compute_client
             mock_compute_client.list.return_value = []
@@ -855,8 +856,9 @@ class TestGCPProviderEdgeCases:
         provider.project_id = "test-project"
         provider.service_account_info = {"test": "info"}
 
-        with patch("clustrix.cloud_providers.gcp.compute_v1") as mock_compute, patch(
-            "clustrix.cloud_providers.gcp.service_account"
+        with (
+            patch("clustrix.cloud_providers.gcp.compute_v1") as mock_compute,
+            patch("clustrix.cloud_providers.gcp.service_account"),
         ):
             # Mock machine types with various formats
             mock_types = []

@@ -187,9 +187,11 @@ class TestAzureProvider:
         mock_resource.return_value = mock_resource_client
         mock_resource_client.resource_groups.list.side_effect = Exception("API error")
 
-        with patch("clustrix.cloud_providers.azure.ComputeManagementClient"), patch(
-            "clustrix.cloud_providers.azure.NetworkManagementClient"
-        ), patch("clustrix.cloud_providers.azure.ContainerServiceClient"):
+        with (
+            patch("clustrix.cloud_providers.azure.ComputeManagementClient"),
+            patch("clustrix.cloud_providers.azure.NetworkManagementClient"),
+            patch("clustrix.cloud_providers.azure.ContainerServiceClient"),
+        ):
             result = provider.authenticate(
                 subscription_id="test-subscription",
                 client_id="test-client",
