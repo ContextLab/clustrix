@@ -1,5 +1,6 @@
 import ast
 import logging
+import contextlib
 import os
 import re
 import sys
@@ -124,6 +125,165 @@ def make_portable_function(source: str, name: str) -> Callable:
     return namespace[name]
 
 
+def _is_local_module(module: Any) -> bool:
+    """True when `module` lives in the user's project rather than an install.
+
+    Anything under the standard library or a site-packages directory is
+    installed on the worker too, because the execution environment mirrors the
+    local one. Anything else -- a sibling file, a package in the working tree --
+    exists only on this machine and has to travel with the function.
+    """
+    name = getattr(module, "__name__", "")
+    path = getattr(module, "__file__", None)
+    # __main__ is already serialized by value. clustrix is the machinery
+    # running the job, not part of the user's function; embedding a checkout of
+    # it would bloat every payload for nothing.
+    if (
+        not path
+        or name == "__main__"
+        or name == "clustrix"
+        or name.startswith("clustrix.")
+    ):
+        return False
+    resolved = os.path.realpath(path)
+    for root in _INSTALLED_ROOTS:
+        if resolved.startswith(root):
+            return False
+    return True
+
+
+def _installed_roots() -> tuple:
+    """Directories whose contents are installed rather than project-local."""
+    import site
+    import sysconfig
+
+    roots = set()
+    for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+        path = sysconfig.get_paths().get(key)
+        if path:
+            roots.add(os.path.realpath(path) + os.sep)
+    try:
+        for path in site.getsitepackages():
+            roots.add(os.path.realpath(path) + os.sep)
+    except AttributeError:  # virtualenvs without getsitepackages
+        pass
+    user_site = getattr(site, "getusersitepackages", None)
+    if user_site:
+        roots.add(os.path.realpath(user_site()) + os.sep)
+    return tuple(sorted(roots))
+
+
+_INSTALLED_ROOTS = _installed_roots()
+
+
+def _referenced_local_modules(obj: Any) -> List[Any]:
+    """Project-local modules `obj` reaches, directly or through other locals.
+
+    A function that calls `mypkg.helpers.clean` serializes that call by
+    *reference* -- dill and cloudpickle both store importable objects as
+    "import mypkg.helpers; get clean" -- and the worker, which has no mypkg,
+    fails with ModuleNotFoundError. Naming those modules lets cloudpickle embed
+    them instead. Parent packages come along because `mypkg.helpers` cannot be
+    rebuilt without `mypkg`.
+    """
+    found: Dict[str, Any] = {}
+    seen: set = set()
+    queue = [obj]
+
+    while queue:
+        current = queue.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        # Only functions carry a real __globals__ dict. Reading the attribute
+        # off a class yields the member descriptor from `types.FunctionType`,
+        # which is not a mapping.
+        namespace = None
+        if inspect.isfunction(current):
+            namespace = current.__globals__
+        elif inspect.ismodule(current):
+            namespace = vars(current)
+        elif inspect.isclass(current):
+            namespace = dict(vars(current))
+
+        module_name = None
+        if inspect.ismodule(current):
+            module_name = getattr(current, "__name__", None)
+        elif inspect.isfunction(current) or inspect.isclass(current):
+            module_name = getattr(current, "__module__", None)
+        elif not isinstance(current, (tuple, list, set, frozenset, dict)):
+            # An argument is usually an instance, not a class. Its class is
+            # what has to travel, so follow the type.
+            module_name = getattr(type(current), "__module__", None)
+            queue.append(type(current))
+
+        if module_name:
+            module = sys.modules.get(module_name)
+            if module is not None and _is_local_module(module):
+                # Register the whole chain: mypkg.helpers needs mypkg.
+                parts = module_name.split(".")
+                for depth in range(1, len(parts) + 1):
+                    name = ".".join(parts[:depth])
+                    parent = sys.modules.get(name)
+                    if (
+                        parent is not None
+                        and name not in found
+                        and _is_local_module(parent)
+                    ):
+                        found[name] = parent
+                if namespace is None:
+                    namespace = vars(module)
+
+        # Arguments arrive wrapped in the args tuple and kwargs dict, so the
+        # instances that matter are one or more containers deep.
+        if isinstance(current, (tuple, list, set, frozenset)):
+            queue.extend(current)
+        elif isinstance(current, dict):
+            queue.extend(current.keys())
+            queue.extend(current.values())
+
+        if namespace:
+            for value in list(namespace.values()):
+                if inspect.isfunction(value) or inspect.isclass(value):
+                    queue.append(value)
+                elif inspect.ismodule(value) and _is_local_module(value):
+                    queue.append(value)
+
+    return list(found.values())
+
+
+@contextlib.contextmanager
+def _pickled_by_value(modules: List[Any]):
+    """Have cloudpickle embed `modules` instead of importing them remotely.
+
+    The registry is process-global, so anything already registered is left
+    exactly as it was found.
+    """
+    registered = []
+    try:
+        already = set(cloudpickle.list_registry_pickle_by_value())
+    except Exception:
+        already = set()
+    for module in modules:
+        name = getattr(module, "__name__", None)
+        if name and name not in already:
+            try:
+                cloudpickle.register_pickle_by_value(module)
+                registered.append(module)
+            except Exception:
+                # Not every module can be embedded; the rest still can.
+                pass
+    try:
+        yield
+    finally:
+        for module in registered:
+            try:
+                cloudpickle.unregister_pickle_by_value(module)
+            except Exception:
+                pass
+
+
 def _dumps_by_value(obj: Any) -> bytes:
     """Serialize `obj` so a fresh interpreter can rebuild it without imports.
 
@@ -131,6 +291,20 @@ def _dumps_by_value(obj: Any) -> bytes:
     produces bytes; if none can, the exception propagates rather than shipping
     a payload that will fail remotely with an unrelated error.
     """
+    # Modules from the user's own project do not exist on the worker, so
+    # anything reaching into them must be embedded rather than imported.
+    local_modules = []
+    try:
+        local_modules = _referenced_local_modules(obj)
+    except Exception:
+        pass
+    if local_modules:
+        try:
+            with _pickled_by_value(local_modules):
+                return cloudpickle.dumps(obj, protocol=4)
+        except Exception:
+            pass
+
     try:
         return dill.dumps(obj, protocol=4, recurse=True)
     except Exception:
@@ -458,7 +632,7 @@ dependencies:
 # stopped installing nine hardcoded packages and started mirroring the local
 # environment) leaves every existing environment matching its old key, so the
 # cache serves a stale environment and the new packages are never installed.
-ENVIRONMENT_RECIPE_VERSION = "2"
+ENVIRONMENT_RECIPE_VERSION = "3"
 
 
 def _environment_key(
@@ -514,6 +688,22 @@ def _conda_envs_exist(ssh_client, conda_setup_prefix: str, *env_names: str) -> b
         if line.strip() and not line.startswith("#")
     }
     return all(name in existing for name in env_names)
+
+
+def _write_remote_text(ssh_client, remote_path: str, content: str) -> None:
+    """Write `content` to `remote_path` over SFTP.
+
+    Used for anything multi-line. Shell heredocs cannot be composed into a
+    `cmd && cmd` chain, and quoting a long payload into `echo` invites the
+    exact escaping bugs that are hardest to notice: the command succeeds and
+    the file holds something subtly wrong.
+    """
+    sftp = ssh_client.open_sftp()
+    try:
+        with sftp.open(remote_path, "w") as handle:
+            handle.write(content)
+    finally:
+        sftp.close()
 
 
 def setup_two_venv_environment(
@@ -775,11 +965,13 @@ def setup_two_venv_environment(
         if mirrored:
             spec_lines = "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items()))
             requirements_path = f"{work_dir}/clustrix_requirements.txt"
-            commands.append(
-                f"cat > {requirements_path} <<'CLUSTRIX_REQUIREMENTS_EOF'\n"
-                f"{spec_lines}\n"
-                "CLUSTRIX_REQUIREMENTS_EOF"
-            )
+            # Written over SFTP rather than emitted as a shell heredoc: these
+            # commands are joined with " && ", which would put the heredoc
+            # terminator on a line with `&& ...` after it. Bash would not
+            # recognise it as a terminator, and `cat` would swallow the rest of
+            # the setup script into the requirements file -- so pip never ran
+            # and the environment silently stayed empty.
+            _write_remote_text(ssh_client, requirements_path, spec_lines + "\n")
             commands.append(
                 f"echo 'Replicating local environment ({len(mirrored)} packages)...'"
             )

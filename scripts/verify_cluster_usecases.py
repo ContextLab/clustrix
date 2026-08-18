@@ -39,10 +39,15 @@ from dataclasses import asdict, fields
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_ROOT))
+# A package that lives in the working tree and is installed nowhere -- the
+# shape of every real project with more than one file.
+sys.path.insert(0, str(_ROOT / "tests" / "unit" / "localproject"))
 
 from clustrix import cluster, configure  # noqa: E402
 from clustrix.config import ClusterConfig, _config, get_config  # noqa: E402
+from mypkg.mathutils import SCALE, Widget, triple  # noqa: E402
 
 CRED_DIR = Path.home() / ".clustrix-dev-credentials"
 # Derived rather than hand-listed: a fixed set silently stops covering the
@@ -256,6 +261,42 @@ def case_custom_class(decorate):
     return decorate(translate), translate, (Point(2, 3), 10, 20), {}
 
 
+def case_local_module_function(decorate):
+    """Calls a function imported from a sibling module of this project.
+
+    Serializers store an importable object by reference -- "import
+    mypkg.mathutils, then get triple" -- which is right for numpy and wrong for
+    a package that exists on no machine but the caller's. This failed with
+    `ModuleNotFoundError: No module named 'mypkg'`.
+    """
+
+    def scaled_up(value):
+        return triple(value) + SCALE
+
+    return decorate(scaled_up), scaled_up, (4,), {}
+
+
+def case_local_module_class(decorate):
+    """Instantiates a class defined in a project-local module."""
+
+    def widget_value(n):
+        return Widget(n).value()
+
+    return decorate(widget_value), widget_value, (3,), {}
+
+
+def case_local_instance_argument(decorate):
+    """Passes an instance of a project-local class as an argument.
+
+    The class has to travel with the argument, not just with the function.
+    """
+
+    def doubled(widget):
+        return widget.value() * 2
+
+    return decorate(doubled), doubled, (Widget(2),), {}
+
+
 def case_disk_roundtrip(decorate):
     """Writes a file on the worker, reads it back, and reports what it read.
 
@@ -395,6 +436,9 @@ CASES = {
     "module_global": case_module_global,
     "helper_call": case_helper_call,
     "custom_class": case_custom_class,
+    "local_module_function": case_local_module_function,
+    "local_module_class": case_local_module_class,
+    "local_instance_argument": case_local_instance_argument,
     "disk_roundtrip": case_disk_roundtrip,
     "external_library": case_external_library,
     "large_argument": case_large_argument,
