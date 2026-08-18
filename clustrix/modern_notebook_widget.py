@@ -1,7 +1,8 @@
 """Modern notebook widget with profile management and horizontal layout."""
 
 import os
-from typing import Optional, Dict, Any, TYPE_CHECKING
+import re
+from typing import Optional, Dict, Any, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
     import ipywidgets as widgets
@@ -18,6 +19,7 @@ except ImportError:
 from dataclasses import asdict
 
 from .config import ClusterConfig, configure, get_config_dir
+from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
@@ -1428,6 +1430,14 @@ class ModernClustrixWidget:
         """
         with self.widgets["output"]:
             try:
+                problems = self._validate_widget_values()
+                if problems:
+                    print("❌ Cannot apply this configuration:")
+                    for problem in problems:
+                        print(f"   - {problem}")
+                    self.set_status("error", "invalid")
+                    return
+
                 config = self._get_config_from_widgets()
 
                 # Save to the current profile so it survives the session.
@@ -1563,6 +1573,14 @@ class ModernClustrixWidget:
             print("🚀 Submitting a test job...")
 
             try:
+                problems = self._validate_widget_values()
+                if problems:
+                    print("❌ Cannot submit with this configuration:")
+                    for problem in problems:
+                        print(f"   - {problem}")
+                    self.set_status("error", "invalid")
+                    return
+
                 config = self._get_config_from_widgets()
 
                 button.description = "Submitting..."
@@ -1768,6 +1786,58 @@ class ModernClustrixWidget:
             finally:
                 button.description = original_description
                 button.disabled = False
+
+    def _validate_widget_values(self) -> List[str]:
+        """Return every problem with what is currently on screen.
+
+        The widget used to accept cores=0, memory="banana", time="soon", an
+        out-of-range port and an empty host for a remote cluster, and hand all
+        of it to ClusterConfig. Nothing complained until the job failed on the
+        cluster, minutes later, with an error that named none of it.
+        """
+        problems: List[str] = []
+        cluster_type = self.widgets["cluster_type"].value
+
+        cores = self.widgets["cpus"].value
+        # -1 is meaningful: "use every core on the node".
+        if cores == 0 or (isinstance(cores, int) and cores < -1):
+            problems.append(f"CPUs must be positive (or -1 for all); got {cores}")
+
+        memory = str(self.widgets["ram"].value).strip()
+        if not memory:
+            problems.append("Memory is required")
+        elif not MEMORY_PATTERN.match(memory):
+            problems.append(
+                f"Memory {memory!r} is not a size; expected something like "
+                "'16GB', '512Mi' or '8G'"
+            )
+
+        walltime = str(self.widgets["time"].value).strip()
+        if not walltime:
+            problems.append("Walltime is required")
+        elif not re.match(r"^\d+(:\d{1,2}){0,2}$|^\d+-\d+(:\d{1,2}){0,2}$", walltime):
+            problems.append(
+                f"Walltime {walltime!r} is not a duration; expected HH:MM:SS "
+                "(or D-HH:MM:SS)"
+            )
+
+        if cluster_type in ("ssh", "slurm", "pbs", "sge"):
+            if not str(self.widgets["host"].value).strip():
+                problems.append(f"A host is required for a {cluster_type} cluster")
+            if not str(self.widgets["username"].value).strip():
+                problems.append(f"A username is required for a {cluster_type} cluster")
+            port = self.widgets["port"].value
+            if not isinstance(port, int) or not 1 <= port <= 65535:
+                problems.append(f"Port must be between 1 and 65535; got {port}")
+
+        if cluster_type == "huggingface":
+            if not str(self.widgets["hf_namespace"].value).strip():
+                problems.append(
+                    "A HuggingFace namespace is required (usually an org, not "
+                    "your personal account)"
+                )
+
+        return problems
 
     def _get_config_from_widgets(self) -> ClusterConfig:
         """Extract configuration from current widget values."""

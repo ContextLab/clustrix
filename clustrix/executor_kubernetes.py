@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 import ast
 
 import cloudpickle
+from .utils import normalize_memory
 
 logger = logging.getLogger(__name__)
 
@@ -243,13 +244,23 @@ except Exception as e:
 """
                                 ],
                                 "resources": {
+                                    # Kubernetes rejects "16GB" outright; its
+                                    # quantities are "16G" or "16Gi". Passing
+                                    # clustrix's configured spelling straight
+                                    # through made default_memory unusable here.
                                     "requests": {
                                         "cpu": f"{job_config.get('cores', 1)}",
-                                        "memory": job_config.get("memory", "1Gi"),
+                                        "memory": normalize_memory(
+                                            job_config.get("memory", "1Gi"),
+                                            "kubernetes",
+                                        ),
                                     },
                                     "limits": {
                                         "cpu": f"{job_config.get('cores', 1)}",
-                                        "memory": job_config.get("memory", "1Gi"),
+                                        "memory": normalize_memory(
+                                            job_config.get("memory", "1Gi"),
+                                            "kubernetes",
+                                        ),
                                     },
                                 },
                             }

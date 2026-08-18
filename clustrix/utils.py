@@ -1,6 +1,7 @@
 import ast
 import logging
 import os
+import re
 import sys
 import pickle
 import inspect
@@ -1329,6 +1330,61 @@ def generate_two_venv_execution_commands(
     )
 
 
+MEMORY_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?)(i?)B?\s*$", re.I)
+
+
+def normalize_memory(value: Any, target: str) -> str:
+    """Render a memory size in the form a given scheduler accepts.
+
+    Clustrix's own configuration uses human sizes like ``"16GB"``. Schedulers
+    do not agree on that spelling:
+
+    * Kubernetes quantities are ``16G`` (decimal) or ``16Gi`` (binary) and a
+      pod carrying ``16GB`` is rejected outright by the API server.
+    * SLURM's ``--mem`` takes a bare number with an optional ``K|M|G|T``.
+    * PBS and SGE accept ``16gb`` and ``16G`` respectively.
+
+    Passing the configured string through unchanged is what made
+    ``default_memory`` unusable on Kubernetes.
+
+    Args:
+        value: A size such as ``"16GB"``, ``"512Mi"``, ``16`` (GB assumed).
+        target: ``"kubernetes"``, ``"slurm"``, ``"pbs"`` or ``"sge"``.
+
+    Returns:
+        The size spelled the way ``target`` expects it.
+    """
+    text = str(value).strip()
+    match = MEMORY_PATTERN.match(text)
+    if not match:
+        # Not a shape we recognise. Passing it through unchanged is better
+        # than guessing: the scheduler's own error names the real problem.
+        logger.warning(
+            "Could not parse memory value %r; passing it to %s unchanged.",
+            value,
+            target,
+        )
+        return text
+
+    amount, unit = match.group(1), match.group(2).upper()
+    if not unit:
+        unit = "G"  # a bare number has always meant gigabytes here
+    if amount.endswith(".0"):
+        amount = amount[:-2]
+
+    if target == "kubernetes":
+        # "16GB" means 16 gibibytes in every other part of clustrix, so keep
+        # the binary suffix rather than silently shrinking the request by 7%.
+        return f"{amount}{unit}i" if unit else amount
+    if target == "slurm":
+        return f"{amount}{unit}"
+    if target == "pbs":
+        return f"{amount.lower()}{unit.lower()}b"
+    if target == "sge":
+        return f"{amount}{unit}"
+    return text
+
+
 def resolve_job_resources(
     job_config: Dict[str, Any], config: ClusterConfig
 ) -> Dict[str, Any]:
@@ -1380,7 +1436,7 @@ def _create_slurm_script(
         f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
         f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
         f"#SBATCH --cpus-per-task={job_config['cores']}",
-        f"#SBATCH --mem={job_config['memory']}",
+        f"#SBATCH --mem={normalize_memory(job_config['memory'], 'slurm')}",
         f"#SBATCH --time={job_config['time']}",
     ]
 
@@ -1476,7 +1532,7 @@ def _create_pbs_script(
         f"#PBS -o {remote_job_dir}/job.out",
         f"#PBS -e {remote_job_dir}/job.err",
         f"#PBS -l nodes=1:ppn={job_config['cores']}",
-        f"#PBS -l mem={job_config['memory']}",
+        f"#PBS -l mem={normalize_memory(job_config['memory'], 'pbs')}",
         f"#PBS -l walltime={job_config['time']}",
     ]
 
@@ -1517,7 +1573,7 @@ def _create_sge_script(
         f"#$ -o {remote_job_dir}/job.out",
         f"#$ -e {remote_job_dir}/job.err",
         f"#$ -pe smp {job_config['cores']}",
-        f"#$ -l h_vmem={job_config['memory']}",
+        f"#$ -l h_vmem={normalize_memory(job_config['memory'], 'sge')}",
         f"#$ -l h_rt={job_config['time']}",
         "#$ -cwd",
         "",

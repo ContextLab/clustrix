@@ -250,7 +250,10 @@ class TestScriptGeneration:
         assert "#!/bin/bash" in script
         assert "#SBATCH --job-name=clustrix" in script
         assert "#SBATCH --cpus-per-task=8" in script
-        assert "#SBATCH --mem=16GB" in script
+        # SLURM documents --mem units as [K|M|G|T]; "GB" is not one of them.
+        # Kubernetes rejects it outright, so clustrix normalizes memory per
+        # scheduler rather than passing the configured spelling through.
+        assert "#SBATCH --mem=16G" in script
         assert "#SBATCH --time=02:00:00" in script
         assert "#SBATCH --partition=gpu" in script
 
@@ -287,7 +290,7 @@ class TestScriptGeneration:
         assert "#!/bin/bash" in script
         assert "#PBS -N clustrix" in script
         assert "#PBS -l nodes=1:ppn=4" in script
-        assert "#PBS -l mem=8GB" in script
+        assert "#PBS -l mem=8gb" in script  # PBS spells it lowercase
         assert "#PBS -l walltime=01:00:00" in script
         assert "#PBS -q batch" in script
 
@@ -306,7 +309,7 @@ class TestScriptGeneration:
         assert result is not None
         assert "#$ -N clustrix" in result
         assert "#$ -pe smp 4" in result
-        assert "#$ -l h_vmem=8GB" in result
+        assert "#$ -l h_vmem=8G" in result
         assert "cd /tmp/job" in result
 
     def test_create_job_script_ssh(self):
