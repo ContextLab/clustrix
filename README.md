@@ -187,7 +187,9 @@ Two timeouts are worth knowing about:
 
 ## SSH Key Automation
 
-Clustrix provides automated SSH key setup to eliminate the manual process of generating and deploying SSH keys to clusters. This feature transforms a 15-30 minute manual setup into a **15-second automated process**.
+Clustrix provides automated SSH key setup: it generates a key, deploys it to
+the cluster and writes the `~/.ssh/config` entry in one call, instead of doing
+those three steps by hand.
 
 ### Quick Setup Methods
 

@@ -49,6 +49,20 @@ Clustrix provides nine core filesystem operations:
 
 1. **cluster_ls()** - List directory contents
 2. **cluster_find()** - Find files by pattern (recursive)
+
+.. important::
+
+   ``cluster_find()`` and ``cluster_glob()`` return paths **relative to the
+   directory they searched**, not to the working directory. Passing a result
+   straight to ``cluster_stat()`` therefore raises ``FileNotFoundError``
+   unless you searched ``"."``. Join the search directory back on first::
+
+       import os
+
+       search_dir = "data/"
+       for name in cluster_find("*.csv", search_dir, config):
+           info = cluster_stat(os.path.join(search_dir, name), config)
+
 3. **cluster_stat()** - Get file information (size, modified time, permissions)
 4. **cluster_exists()** - Check if file/directory exists
 5. **cluster_isdir()** - Check if path is a directory

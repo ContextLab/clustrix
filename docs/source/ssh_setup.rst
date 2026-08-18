@@ -1,7 +1,9 @@
 SSH Key Setup for Remote Clusters
 ====================================
 
-Clustrix provides **automated SSH key setup** that transforms the traditional 15-30 minute manual process into a **15-second automated experience**. This feature eliminates the complexity of SSH configuration while maintaining security best practices.
+Clustrix provides **automated SSH key setup**: it generates a key, deploys
+it to the cluster and writes the ``~/.ssh/config`` entry in one call, instead
+of doing those three steps by hand.
 
 .. note::
    **🚀 New in Clustrix**: Automated SSH key setup makes cluster access effortless! 
@@ -68,7 +70,8 @@ What the Automation Does
 The automated SSH setup handles everything for you:
 
 🔑 **Key Generation**
-  - Creates Ed25519 keys (quantum-resistant, modern encryption)
+  - Creates Ed25519 keys (modern elliptic-curve signatures; fast,
+    compact, and widely supported)
   - Proper file permissions (600 for private, 644 for public)
   - Informative comments with timestamps
 
@@ -353,7 +356,8 @@ Security Best Practices
 Key Management
 ~~~~~~~~~~~~~~
 
-1. **Use Ed25519 Keys**: Default in automated setup, quantum-resistant
+1. **Use Ed25519 Keys**: Default in automated setup; modern
+   elliptic-curve signatures, preferred over RSA
 2. **Regular Rotation**: Use ``force_refresh=True`` periodically  
 3. **Unique Keys**: Different keys for different clusters
 4. **Secure Storage**: Keys stored with proper permissions automatically
@@ -390,4 +394,5 @@ Getting Help
 - **SSH Key Automation**: `Issue #57 <https://github.com/ContextLab/clustrix/issues/57>`_
 
 .. note::
-   **Remember**: 15 seconds of automation beats 15-30 minutes of manual setup! 🚀
+   **Remember**: one call replaces generating, deploying and configuring a
+   key by hand.

@@ -267,8 +267,8 @@ wrong.
   have worked, which is a different claim from "tested".
 * **Kubernetes execution is unverified**, though it is now configurable and
   its memory quantities are valid.
-* **The suite still has failures** outside the paths exercised here: 176
-  failed / 1313 passed / 36 errors, against 211 / 1194 / 72 at the start of
+* **The suite still has failures** outside the paths exercised here: 159
+  failed / 1402 passed / 36 errors, against 211 / 1194 / 72 at the start of
   this branch. Re-baselining it properly is #114.
 * **The result-signing scheme does not defend against a compromised remote
   host.** Nothing that runs your code for you can.
