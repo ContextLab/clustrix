@@ -56,6 +56,9 @@ class ModernClustrixWidget:
             )
 
         self.profile_manager = profile_manager or ProfileManager()
+        # Set while the widget is writing values into its own controls, so the
+        # resulting change events are not mistaken for edits by the user.
+        self._suspend_profile_capture = False
         self.widgets: Dict[str, Any] = {}
         self.auth_manager: Optional[AuthenticationManager] = None
 
@@ -1361,14 +1364,43 @@ class ModernClustrixWidget:
             print("Widget display requires IPython/Jupyter environment")
 
     # Event handlers - Profile Management
+    def _capture_current_profile(self, profile_name: Optional[str]) -> None:
+        """Store what is on screen into `profile_name`.
+
+        Without this the widget only ever reads profiles. Anything typed was
+        held nowhere but the controls themselves, so switching away threw it
+        out and switching back showed the old values -- which looks exactly
+        like a dropdown that does nothing.
+        """
+        if not profile_name or self._suspend_profile_capture:
+            return
+        try:
+            self.profile_manager.save_profile(
+                profile_name, self._get_config_from_widgets()
+            )
+        except Exception as e:
+            with self.widgets["output"]:
+                print(f"⚠️  Could not keep changes to '{profile_name}': {e}")
+
     def _on_profile_change(self, change):
         """Handle profile dropdown changes."""
+        if self._suspend_profile_capture:
+            return
+        # Keep the outgoing profile's edits before the new one overwrites the
+        # controls; `change["old"]` is the profile the user is leaving.
+        self._capture_current_profile(change.get("old"))
+
         profile_name = change["new"]
         if profile_name:
             try:
                 config = self.profile_manager.load_profile(profile_name)
-                self._load_config_to_widgets(config)
-                self._update_ui_for_cluster_type()
+                self.profile_manager.active_profile = profile_name
+                self._suspend_profile_capture = True
+                try:
+                    self._load_config_to_widgets(config)
+                    self._update_ui_for_cluster_type()
+                finally:
+                    self._suspend_profile_capture = False
             except Exception as e:
                 with self.widgets["output"]:
                     print(f"❌ Error loading profile '{profile_name}': {e}")
@@ -1378,7 +1410,10 @@ class ModernClustrixWidget:
         try:
             current_profile = self.widgets["profile_dropdown"].value
             if current_profile:
-                # Clone the profile
+                # Clone what the user is looking at, not the last saved copy.
+                # Cloning the stored profile produced a duplicate of the
+                # defaults and silently discarded every edit on screen.
+                self._capture_current_profile(current_profile)
                 new_name = self.profile_manager.clone_profile(current_profile)
                 # Update dropdown options
                 self._update_profile_dropdown()
@@ -1415,11 +1450,22 @@ class ModernClustrixWidget:
                 print(f"❌ Error removing profile: {e}")
 
     def _update_profile_dropdown(self):
-        """Update the profile dropdown with current profiles."""
-        profile_names = self.profile_manager.get_profile_names()
-        self.widgets["profile_dropdown"].options = profile_names
-        if self.profile_manager.active_profile:
-            self.widgets["profile_dropdown"].value = self.profile_manager.active_profile
+        """Update the profile dropdown with current profiles.
+
+        Rebuilding the options fires change events that are not user edits, so
+        capture is suspended for the duration.
+        """
+        previous = self._suspend_profile_capture
+        self._suspend_profile_capture = True
+        try:
+            profile_names = self.profile_manager.get_profile_names()
+            self.widgets["profile_dropdown"].options = profile_names
+            if self.profile_manager.active_profile:
+                self.widgets["profile_dropdown"].value = (
+                    self.profile_manager.active_profile
+                )
+        finally:
+            self._suspend_profile_capture = previous
 
     @staticmethod
     def _resolve_config_path(filename: str) -> str:
@@ -1453,10 +1499,17 @@ class ModernClustrixWidget:
             self.profile_manager.save_to_file(filename)
 
             with self.widgets["output"]:
-                print(f"✅ Saved all profiles to: {filename}")
+                # A bare filename resolves under ~/.clustrix, so the full path
+                # is the only way the user can tell where it went.
+                print(
+                    f"✅ Saved {len(self.profile_manager.get_profile_names())} "
+                    f"profile(s) to: {filename}"
+                )
+            self.set_status("ok", "saved")
         except Exception as e:
             with self.widgets["output"]:
                 print(f"❌ Error saving configuration: {e}")
+            self.set_status("error", "save failed")
 
     def _on_load_config(self, button):
         """Handle load configuration button click."""
@@ -1480,9 +1533,11 @@ class ModernClustrixWidget:
                 print(
                     f"   Loaded {len(profile_names)} profiles: {', '.join(profile_names)}"
                 )
+            self.set_status("ok", "loaded")
         except Exception as e:
             with self.widgets["output"]:
                 print(f"❌ Error loading configuration: {e}")
+            self.set_status("error", "load failed")
 
     def _on_apply_config(self, button):
         """Make the displayed configuration the one @cluster will use.
@@ -1675,12 +1730,22 @@ class ModernClustrixWidget:
                     "time": config.default_time,
                 }
 
-                executor = ClusterExecutor(config)
-                print("   Submitting...")
-                job_id = executor.submit_job(func_data, job_config)
-                print(f"   Job ID: {job_id}")
-                print("   Waiting for the result...")
-                result = executor.wait_for_result(job_id)
+                if config.cluster_type == "local":
+                    # `local` has no scheduler to submit to -- ClusterExecutor
+                    # rejects it with "Unsupported cluster type: local". It is
+                    # also the widget's default, so this button failed for
+                    # every new user before they had configured anything.
+                    # Running in process is precisely what local execution
+                    # means, and is the path a local @cluster call takes.
+                    print("   Running in this process (local execution)...")
+                    result = make_portable_function(_TEST_JOB_SOURCE, "test_job")()
+                else:
+                    executor = ClusterExecutor(config)
+                    print("   Submitting...")
+                    job_id = executor.submit_job(func_data, job_config)
+                    print(f"   Job ID: {job_id}")
+                    print("   Waiting for the result...")
+                    result = executor.wait_for_result(job_id)
 
                 print("✅ Job submission test succeeded")
                 print(f"   Ran on: {result.get('host')}")
