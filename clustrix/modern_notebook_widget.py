@@ -145,16 +145,34 @@ class ModernClustrixWidget:
             margin-right: 6px;
             vertical-align: -1px;
         }
+        /* color-mix keeps the tint derived from the theme token instead of a
+           frozen light-theme wash that stays pale on a dark background. */
         .clustrix-pill-idle  { background: var(--cx-bg); color: var(--cx-fg-muted); }
-        .clustrix-pill-busy  { background: rgba(245,124,0,.14); color: var(--cx-warn); }
-        .clustrix-pill-ok    { background: rgba(56,142,60,.14); color: var(--cx-ok); }
-        .clustrix-pill-error { background: rgba(211,47,47,.14); color: var(--cx-err); }
+        .clustrix-pill-busy  {
+            color: var(--cx-warn);
+            background: color-mix(in srgb, var(--cx-warn) 16%, var(--cx-bg));
+        }
+        .clustrix-pill-ok    {
+            color: var(--cx-ok);
+            background: color-mix(in srgb, var(--cx-ok) 16%, var(--cx-bg));
+        }
+        .clustrix-pill-error {
+            color: var(--cx-err);
+            background: color-mix(in srgb, var(--cx-err) 16%, var(--cx-bg));
+        }
 
         /* Body and sections --------------------------------------------- */
         .clustrix-body {
             padding: 14px !important;
             box-sizing: border-box;
+            overflow-x: hidden;
         }
+        /* ipywidgets gives every box a default min-width, which makes a row
+           wider than its container and puts a scrollbar inside the card. */
+        .clustrix-widget .widget-box,
+        .clustrix-widget .widget-hbox,
+        .clustrix-widget .widget-vbox { min-width: 0 !important; }
+        .clustrix-row { max-width: 100%; overflow: hidden; }
         .clustrix-section { margin-bottom: 16px !important; }
         .clustrix-section:last-child { margin-bottom: 0 !important; }
 
@@ -209,7 +227,25 @@ class ModernClustrixWidget:
         }
         /* ipywidgets renders every control with a label slot; the labels are
            our own HTML above the field, so reclaim the space. */
-        .clustrix-widget .widget-label { display: none !important; }
+        /* Our own labels sit above each field, so ipywidgets' label slot is
+           dead space -- except in the Advanced panel, where some controls
+           still carry a description. Those must follow the theme: ipywidgets
+           colours them from --jp-widgets-label-color, which stays black on a
+           dark background. */
+        .clustrix-widget .widget-label:empty { display: none !important; }
+        .clustrix-widget .widget-label { color: var(--cx-fg-muted) !important; }
+
+        /* Advanced panel ------------------------------------------------- */
+        .clustrix-advanced { border-top: 1px solid var(--cx-rule); padding-top: 12px !important; }
+        .clustrix-advanced .widget-gridbox { max-width: 100%; overflow-x: auto; }
+        .clustrix-advanced textarea {
+            background: var(--cx-bg);
+            color: var(--cx-fg);
+            border: 1px solid var(--cx-border) !important;
+            border-radius: 3px !important;
+            font-family: var(--cx-mono) !important;
+            font-size: 12px !important;
+        }
         .clustrix-widget .clustrix-mono input { font-family: var(--cx-mono) !important; font-size: 12px !important; }
 
         /* Buttons -------------------------------------------------------- */
@@ -235,6 +271,16 @@ class ModernClustrixWidget:
         }
         .clustrix-widget .widget-button.clustrix-button-secondary:hover {
             background-color: var(--cx-bg-sunken) !important;
+        }
+        /* Square icon buttons (+, -). The 11px side padding that suits a
+           worded button leaves a 30px one with 8px of room, so "+" rendered
+           as "+...". */
+        .clustrix-widget .widget-button.clustrix-button-icon {
+            padding: 0 !important;
+            width: 26px !important;
+            min-width: 26px !important;
+            font-size: 14px !important;
+            line-height: 1 !important;
         }
 
         /* Actions row ---------------------------------------------------- */
@@ -330,7 +376,8 @@ class ModernClustrixWidget:
             tooltip="Clone current profile and append ' (copy)'",
             layout=widgets.Layout(width="30px", height="35px"),
         )
-        self.widgets["add_profile_btn"].add_class("clustrix-button")
+        self.widgets["add_profile_btn"].add_class("clustrix-button-secondary")
+        self.widgets["add_profile_btn"].add_class("clustrix-button-icon")
 
         # 1.4 Remove Profile Button (−)
         self.widgets["remove_profile_btn"] = widgets.Button(
@@ -338,7 +385,8 @@ class ModernClustrixWidget:
             tooltip="Remove current profile",
             layout=widgets.Layout(width="30px", height="35px"),
         )
-        self.widgets["remove_profile_btn"].add_class("clustrix-button")
+        self.widgets["remove_profile_btn"].add_class("clustrix-button-secondary")
+        self.widgets["remove_profile_btn"].add_class("clustrix-button-icon")
 
         # Profile row container (Row 1) with proper spacing
         self.widgets["profile_row"] = widgets.HBox(
@@ -398,7 +446,7 @@ class ModernClustrixWidget:
 
         # 2.6 Test Connect Button - full connection workflow
         self.widgets["test_connect_btn"] = widgets.Button(
-            description="Test connect",
+            description="Test connection",
             tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
             layout=widgets.Layout(width="130px", height="35px"),
         )
@@ -406,7 +454,7 @@ class ModernClustrixWidget:
 
         # 2.7 Test Submit Button - complete job submission test
         self.widgets["test_submit_btn"] = widgets.Button(
-            description="Test submit",
+            description="Test job submission",
             tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
             layout=widgets.Layout(width="130px", height="35px"),
         )
@@ -639,89 +687,78 @@ class ModernClustrixWidget:
             layout=widgets.Layout(height="100px"),
         )
 
-        # Create 19-column GridBox layouts with spacers
-        # Row 1: XAAAABBCCCCDDDEEEFX (X + A(4) + B(2) + C(4) + D(3) + E(3) + F(1) + X)
-        spacer1_1 = widgets.HTML("")  # X: border column 1
-        spacer1_19 = widgets.HTML("")  # X: border column 19
+        # The advanced panel is laid out with the same label-above-field rows
+        # as the rest of the widget. It used to be three 19-column GridBoxes
+        # with spacer columns and side labels; those labels wrapped to two
+        # lines, ipywidgets coloured them from --jp-widgets-label-color (black,
+        # even in the dark theme), and the fixed columns overflowed the card by
+        # ~380px, putting two horizontal scrollbars inside it.
+        for key in ("package_manager", "python_executable", "env_vars", "modules"):
+            self.widgets[key].layout.height = "26px"
+        for key in ("env_vars_add", "env_vars_remove", "modules_add", "modules_remove"):
+            self.widgets[key].layout = widgets.Layout(width="26px", height="26px")
+            self.widgets[key].add_class("clustrix-button-secondary")
+            self.widgets[key].add_class("clustrix-button-icon")
 
-        advanced_row1 = widgets.GridBox(
+        advanced_row1 = widgets.HBox(
             [
-                spacer1_1,  # X: column 1
-                package_manager_label,  # A: columns 2-5 (4 cols)
-                self.widgets["package_manager"],  # B: columns 6-7 (2 cols)
-                python_exec_label,  # C: columns 8-11 (4 cols)
-                self.widgets["python_executable"],  # D: columns 12-14 (3 cols)
-                clone_env_label,  # E: columns 15-17 (3 cols)
-                self.widgets["clone_env"],  # F: column 18 (1 col)
-                spacer1_19,  # X: column 19
+                self._field(
+                    "Package manager", self.widgets["package_manager"], flex="1 1 0"
+                ),
+                self._field(
+                    "Python executable",
+                    self.widgets["python_executable"],
+                    flex="1 1 0",
+                ),
+                self._field(
+                    "Replicate local env", self.widgets["clone_env"], width="150px"
+                ),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="1fr 4fr 2fr 4fr 3fr 3fr 1fr 1fr",
-                grid_gap="2px",
-                align_items="center",
-                margin="5px 0px",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
+        advanced_row1.add_class("clustrix-row")
 
-        # Row 2: XGGGGHHHHIKKKLLLMNX (X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X)
-        # Pattern: X + G(4) + H(4) + I(1) + J(1) + K(3) + L(3) + M(1) + N(1) + X
-        # That's 1 + 4 + 4 + 1 + 1 + 3 + 3 + 1 + 1 = 19 columns total
-        spacer2_1 = widgets.HTML("")  # X: border column 1
-
-        advanced_row2 = widgets.GridBox(
+        advanced_row2 = widgets.HBox(
             [
-                spacer2_1,  # X: column 1
-                env_vars_label,  # G: columns 2-5 (4 cols)
-                self.widgets["env_vars"],  # H: columns 6-9 (4 cols)
-                self.widgets["env_vars_add"],  # I: column 10 (1 col)
-                self.widgets["env_vars_remove"],  # J: column 11 (1 col)
-                modules_label,  # K: columns 12-14 (3 cols)
-                self.widgets["modules"],  # L: columns 15-17 (3 cols)
-                self.widgets["modules_add"],  # M: column 18 (1 col)
-                self.widgets["modules_remove"],  # N: column 19 (1 col)
+                self._field(
+                    "Environment variables", self.widgets["env_vars"], flex="1 1 0"
+                ),
+                self._field("", self.widgets["env_vars_add"], width="26px"),
+                self._field("", self.widgets["env_vars_remove"], width="26px"),
+                self._field("Modules", self.widgets["modules"], flex="1 1 0"),
+                self._field("", self.widgets["modules_add"], width="26px"),
+                self._field("", self.widgets["modules_remove"], width="26px"),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="1fr 4fr 4fr 1fr 1fr 3fr 3fr 1fr 1fr",
-                grid_gap="2px",
-                align_items="center",
-                margin="5px 0px",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
+        advanced_row2.add_class("clustrix-row")
 
-        # Row 3: XOOOOPPPPPPPPPPPPPX (X + O(4) + P(13) + X)
-        # Row 4: XQQQQPPPPPPPPPPPPPX (X + Q(4) + P(13) + X) - Q is empty, P continues
-        spacer3_1 = widgets.HTML("")  # X: border column 1
-        spacer3_19 = widgets.HTML("")  # X: border column 19
-
-        advanced_row3 = widgets.GridBox(
+        self.widgets["pre_exec_commands"].layout = widgets.Layout(
+            width="100%", height="86px"
+        )
+        advanced_row3 = widgets.HBox(
             [
-                spacer3_1,  # X: column 1
-                pre_exec_label,  # O: columns 2-5 (4 cols)
-                self.widgets["pre_exec_commands"],  # P: columns 6-18 (13 cols)
-                spacer3_19,  # X: column 19
+                self._field(
+                    "Pre-execution commands",
+                    self.widgets["pre_exec_commands"],
+                    flex="1 1 0",
+                ),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="1fr 4fr 13fr 1fr",
-                grid_gap="2px",
-                align_items="flex-start",  # Align to top for textarea
-                margin="5px 0px",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
+        advanced_row3.add_class("clustrix-row")
 
-        # Advanced section container (initially hidden)
         self.widgets["advanced_section"] = widgets.VBox(
             [
+                self._section_heading("Advanced"),
                 advanced_row1,
                 advanced_row2,
                 advanced_row3,
             ],
-            layout=widgets.Layout(
-                display="none",
-                padding="10px",
-                border="1px solid #dee2e6",
-                margin="10px 0px",
-            ),
+            layout=widgets.Layout(display="none", width="100%"),
         )
+        self.widgets["advanced_section"].add_class("clustrix-section")
+        self.widgets["advanced_section"].add_class("clustrix-advanced")
 
     def _create_remote_section(self) -> None:
         """Create remote cluster configuration section according to specification."""
@@ -865,9 +902,9 @@ class ModernClustrixWidget:
         # and several tests refer to them by name.
         connection_row = widgets.HBox(
             [
-                self._field("Host", self.widgets["host"], width="100%"),
-                self._field("Port", self.widgets["port"], width="80px"),
-                self._field("Username", self.widgets["username"], width="150px"),
+                self._field("Host", self.widgets["host"], flex="2 1 0"),
+                self._field("Port", self.widgets["port"], flex="0.6 1 0"),
+                self._field("Username", self.widgets["username"], flex="1.4 1 0"),
             ],
             layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
@@ -875,8 +912,8 @@ class ModernClustrixWidget:
 
         auth_row = widgets.HBox(
             [
-                self._field("SSH key file", self.widgets["ssh_key_file"], width="100%"),
-                self._field("Password", self.widgets["password"], width="170px"),
+                self._field("SSH key file", self.widgets["ssh_key_file"], flex="2 1 0"),
+                self._field("Password", self.widgets["password"], flex="1 1 0"),
             ],
             layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
@@ -931,8 +968,8 @@ class ModernClustrixWidget:
 
         hf_row = widgets.HBox(
             [
-                self._field("Namespace", self.widgets["hf_namespace"], width="100%"),
-                self._field("Flavor", self.widgets["hf_flavor"], width="170px"),
+                self._field("Namespace", self.widgets["hf_namespace"], flex="2 1 0"),
+                self._field("Flavor", self.widgets["hf_flavor"], flex="1 1 0"),
             ],
             layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
@@ -993,7 +1030,12 @@ class ModernClustrixWidget:
         return heading
 
     @staticmethod
-    def _field(label: str, control: "widgets.Widget", width: str = "auto"):
+    def _field(
+        label: str,
+        control: "widgets.Widget",
+        width: str = "auto",
+        flex: str = "",
+    ):
         """A control with its label above it, not beside it.
 
         Labels above are what makes the full button text fit: the row no
@@ -1009,15 +1051,27 @@ class ModernClustrixWidget:
         # the flex row shrinks these to fit whatever the stretchy field wants,
         # which is how a 66px "Save" button ended up 40px wide and rendered
         # as "S...".
-        if width in ("auto", "100%"):
-            flex = "1 1 auto"
+        if flex:
+            # Proportional: keeps the artboard's column ratios at any width,
+            # and every column shrinks together instead of the stretchy one
+            # being starved to zero.
+            resolved_flex, resolved_width = flex, "auto"
+        elif width in ("auto", "100%"):
+            resolved_flex, resolved_width = "1 1 auto", width
         else:
-            flex = f"0 0 {width}"
+            # A fixed width is a floor, not a suggestion: without `0 0` the
+            # row shrinks these, which rendered a 66px "Save" button at 40px
+            # as "S...".
+            resolved_flex, resolved_width = f"0 0 {width}", width
 
         return widgets.VBox(
             [caption, control],
             layout=widgets.Layout(
-                width=width, flex=flex, margin="0", overflow="hidden"
+                width=resolved_width,
+                flex=resolved_flex,
+                min_width="0",
+                margin="0",
+                overflow="hidden",
             ),
         )
 
@@ -1050,10 +1104,10 @@ class ModernClustrixWidget:
         profile_row = widgets.HBox(
             [
                 self._field(
-                    "Active profile", self.widgets["profile_dropdown"], width="100%"
+                    "Active profile", self.widgets["profile_dropdown"], flex="2 1 0"
                 ),
-                self._field("", self.widgets["add_profile_btn"], width="42px"),
-                self._field("", self.widgets["remove_profile_btn"], width="42px"),
+                self._field("", self.widgets["add_profile_btn"], width="26px"),
+                self._field("", self.widgets["remove_profile_btn"], width="26px"),
                 self._field(
                     "Configuration file", self.widgets["config_filename"], width="200px"
                 ),
@@ -1073,10 +1127,10 @@ class ModernClustrixWidget:
         # -- resources -------------------------------------------------------
         resources_row = widgets.HBox(
             [
-                self._field("Cluster type", self.widgets["cluster_type"], width="100%"),
-                self._field("CPUs", self.widgets["cpus"], width="90px"),
-                self._field("Memory", self.widgets["ram"], width="110px"),
-                self._field("Walltime", self.widgets["time"], width="120px"),
+                self._field("Cluster type", self.widgets["cluster_type"], flex="2 1 0"),
+                self._field("CPUs", self.widgets["cpus"], flex="1 1 0"),
+                self._field("Memory", self.widgets["ram"], flex="1 1 0"),
+                self._field("Walltime", self.widgets["time"], flex="1.2 1 0"),
             ],
             layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
@@ -1550,13 +1604,11 @@ class ModernClustrixWidget:
         if self.advanced_settings_visible:
             # Hide advanced settings
             self.widgets["advanced_section"].layout.display = "none"
-            button.icon = "caret-down"
             button.description = "Advanced settings"
             self.advanced_settings_visible = False
         else:
             # Show advanced settings
             self.widgets["advanced_section"].layout.display = "block"
-            button.icon = "caret-up"
             button.description = "Hide advanced"
             self.advanced_settings_visible = True
 
