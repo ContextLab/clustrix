@@ -210,7 +210,9 @@ class TestAzureAKSFromScratchProvisioning:
             ), f"Provisioning took too long: {provision_time:.1f}s (max: 1800s)"
             assert cluster_info["ready_for_jobs"] is True
 
-            logger.info(f"⏱️ Performance test completed in {provision_time:.1f} seconds")
+            logger.info(
+                f"⏱️ Performance test completed in {provision_time:.1f} seconds"
+            )
 
             # Cleanup
             provisioner.destroy_cluster(spec.cluster_name, "azure")

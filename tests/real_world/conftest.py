@@ -11,7 +11,6 @@ import subprocess
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
 
-
 # Create global test manager instance
 test_manager = RealWorldTestManager()
 

@@ -70,7 +70,7 @@ setup(
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
-            "black>=21.0",
+            "black>=26.3.1",  # earlier releases have an arbitrary-file-write advisory
             "flake8>=3.8",
             "mypy>=0.812",
         ],
@@ -115,7 +115,7 @@ setup(
             # Development dependencies
             "pytest>=6.0",
             "pytest-cov>=2.0",
-            "black>=21.0",
+            "black>=26.3.1",  # earlier releases have an arbitrary-file-write advisory
             "flake8>=3.8",
             "mypy>=0.812",
             # Documentation dependencies

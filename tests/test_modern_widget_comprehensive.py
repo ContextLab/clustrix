@@ -659,8 +659,7 @@ class TestFileOperations:
 
         # Create a test file first
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            f.write(
-                """
+            f.write("""
 active_profile: Test Profile
 profiles:
   Test Profile:
@@ -668,8 +667,7 @@ profiles:
     default_cores: 4
     default_memory: 8GB
     default_time: 01:30:00
-"""
-            )
+""")
             test_file = f.name
 
         try:

@@ -3,7 +3,6 @@
 Test the new advanced function flattening with dependency resolution.
 """
 
-
 from clustrix.function_flattening import (
     AdvancedFunctionFlattener,
     auto_flatten_if_needed,

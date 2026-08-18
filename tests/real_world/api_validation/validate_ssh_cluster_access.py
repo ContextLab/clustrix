@@ -18,7 +18,9 @@ from datetime import datetime
 # Add the clustrix package to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
+# Imported after the path is set, which is the point of this script running
+# standalone against a checkout.
+from clustrix.secure_credentials import ValidationCredentials  # noqa: E402
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -628,7 +630,9 @@ def main():
                     f"   {'✅' if status == 'PASSED' else '⚠️'} {test_name}: {status} ({success_rate*100:.1f}%)"
                 )
             elif result == {}:
-                print(f"   ⚠️  {test_name}: No schedulers detected (regular SSH server)")
+                print(
+                    f"   ⚠️  {test_name}: No schedulers detected (regular SSH server)"
+                )
             else:
                 print(f"   ❌ {test_name}: FAILED")
 

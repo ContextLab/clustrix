@@ -1,19 +1,22 @@
+# The default `python3` on a developer machine can be older than this project
+# supports: here it is 3.9.13, while pyproject requires >=3.10. Hooks were
+# therefore building their environments on an interpreter the project does not
+# target, which surfaced when black 26.3.1 (the release that fixes a
+# high-severity advisory) refused to install on 3.9.
+default_language_version:
+  python: python3.12
+
+# The psf/black hook below both formats and fails when it changed something,
+# so a separate auto-format step is redundant. Worse, that step ran with
+# `language: system` -- whatever black happened to be on PATH, 25.11.0 here
+# against the pinned 26.3.1 -- so the two formatted differently and each
+# rewrote the other's output. No commit could satisfy both hooks.
 repos:
-  - repo: local
-    hooks:
-      - id: auto-format
-        name: Auto-format with black (auto-fix)
-        entry: python scripts/pre_commit_auto_format.py
-        language: system
-        files: ^(clustrix/|tests/).*\.py$
-        pass_filenames: false
-        
   - repo: https://github.com/psf/black
-    rev: 25.1.0  # Use same version as local environment
+    rev: 26.3.1  # Use same version as local environment
     hooks:
       - id: black
         name: Black formatting verification
-        language_version: python3
         files: ^(clustrix/|tests/)
         
   - repo: https://github.com/pycqa/flake8

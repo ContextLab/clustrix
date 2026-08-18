@@ -93,7 +93,8 @@ dev = [
     # them those modules raise ModuleNotFoundError during collection (see #130).
     "numpy>=1.19",
     "pandas>=1.1",
-    "black==25.1.0",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
+    "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
+    # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8", 
     "mypy>=0.812",
     "types-PyYAML",
@@ -152,7 +153,8 @@ all = [
     # Development dependencies
     "pytest>=6.0",
     "pytest-cov>=2.0",
-    "black==25.1.0",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
+    "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
+    # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8",
     "mypy>=0.812",
     # Documentation dependencies

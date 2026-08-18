@@ -44,8 +44,7 @@ def takes_local_instance(widget):
 def _round_trip(func, args):
     """Deserialize and call in an interpreter that cannot import the package."""
     data = serialize_function(func, args, {})
-    program = textwrap.dedent(
-        """
+    program = textwrap.dedent("""
         import sys, base64
         import cloudpickle, dill
 
@@ -58,8 +57,7 @@ def _round_trip(func, args):
         func = load(base64.b64decode(sys.argv[1]))
         args = load(base64.b64decode(sys.argv[2]))
         print(repr(func(*args)))
-        """
-    )
+        """)
     import base64
 
     result = subprocess.run(
