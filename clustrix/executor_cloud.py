@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import paramiko
 import cloudpickle
-import pickle
+import dill
 
 if TYPE_CHECKING:
     from .cloud_providers.base import CloudProvider
@@ -355,7 +355,10 @@ class CloudJobManager:
             try:
                 sftp_client.get(result_path, temp_result_path)
                 with open(temp_result_path, "rb") as f:
-                    result = pickle.load(f)
+                    # dill: the worker wrote this with dill, and stdlib
+                    # pickle would rebuild __main__ classes instead of reusing
+                    # the caller's.
+                    result = dill.load(f)
             finally:
                 os.unlink(temp_result_path)
 

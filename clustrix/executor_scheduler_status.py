@@ -7,7 +7,8 @@ HPC scheduler jobs (SLURM, PBS, SGE).
 import os
 import time
 import tempfile
-import pickle
+import dill
+
 import logging
 from typing import Dict, Any, Optional
 
@@ -645,7 +646,9 @@ class SchedulerStatusManager:
                 self.connection_manager.download_file(error_pkl_path, local_error_path)
 
                 with open(local_error_path, "rb") as f:
-                    error_data = pickle.load(f)
+                    # dill: matches how the stages write it, and keeps
+                    # a custom exception class bound to the caller's own.
+                    error_data = dill.load(f)
 
                 os.unlink(local_error_path)
 
@@ -746,7 +749,9 @@ class SchedulerStatusManager:
                 self.connection_manager.download_file(error_pkl_path, local_error_path)
 
                 with open(local_error_path, "rb") as f:
-                    error_data = pickle.load(f)
+                    # dill: matches how the stages write it, and keeps
+                    # a custom exception class bound to the caller's own.
+                    error_data = dill.load(f)
 
                 os.unlink(local_error_path)
 

@@ -9,6 +9,7 @@ import shlex
 import hmac
 import time
 import tempfile
+import dill
 import pickle
 import logging
 from typing import Any, Dict, Optional
@@ -242,7 +243,13 @@ class ClusterExecutor:
                         payload = f.read()
 
                     self._verify_result_signature(job_id, remote_dir, payload)
-                    result = pickle.loads(payload)
+                    # dill, not stdlib pickle, because the worker wrote
+                    # this with dill. Replaying dill's reconstruction opcodes
+                    # through stdlib pickle builds a *fresh* class for anything
+                    # defined in the caller's __main__, so a returned instance
+                    # failed isinstance() against the very class that defined
+                    # it. dill's loader reuses the existing one.
+                    result = dill.loads(payload)
 
                     # Cleanup
                     if self.config.cleanup_on_success:
