@@ -4,7 +4,7 @@ import json
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from dataclasses import asdict
+from dataclasses import asdict, fields as dataclass_fields
 
 from .config import ClusterConfig
 
@@ -15,7 +15,15 @@ class ProfileManager:
     def __init__(self, config_dir: str = "~/.clustrix/profiles"):
         """Initialize ProfileManager with default or custom config directory."""
         self.config_dir = Path(config_dir).expanduser()
-        self.config_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.config_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            # An unwritable config directory must not stop the widget from
+            # opening. Profiles then live for the session only, and _persist
+            # reports the same problem when it tries to save.
+            import warnings
+
+            warnings.warn(f"Cannot create profile directory {self.config_dir}: {e}")
 
         self.profiles: Dict[str, ClusterConfig] = {}
         self.active_profile: Optional[str] = None
@@ -179,6 +187,7 @@ class ProfileManager:
 
         self.profiles[new_name] = new_config
         self.active_profile = new_name
+        self._persist()
         return new_name
 
     def remove_profile(self, name: str) -> None:
@@ -272,40 +281,50 @@ class ProfileManager:
                 yaml.dump(data, f, default_flow_style=False, indent=2)
 
     def load_from_file(self, filepath: str) -> None:
-        """Load profiles from a configuration file, replacing current profiles."""
+        """Replace the current profiles with those in `filepath`.
+
+        Built either way or not at all. This used to clear self.profiles and
+        then populate it entry by entry, so a single unreadable profile left
+        the manager holding a partial set with the built-in templates gone and
+        active_profile naming something that no longer existed.
+        """
         filepath_obj = Path(filepath)
-
         if not filepath_obj.exists():
-            raise FileNotFoundError(f"Configuration file '{filepath}' not found")
+            raise FileNotFoundError(f"Configuration file not found: {filepath}")
 
-        # Load based on file extension
-        data: Any
-        if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "r") as f:
+        with open(filepath_obj) as f:
+            if filepath_obj.suffix.lower() == ".json":
                 data = json.load(f)
-        else:  # Assume YAML
-            with open(filepath_obj, "r") as f:
+            else:
                 data = yaml.safe_load(f)
 
-        if not isinstance(data, dict) or "profiles" not in data:
-            raise ValueError("Invalid configuration file format")
+        if not isinstance(data, dict):
+            raise ValueError(f"{filepath} does not contain a profile bundle")
 
-        # Clear current profiles
-        self.profiles.clear()
+        loaded: Dict[str, ClusterConfig] = {}
+        for name, config_dict in (data.get("profiles") or {}).items():
+            if not isinstance(config_dict, dict):
+                raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
+            known = {f.name for f in dataclass_fields(ClusterConfig)}
+            unknown = set(config_dict) - known
+            if unknown:
+                raise ValueError(
+                    f"Profile {name!r} in {filepath} has unknown setting(s): "
+                    f"{', '.join(sorted(unknown))}"
+                )
+            loaded[name] = ClusterConfig(**config_dict)
 
-        # Load profiles
-        for name, config_dict in data["profiles"].items():
-            config = ClusterConfig(**config_dict)
-            self.profiles[name] = config
+        if not loaded:
+            raise ValueError(f"{filepath} contains no profiles")
 
-        # Set active profile
-        self.active_profile = data.get("active_profile")
-        if self.active_profile not in self.profiles and self.profiles:
-            self.active_profile = next(iter(self.profiles.keys()))
-
-        # Ensure we have at least one profile
-        if not self.profiles:
-            self._load_default_profiles()
+        # Swap in only once everything parsed.
+        self.profiles = loaded
+        active = data.get("active_profile")
+        # An active profile naming something absent would make
+        # get_active_profile() return None for the rest of the session.
+        self.active_profile = (
+            active if active in self.profiles else next(iter(self.profiles))
+        )
 
     def export_profile(self, profile_name: str, filepath: str) -> None:
         """Export a single profile to a file."""
@@ -357,4 +376,5 @@ class ProfileManager:
         self.profiles[profile_name] = config
         self.active_profile = profile_name
 
+        self._persist()
         return profile_name

@@ -31,10 +31,15 @@ def isolated_profile_store(tmp_path, monkeypatch):
 
 
 def _profile_manager_init(directory):
+    """Default to a throwaway directory, but honour an explicit one.
+
+    Tests that construct a store deliberately -- to corrupt it, or to check it
+    survives a restart -- must reach their own directory, not this default.
+    """
     original = ProfileManager.__init__
 
     def patched(self, config_dir=None):
-        original(self, config_dir=str(directory))
+        original(self, config_dir=config_dir or str(directory))
 
     return patched
 
@@ -401,3 +406,171 @@ class TestApplyTouchesOnlyWhatItOwns:
 
         known = {f.name for f in dataclass_fields(ClusterConfig)}
         assert set(WIDGET_MANAGED_FIELDS) <= known
+
+
+class TestOpeningTheWidgetIsSafe:
+    """Constructing the widget scans directories and touches the store."""
+
+    def test_a_broken_symlink_in_the_working_directory(self, tmp_path, monkeypatch):
+        """Sorting by mtime outside the try raised before the widget opened."""
+        (tmp_path / "broken.yml").symlink_to(tmp_path / "nonexistent")
+        monkeypatch.chdir(tmp_path)
+
+        assert ModernClustrixWidget() is not None
+
+    def test_a_fifo_named_like_a_config_file(self, tmp_path, monkeypatch):
+        """The size check passed and open() then blocked forever, with no
+        writer, so the constructor never returned."""
+        import os
+
+        os.mkfifo(tmp_path / "pipe.yml")
+        monkeypatch.chdir(tmp_path)
+
+        assert ModernClustrixWidget() is not None
+
+    def test_it_does_not_overwrite_a_saved_current_configuration(self, tmp_path):
+        """That profile can hold a token the live config does not, and losing
+        it to merely opening the widget is the worst kind of surprise."""
+        import clustrix
+        from clustrix.profile_manager import ProfileManager as PM
+
+        store = str(tmp_path / "store")
+        first = PM(config_dir=store)
+        first.save_profile(
+            "Current configuration",
+            ClusterConfig(cluster_type="huggingface", hf_token="MYTOKEN"),
+        )
+
+        clustrix.configure(cluster_type="local", default_cores=4)
+        ModernClustrixWidget(profile_manager=PM(config_dir=store))
+
+        assert (
+            PM(config_dir=store).load_profile("Current configuration").hf_token
+            == "MYTOKEN"
+        )
+
+
+class TestTheStoreSurvivesBadInput:
+    def test_a_corrupt_profile_does_not_wipe_the_built_ins(self, tmp_path):
+        """Clearing then repopulating meant one bad entry left a partial set
+        with the templates gone and active_profile naming nothing."""
+        import warnings
+
+        from clustrix.profile_manager import ProfileManager as PM
+
+        store = tmp_path / "store"
+        store.mkdir()
+        (store / "profiles.yml").write_text(
+            "active_profile: A\nprofiles:\n  A: {cluster_type: ssh}\n  B: {nope: 1}\n"
+        )
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            manager = PM(config_dir=str(store))
+
+        assert set(manager.get_profile_names()) >= set(PM.BUILTIN_PROFILES)
+        assert manager.active_profile in manager.get_profile_names()
+        assert caught, "a store that could not be read should say so"
+
+    def test_active_profile_always_names_something_that_exists(self, tmp_path):
+        from clustrix.profile_manager import ProfileManager as PM
+
+        store = tmp_path / "store"
+        store.mkdir()
+        (store / "profiles.yml").write_text(
+            "active_profile: Gone\nprofiles:\n  A: {cluster_type: ssh}\n"
+        )
+
+        manager = PM(config_dir=str(store))
+        assert manager.get_active_profile() is not None
+
+    def test_an_unwritable_config_directory_does_not_stop_the_widget(self, tmp_path):
+        import warnings
+
+        from clustrix.profile_manager import ProfileManager as PM
+
+        blocked = tmp_path / "blocked"
+        blocked.write_text("not a directory")
+
+        with warnings.catch_warnings(record=True):
+            warnings.simplefilter("always")
+            manager = PM(config_dir=str(blocked / "profiles"))
+
+        assert manager.get_profile_names()
+
+    def test_a_cloned_profile_survives_a_restart(self, tmp_path):
+        """The + button's output was held in memory only."""
+        from clustrix.profile_manager import ProfileManager as PM
+
+        store = str(tmp_path / "store")
+        widget = ModernClustrixWidget(profile_manager=PM(config_dir=store))
+        widget._on_add_profile(widget.widgets["add_profile_btn"])
+        clone = widget.widgets["profile_dropdown"].value
+
+        assert clone in PM(config_dir=store).get_profile_names()
+
+
+class TestPasswordAuthenticationIsReachable:
+    def test_no_placeholder_key_file_is_written(self):
+        """`~/.ssh/id_rsa` was pre-filled as a real value, and the connection
+        code tries key_file first, so a typed password was never used."""
+        import clustrix
+
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["host"].value = "a.edu"
+        widget.widgets["username"].value = "alice"
+        widget.widgets["password"].value = "s3cret"
+
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert clustrix.get_config().key_file is None
+        assert clustrix.get_config().password == "s3cret"
+
+
+class TestGlancingAtAnotherBackend:
+    def test_it_does_not_erase_the_profile_being_left(self, tmp_path):
+        """Collection was gated on the current cluster type, so flipping the
+        menu before switching profiles dropped the remote settings."""
+        from clustrix.profile_manager import ProfileManager as PM
+
+        manager = PM(config_dir=str(tmp_path / "store"))
+        manager.save_profile(
+            "myssh",
+            ClusterConfig(
+                cluster_type="ssh",
+                cluster_host="h.edu",
+                username="bob",
+                remote_work_dir="/scratch/bob",
+            ),
+        )
+        manager.save_profile("other", ClusterConfig(cluster_type="local"))
+        widget = ModernClustrixWidget(profile_manager=manager)
+
+        widget.widgets["profile_dropdown"].value = "myssh"
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["profile_dropdown"].value = "other"
+
+        kept = manager.load_profile("myssh")
+        assert (kept.cluster_host, kept.username) == ("h.edu", "bob")
+        assert kept.remote_work_dir == "/scratch/bob"
+
+    def test_apply_does_not_send_a_local_job_to_a_cluster(self):
+        """_choose_execution_mode routes on cluster_host, so a leftover host
+        would make a 'local' configuration run remotely."""
+        import clustrix
+
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["host"].value = "login.example.edu"
+        widget.widgets["username"].value = "alice"
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert not clustrix.get_config().cluster_host

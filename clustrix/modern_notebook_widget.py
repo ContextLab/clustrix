@@ -136,8 +136,23 @@ class ModernClustrixWidget:
         self._suspend_profile_capture = True
         try:
             if asdict(live) != asdict(ClusterConfig()):
-                self.profile_manager.save_profile(LIVE_PROFILE_NAME, live)
-                self.profile_manager.active_profile = LIVE_PROFILE_NAME
+                # Never overwrite a profile of this name left by an earlier
+                # session: it may hold a token and settings the live config
+                # does not, and losing those to merely opening the widget is
+                # the worst kind of surprise.
+                name = LIVE_PROFILE_NAME
+                existing = self.profile_manager.get_profile_names()
+                if name in existing and asdict(
+                    self.profile_manager.load_profile(name)
+                ) != asdict(live):
+                    suffix = 2
+                    while f"{name} ({suffix})" in existing:
+                        suffix += 1
+                    name = f"{name} ({suffix})"
+                self.profile_manager.save_profile(name, live)
+                # set_active_profile, not assignment: assigning left the store
+                # recording the previous active profile.
+                self.profile_manager.set_active_profile(name)
                 self._update_profile_dropdown()
                 self._load_config_to_widgets(live)
                 return
@@ -1596,7 +1611,17 @@ class ModernClustrixWidget:
                 ]
             except OSError:
                 continue
-            for path in sorted(entries, key=lambda p: -p.stat().st_mtime):
+
+            # A broken symlink has no st_mtime, and sorting outside the try
+            # meant one in the working directory raised FileNotFoundError
+            # before the widget could open.
+            def _age(path: Path) -> float:
+                try:
+                    return -path.stat().st_mtime
+                except OSError:
+                    return 0.0
+
+            for path in sorted(entries, key=_age):
                 if not self._looks_like_a_profile_bundle(path):
                     continue
                 label = str(path) if keep_full_path else path.name
@@ -1617,7 +1642,12 @@ class ModernClustrixWidget:
         Cheap to check: the files are small and there are few of them.
         """
         try:
-            if path.stat().st_size > 5_000_000:
+            # is_file() first: a FIFO named *.yml passed the size check and
+            # then blocked forever in open(), with no writer, so constructing
+            # the widget never returned. It also rejects directories and
+            # devices. 256KB is generous for a profile bundle -- the old 5MB
+            # ceiling let a 1.7MB YAML cost eight seconds of startup.
+            if not path.is_file() or path.stat().st_size > 256_000:
                 return False
             with open(path) as handle:
                 if path.suffix.lower() == ".json":
@@ -1745,7 +1775,7 @@ class ModernClustrixWidget:
                 # timeouts a user can only set from code.
                 defaults = asdict(ClusterConfig())
                 applied = {field: defaults[field] for field in WIDGET_MANAGED_FIELDS}
-                applied.update(self._config_data_from_widgets())
+                applied.update(self._config_data_for_backend())
                 configure(**applied)
 
                 print("✅ Applied configuration")
@@ -2141,6 +2171,48 @@ class ModernClustrixWidget:
 
         return problems
 
+    #: Fields that only mean something for particular backends. A profile
+    #: keeps all of them so nothing is lost while editing, but the applied
+    #: configuration must not carry them into a backend that ignores them --
+    #: _choose_execution_mode routes on cluster_host, so a leftover host would
+    #: send a "local" job to a cluster.
+    BACKEND_ONLY_FIELDS = {
+        ("ssh", "slurm", "pbs", "sge"): (
+            "cluster_host",
+            "cluster_port",
+            "username",
+            "password",
+            "key_file",
+            "password_env_var",
+            "use_env_password",
+            "remote_work_dir",
+        ),
+        ("kubernetes",): (
+            "k8s_namespace",
+            "k8s_image",
+            "k8s_service_account",
+            "k8s_pull_policy",
+        ),
+        ("huggingface",): (
+            "hf_namespace",
+            "hf_flavor",
+            "hf_token",
+            "hf_allow_gpu_flavors",
+        ),
+    }
+
+    def _config_data_for_backend(self) -> Dict[str, Any]:
+        """What is on screen, with fields the chosen backend does not use
+        reset to their defaults."""
+        data = self._config_data_from_widgets()
+        defaults = asdict(ClusterConfig())
+        cluster_type = data["cluster_type"]
+        for applies_to, field_names in self.BACKEND_ONLY_FIELDS.items():
+            if cluster_type not in applies_to:
+                for name in field_names:
+                    data[name] = defaults[name]
+        return data
+
     def _get_config_from_widgets(self) -> ClusterConfig:
         """The configuration currently shown, as a ClusterConfig."""
         return ClusterConfig(**self._config_data_from_widgets())
@@ -2167,77 +2239,60 @@ class ModernClustrixWidget:
             else []
         )
 
-        # Create config object
+        # Every managed field, every time -- not just the current backend's.
+        # Gating these on cluster_type meant merely glancing at another type
+        # before switching profiles erased the host, username and work
+        # directory from the profile being left. The controls already hold the
+        # selected profile's values, so recording all of them is lossless, and
+        # a local profile carrying an unused host is harmless.
         config_data = {
             "cluster_type": self.widgets["cluster_type"].value,
             "default_cores": self.widgets["cpus"].value,
-            "default_memory": self.widgets["ram"].value,  # Already includes GB
+            "default_memory": self.widgets["ram"].value,
             "default_time": self.widgets["time"].value,
+            # Remote / SSH
+            "cluster_host": self.widgets["host"].value or None,
+            "cluster_port": self.widgets["port"].value,
+            "username": self.widgets["username"].value or None,
+            # Collected and then dropped: connection tests passed the password
+            # explicitly and succeeded, while the job itself authenticated from
+            # config.password and failed.
+            "password": self.widgets["password"].value or None,
+            "key_file": self.widgets["ssh_key_file"].value or None,
+            "password_env_var": self.widgets["local_env_var"].value,
+            # Setting the variable name only takes effect if clustrix is told
+            # to look it up; without the flag the field did nothing at all.
+            "use_env_password": bool(self.widgets["local_env_var"].value),
+            # "Remote work directory" was collected and dropped on the floor --
+            # typing /scratch/alice/clustrix still ran the job in ~/.clustrix.
+            "remote_work_dir": (
+                self.widgets["home_dir"].value.strip()
+                or ClusterConfig().remote_work_dir
+            ),
+            # Kubernetes
+            "k8s_namespace": self.widgets["k8s_namespace"].value or "default",
+            "k8s_image": self.widgets["k8s_image"].value or "python:3.11-slim",
+            "k8s_service_account": self.widgets["k8s_service_account"].value or None,
+            "k8s_pull_policy": self.widgets["k8s_pull_policy"].value,
+            # HuggingFace
+            "hf_namespace": self.widgets["hf_namespace"].value or None,
+            "hf_flavor": self.widgets["hf_flavor"].value,
+            "hf_token": self.widgets["hf_token"].value or None,
+            "hf_allow_gpu_flavors": self.widgets["hf_allow_gpu"].value,
+            # Advanced
+            "package_manager": self.widgets["package_manager"].value,
+            "python_executable": self.widgets["python_executable"].value,
+            # The checkbox had no effect: unticking it still replicated the
+            # local environment on the worker.
+            "replicate_local_environment": bool(self.widgets["clone_env"].value),
+            "environment_variables": env_vars,
+            "module_loads": modules,
+            "pre_execution_commands": (
+                self.widgets["pre_exec_commands"].value.split("\n")
+                if self.widgets["pre_exec_commands"].value
+                else []
+            ),
         }
-
-        # Add remote-specific fields if applicable
-        if self.current_cluster_type in ["ssh", "slurm", "pbs", "sge"]:
-            config_data.update(
-                {
-                    "cluster_host": self.widgets["host"].value,
-                    "cluster_port": self.widgets["port"].value,
-                    "username": self.widgets["username"].value,
-                    "key_file": self.widgets["ssh_key_file"].value,
-                    # Collected from the user and then dropped: connection
-                    # tests passed it explicitly, so Test connect succeeded
-                    # while the actual job failed to authenticate.
-                    "password": self.widgets["password"].value or None,
-                    "password_env_var": self.widgets["local_env_var"].value,
-                    # Setting this only takes effect if clustrix is told to
-                    # look it up; without the flag the field silently did
-                    # nothing at all.
-                    "use_env_password": bool(self.widgets["local_env_var"].value),
-                }
-            )
-            # "Remote work directory" was collected from the user and then
-            # dropped on the floor -- typing /scratch/alice/clustrix into it
-            # still ran the job in ~/.clustrix/jobs.
-            if self.widgets["home_dir"].value.strip():
-                config_data["remote_work_dir"] = self.widgets["home_dir"].value.strip()
-
-        if self.current_cluster_type == "kubernetes":
-            config_data.update(
-                {
-                    "k8s_namespace": self.widgets["k8s_namespace"].value or "default",
-                    "k8s_image": self.widgets["k8s_image"].value or "python:3.11-slim",
-                    "k8s_service_account": self.widgets["k8s_service_account"].value
-                    or None,
-                    "k8s_pull_policy": self.widgets["k8s_pull_policy"].value,
-                }
-            )
-
-        if self.current_cluster_type == "huggingface":
-            config_data.update(
-                {
-                    "hf_namespace": self.widgets["hf_namespace"].value or None,
-                    "hf_flavor": self.widgets["hf_flavor"].value,
-                    "hf_token": self.widgets["hf_token"].value or None,
-                    "hf_allow_gpu_flavors": self.widgets["hf_allow_gpu"].value,
-                }
-            )
-
-        # Add advanced settings
-        config_data.update(
-            {
-                "package_manager": self.widgets["package_manager"].value,
-                "python_executable": self.widgets["python_executable"].value,
-                # The checkbox had no effect: unticking it still replicated the
-                # local environment on the worker.
-                "replicate_local_environment": bool(self.widgets["clone_env"].value),
-                "environment_variables": env_vars,
-                "module_loads": modules,
-                "pre_execution_commands": (
-                    self.widgets["pre_exec_commands"].value.split("\n")
-                    if self.widgets["pre_exec_commands"].value
-                    else []
-                ),
-            }
-        )
 
         return config_data
 
@@ -2269,7 +2324,11 @@ class ModernClustrixWidget:
         self.widgets["port"].value = config.cluster_port or 22
         self.widgets["username"].value = config.username or ""
         self.widgets["password"].value = config.password or ""
-        self.widgets["ssh_key_file"].value = config.key_file or "~/.ssh/id_rsa"
+        # Empty, not "~/.ssh/id_rsa". That placeholder was written back as a
+        # real setting, and executor_connections tries key_file first and only
+        # falls back to a password when it is falsy -- so filling in a password
+        # authenticated against a key file that does not exist.
+        self.widgets["ssh_key_file"].value = config.key_file or ""
         self.widgets["local_env_var"].value = config.password_env_var or ""
         self.widgets["home_dir"].value = config.remote_work_dir or ""
 
