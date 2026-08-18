@@ -17,7 +17,7 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
 - **Automated SSH Key Setup**: Create and deplot SSH keys to enable secure passwordless authentication with one click or API call
-- **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
+- **Interactive Jupyter Widget**: `%%remote` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
 - **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
@@ -78,11 +78,11 @@ Clustrix provides seamless integration with Jupyter notebooks through an interac
 ```python
 import clustrix  # Auto-loads the magic command
 
-# Use the %%clusterfy magic command to open the configuration widget
+# Use the %%remote magic command to open the configuration widget
 ```
 
 ```jupyter
-%%clusterfy
+%%remote
 # Interactive widget appears with:
 # - Dropdown to select configurations
 # - Forms to create/edit cluster setups  
@@ -92,7 +92,7 @@ import clustrix  # Auto-loads the magic command
 
 #### Interactive Configuration Widget
 
-The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks. Here's what you'll see when you use the `%%clusterfy` magic command:
+The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks. Here's what you'll see when you use the `%%remote` magic command:
 
 ##### Default View
 When the widget first loads, it displays the "Local Single-core" configuration for quick testing:

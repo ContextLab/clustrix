@@ -37,7 +37,7 @@ For Jupyter notebook integration with interactive widgets:
    # or
    pip install clustrix ipywidgets pyyaml
 
-This enables the ``%%clusterfy`` magic command for interactive configuration.
+This enables the ``%%remote`` magic command for interactive configuration.
 
 Kubernetes Support
 ~~~~~~~~~~~~~~~~~~
@@ -110,5 +110,5 @@ If you installed notebook support, test the magic command in Jupyter:
    # Magic command should be auto-registered
    
    # In a Jupyter cell:
-   %%clusterfy
+   %%remote
    # Interactive widget should appear

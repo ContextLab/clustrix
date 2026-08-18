@@ -1,7 +1,7 @@
 """
 IPython magic command and widget for Clustrix configuration management.
 
-This module provides a %%clusterfy magic command that creates an interactive
+This module provides a %%remote magic command that creates an interactive
 widget for managing cluster configurations in Jupyter notebooks. The widget
 also displays automatically when clustrix is imported in a notebook environment.
 
@@ -50,7 +50,9 @@ try:
     widgets = _widgets
 except ImportError:
     IPYTHON_AVAILABLE = False
-    from .notebook_magic_mocks import (
+    # mypy sees these as redefinitions of the names bound in the try branch.
+    # That is the point of the fallback: same names, non-IPython implementations.
+    from .notebook_magic_mocks import (  # type: ignore[assignment,no-redef]
         Magics,
         magics_class,
         cell_magic,

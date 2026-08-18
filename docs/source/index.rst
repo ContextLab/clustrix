@@ -20,7 +20,7 @@ Features
 
 - **Simple Decorator Interface**: Just add ``@cluster`` to any function
 - **Advanced Function Packaging**: AST-based dependency analysis replaces pickle limitations
-- **Interactive Jupyter Widget**: ``%%clusterfy`` magic command with GUI configuration manager
+- **Interactive Jupyter Widget**: ``%%remote`` magic command with GUI configuration manager
 - **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH  
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
@@ -82,7 +82,7 @@ For Jupyter notebook users, Clustrix provides an interactive configuration widge
 
 .. code-block:: jupyter
 
-   %%clusterfy
+   %%remote
    # Interactive widget appears with:
    # - Dropdown to select configurations  
    # - Forms to create/edit cluster setups
@@ -96,7 +96,7 @@ The Clustrix widget provides a comprehensive GUI for managing cluster configurat
 
 **Default View**
 
-When you first import clustrix or use the ``%%clusterfy`` magic command, the widget displays with a default "Local Single-core" configuration:
+When you first import clustrix or use the ``%%remote`` magic command, the widget displays with a default "Local Single-core" configuration:
 
 .. image:: _static/img/screenshots/widget_default.png
    :alt: Default widget view showing Local Single-core configuration

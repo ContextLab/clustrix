@@ -400,12 +400,26 @@ def setup_two_venv_environment(
 
     local_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
-    # Check if conda is available first - on many clusters, only conda Python works
+    # Check if conda is available first - on many clusters, only conda Python
+    # works. The lookup runs through a LOGIN shell: paramiko's exec_command
+    # starts a non-interactive, non-login shell that never sources the profile
+    # scripts where clusters put conda on PATH. Discovery keeps conda at
+    # /dartfs-hpc/admin/local/bin/conda, invisible to a bare `conda --version`,
+    # so clustrix silently fell back to building two virtualenvs with pip over
+    # NFS -- minutes of work that then timed out.
     conda_available = False
-    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
-    if "conda" in stdout.read().decode():
+    conda_bin_dir = None
+    stdin, stdout, stderr = ssh_client.exec_command(
+        "bash -lc 'command -v conda' 2>/dev/null"
+    )
+    conda_path = stdout.read().decode().strip().splitlines()
+    conda_path = conda_path[-1].strip() if conda_path else ""
+    if conda_path.endswith("conda"):
         conda_available = True
-        print("Conda available on remote system, using conda for both venvs")
+        conda_bin_dir = os.path.dirname(conda_path)
+        print(
+            f"Conda available on remote system ({conda_path}), using it for both venvs"
+        )
 
     if conda_available:
         # Use conda for both VENV1 and VENV2 to ensure compatibility.
@@ -470,6 +484,10 @@ def setup_two_venv_environment(
     conda_env2_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
 
     commands = [f"cd {work_dir}"]
+    if conda_bin_dir:
+        # Every `conda ...` below (and in the generated job script) needs this,
+        # because the shell running them is not a login shell.
+        commands.insert(0, f'export PATH="{conda_bin_dir}:$PATH"')
 
     if compatible_python == "conda":
         # Use conda for both VENV1 and VENV2 (preferred for clusters)
@@ -646,6 +664,7 @@ def setup_two_venv_environment(
                     "conda_env1_name": conda_env1_name,
                     "conda_env2_name": conda_env2_name,
                     "conda_env_name": conda_env2_name,  # For backward compatibility with job script generation
+                    "conda_bin_dir": conda_bin_dir,
                     "uses_conda": True,
                 }
             )
@@ -1204,6 +1223,12 @@ def _create_slurm_script(
         script_lines.append(f"cd {remote_job_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        conda_bin_dir = config.venv_info.get("conda_bin_dir", None)
+        if conda_bin_dir:
+            # The batch script runs on a compute node under a non-login shell,
+            # so conda is not on PATH there either even though the submit host
+            # found it.
+            script_lines.append(f'export PATH="{conda_bin_dir}:$PATH"')
         script_lines.extend(
             generate_two_venv_execution_commands(
                 remote_job_dir, conda_env1_name, conda_env2_name

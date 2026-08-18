@@ -1,0 +1,88 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    /* The widget as it ships today, reproduced from
+       clustrix/modern_notebook_widget.py::_inject_css_styles -- the 19-column
+       grid, #333366 buttons and right-aligned labels, at their real sizes.
+       Kept as an artboard so the redesign is judged against the real thing
+       rather than against a description of it. */
+    body {
+      margin: 0;
+      background: #eee;
+      font-family: system-ui, -apple-system, "Segoe UI", helvetica, arial, sans-serif;
+      font-size: 13px;
+      color: rgba(0,0,0,.87);
+    }
+    a { color: #333366; }
+    a:hover { color: #444477; }
+    .c-grid { display: grid; grid-template-columns: repeat(19, 1fr); gap: 8px; align-items: center; }
+    .c-label { text-align: right; padding-right: 5px; font-size: 13px; }
+    .c-btn {
+      background: #333366; color: #fff; border: none; border-radius: 2px;
+      height: 28px; font-family: inherit; font-size: 13px; cursor: pointer;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 8px;
+    }
+    .c-plain {
+      height: 28px; border: 1px solid #bdbdbd; border-radius: 2px; background: #fff;
+      font-family: inherit; font-size: 13px; padding: 0 6px; box-sizing: border-box; width: 100%;
+    }
+    .c-icon {
+      height: 28px; border: 1px solid #bdbdbd; background: #fff; border-radius: 2px;
+      font-size: 15px; color: #888; cursor: pointer;
+    }
+  </style>
+</helmet>
+
+<div style="padding: 24px; display: flex; justify-content: center;">
+  <div style="width: 780px; background: #fff; border: 1px solid #dee2e6; border-radius: 8px; padding: 15px; display: flex; flex-direction: column; gap: 8px;">
+
+    <div class="c-grid">
+      <div class="c-label" style="grid-column: 1 / 5;">Active profile:</div>
+      <div style="grid-column: 5 / 18;"><select class="c-plain"><option>Local single-core</option></select></div>
+      <div style="grid-column: 18 / 19;"><button class="c-btn" style="width:100%;">+</button></div>
+      <div style="grid-column: 19 / 20;"><button class="c-btn" style="width:100%;">−</button></div>
+    </div>
+
+    <div class="c-grid">
+      <div class="c-label" style="grid-column: 1 / 5;">Config filename:</div>
+      <div style="grid-column: 5 / 12;"><input class="c-plain" value="clustrix.yml"></div>
+      <div style="grid-column: 12 / 13;"><button class="c-icon" style="width:100%;" title="Save">▯</button></div>
+      <div style="grid-column: 13 / 14;"><button class="c-icon" style="width:100%;" title="Load">▯</button></div>
+      <div style="grid-column: 14 / 16;"><button class="c-btn" style="width:100%;">Apply</button></div>
+      <div style="grid-column: 16 / 18;"><button class="c-btn" style="width:100%;">Test conn…</button></div>
+      <div style="grid-column: 18 / 20;"><button class="c-btn" style="width:100%;">Test sub…</button></div>
+    </div>
+
+    <div class="c-grid">
+      <div class="c-label" style="grid-column: 1 / 5;">Cluster type:</div>
+      <div style="grid-column: 5 / 8;"><select class="c-plain"><option>local</option></select></div>
+      <div class="c-label" style="grid-column: 8 / 10;">CPUs:</div>
+      <div style="grid-column: 10 / 12;"><input class="c-plain" value="1"></div>
+      <div class="c-label" style="grid-column: 12 / 14;">RAM:</div>
+      <div style="grid-column: 14 / 16;"><input class="c-plain" value="16GB"></div>
+      <div class="c-label" style="grid-column: 16 / 18;">Time:</div>
+      <div style="grid-column: 18 / 20;"><input class="c-plain" value="01:00:00"></div>
+    </div>
+
+    <div class="c-grid">
+      <div style="grid-column: 11 / 14;"><button class="c-btn" style="width:100%;">Advanced settings</button></div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{"$preview": {"width": 828, "height": 300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

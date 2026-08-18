@@ -44,126 +44,163 @@ class ModernClustrixWidget:
         self._update_ui_for_cluster_type()
 
     def _inject_css_styles(self) -> None:
-        """Inject CSS styles for proper button colors, Arvo font, and grid layout."""
+        """Inject the widget stylesheet.
+
+        Every colour, font and size below resolves through a ``--jp-*``
+        custom property that JupyterLab (and Notebook 7, which shares the
+        theme package) already defines, with a literal fallback for the
+        rare host that does not. That single decision buys three things
+        the previous stylesheet had to fight for:
+
+        * **Dark mode works for free.** JupyterLab redefines these tokens
+          when the theme changes, so the widget follows instead of needing
+          a second, hand-maintained dark stylesheet.
+        * **No network at import time.** The old sheet pulled Lexend Deca
+          from ``fonts.googleapis.com``, which fails on an air-gapped
+          cluster login node and phones out everywhere else. The notebook's
+          own UI font is already the right font.
+        * **It looks like part of the notebook.** Hardcoded ``#333366``
+          buttons read as a foreign object pasted into JupyterLab's chrome.
+
+        Nothing here uses ``!important`` except where it must override an
+        inline style that ipywidgets writes itself.
+        """
         css = """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@300;400;500&display=swap');
+        .clustrix-widget {
+            --cx-fg:        var(--jp-ui-font-color1, rgba(0,0,0,.87));
+            --cx-fg-muted:  var(--jp-ui-font-color2, rgba(0,0,0,.54));
+            --cx-fg-faint:  var(--jp-ui-font-color3, rgba(0,0,0,.38));
+            --cx-bg:        var(--jp-layout-color1, #fff);
+            --cx-bg-sunken: var(--jp-layout-color2, #eee);
+            --cx-border:    var(--jp-border-color1, #bdbdbd);
+            --cx-rule:      var(--jp-border-color2, #e0e0e0);
+            --cx-accent:    var(--jp-brand-color1, #1976d2);
+            --cx-focus:     var(--jp-brand-color3, #bbdefb);
+            --cx-ok:        var(--jp-success-color1, #388e3c);
+            --cx-err:       var(--jp-error-color1, #d32f2f);
+            --cx-font:      var(--jp-ui-font-family, system-ui,
+                            -apple-system, "Segoe UI", helvetica, arial, sans-serif);
+            --cx-mono:      var(--jp-code-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+            --cx-size:      var(--jp-ui-font-size1, 13px);
 
-        .clustrix-widget, .clustrix-widget * {
-            font-family: 'Lexend Deca', sans-serif !important;
+            font-family: var(--cx-font);
+            font-size: var(--cx-size);
+            color: var(--cx-fg);
+            background: var(--cx-bg);
+            border: 1px solid var(--cx-rule) !important;
+            border-radius: 4px !important;
         }
 
-        .widget-button.clustrix-button {
-            background-color: #333366 !important;
-            color: white !important;
-            font-weight: normal !important;
-            border: none !important;
-            font-family: 'Lexend Deca', sans-serif !important;
+        .clustrix-widget * { font-family: var(--cx-font); }
+
+        /* Buttons ------------------------------------------------------ */
+        .clustrix-widget .widget-button.clustrix-button {
+            background-color: var(--cx-accent) !important;
+            color: #fff !important;
+            border: 1px solid var(--cx-accent) !important;
+            border-radius: 3px !important;
+            font-weight: 400 !important;
+            font-size: 12px !important;
         }
-        .widget-button.clustrix-button:hover {
-            background-color: #444477 !important;
+        .clustrix-widget .widget-button.clustrix-button:hover {
+            filter: brightness(1.12);
+        }
+        .clustrix-widget .widget-button.clustrix-button-secondary {
+            background-color: var(--cx-bg) !important;
+            color: var(--cx-fg) !important;
+            border: 1px solid var(--cx-border) !important;
+            border-radius: 3px !important;
+            font-size: 12px !important;
+        }
+        .clustrix-widget .widget-button.clustrix-button-secondary:hover {
+            background-color: var(--cx-bg-sunken) !important;
         }
 
+        /* Fields ------------------------------------------------------- */
+        .clustrix-widget .widget-text input,
+        .clustrix-widget .widget-dropdown select,
+        .clustrix-widget .widget-combobox input {
+            background: var(--cx-bg);
+            color: var(--cx-fg);
+            border: 1px solid var(--cx-border);
+            border-radius: 3px;
+        }
+        .clustrix-widget .widget-text input:focus,
+        .clustrix-widget .widget-dropdown select:focus,
+        .clustrix-widget .widget-combobox input:focus {
+            outline: 2px solid var(--cx-focus);
+            border-color: var(--cx-accent);
+        }
+
+        /* Labels and section headings ---------------------------------- */
+        .clustrix-label {
+            text-align: right;
+            font-weight: normal;
+            color: var(--cx-fg-muted);
+            padding-right: 6px;
+        }
+        .clustrix-section-heading {
+            font-size: 10px;
+            font-weight: 600;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--cx-fg-faint);
+            border-bottom: 1px solid var(--cx-rule);
+            padding-bottom: 3px;
+            margin: 4px 0 2px 0;
+        }
+        .clustrix-status-ok  { color: var(--cx-ok); }
+        .clustrix-status-err { color: var(--cx-err); }
+        .clustrix-mono { font-family: var(--cx-mono) !important; }
+
+        /* Grid --------------------------------------------------------- */
         .clustrix-grid {
             display: grid;
             gap: 8px;
             align-items: center;
-            font-family: 'Lexend Deca', sans-serif !important;
         }
 
-        /* 19-column grid system based on detailed mockup analysis */
-        /* Each unit represents 1/19th of total row width for perfect alignment */
+        /* 19-column grid: each unit is 1/19th of the row width. */
         .clustrix-row1, .clustrix-row2, .clustrix-row3, .clustrix-row4 {
             grid-template-columns: repeat(19, 1fr);
         }
 
-        /* Row 1: AAAABBBBBBBBBBBBBCD */
-        /* A=active profile text, B=profile dropdown, C=+ button, D=- button */
-        .clustrix-row1-label { grid-column: 1 / 5; }     /* A: 4 columns */
-        .clustrix-row1-profile { grid-column: 5 / 18; }  /* B: 13 columns */
-        .clustrix-row1-add { grid-column: 18 / 19; }     /* C: 1 column */
-        .clustrix-row1-remove { grid-column: 19 / 20; }  /* D: 1 column */
+        /* Row 1: profile label | profile dropdown | add | remove */
+        .clustrix-row1-label { grid-column: 1 / 5; }
+        .clustrix-row1-profile { grid-column: 5 / 18; }
+        .clustrix-row1-add { grid-column: 18 / 19; }
+        .clustrix-row1-remove { grid-column: 19 / 20; }
 
-        /* Row 2: EEEEFFFFFFFGHIIJJKK */
-        /* E=config filename text, F=config field, G=save, H=load, I=apply, J=test conn, K=test submit */
-        .clustrix-row2-label { grid-column: 1 / 5; }     /* E: 4 columns */
-        .clustrix-row2-field { grid-column: 5 / 12; }    /* F: 7 columns */
-        .clustrix-row2-save { grid-column: 12 / 13; }    /* G: 1 column */
-        .clustrix-row2-load { grid-column: 13 / 14; }    /* H: 1 column */
-        .clustrix-row2-apply { grid-column: 14 / 16; }   /* I: 2 columns */
-        .clustrix-row2-test1 { grid-column: 16 / 18; }   /* J: 2 columns */
-        .clustrix-row2-test2 { grid-column: 18 / 20; }   /* K: 2 columns */
+        /* Row 2: config label | field | save | load | apply | test | test
+         * The two test buttons get 3 columns each rather than 2: at 2
+         * columns their labels truncated to "Test conn..." / "Test sub...". */
+        .clustrix-row2-label { grid-column: 1 / 4; }
+        .clustrix-row2-field { grid-column: 4 / 10; }
+        .clustrix-row2-save  { grid-column: 10 / 11; }
+        .clustrix-row2-load  { grid-column: 11 / 12; }
+        .clustrix-row2-apply { grid-column: 12 / 14; }
+        .clustrix-row2-test1 { grid-column: 14 / 17; }
+        .clustrix-row2-test2 { grid-column: 17 / 20; }
 
-        /* Row 3: LLLLMMMNNOOPPQQRRSS */
-        /* L=cluster type text, M=cluster dropdown, N=CPUs text, O=CPU field,
-         * P=RAM text, Q=RAM field, R=Time text, S=Time field */
-        .clustrix-row3-label { grid-column: 1 / 5; }      /* L: 4 columns */
-        .clustrix-row3-cluster { grid-column: 5 / 8; }    /* M: 3 columns */
-        .clustrix-row3-cpu-label { grid-column: 8 / 10; } /* N: 2 columns */
-        .clustrix-row3-cpu-field { grid-column: 10 / 12; }/* O: 2 columns */
-        .clustrix-row3-ram-label { grid-column: 12 / 14; }/* P: 2 columns */
-        .clustrix-row3-ram-field { grid-column: 14 / 16; }/* Q: 2 columns */
-        .clustrix-row3-time-label { grid-column: 16 / 18; }/* R: 2 columns */
-        .clustrix-row3-time-field { grid-column: 18 / 20; }/* S: 2 columns */
+        /* Row 3: cluster type | CPUs | RAM | Time */
+        .clustrix-row3-label { grid-column: 1 / 5; }
+        .clustrix-row3-cluster { grid-column: 5 / 8; }
+        .clustrix-row3-cpu-label { grid-column: 8 / 10; }
+        .clustrix-row3-cpu-field { grid-column: 10 / 12; }
+        .clustrix-row3-ram-label { grid-column: 12 / 14; }
+        .clustrix-row3-ram-field { grid-column: 14 / 16; }
+        .clustrix-row3-time-label { grid-column: 16 / 18; }
+        .clustrix-row3-time-field { grid-column: 18 / 20; }
 
-        /* Row 4: TTTTTTTTTTUUUVVVVVV */
-        /* T=empty space, U=advanced button, V=empty space */
-        .clustrix-row4-advanced { grid-column: 11 / 14; } /* U: 3 columns */
-
-        .clustrix-label {
-            text-align: right;
-            font-weight: normal;
-            font-family: 'Lexend Deca', sans-serif !important;
-            padding-right: 5px;
-        }
-
-        .widget-text, .widget-dropdown, .widget-combobox {
-            font-family: 'Lexend Deca', sans-serif !important;
-        }
+        /* Row 4: advanced-settings button, centred */
+        .clustrix-row4-advanced { grid-column: 9 / 12; }
         </style>
         """
         # Display CSS
         from IPython.display import HTML
 
         display(HTML(css))
-
-        self.styles = {
-            "main_button": {
-                "button_color": "#333366",
-                "font_weight": "bold",
-                "border": "none",
-                "font_size": "14px",
-            },
-            "icon_button": {
-                "button_color": "#6c757d",
-                "width": "40px",
-                "height": "35px",
-            },
-            "profile_dropdown": {
-                "width": "250px",
-                "font_size": "14px",
-            },
-            "config_filename": {
-                "width": "180px",
-                "font_size": "14px",
-            },
-            "cluster_field": {
-                "width": "120px",
-                "font_size": "14px",
-            },
-            "small_field": {
-                "width": "80px",
-                "font_size": "14px",
-            },
-            "medium_field": {
-                "width": "150px",
-                "font_size": "14px",
-            },
-            "large_field": {
-                "width": "200px",
-                "font_size": "14px",
-            },
-        }
 
     def _create_widgets(self) -> None:
         """Create all widget components."""
@@ -251,27 +288,29 @@ class ModernClustrixWidget:
             layout=widgets.Layout(width="160px", height="35px"),
         )
 
-        # 2.3 Save Config Button (💾 disk emoji) - saves ALL profiles
+        # 2.3 Save Config Button - saves ALL profiles.
+        # Uses a FontAwesome icon rather than an emoji: the notebook UI font
+        # has no glyph for 💾/📂, so those rendered as empty tofu boxes.
         self.widgets["save_btn"] = widgets.Button(
-            description="💾",
+            description="Save",
             tooltip="Save ALL profiles (not just active one) to specified config file",
-            layout=widgets.Layout(width="30px", height="35px"),
-            style={"button_color": "#f8f9fa"},  # Light gray like text fields
+            layout=widgets.Layout(width="60px", height="35px"),
         )
+        self.widgets["save_btn"].add_class("clustrix-button-secondary")
 
-        # 2.4 Load Config Button (📂 open folder emoji) - opens file dialog, replaces ALL profiles
+        # 2.4 Load Config Button - opens file dialog, replaces ALL profiles
         self.widgets["load_btn"] = widgets.Button(
-            description="📂",
+            description="Load",
             tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
-            layout=widgets.Layout(width="30px", height="35px"),
-            style={"button_color": "#f8f9fa"},  # Light gray like text fields
+            layout=widgets.Layout(width="60px", height="35px"),
         )
+        self.widgets["load_btn"].add_class("clustrix-button-secondary")
 
         # 2.5 Apply Button - sets current configuration as active
         self.widgets["apply_btn"] = widgets.Button(
             description="Apply",
             tooltip="Set the currently displayed configuration as the active profile",
-            layout=widgets.Layout(width="60px", height="35px"),
+            layout=widgets.Layout(width="80px", height="35px"),
         )
         self.widgets["apply_btn"].add_class("clustrix-button")
 
@@ -279,7 +318,7 @@ class ModernClustrixWidget:
         self.widgets["test_connect_btn"] = widgets.Button(
             description="Test connect",
             tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
-            layout=widgets.Layout(width="90px", height="35px"),
+            layout=widgets.Layout(width="130px", height="35px"),
         )
         self.widgets["test_connect_btn"].add_class("clustrix-button")
 
@@ -287,7 +326,7 @@ class ModernClustrixWidget:
         self.widgets["test_submit_btn"] = widgets.Button(
             description="Test submit",
             tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
-            layout=widgets.Layout(width="90px", height="35px"),
+            layout=widgets.Layout(width="130px", height="35px"),
         )
         self.widgets["test_submit_btn"].add_class("clustrix-button")
 
@@ -1183,7 +1222,9 @@ class ModernClustrixWidget:
             # Update button temporarily
             original_description = self.widgets["apply_btn"].description
             self.widgets["apply_btn"].description = "Applied!"
-            self.widgets["apply_btn"].style.button_color = "#28a745"
+            self.widgets["apply_btn"].style.button_color = (
+                "var(--jp-success-color1, #388e3c)"
+            )
 
             # Reset button after 2 seconds (this is for visual feedback)
             def reset_button():
@@ -1191,7 +1232,7 @@ class ModernClustrixWidget:
 
                 time.sleep(2)
                 self.widgets["apply_btn"].description = original_description
-                self.widgets["apply_btn"].style.button_color = "#3e4a61"
+                self.widgets["apply_btn"].style.button_color = None
 
             # In a real implementation, you'd use a timer or similar
 

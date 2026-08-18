@@ -22,7 +22,7 @@ For Jupyter notebook users, use the interactive configuration widget:
    import clustrix  # Auto-loads the magic command
    
    # Use the magic command to open the configuration widget
-   %%clusterfy
+   %%remote
    # Interactive widget appears with PBS/Torque templates and GUI configuration
 
 **Option 2: Programmatic Configuration**

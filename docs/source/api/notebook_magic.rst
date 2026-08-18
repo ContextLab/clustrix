@@ -8,16 +8,16 @@ Clustrix provides seamless integration with Jupyter notebooks through IPython ma
 Magic Commands
 --------------
 
-%%clusterfy
+%%remote
 ~~~~~~~~~~~
 
-The ``%%clusterfy`` magic command creates an interactive widget interface for managing cluster configurations directly in Jupyter notebooks.
+The ``%%remote`` magic command creates an interactive widget interface for managing cluster configurations directly in Jupyter notebooks.
 
 **Usage:**
 
 .. code-block:: jupyter
 
-   %%clusterfy
+   %%remote
    # Interactive widget appears with full configuration interface
 
 **Features:**
@@ -66,7 +66,7 @@ ClusterfyMagics
    :undoc-members:
    :show-inheritance:
 
-   IPython magic command class for the ``%%clusterfy`` command.
+   IPython magic command class for the ``%%remote`` command.
 
 Configuration Defaults
 -----------------------
@@ -125,7 +125,7 @@ load_ipython_extension
       import clustrix
       
       # Use the magic command
-      %%clusterfy
+      %%remote
 
 Requirements
 ------------
@@ -155,7 +155,7 @@ Basic Widget Usage
    import clustrix
    
    # Widget appears automatically with magic command
-   %%clusterfy
+   %%remote
 
 Programmatic Access
 ~~~~~~~~~~~~~~~~~~~
