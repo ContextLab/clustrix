@@ -122,3 +122,65 @@ class TestHandlersRefuseInvalidInput:
         widget._on_test_submit(widget.widgets["test_submit_btn"])
 
         assert "invalid" in widget.widgets["status_pill"].value
+
+
+class TestBackendSpecificSections:
+    """Each backend needs different settings, and only its own should show."""
+
+    SECTIONS = {
+        "remote_section": ("ssh", "slurm", "pbs", "sge"),
+        "hf_section": ("huggingface",),
+        "k8s_section": ("kubernetes",),
+    }
+
+    @pytest.mark.parametrize(
+        "cluster_type",
+        ["local", "ssh", "slurm", "pbs", "sge", "kubernetes", "huggingface"],
+    )
+    def test_exactly_the_right_sections_are_shown(self, cluster_type):
+        widget = _widget(cluster_type)
+        for section, applies_to in self.SECTIONS.items():
+            expected = "block" if cluster_type in applies_to else "none"
+            assert (
+                widget.widgets[section].layout.display == expected
+            ), f"{section} should be {expected} for {cluster_type}"
+
+    def test_kubernetes_settings_reach_the_config(self):
+        """None of these had fields, so only the defaults were ever usable."""
+        widget = _widget("kubernetes")
+        widget.widgets["k8s_namespace"].value = "research"
+        widget.widgets["k8s_image"].value = "python:3.12-slim"
+        widget.widgets["k8s_service_account"].value = "clustrix-runner"
+        widget.widgets["k8s_pull_policy"].value = "Always"
+
+        config = widget._get_config_from_widgets()
+        assert config.k8s_namespace == "research"
+        assert config.k8s_image == "python:3.12-slim"
+        assert config.k8s_service_account == "clustrix-runner"
+        assert config.k8s_pull_policy == "Always"
+
+    def test_huggingface_settings_reach_the_config(self):
+        widget = _widget("huggingface")
+        widget.widgets["hf_namespace"].value = "contextlab"
+        widget.widgets["hf_flavor"].value = "cpu-upgrade"
+
+        config = widget._get_config_from_widgets()
+        assert config.hf_namespace == "contextlab"
+        assert config.hf_flavor == "cpu-upgrade"
+        assert config.hf_allow_gpu_flavors is False
+
+    def test_every_cluster_type_in_the_dropdown_is_a_real_backend(self):
+        """A type the executor cannot dispatch is worse than not offering it."""
+        from clustrix.executor_core import ClusterExecutor  # noqa: F401
+
+        widget = _widget("local")
+        offered = set(widget.widgets["cluster_type"].options)
+        assert offered == {
+            "local",
+            "ssh",
+            "slurm",
+            "pbs",
+            "sge",
+            "kubernetes",
+            "huggingface",
+        }

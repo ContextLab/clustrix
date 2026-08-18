@@ -994,6 +994,61 @@ class ModernClustrixWidget:
         )
         self.widgets["hf_section"].add_class("clustrix-section")
 
+        # Kubernetes configuration. Like HuggingFace Jobs this reaches its
+        # compute over an API rather than SSH, so it needs a namespace and an
+        # image rather than a host and a key file. None of these had fields
+        # before, so only the shipped defaults were ever usable.
+        self.widgets["k8s_namespace"] = widgets.Text(
+            value="default",
+            placeholder="default",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["k8s_image"] = widgets.Text(
+            value="python:3.11-slim",
+            placeholder="python:3.12-slim",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["k8s_service_account"] = widgets.Text(
+            value="",
+            placeholder="(cluster default)",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["k8s_pull_policy"] = widgets.Dropdown(
+            options=["IfNotPresent", "Always", "Never"],
+            value="IfNotPresent",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+
+        k8s_row1 = widgets.HBox(
+            [
+                self._field("Namespace", self.widgets["k8s_namespace"], flex="1 1 0"),
+                self._field("Image", self.widgets["k8s_image"], flex="2 1 0"),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        k8s_row1.add_class("clustrix-row")
+
+        k8s_row2 = widgets.HBox(
+            [
+                self._field(
+                    "Service account",
+                    self.widgets["k8s_service_account"],
+                    flex="2 1 0",
+                ),
+                self._field(
+                    "Image pull policy", self.widgets["k8s_pull_policy"], flex="1 1 0"
+                ),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        k8s_row2.add_class("clustrix-row")
+
+        self.widgets["k8s_section"] = widgets.VBox(
+            [self._section_heading("Kubernetes"), k8s_row1, k8s_row2],
+            layout=widgets.Layout(display="none", width="100%"),
+        )
+        self.widgets["k8s_section"].add_class("clustrix-section")
+
         self.widgets["remote_section"] = widgets.VBox(
             [
                 self._section_heading("Connection"),
@@ -1225,6 +1280,9 @@ class ModernClustrixWidget:
         self.widgets["hf_section"].layout.display = (
             "block" if cluster_type == "huggingface" else "none"
         )
+        self.widgets["k8s_section"].layout.display = (
+            "block" if cluster_type == "kubernetes" else "none"
+        )
 
     def get_widget(self) -> "widgets.Widget":
         """Get the complete widget for display.
@@ -1240,6 +1298,7 @@ class ModernClustrixWidget:
                 self.widgets["grid_row3"],  # Resources
                 self.widgets["remote_section"],  # Connection
                 self.widgets["hf_section"],  # HuggingFace Jobs
+                self.widgets["k8s_section"],  # Kubernetes
                 self.widgets["grid_row4"],  # Actions
                 self.widgets["advanced_section"],
                 self._output_panel(),
@@ -1884,6 +1943,17 @@ class ModernClustrixWidget:
             # still ran the job in ~/.clustrix/jobs.
             if self.widgets["home_dir"].value.strip():
                 config_data["remote_work_dir"] = self.widgets["home_dir"].value.strip()
+
+        if self.current_cluster_type == "kubernetes":
+            config_data.update(
+                {
+                    "k8s_namespace": self.widgets["k8s_namespace"].value or "default",
+                    "k8s_image": self.widgets["k8s_image"].value or "python:3.11-slim",
+                    "k8s_service_account": self.widgets["k8s_service_account"].value
+                    or None,
+                    "k8s_pull_policy": self.widgets["k8s_pull_policy"].value,
+                }
+            )
 
         if self.current_cluster_type == "huggingface":
             config_data.update(
