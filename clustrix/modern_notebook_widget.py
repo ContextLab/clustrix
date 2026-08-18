@@ -15,10 +15,32 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     widgets = None  # type: ignore
 
-from .config import ClusterConfig
+from dataclasses import asdict
+
+from .config import ClusterConfig, configure
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
+
+
+#: The function the "Test job submission" button runs on the cluster. Kept as
+#: source, not as a def, because it has to survive being shipped to a worker
+#: that has never heard of clustrix (see utils.make_portable_function).
+_TEST_JOB_SOURCE = '''
+def test_job():
+    """Tiny, dependency-free proof that the whole path works.
+
+    Reports where it ran, so the caller can see it was not here.
+    """
+    import platform
+    import sys
+
+    return {
+        "answer": sum(range(101)),
+        "host": platform.node(),
+        "python": sys.version.split()[0],
+    }
+'''
 
 
 class ModernClustrixWidget:
@@ -286,20 +308,15 @@ class ModernClustrixWidget:
         )
         profile_label.add_class("clustrix-label")
 
-        # 1.2 Profile Dropdown (editable entries with default configurations)
-        default_profiles = [
-            "Local single-core",
-            "Local quad-core",
-            "Local 8-core",
-            "Local all cores",
-            "SLURM cluster",
-            "PBS cluster",
-            "SGE cluster",
-            "SSH cluster",
-        ]
-        profile_names = self.profile_manager.get_profile_names()
-        # Merge defaults with existing profiles
-        all_profiles = list(set(default_profiles + profile_names))
+        # 1.2 Profile Dropdown.
+        #
+        # Only profiles that actually exist are offered. The list used to be
+        # eight hardcoded names ("SLURM cluster", "PBS cluster", ...) unioned
+        # with the real ones, of which the ProfileManager held exactly one --
+        # so seven of the eight entries failed with "Profile does not exist"
+        # the moment they were selected, and "+" on one failed too. Sorted,
+        # because the old `set()` union also made the order change run to run.
+        all_profiles = sorted(self.profile_manager.get_profile_names())
 
         self.widgets["profile_dropdown"] = widgets.Combobox(
             options=all_profiles,
@@ -427,7 +444,15 @@ class ModernClustrixWidget:
 
         # 3.2 Cluster Type Dropdown - hardcoded options (not editable)
         self.widgets["cluster_type"] = widgets.Dropdown(
-            options=["local", "slurm", "pbs", "sge", "ssh", "kubernetes"],
+            options=[
+                "local",
+                "ssh",
+                "slurm",
+                "pbs",
+                "sge",
+                "kubernetes",
+                "huggingface",
+            ],
             value="local",
             layout=widgets.Layout(width="100px", height="35px"),
         )
@@ -868,6 +893,68 @@ class ModernClustrixWidget:
         workdir_row.add_class("clustrix-row")
         self.widgets["home_dir"].add_class("clustrix-mono")
 
+        # HuggingFace Jobs configuration. cluster_type="huggingface" reaches
+        # its compute over an HTTP API, so it needs a namespace, a flavor and
+        # a token rather than a host and a key file.
+        self.widgets["hf_namespace"] = widgets.Text(
+            value="",
+            placeholder="my-org",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["hf_flavor"] = widgets.Dropdown(
+            options=[
+                "cpu-basic",
+                "cpu-upgrade",
+                "cpu-performance",
+                "cpu-xl",
+                "t4-small",
+                "t4-medium",
+                "l4x1",
+                "a10g-small",
+                "a100-large",
+                "h200",
+            ],
+            value="cpu-basic",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["hf_token"] = widgets.Password(
+            value="",
+            placeholder="hf_...  (or leave blank to use HF_TOKEN)",
+            layout=widgets.Layout(width="100%", height="26px"),
+        )
+        self.widgets["hf_allow_gpu"] = widgets.Checkbox(
+            value=False,
+            description="Allow paid GPU flavors",
+            indent=False,
+            layout=widgets.Layout(width="100%"),
+        )
+
+        hf_row = widgets.HBox(
+            [
+                self._field("Namespace", self.widgets["hf_namespace"], width="100%"),
+                self._field("Flavor", self.widgets["hf_flavor"], width="170px"),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        hf_row.add_class("clustrix-row")
+
+        hf_token_row = widgets.HBox(
+            [self._field("Token", self.widgets["hf_token"], width="100%")],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        hf_token_row.add_class("clustrix-row")
+
+        self.widgets["hf_section"] = widgets.VBox(
+            [
+                self._section_heading("HuggingFace Jobs"),
+                hf_row,
+                hf_token_row,
+                self.widgets["hf_allow_gpu"],
+            ],
+            layout=widgets.Layout(display="none", width="100%"),
+        )
+        self.widgets["hf_section"].add_class("clustrix-section")
+
         self.widgets["remote_section"] = widgets.VBox(
             [
                 self._section_heading("Connection"),
@@ -1079,6 +1166,9 @@ class ModernClustrixWidget:
         # and drop every field after the third.
         remote = cluster_type in ["ssh", "slurm", "pbs", "sge"]
         self.widgets["remote_section"].layout.display = "block" if remote else "none"
+        self.widgets["hf_section"].layout.display = (
+            "block" if cluster_type == "huggingface" else "none"
+        )
 
     def get_widget(self) -> "widgets.Widget":
         """Get the complete widget for display.
@@ -1093,6 +1183,7 @@ class ModernClustrixWidget:
                 self.widgets["grid_row2"],  # Profile
                 self.widgets["grid_row3"],  # Resources
                 self.widgets["remote_section"],  # Connection
+                self.widgets["hf_section"],  # HuggingFace Jobs
                 self.widgets["grid_row4"],  # Actions
                 self.widgets["advanced_section"],
                 self._output_panel(),
@@ -1259,47 +1350,55 @@ class ModernClustrixWidget:
                 print(f"❌ Error loading configuration: {e}")
 
     def _on_apply_config(self, button):
-        """Handle apply configuration button click."""
-        try:
-            # Get current configuration from widgets
-            config = self._get_config_from_widgets()
+        """Make the displayed configuration the one @cluster will use.
 
-            # Save to current profile
-            current_profile = self.widgets["profile_dropdown"].value
-            if current_profile:
-                self.profile_manager.save_profile(current_profile, config)
+        This used to save the profile, print "Applied configuration" and stop
+        -- the source even said "This integration point would need to be
+        connected to the main config system". It never was, so every setting
+        typed into this widget was invisible to @cluster, which went on using
+        whatever the global config held. Applying now actually calls
+        clustrix.configure().
+        """
+        with self.widgets["output"]:
+            try:
+                config = self._get_config_from_widgets()
 
-            # Apply to global config (this would update the ClusterConfig singleton)
-            # Note: This integration point would need to be connected to the main config system
+                # Save to the current profile so it survives the session.
+                current_profile = self.widgets["profile_dropdown"].value
+                if current_profile:
+                    self.profile_manager.save_profile(current_profile, config)
 
-            # Update button temporarily
-            original_description = self.widgets["apply_btn"].description
-            self.widgets["apply_btn"].description = "Applied!"
-            self.widgets["apply_btn"].style.button_color = (
-                "var(--jp-success-color1, #388e3c)"
-            )
+                # And make it the active configuration for @cluster.
+                applied = {
+                    field: value
+                    for field, value in asdict(config).items()
+                    if value is not None
+                }
+                configure(**applied)
 
-            # Reset button after 2 seconds (this is for visual feedback)
-            def reset_button():
-                import time
-
-                time.sleep(2)
-                self.widgets["apply_btn"].description = original_description
-                self.widgets["apply_btn"].style.button_color = None
-
-            # In a real implementation, you'd use a timer or similar
-
-            with self.widgets["output"]:
-                print(f"✅ Applied configuration from profile: {current_profile}")
-                print(f"   Cluster type: {config.cluster_type}")
-                if hasattr(config, "cluster_host") and config.cluster_host:
+                print("✅ Applied configuration")
+                print(f"   Cluster: {config.cluster_type}")
+                if config.cluster_host:
                     print(f"   Host: {config.cluster_host}")
                 print(
-                    f"   Resources: {config.default_cores} CPUs, {config.default_memory} RAM"
+                    f"   Resources: {config.default_cores} cores, "
+                    f"{config.default_memory}, {config.default_time}"
                 )
-        except Exception as e:
-            with self.widgets["output"]:
+                print("   @cluster will use this configuration from now on.")
+                self.set_status("ok", "applied")
+
+                original_description = self.widgets["apply_btn"].description
+                self.widgets["apply_btn"].description = "Applied!"
+
+                def reset_button():
+                    import time
+
+                    time.sleep(2)
+                    self.widgets["apply_btn"].description = original_description
+
+            except Exception as e:
                 print(f"❌ Error applying configuration: {e}")
+                self.set_status("error", "not applied")
 
     def _on_test_connect(self, button):
         """Handle test connect button click."""
@@ -1374,49 +1473,75 @@ class ModernClustrixWidget:
                 button.disabled = False
 
     def _on_test_submit(self, button):
-        """Handle test submit button click."""
-        # Store original description before entering try block
+        """Submit a real job to the configured cluster and report the result.
+
+        This used to print
+
+            Job 1/4: Basic Python execution... OK
+            ...
+            All 4 test jobs executed and cleaned up properly
+
+        without calling an executor at all. It reported success with an empty
+        host, zero cores and a memory string of "banana". A test that cannot
+        fail tells you nothing, and this one actively misled anyone using it
+        to check their configuration.
+
+        It now runs one small function end to end, through exactly the path a
+        real @cluster call takes, and shows what came back.
+        """
         original_description = button.description
 
         with self.widgets["output"]:
             self.set_status("busy", "submitting…")
-            print("🚀 Testing job submission...")
+            print("🚀 Submitting a test job...")
 
             try:
                 config = self._get_config_from_widgets()
 
-                # Update button to show testing
-                button.description = "Testing..."
+                button.description = "Submitting..."
                 button.disabled = True
 
                 print(f"   Cluster: {config.cluster_type}")
+                if config.cluster_host:
+                    print(f"   Host: {config.cluster_host}")
                 print(
-                    f"   Resources: {config.default_cores} CPUs, {config.default_memory} RAM"
+                    f"   Resources: {config.default_cores} cores, "
+                    f"{config.default_memory}, {config.default_time}"
                 )
-                print(f"   Time limit: {getattr(config, 'time_limit', 'N/A')}")
 
-                # Simulate job submission test
-                print("   Creating test environment...")
-                print("   Submitting test jobs (4 jobs)...")
-                print("   Job 1/4: Basic Python execution... ✅")
-                print("   Job 2/4: Environment test... ✅")
-                print("   Job 3/4: Resource allocation... ✅")
-                print("   Job 4/4: Cleanup test... ✅")
+                from .executor import ClusterExecutor
+                from .utils import make_portable_function, serialize_function
 
-                print("   Monitoring job completion...")
-                print("   Collecting results...")
-                print("   Cleaning up test environment...")
+                # Compiled from source rather than referenced, so the worker
+                # does not need clustrix installed to load it -- see
+                # make_portable_function for why a plain def would not do.
+                func_data = serialize_function(
+                    make_portable_function(_TEST_JOB_SOURCE, "test_job"), (), {}
+                )
+                job_config = {
+                    "cores": config.default_cores,
+                    "memory": config.default_memory,
+                    "time": config.default_time,
+                }
 
-                print("✅ Job submission test completed successfully")
-                self.set_status("ok", "job submitted")
-                print("   All 4 test jobs executed and cleaned up properly")
+                executor = ClusterExecutor(config)
+                print("   Submitting...")
+                job_id = executor.submit_job(func_data, job_config)
+                print(f"   Job ID: {job_id}")
+                print("   Waiting for the result...")
+                result = executor.wait_for_result(job_id)
+
+                print("✅ Job submission test succeeded")
+                print(f"   Ran on: {result.get('host')}")
+                print(f"   Python: {result.get('python')}")
+                print(f"   Returned: {result.get('answer')}")
+                self.set_status("ok", "job completed")
 
             except Exception as e:
                 print(f"❌ Job submission test failed: {e}")
                 self.set_status("error", "submission failed")
 
             finally:
-                # Reset button
                 button.description = original_description
                 button.disabled = False
 
@@ -1613,6 +1738,25 @@ class ModernClustrixWidget:
                     "username": self.widgets["username"].value,
                     "key_file": self.widgets["ssh_key_file"].value,
                     "password_env_var": self.widgets["local_env_var"].value,
+                    # Setting this only takes effect if clustrix is told to
+                    # look it up; without the flag the field silently did
+                    # nothing at all.
+                    "use_env_password": bool(self.widgets["local_env_var"].value),
+                }
+            )
+            # "Remote work directory" was collected from the user and then
+            # dropped on the floor -- typing /scratch/alice/clustrix into it
+            # still ran the job in ~/.clustrix/jobs.
+            if self.widgets["home_dir"].value.strip():
+                config_data["remote_work_dir"] = self.widgets["home_dir"].value.strip()
+
+        if self.current_cluster_type == "huggingface":
+            config_data.update(
+                {
+                    "hf_namespace": self.widgets["hf_namespace"].value or None,
+                    "hf_flavor": self.widgets["hf_flavor"].value,
+                    "hf_token": self.widgets["hf_token"].value or None,
+                    "hf_allow_gpu_flavors": self.widgets["hf_allow_gpu"].value,
                 }
             )
 

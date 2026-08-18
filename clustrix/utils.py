@@ -1,4 +1,5 @@
 import ast
+import logging
 import os
 import sys
 import pickle
@@ -10,6 +11,8 @@ import dill  # type: ignore
 import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
+
+logger = logging.getLogger(__name__)
 
 
 def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
@@ -92,6 +95,32 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
     except Exception:
         # If analysis fails, assume no parallelizable loops
         return None
+
+
+def make_portable_function(source: str, name: str) -> Callable:
+    """Build a function that can be shipped to a worker without clustrix.
+
+    dill pickles a function belonging to an importable module BY REFERENCE --
+    a few dozen bytes that merely name the module -- so the worker has to
+    import that module to load it. That is fine for the user's own code, which
+    lives in ``__main__``, but it is fatal for helper functions clustrix ships
+    itself: a bare container has no clustrix, and the job dies with
+    ``ModuleNotFoundError: No module named 'clustrix'`` before it runs a line.
+
+    Compiling the source into a fresh namespace gives the function
+    ``__module__ = None`` and no reference to anything importable, so dill
+    serializes it by value and the worker needs nothing installed.
+
+    Args:
+        source: Source of a single top-level function.
+        name: The function's name within that source.
+
+    Returns:
+        The compiled function, safe to serialize for a bare worker.
+    """
+    namespace: Dict[str, Any] = {}
+    exec(source, namespace)
+    return namespace[name]
 
 
 def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
@@ -370,6 +399,46 @@ dependencies:
         return f"{venv_path}/bin/python"
 
 
+def _environment_key(python_version: str, requirements: Dict[str, str]) -> str:
+    """A short, stable name for an environment with these exact contents.
+
+    Two calls asking for the same Python version and the same requirements get
+    the same key, so the environment is built once and reused. Any difference
+    produces a different key, so environments are never silently shared
+    between jobs that need different packages.
+    """
+    import hashlib
+
+    material = (
+        python_version
+        + "|"
+        + ";".join(
+            f"{name}=={version}" for name, version in sorted(requirements.items())
+        )
+    )
+    digest = hashlib.sha256(material.encode()).hexdigest()[:12]
+    return f"py{python_version.replace('.', '')}_{digest}"
+
+
+def _conda_envs_exist(ssh_client, conda_setup_prefix: str, *env_names: str) -> bool:
+    """True when every named conda environment is already present remotely."""
+    prefix = f"{conda_setup_prefix} && " if conda_setup_prefix else ""
+    try:
+        stdin, stdout, stderr = ssh_client.exec_command(
+            f"bash -c '{prefix}conda env list' 2>/dev/null"
+        )
+        listing = stdout.read().decode()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug(f"Could not list conda environments: {e}")
+        return False
+    existing = {
+        line.split()[0]
+        for line in listing.splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    return all(name in existing for name in env_names)
+
+
 def setup_two_venv_environment(
     ssh_client,
     work_dir: str,
@@ -502,17 +571,50 @@ def setup_two_venv_environment(
                 "No compatible Python version found on remote system. Consider installing conda."
             )
 
-    # Create environment names
+    # Environment names.
+    #
+    # Conda environments are named after what is IN them -- the Python version
+    # and the requirement set -- not after the job directory. Naming them per
+    # job meant every single @cluster call built two fresh conda environments
+    # and left them behind: on a shared filesystem that is roughly ten minutes
+    # each, twenty minutes before any user code runs, repeated for every job,
+    # accumulating environments nothing ever removes.
+    #
+    # Keying on content means the second job with the same requirements reuses
+    # the first job's environments, and a job whose requirements differ gets
+    # its own rather than silently inheriting the wrong ones. `conda create`
+    # is skipped when the environment already exists.
     venv1_path = f"{work_dir}/venv1_serialization"
     venv2_path = f"{work_dir}/venv2_execution"
-    conda_env1_name = f"clustrix_venv1_{work_dir.split('/')[-1]}"
-    conda_env2_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
+    env_key = _environment_key(remote_python_version, requirements)
+    conda_env1_name = f"clustrix_venv1_{env_key}"
+    conda_env2_name = f"clustrix_venv2_{env_key}"
 
     commands = [f"cd {work_dir}"]
     if conda_setup_prefix:
         # Every `conda ...` below runs in a fresh non-login shell, so conda.sh
         # has to be sourced first. The generated job script does the same.
         commands.insert(0, conda_setup_prefix)
+
+    if compatible_python == "conda" and _conda_envs_exist(
+        ssh_client, conda_setup_prefix, conda_env1_name, conda_env2_name
+    ):
+        # Already built by an earlier job with the same requirements. Building
+        # them again would cost ten minutes per environment for no change.
+        print(f"Reusing existing conda environments ({env_key})")
+        return {
+            "compatible_python": compatible_python,
+            "remote_python_version": remote_python_version,
+            "venv1_python": f"conda run -n {conda_env1_name} python",
+            "venv1_path": f"conda:{conda_env1_name}",
+            "venv2_python": f"conda run -n {conda_env2_name} python",
+            "venv2_path": f"conda:{conda_env2_name}",
+            "conda_env1_name": conda_env1_name,
+            "conda_env2_name": conda_env2_name,
+            "conda_env_name": conda_env2_name,
+            "conda_setup_prefix": conda_setup_prefix,
+            "uses_conda": True,
+        }
 
     if compatible_python == "conda":
         # Use conda for both VENV1 and VENV2 (preferred for clusters)
