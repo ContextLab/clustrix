@@ -1018,6 +1018,18 @@ dependencies:
     return "Environment setup completed successfully"
 
 
+def result_key_export_line(remote_job_dir: str) -> str:
+    """Shell line making the per-job result-signing key available to the job.
+
+    Read from a 0600 file in the job directory rather than baked into job.sh,
+    which is world-readable on some shared filesystems.
+    """
+    return (
+        f"export CLUSTRIX_RESULT_KEY=$(cat {remote_job_dir}/.clustrix_result_key "
+        f"2>/dev/null || true)"
+    )
+
+
 def conda_activation_lines(config) -> list:
     """Lines a generated job script needs before it can run `conda`.
 
@@ -1288,9 +1300,22 @@ def generate_two_venv_execution_commands(
             "    ",
             "    print('Result loaded from VENV2:', type(result))",
             "    ",
+            "    _payload_bytes = _ser.dumps(result, protocol=4)",
             "    with open('result.pkl', 'wb') as f:",
-            "        _ser.dump(result, f, protocol=4)",
-            "        ",
+            "        f.write(_payload_bytes)",
+            "    ",
+            "    # Tag the result so the caller can tell it apart from anything",
+            "    # else that may have been written into this directory. Loading a",
+            "    # pickle executes code, so the caller must not do it on trust.",
+            "    import hashlib as _hashlib",
+            "    import hmac as _hmac",
+            "    _key = os.environ.get('CLUSTRIX_RESULT_KEY', '')",
+            "    if _key:",
+            "        _tag = _hmac.new(_key.encode(), _payload_bytes, "
+            "_hashlib.sha256).hexdigest()",
+            "        with open('result.pkl.hmac', 'w') as f:",
+            "            f.write(_tag)",
+            "    ",
             "    print('Result serialized successfully')",
             "    ",
         ]
@@ -1384,6 +1409,7 @@ def _create_slurm_script(
         script_lines.append(f"cd {remote_job_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
             generate_two_venv_execution_commands(
@@ -1615,6 +1641,7 @@ def _create_ssh_script(
         # Use the centralized two-venv approach for cross-version compatibility
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
             generate_two_venv_execution_commands(

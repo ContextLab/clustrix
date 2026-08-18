@@ -5,6 +5,7 @@ HPC schedulers including SLURM, PBS/Torque, and Sun Grid Engine (SGE).
 """
 
 import os
+import secrets
 import time
 import tempfile
 import pickle
@@ -19,6 +20,31 @@ logger = logging.getLogger(__name__)
 
 
 class SchedulerManager:
+    """Submits jobs to SLURM, PBS, SGE and plain SSH hosts."""
+
+    def _prepare_job_dir(self, remote_job_dir: str) -> str:
+        """Create the job directory and give the job a result-signing key.
+
+        The key lets the caller verify result.pkl before unpickling it, which
+        matters because unpickling executes code (#121). It is written inside
+        the job directory with 0600, and the directory itself is 0700, so on a
+        shared filesystem another user can neither read the key nor forge a
+        result that verifies against it.
+
+        This bounds the trust to whoever can already read the job directory.
+        It is not a defence against a wholly compromised remote host -- that
+        host runs the function anyway -- but it does stop an unrelated user,
+        a stale file, or a truncated transfer from being loaded as code.
+        """
+        self.connection_manager.execute_remote_command(
+            f"mkdir -p {remote_job_dir} && chmod 700 {remote_job_dir}"
+        )
+        key = secrets.token_hex(32)
+        self.connection_manager.execute_remote_command(
+            f"umask 077 && printf '%s' {key} > {remote_job_dir}/.clustrix_result_key"
+        )
+        return key
+
     """Manages jobs for traditional HPC schedulers (SLURM, PBS, SGE)."""
 
     def __init__(self, config, connection_manager):
@@ -42,7 +68,7 @@ class SchedulerManager:
             self.config.remote_work_dir
         )
         remote_job_dir = f"{work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -151,6 +177,7 @@ class SchedulerManager:
         # Store job info
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -166,7 +193,7 @@ class SchedulerManager:
             self.config.remote_work_dir
         )
         remote_job_dir = f"{work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -197,6 +224,7 @@ class SchedulerManager:
 
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -212,7 +240,7 @@ class SchedulerManager:
             self.config.remote_work_dir
         )
         remote_job_dir = f"{work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -254,6 +282,7 @@ class SchedulerManager:
         # Store job info
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -268,7 +297,7 @@ class SchedulerManager:
             self.config.remote_work_dir
         )
         remote_job_dir = f"{work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -359,6 +388,7 @@ class SchedulerManager:
 
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "running",
             "submit_time": time.time(),
         }
