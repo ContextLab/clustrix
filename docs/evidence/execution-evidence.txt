@@ -1,0 +1,73 @@
+caller: vpn-two-factor-general-229-128-226.dartmouth.edu (arm64, python 3.12.10)
+
+========================================================================
+slurm: SLURM scheduler (discovery.dartmouth.edu)
+========================================================================
+submitting to discovery.dartmouth.edu ...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_835d8ee6173f)
+No GPUs detected, using standard VENV2 setup...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_835d8ee6173f)
+No GPUs detected, using standard VENV2 setup...
+RESULT (60s): {
+  "gpus": "",
+  "host": "s12.hpcc.dartmouth.edu",
+  "machine": "x86_64",
+  "python": "3.12.13",
+  "slurm_job_id": "9220729",
+  "slurm_nodelist": "s12",
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+gpu: SSH + GPU host (tensor01.dartmouth.edu)
+========================================================================
+submitting to tensor01.dartmouth.edu ...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_835d8ee6173f)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_835d8ee6173f)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+RESULT (13s): {
+  "gpus": "NVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB",
+  "host": "tensor01.dartmouth.edu",
+  "machine": "x86_64",
+  "python": "3.12.13",
+  "slurm_job_id": null,
+  "slurm_nodelist": null,
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+hf: HuggingFace Jobs (container)
+========================================================================
+submitting to huggingface-jobs ...
+RESULT (12s): {
+  "gpus": "",
+  "host": "j-contextlab-6a841cc5e55292eada79c155-bsd8b8iw-18a14-dhgrc",
+  "machine": "x86_64",
+  "python": "3.12.14",
+  "slurm_job_id": null,
+  "slurm_nodelist": null,
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+SUMMARY
+========================================================================
+slurm  PASSED  s12.hpcc.dartmouth.edu  python 3.12.13  59.9s
+gpu    PASSED  tensor01.dartmouth.edu  python 3.12.13  12.5s
+hf     PASSED  j-contextlab-6a841cc5e55292eada79c155-bsd8b8iw-18a14-dhgrc  python 3.12.14  12.0s
