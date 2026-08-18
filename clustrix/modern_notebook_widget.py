@@ -175,6 +175,13 @@ class ModernClustrixWidget:
         .clustrix-widget .widget-hbox,
         .clustrix-widget .widget-vbox { min-width: 0 !important; }
         .clustrix-row { max-width: 100%; overflow: hidden; }
+        /* ipywidgets checkboxes carry their own padding and a min-width that
+           together overflow a full-width container, leaving a scrollbar. */
+        .clustrix-widget .widget-checkbox {
+            width: auto !important;
+            max-width: 100%;
+            overflow: hidden;
+        }
         .clustrix-section { margin-bottom: 16px !important; }
         .clustrix-section:last-child { margin-bottom: 0 !important; }
 
@@ -965,7 +972,7 @@ class ModernClustrixWidget:
             value=False,
             description="Allow paid GPU flavors",
             indent=False,
-            layout=widgets.Layout(width="100%"),
+            layout=widgets.Layout(width="auto", margin="4px 0 0 0"),
         )
 
         hf_row = widgets.HBox(
