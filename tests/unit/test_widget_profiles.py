@@ -79,10 +79,12 @@ class TestAddingAndRemoving:
     def test_add_leaves_the_original_intact(self, widget):
         widget.widgets["profile_dropdown"].value = "A"
         widget.widgets["cpus"].value = 99
+        before = len(widget.profile_manager.get_profile_names())
+
         widget._on_add_profile(widget.widgets["add_profile_btn"])
 
         assert widget.profile_manager.load_profile("A").default_cores == 99
-        assert len(widget.profile_manager.get_profile_names()) == 4
+        assert len(widget.profile_manager.get_profile_names()) == before + 1
 
 
 class TestSaveAndLoad:

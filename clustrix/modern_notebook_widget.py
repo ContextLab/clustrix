@@ -1436,7 +1436,9 @@ class ModernClustrixWidget:
                 # Load the new active profile
                 new_active = self.profile_manager.active_profile
                 if new_active:
-                    config = self.profile_manager.load_profile(new_active)
+                    # set_active_profile, not load_profile: reading a profile
+                    # no longer selects it.
+                    config = self.profile_manager.set_active_profile(new_active)
                     self._load_config_to_widgets(config)
                     self._update_ui_for_cluster_type()
 

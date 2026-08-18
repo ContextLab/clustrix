@@ -21,18 +21,94 @@ class ProfileManager:
         self.active_profile: Optional[str] = None
         self._load_default_profiles()
 
+    #: Starting points for each backend clustrix supports, so the dropdown is
+    #: something to choose from rather than a single entry to edit. Each is a
+    #: usable shape with sensible resources; the fields only the user can know
+    #: -- host, username, namespace -- are deliberately blank, and the widget's
+    #: validation names them before anything is submitted.
+    #:
+    #: These are templates: clone one, fill it in, and save.
+    BUILTIN_PROFILES: Dict[str, Dict[str, Any]] = {
+        "Local single-core": {
+            "cluster_type": "local",
+            "default_cores": 1,
+            "default_memory": "16.25GB",
+            "default_time": "01:00:00",
+        },
+        "Local all cores": {
+            # -1 means "every core on this machine".
+            "cluster_type": "local",
+            "default_cores": -1,
+            "default_memory": "16.25GB",
+            "default_time": "01:00:00",
+        },
+        "SLURM cluster": {
+            "cluster_type": "slurm",
+            "default_cores": 8,
+            "default_memory": "32GB",
+            "default_time": "02:00:00",
+            "remote_work_dir": "~/.clustrix/jobs",
+        },
+        "PBS cluster": {
+            "cluster_type": "pbs",
+            "default_cores": 8,
+            "default_memory": "32GB",
+            "default_time": "02:00:00",
+            "remote_work_dir": "~/.clustrix/jobs",
+        },
+        "SGE cluster": {
+            "cluster_type": "sge",
+            "default_cores": 8,
+            "default_memory": "32GB",
+            "default_time": "02:00:00",
+            "remote_work_dir": "~/.clustrix/jobs",
+        },
+        "SSH remote machine": {
+            "cluster_type": "ssh",
+            "default_cores": 4,
+            "default_memory": "16GB",
+            "default_time": "01:00:00",
+            "remote_work_dir": "~/.clustrix/jobs",
+        },
+        "Kubernetes": {
+            "cluster_type": "kubernetes",
+            "default_cores": 4,
+            "default_memory": "8GB",
+            "default_time": "01:00:00",
+            "k8s_namespace": "default",
+            "k8s_image": "python:3.12-slim",
+        },
+        "HuggingFace Jobs (CPU)": {
+            "cluster_type": "huggingface",
+            "hf_flavor": "cpu-basic",
+            "default_cores": 2,
+            "default_memory": "8GB",
+            "default_time": "01:00:00",
+        },
+        "HuggingFace Jobs (GPU)": {
+            # hf_allow_gpu_flavors stays False: GPU flavors bill by the second,
+            # so running one is an explicit decision, not a side effect of
+            # picking a profile. Submitting without it fails with a message
+            # saying exactly that.
+            "cluster_type": "huggingface",
+            "hf_flavor": "a10g-small",
+            "hf_allow_gpu_flavors": False,
+            "default_cores": 4,
+            "default_memory": "16GB",
+            "default_time": "01:00:00",
+        },
+    }
+
+    #: Selected when the widget opens and nothing else is configured.
+    DEFAULT_PROFILE = "Local single-core"
+
     def _load_default_profiles(self) -> None:
-        """Load default profiles if no profiles exist."""
-        if not self.profiles:
-            # Create default local profile
-            local_config = ClusterConfig(
-                cluster_type="local",
-                default_cores=1,
-                default_memory="16.25GB",
-                default_time="01:00:00",
-            )
-            self.profiles["Local single-core"] = local_config
-            self.active_profile = "Local single-core"
+        """Install the built-in templates if no profiles exist yet."""
+        if self.profiles:
+            return
+        for name, settings in self.BUILTIN_PROFILES.items():
+            self.profiles[name] = ClusterConfig(**settings)
+        self.active_profile = self.DEFAULT_PROFILE
 
     def create_profile(self, name: str, config: ClusterConfig) -> None:
         """Create a new configuration profile."""
@@ -83,11 +159,16 @@ class ProfileManager:
             self.active_profile = next(iter(self.profiles.keys()))
 
     def load_profile(self, name: str) -> ClusterConfig:
-        """Load an existing profile by name."""
+        """Return a profile by name.
+
+        Reading a profile does not select it. It used to: `load_profile` set
+        `active_profile` as a side effect, so merely inspecting profiles in a
+        loop left the last one inspected marked active. Use
+        `set_active_profile` to switch.
+        """
         if name not in self.profiles:
             raise ValueError(f"Profile '{name}' does not exist")
 
-        self.active_profile = name
         return self.profiles[name]
 
     def save_profile(self, name: str, config: ClusterConfig) -> None:

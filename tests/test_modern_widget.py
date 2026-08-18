@@ -13,12 +13,47 @@ class TestProfileManager:
     """Test profile management functionality."""
 
     def test_profile_manager_initialization(self):
-        """Test that ProfileManager initializes with default profile."""
+        """A template ships for every backend, with local selected."""
         with tempfile.TemporaryDirectory() as temp_dir:
             pm = ProfileManager(config_dir=temp_dir)
 
-            assert len(pm.get_profile_names()) == 1
-            assert "Local single-core" in pm.get_profile_names()
+            names = pm.get_profile_names()
+            assert set(names) == set(ProfileManager.BUILTIN_PROFILES)
+            assert pm.active_profile == "Local single-core"
+
+    def test_every_backend_has_a_starting_profile(self):
+        """A dropdown with one entry is a text field with extra steps."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pm = ProfileManager(config_dir=temp_dir)
+
+            offered = {pm.load_profile(n).cluster_type for n in pm.get_profile_names()}
+            assert offered == {
+                "local",
+                "ssh",
+                "slurm",
+                "pbs",
+                "sge",
+                "kubernetes",
+                "huggingface",
+            }
+
+    def test_gpu_template_does_not_pre_authorise_spending(self):
+        """GPU flavors bill by the second; picking a profile must not opt in."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pm = ProfileManager(config_dir=temp_dir)
+
+            gpu = pm.load_profile("HuggingFace Jobs (GPU)")
+            assert gpu.hf_allow_gpu_flavors is False
+
+    def test_reading_a_profile_does_not_select_it(self):
+        """load_profile used to set active_profile, so merely inspecting
+        profiles in a loop left the last one inspected marked active."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            pm = ProfileManager(config_dir=temp_dir)
+
+            for name in pm.get_profile_names():
+                pm.load_profile(name)
+
             assert pm.active_profile == "Local single-core"
 
     def test_create_profile(self):
@@ -48,10 +83,11 @@ class TestProfileManager:
             pm = ProfileManager(config_dir=temp_dir)
 
             # Clone the default profile
+            before = len(pm.get_profile_names())
             new_name = pm.clone_profile("Local single-core")
 
             assert new_name == "Local single-core (copy)"
-            assert len(pm.get_profile_names()) == 2
+            assert len(pm.get_profile_names()) == before + 1
             assert pm.active_profile == new_name
 
     def test_remove_profile(self):
@@ -63,22 +99,29 @@ class TestProfileManager:
             config = ClusterConfig(cluster_type="ssh", default_cores=4)
             pm.create_profile("SSH Cluster", config)
 
+            before = len(pm.get_profile_names())
+
             # Remove the original profile
             pm.remove_profile("Local single-core")
 
             assert "Local single-core" not in pm.get_profile_names()
-            assert len(pm.get_profile_names()) == 1
+            assert len(pm.get_profile_names()) == before - 1
             assert pm.active_profile == "SSH Cluster"
 
     def test_cannot_remove_last_profile(self):
-        """Test that we cannot remove the last remaining profile."""
+        """Removing every template must still leave something selected."""
         with tempfile.TemporaryDirectory() as temp_dir:
             pm = ProfileManager(config_dir=temp_dir)
 
+            names = pm.get_profile_names()
+            for name in names[:-1]:
+                pm.remove_profile(name)
+
+            assert len(pm.get_profile_names()) == 1
             with pytest.raises(
                 ValueError, match="Cannot remove the last remaining profile"
             ):
-                pm.remove_profile("Local single-core")
+                pm.remove_profile(pm.get_profile_names()[0])
 
     def test_save_and_load_file(self):
         """Test saving and loading profiles to/from file."""
@@ -105,7 +148,7 @@ class TestProfileManager:
             pm2 = ProfileManager(config_dir=temp_dir)
             pm2.load_from_file(config_file)
 
-            assert len(pm2.get_profile_names()) == 2
+            assert len(pm2.get_profile_names()) == len(pm.get_profile_names())
             assert "University Cluster" in pm2.get_profile_names()
             assert pm2.active_profile == "University Cluster"
 
