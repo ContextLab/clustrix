@@ -17,7 +17,7 @@ except ImportError:
 
 from dataclasses import asdict
 
-from .config import ClusterConfig, configure
+from .config import ClusterConfig, configure, get_config_dir
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
@@ -1353,12 +1353,27 @@ class ModernClustrixWidget:
         if self.profile_manager.active_profile:
             self.widgets["profile_dropdown"].value = self.profile_manager.active_profile
 
+    @staticmethod
+    def _resolve_config_path(filename: str) -> str:
+        """Anchor a bare config filename to the clustrix config directory.
+
+        `save_to_file("clustrix.yml")` resolves against the current working
+        directory, so the file lands wherever the notebook happened to be
+        started -- for the test suite, that was the repository root. A path
+        that names a directory, or an absolute one, is respected as written.
+        """
+        if not filename:
+            filename = "clustrix.yml"
+        if os.path.isabs(filename) or os.sep in filename:
+            return os.path.expanduser(filename)
+        config_dir = get_config_dir()
+        config_dir.mkdir(parents=True, exist_ok=True)
+        return str(config_dir / filename)
+
     def _on_save_config(self, button):
         """Handle save configuration button click."""
         try:
-            filename = self.widgets["config_filename"].value
-            if not filename:
-                filename = "clustrix.yml"
+            filename = self._resolve_config_path(self.widgets["config_filename"].value)
 
             # Save current widget state to active profile first
             current_profile = self.widgets["profile_dropdown"].value
@@ -1378,9 +1393,7 @@ class ModernClustrixWidget:
     def _on_load_config(self, button):
         """Handle load configuration button click."""
         try:
-            filename = self.widgets["config_filename"].value
-            if not filename:
-                filename = "clustrix.yml"
+            filename = self._resolve_config_path(self.widgets["config_filename"].value)
 
             # Load profiles from file
             self.profile_manager.load_from_file(filename)
