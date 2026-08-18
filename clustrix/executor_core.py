@@ -16,6 +16,7 @@ from .executor_connections import ConnectionManager
 from .executor_schedulers import SchedulerManager
 from .executor_kubernetes import KubernetesJobManager
 from .executor_cloud import CloudJobManager
+from .hf_jobs import HFJobsManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,7 @@ class ClusterExecutor:
         self.scheduler_manager = SchedulerManager(config, self.connection_manager)
         self.k8s_manager = KubernetesJobManager(config, self.connection_manager)
         self.cloud_manager = CloudJobManager(config)
+        self.hf_jobs_manager = HFJobsManager(config)
 
         # Combined active jobs tracking
         self.active_jobs: Dict[str, Any] = {}
@@ -74,6 +76,14 @@ class ClusterExecutor:
                 )
 
         # If no provider specified, use traditional cluster routing
+
+        # HuggingFace Jobs talks to an HTTP API, not a host: there is nothing
+        # to SSH into, and calling connect() here would fail on a config that
+        # is perfectly valid for this backend.
+        if self.config.cluster_type == "huggingface":
+            job_id = self.hf_jobs_manager.submit_job(func_data, job_config)
+            self.active_jobs[job_id] = {"manager": "huggingface", "job_id": job_id}
+            return job_id
 
         # Ensure connection is established for traditional cluster types
         self.connect()
@@ -121,6 +131,10 @@ class ClusterExecutor:
                 return result
             elif manager_type == "kubernetes":
                 result = self.k8s_manager.wait_for_k8s_result(job_id)
+                del self.active_jobs[job_id]
+                return result
+            elif manager_type == "huggingface":
+                result = self.hf_jobs_manager.wait_for_result(job_id)
                 del self.active_jobs[job_id]
                 return result
             elif manager_type == "scheduler":
@@ -213,6 +227,8 @@ class ClusterExecutor:
                 return self.cloud_manager.get_cloud_job_status(job_id)
             elif manager_type == "kubernetes":
                 return self.k8s_manager.check_k8s_job_status(job_id)
+            elif manager_type == "huggingface":
+                return self.hf_jobs_manager.get_job_status(job_id)
             elif manager_type == "scheduler":
                 return self.scheduler_manager.check_job_status(job_id)
 
@@ -240,6 +256,10 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             manager_type = self.active_jobs[job_id]["manager"]
 
+            if manager_type == "huggingface":
+                self.hf_jobs_manager.cancel_job(job_id)
+                del self.active_jobs[job_id]
+                return
             if manager_type == "cloud":
                 self.cloud_manager.cancel_cloud_job(job_id)
                 del self.active_jobs[job_id]

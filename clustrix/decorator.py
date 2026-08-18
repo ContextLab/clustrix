@@ -16,6 +16,10 @@ from .function_flattening import (
     create_simple_subprocess_fallback,
 )
 
+#: Cluster types that submit work over an API instead of SSH, and therefore
+#: never have a ``cluster_host``.
+HOSTLESS_CLUSTER_TYPES = frozenset({"huggingface"})
+
 
 def cluster(
     _func: Optional[Callable] = None,
@@ -645,6 +649,14 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     if config.cluster_type == "kubernetes" and getattr(
         config, "auto_provision_k8s", False
     ):
+        return "remote"
+
+    # Some backends reach their compute over an HTTP API rather than SSH, so
+    # they legitimately have no cluster_host. Without this they fall into the
+    # "no cluster configured" branch below and run on the caller's machine --
+    # silently, while reporting success, which is the worst possible outcome
+    # for someone who asked for remote execution.
+    if config.cluster_type in HOSTLESS_CLUSTER_TYPES:
         return "remote"
 
     # If no cluster is configured, use local execution

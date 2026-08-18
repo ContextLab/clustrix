@@ -107,6 +107,15 @@ class ClusterConfig:
     hf_token: Optional[str] = None  # Required for authentication
     hf_username: Optional[str] = None
     hf_sdk: Optional[str] = None
+    # HuggingFace Jobs backend (cluster_type="huggingface"). The namespace is
+    # usually an org rather than the personal account, which is often not on a
+    # plan that can run jobs.
+    hf_namespace: Optional[str] = None
+    hf_flavor: Optional[str] = None  # defaults to cpu-basic
+    hf_image: Optional[str] = None  # defaults to python:<local minor>-slim
+    hf_job_timeout: Optional[str] = None  # e.g. "30m"
+    # GPU flavors bill real money, so selecting one is an explicit act.
+    hf_allow_gpu_flavors: bool = False
 
     # Resource defaults
     default_cores: int = 4

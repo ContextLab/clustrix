@@ -249,7 +249,28 @@ class SchedulerStatusManager:
         except Exception as e:
             logger.warning(f"Error checking SLURM queue status for job {job_id}: {e}")
 
-        # Job not in queue - could be completed or failed
+        # Job not in the queue. That does NOT mean it finished: squeue does not
+        # list a job for a short window right after sbatch accepts it, and it
+        # stops listing a job the moment it finishes. Asking the accounting
+        # database first distinguishes "not started yet" and "still running"
+        # from "gone", which the file probe below cannot do -- it would poll
+        # for about fifteen seconds, find no result.pkl, and report the job
+        # unknown while it was in fact still queued.
+        sacct_info = self._query_sacct(job_id)
+        if sacct_info:
+            state = sacct_info["state"]
+            if state.startswith(("PENDING", "REQUEUED", "RESIZING", "SUSPENDED")):
+                return "queued"
+            if state.startswith(("RUNNING", "CONFIGURING", "COMPLETING")):
+                return "running"
+            if any(state.startswith(f) for f in self._TERMINAL_FAILURE_STATES):
+                reason = self._get_scheduler_failure_reason(job_id)
+                logger.error(f"Job {job_id} {reason or 'failed'}")
+                return "failed"
+            # COMPLETED, or a state we do not recognise: fall through to the
+            # file probe, which distinguishes a real result from a job that
+            # exited zero without producing one.
+
         # Use robust file-based detection with retry logic
         if job_id not in active_jobs:
             logger.warning(f"Job {job_id} not found in active_jobs, assuming completed")
@@ -427,11 +448,12 @@ class SchedulerStatusManager:
         "DEADLINE",
     )
 
-    def _get_scheduler_failure_reason(self, job_id: str) -> Optional[str]:
-        """Ask the scheduler's accounting database why a job produced nothing.
+    def _query_sacct(self, job_id: str) -> Optional[Dict[str, str]]:
+        """Ask SLURM's accounting database about a job.
 
-        Returns a human-readable explanation, or None if the scheduler has no
-        record of a failure (or cannot be reached).
+        Returns a dict with ``state``, ``exit_code``, ``nodelist`` and
+        ``workdir``, or None when the cluster is not SLURM, sacct is
+        unavailable, or it has no record of the job.
         """
         if self.config.cluster_type != "slurm":
             return None
@@ -451,19 +473,33 @@ class SchedulerStatusManager:
             return None
 
         parts = line.split("|")
-        state = parts[0].strip() if parts else ""
-        exit_code = parts[1].strip() if len(parts) > 1 else "?"
-        nodelist = parts[2].strip() if len(parts) > 2 else "?"
-        workdir = parts[3].strip() if len(parts) > 3 else "?"
+        return {
+            "state": parts[0].strip() if parts else "",
+            "exit_code": parts[1].strip() if len(parts) > 1 else "?",
+            "nodelist": parts[2].strip() if len(parts) > 2 else "?",
+            "workdir": parts[3].strip() if len(parts) > 3 else "?",
+        }
 
+    def _get_scheduler_failure_reason(self, job_id: str) -> Optional[str]:
+        """Ask the scheduler's accounting database why a job produced nothing.
+
+        Returns a human-readable explanation, or None if the scheduler has no
+        record of a failure (or cannot be reached).
+        """
+        info = self._query_sacct(job_id)
+        if not info:
+            return None
+
+        state = info["state"]
         if not any(state.startswith(s) for s in self._TERMINAL_FAILURE_STATES):
             return None
 
         detail = (
-            f"failed according to sacct: state={state} exit_code={exit_code} "
-            f"node={nodelist} workdir={workdir}"
+            f"failed according to sacct: state={state} "
+            f"exit_code={info['exit_code']} node={info['nodelist']} "
+            f"workdir={info['workdir']}"
         )
-        if exit_code.startswith("127"):
+        if info["exit_code"].startswith("127"):
             detail += (
                 ". Exit code 127 means the job script could not find a command it "
                 "tried to run. The usual cause is that remote_work_dir points at "
