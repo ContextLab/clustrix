@@ -20,6 +20,7 @@ class ProfileManager:
         self.profiles: Dict[str, ClusterConfig] = {}
         self.active_profile: Optional[str] = None
         self._load_default_profiles()
+        self._restore()
 
     #: Starting points for each backend clustrix supports, so the dropdown is
     #: something to choose from rather than a single entry to edit. Each is a
@@ -110,6 +111,40 @@ class ProfileManager:
             self.profiles[name] = ClusterConfig(**settings)
         self.active_profile = self.DEFAULT_PROFILE
 
+    #: Where profiles live between sessions.
+    STORE_FILENAME = "profiles.yml"
+
+    @property
+    def store_path(self) -> Path:
+        return self.config_dir / self.STORE_FILENAME
+
+    def _restore(self) -> None:
+        """Reload profiles saved by an earlier session.
+
+        Without this the profile system forgot everything on kernel restart:
+        the built-in templates were re-seeded and anything the user had built
+        was gone, which made the whole profile row feel like scratch space.
+        A store that cannot be read must not stop the widget from opening, so
+        the built-ins stand and the problem is reported rather than raised.
+        """
+        if not self.store_path.exists():
+            return
+        try:
+            self.load_from_file(str(self.store_path))
+        except Exception as e:  # noqa: BLE001
+            import warnings
+
+            warnings.warn(f"Could not read saved profiles from {self.store_path}: {e}")
+
+    def _persist(self) -> None:
+        """Write profiles out so the next session starts where this one left off."""
+        try:
+            self.save_to_file(str(self.store_path))
+        except Exception as e:  # noqa: BLE001
+            import warnings
+
+            warnings.warn(f"Could not save profiles to {self.store_path}: {e}")
+
     def create_profile(self, name: str, config: ClusterConfig) -> None:
         """Create a new configuration profile."""
         if name in self.profiles:
@@ -117,6 +152,8 @@ class ProfileManager:
 
         self.profiles[name] = config
         self.active_profile = name
+
+        self._persist()
 
     def clone_profile(self, original_name: str, new_name: Optional[str] = None) -> str:
         """Clone an existing profile with a new name."""
@@ -158,6 +195,8 @@ class ProfileManager:
         if self.active_profile == name:
             self.active_profile = next(iter(self.profiles.keys()))
 
+        self._persist()
+
     def load_profile(self, name: str) -> ClusterConfig:
         """Return a profile by name.
 
@@ -177,6 +216,8 @@ class ProfileManager:
         if self.active_profile is None:
             self.active_profile = name
 
+        self._persist()
+
     def rename_profile(self, old_name: str, new_name: str) -> None:
         """Rename an existing profile."""
         if old_name not in self.profiles:
@@ -190,6 +231,8 @@ class ProfileManager:
 
         if self.active_profile == old_name:
             self.active_profile = new_name
+
+        self._persist()
 
     def get_profile_names(self) -> List[str]:
         """Get list of all profile names."""
@@ -207,6 +250,7 @@ class ProfileManager:
             raise ValueError(f"Profile '{name}' does not exist")
 
         self.active_profile = name
+        self._persist()
         return self.profiles[name]
 
     def save_to_file(self, filepath: str) -> None:

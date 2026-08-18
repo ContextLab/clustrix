@@ -15,6 +15,28 @@ pytest.importorskip("ipywidgets")
 
 from clustrix.config import ClusterConfig  # noqa: E402
 from clustrix.modern_notebook_widget import ModernClustrixWidget  # noqa: E402
+from clustrix.profile_manager import ProfileManager  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def isolated_profile_store(tmp_path, monkeypatch):
+    """Profiles persist to ~/.clustrix now, so tests must not read the
+    developer's own store -- or write to it."""
+    monkeypatch.setattr(
+        ProfileManager, "__init__", _profile_manager_init(tmp_path / "profiles")
+    )
+    from clustrix.config import _config
+
+    _config.__dict__.update(ClusterConfig().__dict__)
+
+
+def _profile_manager_init(directory):
+    original = ProfileManager.__init__
+
+    def patched(self, config_dir=None):
+        original(self, config_dir=str(directory))
+
+    return patched
 
 
 @pytest.fixture
@@ -143,3 +165,170 @@ class TestTestJobButton:
             assert any(
                 word in pill for word in ("completed", "invalid", "failed")
             ), f"{cluster_type} left the pill saying {pill!r}"
+
+
+class TestTheWidgetAgreesWithTheLibrary:
+    """The widget used to only ever *write*, never read."""
+
+    def test_it_opens_showing_the_live_configuration(self):
+        """A session that already called configure() saw the widget contradict
+        it, and Apply would then overwrite the real config with the defaults
+        on screen."""
+        import clustrix
+
+        clustrix.configure(
+            cluster_type="huggingface",
+            hf_namespace="contextlab",
+            hf_flavor="cpu-upgrade",
+        )
+        widget = ModernClustrixWidget()
+
+        assert widget.widgets["cluster_type"].value == "huggingface"
+        assert widget.widgets["hf_namespace"].value == "contextlab"
+        assert widget.widgets["hf_flavor"].value == "cpu-upgrade"
+
+    def test_the_live_configuration_appears_as_its_own_profile(self):
+        """It must not silently overwrite one of the templates."""
+        import clustrix
+
+        clustrix.configure(cluster_type="slurm", cluster_host="live.example.edu")
+        widget = ModernClustrixWidget()
+
+        assert widget.widgets["profile_dropdown"].value == "Current configuration"
+        assert "Local single-core" in widget.profile_manager.get_profile_names()
+
+    def test_the_displayed_values_match_the_selected_profile(self):
+        """Fresh widgets showed 16GB while the profile held 16.25GB."""
+        widget = ModernClustrixWidget()
+        name = widget.widgets["profile_dropdown"].value
+        stored = widget.profile_manager.load_profile(name)
+
+        assert widget.widgets["ram"].value == stored.default_memory
+        assert widget.widgets["cpus"].value == stored.default_cores
+
+    def test_apply_replaces_rather_than_merges(self):
+        """Applying ssh then local left cluster_host pointing at the old host."""
+        import clustrix
+
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["host"].value = "login.example.edu"
+        widget.widgets["username"].value = "alice"
+        widget._on_apply_config(widget.widgets["apply_btn"])
+        assert clustrix.get_config().cluster_host == "login.example.edu"
+
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert clustrix.get_config().cluster_type == "local"
+        assert not clustrix.get_config().cluster_host
+        assert not clustrix.get_config().username
+
+
+class TestBackendSettingsSurviveSwitching:
+    """Switching profiles used to overwrite each one with the previous screen."""
+
+    def _widget_with(self, extra):
+        widget = ModernClustrixWidget()
+        for name, config in extra.items():
+            widget.profile_manager.save_profile(name, config)
+        widget._update_profile_dropdown()
+        return widget
+
+    def test_huggingface_and_kubernetes_settings_are_not_cross_contaminated(self):
+        widget = self._widget_with(
+            {
+                "MyHF": ClusterConfig(
+                    cluster_type="huggingface",
+                    hf_namespace="contextlab",
+                    hf_flavor="cpu-upgrade",
+                ),
+                "MyK8s": ClusterConfig(
+                    cluster_type="kubernetes",
+                    k8s_namespace="research",
+                    k8s_image="python:3.10",
+                ),
+            }
+        )
+        dropdown = widget.widgets["profile_dropdown"]
+        for name in ["MyHF", "MyK8s", "MyHF", "MyK8s"]:
+            dropdown.value = name
+
+        hf = widget.profile_manager.load_profile("MyHF")
+        k8s = widget.profile_manager.load_profile("MyK8s")
+        assert (hf.hf_namespace, hf.hf_flavor) == ("contextlab", "cpu-upgrade")
+        assert (k8s.k8s_namespace, k8s.k8s_image) == ("research", "python:3.10")
+
+    def test_the_remote_work_directory_survives(self):
+        widget = self._widget_with(
+            {
+                "Scratch": ClusterConfig(
+                    cluster_type="slurm",
+                    cluster_host="a.edu",
+                    remote_work_dir="/scratch/alice/clustrix",
+                ),
+                "Other": ClusterConfig(cluster_type="local"),
+            }
+        )
+        dropdown = widget.widgets["profile_dropdown"]
+        dropdown.value = "Scratch"
+        dropdown.value = "Other"
+        dropdown.value = "Scratch"
+
+        assert widget.widgets["home_dir"].value == "/scratch/alice/clustrix"
+
+    def test_a_password_reaches_the_configuration(self):
+        """Test connect passed the password explicitly and succeeded, while the
+        job itself authenticated from config.password and failed."""
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "slurm"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["host"].value = "a.edu"
+        widget.widgets["username"].value = "alice"
+        widget.widgets["password"].value = "s3cret"
+
+        assert widget._get_config_from_widgets().password == "s3cret"
+
+    def test_unticking_clone_environment_has_an_effect(self):
+        widget = ModernClustrixWidget()
+        widget.widgets["clone_env"].value = False
+
+        assert widget._get_config_from_widgets().replicate_local_environment is False
+
+
+class TestProfilesSurviveARestart:
+    def test_a_saved_profile_is_there_next_session(self, tmp_path):
+        """Profiles were re-seeded from the built-ins on every kernel start."""
+        from clustrix.profile_manager import ProfileManager as PM
+
+        first = PM(config_dir=str(tmp_path / "store"))
+        first.save_profile(
+            "Mine", ClusterConfig(cluster_type="slurm", default_cores=64)
+        )
+        first.set_active_profile("Mine")
+
+        second = PM(config_dir=str(tmp_path / "store"))
+        assert second.active_profile == "Mine"
+        assert second.load_profile("Mine").default_cores == 64
+
+
+class TestTheConfigFilePicker:
+    def test_it_offers_files_rather_than_requiring_a_guess(self, tmp_path):
+        widget = ModernClustrixWidget()
+        assert isinstance(widget.widgets["config_filename"].options, (list, tuple))
+        assert widget.widgets["config_filename"].value == "profiles.yml"
+
+    def test_it_does_not_offer_unrelated_yaml(self, tmp_path, monkeypatch):
+        """A working tree is full of YAML that has nothing to do with clustrix."""
+        (tmp_path / ".pre-commit-config.yaml").write_text("repos: []\n")
+        (tmp_path / "profiles.yml").write_text(
+            "active_profile: A\nprofiles:\n  A:\n    cluster_type: local\n"
+        )
+        monkeypatch.chdir(tmp_path)
+
+        widget = ModernClustrixWidget()
+        offered = " ".join(widget._discover_config_files())
+
+        assert "pre-commit" not in offered

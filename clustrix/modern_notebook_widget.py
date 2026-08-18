@@ -16,13 +16,32 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     widgets = None  # type: ignore
 
-from dataclasses import asdict
+import json
 
-from .config import ClusterConfig, configure, get_config_dir
+import yaml
+
+from dataclasses import asdict
+from pathlib import Path
+
+from .config import (
+    ClusterConfig,
+    _config,
+    configure,
+    get_config,
+    get_config_dir,
+)
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
+
+#: Profile holding whatever clustrix was already configured to do when the
+#: widget opened, so the live state is visible instead of contradicted.
+LIVE_PROFILE_NAME = "Current configuration"
+
+#: Default profile bundle. Deliberately not clustrix.yml, which is the
+#: library's own config file and a different format.
+DEFAULT_PROFILE_STORE = "profiles.yml"
 
 
 #: The function the "Test job submission" button runs on the cluster. Kept as
@@ -68,7 +87,37 @@ class ModernClustrixWidget:
 
         self._create_widgets()
         self._setup_observers()
+        self._adopt_live_configuration()
         self._update_ui_for_cluster_type()
+
+    def _adopt_live_configuration(self) -> None:
+        """Open showing the configuration clustrix is actually using.
+
+        The widget only ever *wrote* on Apply: it never read `get_config()`, so
+        a session that had already called `configure(cluster_type="huggingface",
+        ...)` still opened on "Local single-core" with a blank namespace. The
+        displayed state contradicted the library's, and Apply would then
+        overwrite the real configuration with the defaults on screen.
+
+        A configuration that differs from the shipped defaults becomes its own
+        profile, so it is visible in the dropdown next to the templates rather
+        than silently replacing one.
+        """
+        live = get_config()
+        self._suspend_profile_capture = True
+        try:
+            if asdict(live) != asdict(ClusterConfig()):
+                self.profile_manager.save_profile(LIVE_PROFILE_NAME, live)
+                self.profile_manager.active_profile = LIVE_PROFILE_NAME
+                self._update_profile_dropdown()
+                self._load_config_to_widgets(live)
+                return
+
+            active = self.profile_manager.get_active_profile()
+            if active is not None:
+                self._load_config_to_widgets(active)
+        finally:
+            self._suspend_profile_capture = False
 
     def _inject_css_styles(self) -> None:
         """Inject the widget stylesheet.
@@ -374,7 +423,10 @@ class ModernClustrixWidget:
         # so seven of the eight entries failed with "Profile does not exist"
         # the moment they were selected, and "+" on one failed too. Sorted,
         # because the old `set()` union also made the order change run to run.
-        all_profiles = sorted(self.profile_manager.get_profile_names())
+        # Not sorted: _update_profile_dropdown does not sort either, so the
+        # list jumped around after an add or remove. Insertion order also keeps
+        # the built-in templates in a deliberate sequence, local first.
+        all_profiles = self.profile_manager.get_profile_names()
 
         self.widgets["profile_dropdown"] = widgets.Combobox(
             options=all_profiles,
@@ -424,10 +476,19 @@ class ModernClustrixWidget:
         )
         config_label.add_class("clustrix-label")
 
-        # 2.2 Config Filename Field (editable text)
-        self.widgets["config_filename"] = widgets.Text(
-            value="clustrix.yml",
-            layout=widgets.Layout(width="160px", height="35px"),
+        # 2.2 Config file: a picker over the files that actually exist, which
+        # is still typeable for a path that does not exist yet. A plain text
+        # field meant guessing both the name and where a bare name resolved to,
+        # and the Load button's tooltip promised a file dialog there was none
+        # of. The default is profiles.yml, not clustrix.yml: this file is a
+        # bundle of profiles, and clustrix.yml is the library's own config
+        # file, which load_config rejects this format for.
+        self.widgets["config_filename"] = widgets.Combobox(
+            value=DEFAULT_PROFILE_STORE,
+            options=self._discover_config_files(),
+            placeholder="profiles.yml, or a path",
+            ensure_option=False,
+            layout=widgets.Layout(width="220px", height="35px"),
         )
 
         # 2.3 Save Config Button - saves ALL profiles.
@@ -443,7 +504,10 @@ class ModernClustrixWidget:
         # 2.4 Load Config Button - opens file dialog, replaces ALL profiles
         self.widgets["load_btn"] = widgets.Button(
             description="Load",
-            tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
+            tooltip=(
+                "Replace ALL current profiles with those in the selected "
+                ".yml/.yaml/.json file"
+            ),
             layout=widgets.Layout(width="66px", height="26px"),
         )
         self.widgets["load_btn"].add_class("clustrix-button-secondary")
@@ -607,7 +671,9 @@ class ModernClustrixWidget:
 
         # B: Package manager dropdown (2 columns)
         self.widgets["package_manager"] = widgets.Dropdown(
-            options=["auto", "pip", "conda"],
+            # uv is what ClusterConfig documents and utils implements; leaving
+            # it out of the menu made it unreachable from the widget.
+            options=["auto", "pip", "uv", "conda"],
             value="auto",
             layout=widgets.Layout(height="35px"),
         )
@@ -1404,6 +1470,17 @@ class ModernClustrixWidget:
             except Exception as e:
                 with self.widgets["output"]:
                     print(f"❌ Error loading profile '{profile_name}': {e}")
+                    print("   Use + to create a profile with this name.")
+                # The box is a Combobox, so a typo is accepted as free text.
+                # Leaving it displayed would mean the widget names a profile
+                # that does not exist while showing another one's settings.
+                self._suspend_profile_capture = True
+                try:
+                    self.widgets["profile_dropdown"].value = (
+                        self.profile_manager.active_profile or ""
+                    )
+                finally:
+                    self._suspend_profile_capture = False
 
     def _on_add_profile(self, button):
         """Handle add profile button click."""
@@ -1469,6 +1546,65 @@ class ModernClustrixWidget:
         finally:
             self._suspend_profile_capture = previous
 
+    def _discover_config_files(self) -> List[str]:
+        """Profile files the user could plausibly want, newest first.
+
+        Looks where saves land (the clustrix config directory) and where a
+        notebook is usually rooted (the working directory), so picking a file
+        does not require remembering where it went.
+        """
+        found: List[str] = []
+        seen = set()
+        for directory, keep_full_path in (
+            (get_config_dir(), False),
+            (Path.cwd(), True),
+        ):
+            try:
+                entries = [
+                    path
+                    for pattern in ("*.yml", "*.yaml", "*.json")
+                    for path in directory.glob(pattern)
+                ]
+            except OSError:
+                continue
+            for path in sorted(entries, key=lambda p: -p.stat().st_mtime):
+                if not self._looks_like_a_profile_bundle(path):
+                    continue
+                label = str(path) if keep_full_path else path.name
+                if label not in seen:
+                    seen.add(label)
+                    found.append(label)
+        if DEFAULT_PROFILE_STORE not in seen:
+            found.insert(0, DEFAULT_PROFILE_STORE)
+        return found
+
+    @staticmethod
+    def _looks_like_a_profile_bundle(path: Path) -> bool:
+        """True for files this widget could actually load.
+
+        A working tree is full of YAML that has nothing to do with clustrix --
+        .pre-commit-config.yaml, .readthedocs.yaml, coverage.json -- and
+        offering them in a Load menu invites an error instead of a choice.
+        Cheap to check: the files are small and there are few of them.
+        """
+        try:
+            if path.stat().st_size > 5_000_000:
+                return False
+            with open(path) as handle:
+                if path.suffix.lower() == ".json":
+                    data = json.load(handle)
+                else:
+                    data = yaml.safe_load(handle)
+        except Exception:  # noqa: BLE001 - unreadable or malformed: not offerable
+            return False
+        return isinstance(data, dict) and isinstance(data.get("profiles"), dict)
+
+    def _refresh_config_files(self) -> None:
+        """Re-scan, preserving whatever the user typed or chose."""
+        chosen = self.widgets["config_filename"].value
+        self.widgets["config_filename"].options = self._discover_config_files()
+        self.widgets["config_filename"].value = chosen
+
     @staticmethod
     def _resolve_config_path(filename: str) -> str:
         """Anchor a bare config filename to the clustrix config directory.
@@ -1507,6 +1643,7 @@ class ModernClustrixWidget:
                     f"✅ Saved {len(self.profile_manager.get_profile_names())} "
                     f"profile(s) to: {filename}"
                 )
+            self._refresh_config_files()
             self.set_status("ok", "saved")
         except Exception as e:
             with self.widgets["output"]:
@@ -1569,12 +1706,14 @@ class ModernClustrixWidget:
                     self.profile_manager.save_profile(current_profile, config)
 
                 # And make it the active configuration for @cluster.
-                applied = {
-                    field: value
-                    for field, value in asdict(config).items()
-                    if value is not None
-                }
-                configure(**applied)
+                #
+                # Replace rather than merge. configure() mutates the global
+                # config in place, and skipping None values meant fields from a
+                # previous Apply survived: switching from an SSH profile to a
+                # local one left cluster_host and username pointing at the old
+                # cluster, so the config no longer matched anything on screen.
+                _config.__dict__.update(ClusterConfig().__dict__)
+                configure(**asdict(config))
 
                 print("✅ Applied configuration")
                 print(f"   Cluster: {config.cluster_type}")
@@ -1587,14 +1726,11 @@ class ModernClustrixWidget:
                 print("   @cluster will use this configuration from now on.")
                 self.set_status("ok", "applied")
 
-                original_description = self.widgets["apply_btn"].description
-                self.widgets["apply_btn"].description = "Applied!"
-
-                def reset_button():
-                    import time
-
-                    time.sleep(2)
-                    self.widgets["apply_btn"].description = original_description
+                # The button label used to change to "Applied!" and a
+                # reset_button() closure was defined to change it back -- and
+                # never called, so it stayed "Applied!" for the rest of the
+                # session even after a later Apply failed. The status pill
+                # already reports the outcome and clears on the next action.
 
             except Exception as e:
                 print(f"❌ Error applying configuration: {e}")
@@ -2005,6 +2141,10 @@ class ModernClustrixWidget:
                     "cluster_port": self.widgets["port"].value,
                     "username": self.widgets["username"].value,
                     "key_file": self.widgets["ssh_key_file"].value,
+                    # Collected from the user and then dropped: connection
+                    # tests passed it explicitly, so Test connect succeeded
+                    # while the actual job failed to authenticate.
+                    "password": self.widgets["password"].value or None,
                     "password_env_var": self.widgets["local_env_var"].value,
                     # Setting this only takes effect if clustrix is told to
                     # look it up; without the flag the field silently did
@@ -2044,6 +2184,9 @@ class ModernClustrixWidget:
             {
                 "package_manager": self.widgets["package_manager"].value,
                 "python_executable": self.widgets["python_executable"].value,
+                # The checkbox had no effect: unticking it still replicated the
+                # local environment on the worker.
+                "replicate_local_environment": bool(self.widgets["clone_env"].value),
                 "environment_variables": env_vars,
                 "module_loads": modules,
                 "pre_execution_commands": (
@@ -2057,54 +2200,65 @@ class ModernClustrixWidget:
         return ClusterConfig(**config_data)
 
     def _load_config_to_widgets(self, config: ClusterConfig) -> None:
-        """Load configuration values into widgets."""
-        # Basic cluster settings
+        """Show `config` in the controls.
+
+        This must mirror `_get_config_from_widgets` field for field, including
+        resetting a control to its default when the config does not set it.
+        It used to restore only a subset -- no HuggingFace or Kubernetes
+        settings, no remote work directory, no password -- and to leave
+        environment variables and modules untouched when the incoming config
+        had none. Combined with saving the visible state on the way out, that
+        meant clicking through the profile dropdown overwrote each profile with
+        whatever the previous one happened to leave on screen.
+        """
         self.widgets["cluster_type"].value = config.cluster_type
+        # Section visibility keys off this, and the capture on the way out
+        # reads it to decide which fields belong to the profile.
+        self.current_cluster_type = config.cluster_type
+
         self.widgets["cpus"].value = config.default_cores
-        # Set memory as string (already includes GB)
-        memory_str = config.default_memory
-        if isinstance(memory_str, str):
-            self.widgets["ram"].value = memory_str
-        else:
-            self.widgets["ram"].value = "16GB"  # Default fallback
+        self.widgets["ram"].value = (
+            config.default_memory if isinstance(config.default_memory, str) else "16GB"
+        )
         self.widgets["time"].value = config.default_time
 
-        # Remote settings
-        if hasattr(config, "cluster_host"):
-            self.widgets["host"].value = config.cluster_host or ""
-        if hasattr(config, "cluster_port"):
-            self.widgets["port"].value = config.cluster_port
-        if hasattr(config, "username"):
-            self.widgets["username"].value = config.username or ""
-        if hasattr(config, "key_file"):
-            self.widgets["ssh_key_file"].value = config.key_file or "~/.ssh/id_rsa"
-        if hasattr(config, "password_env_var"):
-            self.widgets["local_env_var"].value = config.password_env_var or ""
+        # Remote / SSH
+        self.widgets["host"].value = config.cluster_host or ""
+        self.widgets["port"].value = config.cluster_port or 22
+        self.widgets["username"].value = config.username or ""
+        self.widgets["password"].value = config.password or ""
+        self.widgets["ssh_key_file"].value = config.key_file or "~/.ssh/id_rsa"
+        self.widgets["local_env_var"].value = config.password_env_var or ""
+        self.widgets["home_dir"].value = config.remote_work_dir or ""
 
-        # Advanced settings
-        if hasattr(config, "package_manager"):
-            self.widgets["package_manager"].value = config.package_manager or "auto"
-        if hasattr(config, "python_executable"):
-            self.widgets["python_executable"].value = (
-                config.python_executable or "python"
-            )
-        # Clone environment checkbox - set default value since this field doesn't exist in ClusterConfig
-        self.widgets["clone_env"].value = True  # Default to enabled
+        # Kubernetes
+        self.widgets["k8s_namespace"].value = config.k8s_namespace or "default"
+        self.widgets["k8s_image"].value = config.k8s_image or "python:3.11-slim"
+        self.widgets["k8s_service_account"].value = config.k8s_service_account or ""
+        self.widgets["k8s_pull_policy"].value = config.k8s_pull_policy or "IfNotPresent"
 
-        # Environment variables and modules
-        if hasattr(config, "environment_variables") and config.environment_variables:
-            env_var_options = [
-                f"{k}={v}" for k, v in config.environment_variables.items()
-            ]
-            self.widgets["env_vars"].options = env_var_options
+        # HuggingFace
+        self.widgets["hf_namespace"].value = config.hf_namespace or ""
+        self.widgets["hf_flavor"].value = config.hf_flavor or "cpu-basic"
+        self.widgets["hf_token"].value = config.hf_token or ""
+        self.widgets["hf_allow_gpu"].value = bool(config.hf_allow_gpu_flavors)
 
-        if hasattr(config, "module_loads") and config.module_loads:
-            self.widgets["modules"].options = config.module_loads
+        # Advanced
+        self.widgets["package_manager"].value = config.package_manager or "auto"
+        self.widgets["python_executable"].value = config.python_executable or "python"
+        self.widgets["clone_env"].value = bool(
+            getattr(config, "replicate_local_environment", True)
+        )
 
-        if hasattr(config, "pre_execution_commands") and config.pre_execution_commands:
-            self.widgets["pre_exec_commands"].value = "\n".join(
-                config.pre_execution_commands
-            )
+        # Assigned unconditionally: leaving the previous profile's entries in
+        # place is how they migrated between profiles.
+        self.widgets["env_vars"].options = [
+            f"{k}={v}" for k, v in (config.environment_variables or {}).items()
+        ]
+        self.widgets["modules"].options = list(config.module_loads or [])
+        self.widgets["pre_exec_commands"].value = "\n".join(
+            config.pre_execution_commands or []
+        )
 
 
 def create_modern_cluster_widget(
