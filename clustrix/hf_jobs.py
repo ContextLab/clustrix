@@ -41,6 +41,7 @@ import os
 import secrets
 import sys
 import time
+import uuid
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,10 @@ LOG_FETCH_DELAY_SECONDS = 2.0
 #: limit, but large enough for a function plus modest arguments; anything
 #: bigger should be read from a dataset inside the job rather than shipped.
 MAX_PAYLOAD_BYTES = 256 * 1024
+
+#: Private dataset repo used to hand a job a payload too large to pass in the
+#: environment. Created on first use under the job's namespace.
+PAYLOAD_REPO_NAME = "clustrix-payloads"
 
 
 def _token_from_hf_cli_cache() -> Optional[str]:
@@ -158,7 +163,17 @@ def _bootstrap_source() -> str:
         "    print(hmac.new(k,b,hashlib.sha256).hexdigest())\n"
         "    print(base64.b64encode(b).decode())\n"
         "    print(end)\n"
-        "p=dill.loads(base64.b64decode(os.environ['CLUSTRIX_PAYLOAD']))\n"
+        # A payload too big for an environment variable is staged in a private
+        # dataset repo and named here instead. CLUSTRIX_HF_TOKEN is delivered
+        # as a job secret, and is only sent when staging was actually needed.
+        "_enc=os.environ.get('CLUSTRIX_PAYLOAD','')\n"
+        "if not _enc:\n"
+        "    from huggingface_hub import hf_hub_download\n"
+        "    _f=hf_hub_download(repo_id=os.environ['CLUSTRIX_PAYLOAD_REPO'],\n"
+        "        filename=os.environ['CLUSTRIX_PAYLOAD_FILE'],repo_type='dataset',\n"
+        "        token=os.environ['CLUSTRIX_HF_TOKEN'])\n"
+        "    _enc=open(_f).read()\n"
+        "p=dill.loads(base64.b64decode(_enc))\n"
         "try:\n"
         "    try:\n"
         "        f=dill.loads(p['function'])\n"
@@ -207,6 +222,7 @@ class HFJobsManager:
         self.config = config
         self._api: Optional[Any] = None
         self._jobs: Dict[str, Dict[str, Any]] = {}
+        self._token: Optional[str] = None
 
     # -- setup ---------------------------------------------------------
 
@@ -232,6 +248,9 @@ class HFJobsManager:
                     "clustrix config, export HF_TOKEN, or run `hf auth login`."
                 )
             self._api = HfApi(token=token)
+            # Held so a staged job can be handed a token as a secret. Only
+            # staged jobs get one; see submit_job.
+            self._token = token
         return self._api
 
     def _namespace(self) -> Optional[str]:
@@ -311,6 +330,66 @@ class HFJobsManager:
             )
         return flavor
 
+    # -- payload staging -----------------------------------------------
+
+    def _payload_repo(self) -> str:
+        """The private dataset repo used to hand large payloads to a job."""
+        configured = getattr(self.config, "hf_payload_repo", None)
+        if configured:
+            return str(configured)
+        return f"{self._namespace()}/{PAYLOAD_REPO_NAME}"
+
+    def _stage_payload(self, encoded: str) -> Dict[str, str]:
+        """Put an oversized payload in a private dataset and describe where.
+
+        HuggingFace rejects very large environment variables, which capped a
+        job's arguments at a few hundred kilobytes -- fine for a function,
+        useless for data. Staging lifts that cap without asking the caller to
+        restructure their code, and the repo is private because the payload is
+        the user's function and their data.
+        """
+        repo_id = self._payload_repo()
+        path_in_repo = f"payloads/{uuid.uuid4().hex}.b64"
+
+        self.api.create_repo(
+            repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True
+        )
+        self.api.upload_file(
+            path_or_fileobj=encoded.encode(),
+            path_in_repo=path_in_repo,
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message="clustrix job payload",
+        )
+        logger.info(
+            "Staged %d-byte payload at %s/%s", len(encoded), repo_id, path_in_repo
+        )
+        return {"repo_id": repo_id, "path_in_repo": path_in_repo}
+
+    def _unstage_payload(self, staged: Optional[Dict[str, str]]) -> None:
+        """Remove a staged payload once the job no longer needs it.
+
+        Best effort by design: a payload left behind is clutter in a private
+        repo, and raising here would replace the caller's real result -- or
+        their real error -- with a cleanup failure.
+        """
+        if not staged:
+            return
+        try:
+            self.api.delete_file(
+                path_in_repo=staged["path_in_repo"],
+                repo_id=staged["repo_id"],
+                repo_type="dataset",
+                commit_message="clustrix job payload cleanup",
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.warning(
+                "Could not delete staged payload %s/%s: %s",
+                staged["repo_id"],
+                staged["path_in_repo"],
+                e,
+            )
+
     # -- submission ----------------------------------------------------
 
     def submit_job(self, func_data: Dict[str, Any], job_config: Dict[str, Any]) -> str:
@@ -331,6 +410,7 @@ class HFJobsManager:
             protocol=4,
         )
         encoded = base64.b64encode(payload).decode()
+        staged: Optional[Dict[str, str]] = None
         if len(encoded) > MAX_PAYLOAD_BYTES:
             # Say which part is big. The old message blamed "closing over" the
             # data, which is wrong as often as not: a module-level table in the
@@ -341,16 +421,14 @@ class HFJobsManager:
                 for part in ("function", "args", "kwargs")
                 if func_data.get(part)
             )
-            raise ValueError(
-                f"Serialized function and arguments are {len(encoded)} bytes, "
-                f"over the {MAX_PAYLOAD_BYTES}-byte limit for a HuggingFace "
-                f"Jobs payload ({breakdown}). Large arguments should be passed "
-                "through a Hub dataset and loaded inside the function. A large "
-                "'function' usually means a big module-level object in one of "
-                "your project's modules, which is embedded along with the "
-                "module: move it behind a function, or install the package so "
-                "the worker imports it instead of receiving a copy."
+            logger.info(
+                "Payload is %d bytes (%s), over the %d-byte environment limit; "
+                "staging it through a private dataset.",
+                len(encoded),
+                breakdown,
+                MAX_PAYLOAD_BYTES,
             )
+            staged = self._stage_payload(encoded)
 
         flavor = self._flavor(job_config)
         timeout = (
@@ -374,19 +452,45 @@ class HFJobsManager:
         # Fresh per job: the key only has to outlive this one result.
         hmac_key = secrets.token_hex(32)
 
-        job = self.api.run_job(
-            image=image,
-            command=["python", "-c", _bootstrap_source()],
-            env={"CLUSTRIX_PAYLOAD": encoded, "CLUSTRIX_PACKAGES": packages},
-            secrets={"CLUSTRIX_HMAC_KEY": hmac_key},
-            flavor=flavor,
-            timeout=timeout,
-            namespace=self._namespace(),
-        )
+        self.api  # resolve credentials before they are needed below
+        env = {"CLUSTRIX_PACKAGES": packages}
+        job_secrets = {"CLUSTRIX_HMAC_KEY": hmac_key}
+        if staged:
+            # The payload is not in the environment; say where it is instead.
+            # The token goes as a *secret* and only on staged jobs, so an
+            # ordinary job never carries account credentials into a container.
+            env["CLUSTRIX_PAYLOAD_REPO"] = staged["repo_id"]
+            env["CLUSTRIX_PAYLOAD_FILE"] = staged["path_in_repo"]
+            env["CLUSTRIX_PACKAGES"] = f"{packages} huggingface_hub".strip()
+            if not self._token:
+                raise RuntimeError(
+                    "A staged payload can only be read by the job with a "
+                    "token, and none was resolved."
+                )
+            job_secrets["CLUSTRIX_HF_TOKEN"] = self._token
+        else:
+            env["CLUSTRIX_PAYLOAD"] = encoded
+
+        try:
+            job = self.api.run_job(
+                image=image,
+                command=["python", "-c", _bootstrap_source()],
+                env=env,
+                secrets=job_secrets,
+                flavor=flavor,
+                timeout=timeout,
+                namespace=self._namespace(),
+            )
+        except Exception:
+            # Nothing is going to collect this payload now.
+            self._unstage_payload(staged)
+            raise
+
         self._jobs[job.id] = {
             "flavor": flavor,
             "image": image,
             "hmac_key": hmac_key,
+            "staged": staged,
         }
         logger.info("HuggingFace Job %s submitted", job.id)
         return job.id
@@ -478,6 +582,14 @@ class HFJobsManager:
             )
         hmac_key = tracked["hmac_key"]
 
+        try:
+            return self._wait_for_result(job_id, hmac_key)
+        finally:
+            # The job has finished one way or another; nothing will read the
+            # staged payload again.
+            self._unstage_payload(tracked.get("staged"))
+
+    def _wait_for_result(self, job_id: str, hmac_key: str) -> Any:
         self.api.wait_for_job(job_id, namespace=self._namespace())
 
         # fetch_job_logs returns whatever is available now, and a job that has

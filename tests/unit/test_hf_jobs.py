@@ -15,6 +15,7 @@ import hmac
 
 import dill
 import pytest
+from types import SimpleNamespace
 
 from clustrix.config import ClusterConfig
 from clustrix.hf_jobs import (
@@ -264,13 +265,64 @@ class TestImageSelection:
 
 
 class TestPayload:
-    def test_oversized_payload_is_rejected_with_actionable_advice(self):
+    def test_oversized_payload_is_staged_rather_than_refused(self, monkeypatch):
+        """HuggingFace rejects very large environment variables, which capped
+        arguments at a few hundred kilobytes. Oversized payloads now go to a
+        private dataset instead of the caller being told to restructure."""
         mgr = _manager()
-        big = b"x" * MAX_PAYLOAD_BYTES
-        func_data = {"function": big, "args": b"", "kwargs": b""}
+        calls = {}
 
-        with pytest.raises(ValueError, match="Hub dataset"):
-            mgr.submit_job(func_data, {})
+        def fake_stage(encoded):
+            calls["size"] = len(encoded)
+            return {"repo_id": "ns/clustrix-payloads", "path_in_repo": "payloads/x.b64"}
+
+        def fake_run_job(**kwargs):
+            calls["env"] = kwargs["env"]
+            calls["secrets"] = kwargs["secrets"]
+            return SimpleNamespace(id="job-1")
+
+        monkeypatch.setattr(mgr, "_stage_payload", fake_stage)
+        monkeypatch.setattr(mgr, "_unstage_payload", lambda staged: None)
+        monkeypatch.setattr(
+            type(mgr),
+            "api",
+            property(lambda self: SimpleNamespace(run_job=fake_run_job)),
+        )
+        mgr._token = "hf_fake"
+
+        big = b"x" * MAX_PAYLOAD_BYTES
+        mgr.submit_job({"function": big, "args": b"", "kwargs": b""}, {})
+
+        assert calls["size"] > MAX_PAYLOAD_BYTES
+        # The payload is named, not carried.
+        assert "CLUSTRIX_PAYLOAD" not in calls["env"]
+        assert calls["env"]["CLUSTRIX_PAYLOAD_REPO"] == "ns/clustrix-payloads"
+        assert calls["env"]["CLUSTRIX_PAYLOAD_FILE"] == "payloads/x.b64"
+        assert "huggingface_hub" in calls["env"]["CLUSTRIX_PACKAGES"]
+        # The token travels as a secret, never as plain environment.
+        assert calls["secrets"]["CLUSTRIX_HF_TOKEN"] == "hf_fake"
+
+    def test_an_ordinary_payload_carries_no_credentials(self, monkeypatch):
+        """Only staged jobs need a token; a normal job must never get one."""
+        mgr = _manager()
+        calls = {}
+
+        def fake_run_job(**kwargs):
+            calls.update(env=kwargs["env"], secrets=kwargs["secrets"])
+            return SimpleNamespace(id="job-2")
+
+        monkeypatch.setattr(
+            type(mgr),
+            "api",
+            property(lambda self: SimpleNamespace(run_job=fake_run_job)),
+        )
+        mgr._token = "hf_fake"
+
+        mgr.submit_job({"function": b"small", "args": b"", "kwargs": b""}, {})
+
+        assert "CLUSTRIX_PAYLOAD" in calls["env"]
+        assert "CLUSTRIX_PAYLOAD_REPO" not in calls["env"]
+        assert "CLUSTRIX_HF_TOKEN" not in calls["secrets"]
 
     def test_namespace_falls_back_to_username(self):
         assert _manager(hf_username="someone")._namespace() == "someone"
