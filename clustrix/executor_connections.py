@@ -217,14 +217,29 @@ class ConnectionManager:
             logger.error(f"Failed to configure kubectl for provisioned cluster: {e}")
             raise
 
-    def execute_remote_command(self, command: str) -> tuple:
-        """Execute command on remote cluster."""
+    def execute_remote_command(self, command: str, check: bool = False) -> tuple:
+        """Execute command on remote cluster.
+
+        ``check`` raises when the command exits non-zero. It is off by default
+        because most callers here inspect the output themselves and tolerate
+        failure, but anything whose failure would be *unsafe* rather than
+        merely unhelpful must opt in -- a `chmod 700` that quietly does nothing
+        leaves a secret readable.
+        """
         if self.ssh_client is None:
             raise RuntimeError(
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         stdin, stdout, stderr = self.ssh_client.exec_command(command)
-        return stdout.read().decode(), stderr.read().decode()
+        out = stdout.read().decode()
+        err = stderr.read().decode()
+        if check:
+            status = stdout.channel.recv_exit_status()
+            if status != 0:
+                raise RuntimeError(
+                    f"Remote command failed (exit {status}): {command}\n{err.strip()}"
+                )
+        return out, err
 
     def resolve_remote_path(self, path: str) -> str:
         """Expand a leading ``~/`` against the remote account's home directory.

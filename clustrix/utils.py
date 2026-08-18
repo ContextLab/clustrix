@@ -914,6 +914,65 @@ def setup_python_compatible_environment(
         return setup_remote_environment(ssh_client, work_dir, requirements, config)
 
 
+def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
+    """Find a remote interpreter that can actually run this job.
+
+    An explicitly configured `python_executable` is respected as given -- if
+    the user named it, they mean it.
+
+    Otherwise the version must MATCH the caller's. dill embeds CPython
+    bytecode, so a function pickled under 3.12 and unpickled under 3.9 fails
+    with things like "code() takes at most 15 arguments (20 given)" -- an
+    error that names neither Python nor the version gap. The two-venv path
+    solves this by creating a conda environment at the right version; the
+    single-venv path can only use what is already installed, so if nothing
+    matches it has to say so rather than proceed to that traceback.
+
+    The default "python" is also not assumed to exist: Python 3 installs ship
+    `python3`, and `python` is only present where somebody added a
+    compatibility symlink.
+    """
+    configured = getattr(config, "python_executable", None)
+    if configured and configured != "python":
+        return configured
+
+    import sys as _sys
+
+    wanted = f"python{_sys.version_info.major}.{_sys.version_info.minor}"
+
+    def exists(candidate: str) -> bool:
+        try:
+            stdin, stdout, stderr = ssh_client.exec_command(f"command -v {candidate}")
+            return bool(stdout.read().decode().strip())
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    if exists(wanted):
+        logger.debug("Using remote interpreter %s", wanted)
+        return wanted
+
+    # Report what IS there, so the message is actionable.
+    available = []
+    for candidate in ("python3", "python"):
+        if exists(candidate):
+            try:
+                stdin, stdout, stderr = ssh_client.exec_command(
+                    f"{candidate} -c 'import sys; print(sys.version.split()[0])'"
+                )
+                version = stdout.read().decode().strip()
+            except Exception:  # pragma: no cover - defensive
+                version = "?"
+            available.append(f"{candidate} ({version})")
+
+    raise RuntimeError(
+        f"No {wanted} on the remote host, and dill payloads cannot cross "
+        f"Python minor versions. Found: {', '.join(available) or 'no Python at all'}. "
+        f"Either install {wanted} there, set python_executable to a matching "
+        "interpreter, or leave use_two_venv enabled so clustrix can build a "
+        "conda environment at the right version."
+    )
+
+
 def setup_remote_environment(
     ssh_client,
     work_dir: str,
@@ -978,8 +1037,14 @@ dependencies:
             for cmd in config.pre_execution_commands:
                 commands.append(cmd)
 
-        # Now create virtual environment using the configured python executable
-        python_cmd = config.python_executable if config.python_executable else "python"
+        # Now create the virtual environment. `python_executable` defaults to
+        # "python", which does not exist on most modern systems -- Python 3
+        # installs ship `python3`, and `python` is only present where someone
+        # added a compatibility symlink. tensor01 is one of the many hosts
+        # where it is absent, so `python -m venv venv` failed, the venv was
+        # never created, and the job script then died on
+        # `source venv/bin/activate` with "python: command not found".
+        python_cmd = resolve_remote_python(ssh_client, config)
         commands.extend(
             [
                 f"{python_cmd} -m venv venv",
@@ -987,24 +1052,26 @@ dependencies:
             ]
         )
 
-        if requirements:
-            # Only install essential packages, skip complex requirements
-            essential_pkgs = []
-            for pkg, version in requirements.items():
-                if pkg.lower() in ["dill", "cloudpickle"]:
-                    essential_pkgs.append(f"{pkg}=={version}")
-
-            if essential_pkgs:
-                # Install essential packages with timeout
-                pkg_list = " ".join(essential_pkgs)
-                commands.append(
-                    f"{pkg_manager} install {pkg_list} --timeout=30 || echo 'Package installation failed, continuing...'"
-                )
-            else:
-                # Just install basic packages
-                commands.append(
-                    f"{pkg_manager} install dill cloudpickle --timeout=30 || echo 'Package installation failed, continuing...'"
-                )
+        # dill and cloudpickle are not optional: the job script deserializes
+        # the function with them, and without them it gets `func = None` and
+        # dies twenty lines into a remote traceback with
+        # "'NoneType' object is not callable" -- which names neither the
+        # missing package nor the failed install. So this must not be swallowed
+        # by `|| echo ... continuing`, as it was.
+        #
+        # Versions are pinned to the caller's when known, because dill embeds
+        # CPython bytecode and a mismatched pair is its own class of failure;
+        # an unpinned install is the fallback, not the default.
+        pinned = [
+            f"{pkg}=={version}"
+            for pkg, version in (requirements or {}).items()
+            if pkg.lower() in ("dill", "cloudpickle")
+        ]
+        wanted = " ".join(pinned) if pinned else "dill cloudpickle"
+        commands.append(
+            f"{pkg_manager} install {wanted} --timeout=120 "
+            f"|| {pkg_manager} install dill cloudpickle --timeout=120"
+        )
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -1369,8 +1436,23 @@ def normalize_memory(value: Any, target: str) -> str:
     amount, unit = match.group(1), match.group(2).upper()
     if not unit:
         unit = "G"  # a bare number has always meant gigabytes here
-    if amount.endswith(".0"):
-        amount = amount[:-2]
+
+    # Schedulers take integers. "1.5GB" would reach SLURM as --mem=1.5G and
+    # PBS as mem=1.5gb, both of which they reject, so round up to the next
+    # whole unit rather than emit something that cannot be submitted. Rounding
+    # *up* because a job asking for 1.5G and given 1G would be killed.
+    if "." in amount:
+        import math
+
+        whole = math.ceil(float(amount))
+        logger.info(
+            "Rounding memory %s%s up to %d%s: schedulers take whole units.",
+            amount,
+            unit,
+            whole,
+            unit,
+        )
+        amount = str(whole)
 
     if target == "kubernetes":
         # "16GB" means 16 gibibytes in every other part of clustrix, so keep
@@ -1425,6 +1507,31 @@ def create_job_script(
         raise ValueError(f"Unsupported cluster type: {cluster_type}")
 
 
+def result_signing_lines(indent: str = "    ") -> list:
+    """Python lines that write result.pkl together with its HMAC.
+
+    Both execution branches must emit this. The single-venv branch did not,
+    while the submitter recorded a signing key regardless -- so every job that
+    fell back to it (use_two_venv=False, or any two-venv setup failure or
+    timeout) produced a result the caller then refused as unsigned. A degraded
+    but working path became a hard failure.
+    """
+    return [
+        f"{indent}_payload_bytes = pickle.dumps(result, protocol=4)",
+        f"{indent}with open('result.pkl', 'wb') as f:",
+        f"{indent}    f.write(_payload_bytes)",
+        f"{indent}import hashlib as _hashlib",
+        f"{indent}import hmac as _hmac",
+        f"{indent}import os as _os",
+        f"{indent}_key = _os.environ.get('CLUSTRIX_RESULT_KEY', '')",
+        f"{indent}if _key:",
+        f"{indent}    _tag = _hmac.new(_key.encode(), _payload_bytes, "
+        "_hashlib.sha256).hexdigest()",
+        f"{indent}    with open('result.pkl.hmac', 'w') as f:",
+        f"{indent}        f.write(_tag)",
+    ]
+
+
 def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
     """The lines that actually run the user's function in a job script.
 
@@ -1453,6 +1560,7 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
         )
     else:
         # Use the original single-venv approach
+        script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(
             [
                 f"cd {remote_job_dir}",
@@ -1486,9 +1594,10 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
                 "    ",
                 "    result = func(*args, **kwargs)",
                 "    ",
-                "    with open('result.pkl', 'wb') as f:",
-                "        pickle.dump(result, f, protocol=4)",
-                "        ",
+            ]
+            + result_signing_lines()
+            + [
+                "    ",
                 "except Exception as e:",
                 "    with open('error.pkl', 'wb') as f:",
                 "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
@@ -1608,8 +1717,6 @@ def _create_ssh_script(
 ) -> str:
     """Create simple execution script for SSH."""
 
-    python_cmd = config.python_executable if config.python_executable else "python"
-
     # Start with base script structure
     script_lines = [
         "#!/bin/bash",
@@ -1637,97 +1744,7 @@ def _create_ssh_script(
         script_lines.append("")
 
     # Check if we have two-venv setup
-    if hasattr(config, "venv_info") and config.venv_info:
-        # Use the centralized two-venv approach for cross-version compatibility
-        conda_env1_name = config.venv_info.get("conda_env1_name", None)
-        conda_env2_name = config.venv_info.get("conda_env2_name", None)
-        script_lines.append(result_key_export_line(remote_job_dir))
-        script_lines.extend(conda_activation_lines(config))
-        script_lines.extend(
-            generate_two_venv_execution_commands(
-                remote_job_dir, conda_env1_name, conda_env2_name
-            )
-        )
-    else:
-        # Single-venv approach
-        script_lines.extend(
-            [
-                "",
-                f'{python_cmd} -c "',
-                "import pickle",
-                "import sys",
-                "import traceback",
-                "",
-                "try:",
-                "    import dill",
-                "except ImportError:",
-                "    dill = None",
-                "try:",
-                "    import cloudpickle",
-                "except ImportError:",
-                "    cloudpickle = None",
-                "",
-                "try:",
-                "    with open('function_data.pkl', 'rb') as f:",
-                "        data = pickle.load(f)",
-                "    ",
-                "    print('Python version: ' + sys.version)",
-                "    print('Data keys: ' + str(list(data.keys())))",
-                "    print('Function source available: ' + str(data.get('function_source') is not None))",
-                "    print('Function data size: ' + str(len(data['function'])) + ' bytes')",
-                "    ",
-                "    # Try dill first, then cloudpickle, then built-in pickle, then source code",
-                "    func = None",
-                "    if dill:",
-                "        try:",
-                "            func = dill.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Dill deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None and cloudpickle:",
-                "        try:",
-                "            func = cloudpickle.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Cloudpickle deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None:",
-                "        try:",
-                "            func = pickle.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Pickle deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None and data.get('function_source'):",
-                "        try:",
-                "            import textwrap",
-                "            source = data['function_source']",
-                "            # Execute the source code to create the function",
-                "            namespace = {}",
-                "            exec(source, namespace)",
-                "            # Get the function name from func_info",
-                "            func_name = data['func_info']['name']",
-                "            func = namespace[func_name]",
-                "        except Exception as e:",
-                "            pass",
-                "    if func is None:",
-                "        error_msg = 'Could not deserialize function with dill, cloudpickle, pickle, or source code. '",
-                "        error_msg += 'dill available: ' + str(dill is not None) + ', cloudpickle available: ' + str(cloudpickle is not None)",
-                "        raise RuntimeError(error_msg)",
-                "    ",
-                "    args = pickle.loads(data['args'])",
-                "    kwargs = pickle.loads(data['kwargs'])",
-                "    ",
-                "    result = func(*args, **kwargs)",
-                "    ",
-                "    with open('result.pkl', 'wb') as f:",
-                "        pickle.dump(result, f, protocol=4)",
-                "        ",
-                "except Exception as e:",
-                "    with open('error.pkl', 'wb') as f:",
-                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-                "    sys.exit(1)",
-                '"',
-            ]
-        )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 

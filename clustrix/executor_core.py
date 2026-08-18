@@ -5,6 +5,7 @@ for different job execution backends (schedulers, Kubernetes, cloud providers).
 """
 
 import hashlib
+import shlex
 import hmac
 import time
 import tempfile
@@ -190,7 +191,7 @@ class ClusterExecutor:
 
         try:
             stdout, _ = self.connection_manager.execute_remote_command(
-                f"cat {remote_dir}/result.pkl.hmac 2>/dev/null"
+                f"cat {shlex.quote(f'{remote_dir}/result.pkl.hmac')} 2>/dev/null"
             )
         except Exception as e:  # pragma: no cover - defensive
             raise RuntimeError(

@@ -6,6 +6,7 @@ HPC schedulers including SLURM, PBS/Torque, and Sun Grid Engine (SGE).
 
 import os
 import secrets
+import shlex
 import time
 import tempfile
 import pickle
@@ -42,8 +43,18 @@ class SchedulerManager:
         read another user's command line out of `ps` -- which would hand the
         secret to exactly the people the 0700 directory is meant to exclude.
         """
+        # `mkdir -p` succeeds on a directory that already exists and is owned
+        # by somebody else, and an unchecked `chmod` then fails silently. Job
+        # directory names were fully predictable, so on a world-writable
+        # remote_work_dir an attacker could pre-create the directory, receive
+        # the signing key into it, and forge a result -- turning the defence
+        # into a code-execution path on the *submitting* machine. Create it
+        # exclusively, and refuse to continue if that fails.
         self.connection_manager.execute_remote_command(
-            f"mkdir -p {remote_job_dir} && chmod 700 {remote_job_dir}"
+            f"mkdir -p {shlex.quote(os.path.dirname(remote_job_dir))}", check=True
+        )
+        self.connection_manager.execute_remote_command(
+            f"mkdir -m 700 {shlex.quote(remote_job_dir)}", check=True
         )
         key = secrets.token_hex(32)
         self.connection_manager.create_remote_file(
@@ -73,7 +84,7 @@ class SchedulerManager:
         work_dir = self.connection_manager.resolve_remote_path(
             self.config.remote_work_dir
         )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
         result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
@@ -198,7 +209,7 @@ class SchedulerManager:
         work_dir = self.connection_manager.resolve_remote_path(
             self.config.remote_work_dir
         )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
         result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
@@ -245,7 +256,7 @@ class SchedulerManager:
         work_dir = self.connection_manager.resolve_remote_path(
             self.config.remote_work_dir
         )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
         result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
@@ -302,7 +313,7 @@ class SchedulerManager:
         work_dir = self.connection_manager.resolve_remote_path(
             self.config.remote_work_dir
         )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
         result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
@@ -368,10 +379,27 @@ class SchedulerManager:
 
             except Exception as e:
                 logger.warning(f"Failed to setup two-venv environment: {e}")
-                # Fall back to original approach
+                # Fall back to the single-venv approach -- which means actually
+                # building that venv. Both fallback branches used to set
+                # venv_info = None and stop there, so the generated script
+                # activated a virtualenv nobody had created and every job died
+                # with "venv/bin/activate: No such file or directory". The
+                # SLURM path has always called this; the SSH path never did.
+                setup_remote_environment(
+                    self.connection_manager.ssh_client,
+                    remote_job_dir,
+                    func_data["requirements"],
+                    self.config,
+                )
                 updated_config.venv_info = None
         else:
             logger.info("Two-venv setup disabled, using basic environment setup")
+            setup_remote_environment(
+                self.connection_manager.ssh_client,
+                remote_job_dir,
+                func_data["requirements"],
+                self.config,
+            )
             updated_config.venv_info = None
 
         # Create execution script
