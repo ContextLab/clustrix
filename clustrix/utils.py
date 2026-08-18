@@ -1304,6 +1304,24 @@ def generate_two_venv_execution_commands(
     )
 
 
+def resolve_job_resources(
+    job_config: Dict[str, Any], config: ClusterConfig
+) -> Dict[str, Any]:
+    """Fill in resource keys the caller left out, from the configured defaults.
+
+    The scheduler script generators index job_config["cores"], ["memory"] and
+    ["time"] directly, so a caller that omits one gets a bare
+    ``KeyError: 'time'`` -- which is what the GPU-detection probe hit, and
+    what got swallowed into "Could not detect remote GPU count". The defaults
+    exist for exactly this; use them.
+    """
+    resolved = dict(job_config)
+    resolved.setdefault("cores", config.default_cores)
+    resolved.setdefault("memory", config.default_memory)
+    resolved.setdefault("time", config.default_time)
+    return resolved
+
+
 def create_job_script(
     cluster_type: str,
     job_config: Dict[str, Any],
@@ -1311,6 +1329,8 @@ def create_job_script(
     config: ClusterConfig,
 ) -> str:
     """Create job submission script for different cluster types."""
+
+    job_config = resolve_job_resources(job_config, config)
 
     if cluster_type == "slurm":
         return _create_slurm_script(job_config, remote_job_dir, config)
