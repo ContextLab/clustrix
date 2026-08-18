@@ -1425,37 +1425,16 @@ def create_job_script(
         raise ValueError(f"Unsupported cluster type: {cluster_type}")
 
 
-def _create_slurm_script(
-    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
-) -> str:
-    """Create SLURM job script."""
+def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
+    """The lines that actually run the user's function in a job script.
 
-    script_lines = [
-        "#!/bin/bash",
-        "#SBATCH --job-name=clustrix",
-        f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
-        f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
-        f"#SBATCH --cpus-per-task={job_config['cores']}",
-        f"#SBATCH --mem={normalize_memory(job_config['memory'], 'slurm')}",
-        f"#SBATCH --time={job_config['time']}",
-    ]
-
-    if job_config.get("partition"):
-        script_lines.append(f"#SBATCH --partition={job_config['partition']}")
-
-    # Add environment setup
-    if config.module_loads:
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
-
-    if config.environment_variables:
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-
-    if config.pre_execution_commands:
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
-
+    Shared by every scheduler. It used to live only inside the SLURM
+    generator: PBS ran `python execute_function.py`, a file nothing in
+    clustrix has ever created, and SGE carried its own divergent copy of
+    the single-venv script. Both therefore missed the two-venv path, the
+    result signing and every fix made to the SLURM one.
+    """
+    script_lines: list = []
     # Add execution commands
     python_cmd = config.python_executable if config.python_executable else "python"
 
@@ -1518,6 +1497,42 @@ def _create_slurm_script(
             ]
         )
 
+    return script_lines
+
+
+def _create_slurm_script(
+    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
+) -> str:
+    """Create SLURM job script."""
+
+    script_lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=clustrix",
+        f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
+        f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
+        f"#SBATCH --cpus-per-task={job_config['cores']}",
+        f"#SBATCH --mem={normalize_memory(job_config['memory'], 'slurm')}",
+        f"#SBATCH --time={job_config['time']}",
+    ]
+
+    if job_config.get("partition"):
+        script_lines.append(f"#SBATCH --partition={job_config['partition']}")
+
+    # Add environment setup
+    if config.module_loads:
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
+
+    if config.environment_variables:
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
+
+    if config.pre_execution_commands:
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
+
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
+
     return "\n".join(script_lines)
 
 
@@ -1550,14 +1565,7 @@ def _create_pbs_script(
         for cmd in config.pre_execution_commands:
             script_lines.append(cmd)
 
-    # Add similar execution logic as SLURM
-    script_lines.extend(
-        [
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate",
-            "python execute_function.py",
-        ]
-    )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 
@@ -1590,71 +1598,7 @@ def _create_sge_script(
         for cmd in config.pre_execution_commands:
             script_lines.append(cmd)
 
-    script_lines.extend(
-        [
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate",
-            f'{config.python_executable if config.python_executable else "python"} -c "',
-            "import pickle",
-            "import sys",
-            "import traceback",
-            "",
-            "try:",
-            "    import dill",
-            "except ImportError:",
-            "    dill = None",
-            "try:",
-            "    import cloudpickle",
-            "except ImportError:",
-            "    cloudpickle = None",
-            "",
-            "try:",
-            "    with open('function_data.pkl', 'rb') as f:",
-            "        data = pickle.load(f)",
-            "    ",
-            "    # Try dill first, then cloudpickle, then source code",
-            "    func = None",
-            "    if dill:",
-            "        try:",
-            "            func = dill.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and cloudpickle:",
-            "        try:",
-            "            func = cloudpickle.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and data.get('function_source'):",
-            "        try:",
-            "            import textwrap",
-            "            source = data['function_source']",
-            "            # Execute the source code to create the function",
-            "            namespace = {}",
-            "            exec(source, namespace)",
-            "            # Get the function name from func_info",
-            "            func_name = data['func_info']['name']",
-            "            func = namespace[func_name]",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None:",
-            "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
-            "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
-            "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
-            "    ",
-            "    args = pickle.loads(data['args'])",
-            "    kwargs = pickle.loads(data['kwargs'])",
-            "    ",
-            "    result = func(*args, **kwargs)",
-            "    ",
-            "    with open('result.pkl', 'wb') as f:",
-            "        pickle.dump(result, f, protocol=4)",
-            "except Exception as e:",
-            "    with open('error.pkl', 'wb') as f:",
-            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-            "    raise",
-            '"',
-        ]
-    )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 

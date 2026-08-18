@@ -126,3 +126,70 @@ class TestCondaVersusVirtualenv:
     def test_conda_mode_does_not_emit_deactivate(self):
         """`conda run` does not leave an environment to deactivate."""
         assert "deactivate" not in generate_two_venv_execution_commands(*CONDA)
+
+
+class TestEverySchedulerRunsTheSameBody:
+    """PBS and SGE used to diverge from SLURM, and PBS did not work at all.
+
+    PBS ended its script with ``python execute_function.py`` -- a file nothing
+    in clustrix has ever created, so every PBS job died immediately. SGE
+    carried its own copy of the single-venv script, which meant it silently
+    missed the two-venv path, the conda sourcing and the result signing as
+    those were fixed on the SLURM one. All three now share one body.
+    """
+
+    SCHEDULERS = ("slurm", "pbs", "sge")
+
+    def _script(self, scheduler, *, two_venv):
+        from clustrix.config import ClusterConfig
+        from clustrix.utils import create_job_script
+
+        config = ClusterConfig(cluster_type=scheduler)
+        if two_venv:
+            config.venv_info = {
+                "conda_env1_name": "e1",
+                "conda_env2_name": "e2",
+                "conda_setup_prefix": "source /opt/conda/etc/profile.d/conda.sh",
+            }
+        return create_job_script(
+            scheduler,
+            {"cores": 2, "memory": "8GB", "time": "01:00:00"},
+            "/remote/job",
+            config,
+        )
+
+    @pytest.mark.parametrize("scheduler", SCHEDULERS)
+    def test_no_scheduler_runs_a_file_that_is_never_created(self, scheduler):
+        assert "execute_function.py" not in self._script(scheduler, two_venv=False)
+
+    @pytest.mark.parametrize("scheduler", SCHEDULERS)
+    def test_every_scheduler_reads_the_function_payload(self, scheduler):
+        assert "function_data.pkl" in self._script(scheduler, two_venv=False)
+
+    @pytest.mark.parametrize("scheduler", SCHEDULERS)
+    def test_every_scheduler_uses_the_two_venv_path_when_available(self, scheduler):
+        script = self._script(scheduler, two_venv=True)
+        assert "VENV1" in script
+        assert "conda run -n e1" in script
+        assert "conda run -n e2" in script
+
+    @pytest.mark.parametrize("scheduler", SCHEDULERS)
+    def test_every_scheduler_sources_conda(self, scheduler):
+        script = self._script(scheduler, two_venv=True)
+        assert "source /opt/conda/etc/profile.d/conda.sh" in script
+
+    @pytest.mark.parametrize("scheduler", SCHEDULERS)
+    def test_every_scheduler_signs_its_result(self, scheduler):
+        script = self._script(scheduler, two_venv=True)
+        assert "result.pkl.hmac" in script
+        assert "CLUSTRIX_RESULT_KEY" in script
+
+    def test_the_bodies_are_identical_across_schedulers(self):
+        """Only the directive header should differ between schedulers."""
+        bodies = {}
+        for scheduler in self.SCHEDULERS:
+            script = self._script(scheduler, two_venv=True)
+            # Drop the scheduler directives; keep everything from `cd` onward.
+            body = script[script.index("cd /remote/job") :]
+            bodies[scheduler] = body
+        assert bodies["slurm"] == bodies["pbs"] == bodies["sge"]
