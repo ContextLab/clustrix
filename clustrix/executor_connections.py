@@ -8,7 +8,7 @@ import os
 import time
 import tempfile
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 import yaml
 import paramiko
 
@@ -286,16 +286,26 @@ class ConnectionManager:
         sftp.get(remote_path, local_path)
         sftp.close()
 
-    def create_remote_file(self, remote_path: str, content: str):
-        """Create file with content on remote cluster."""
+    def create_remote_file(
+        self, remote_path: str, content: str, mode: Optional[int] = None
+    ):
+        """Create file with content on remote cluster.
+
+        ``mode`` sets the file's permissions before anything is written, so a
+        secret never exists on disk world-readable even briefly.
+        """
         if self.ssh_client is None:
             raise RuntimeError(
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         sftp = self.ssh_client.open_sftp()
-        with sftp.open(remote_path, "w") as f:
-            f.write(content)
-        sftp.close()
+        try:
+            with sftp.open(remote_path, "w") as f:
+                if mode is not None:
+                    sftp.chmod(remote_path, mode)
+                f.write(content)
+        finally:
+            sftp.close()
 
     def remote_file_exists(self, remote_path: str) -> bool:
         """Check if file exists on remote cluster."""

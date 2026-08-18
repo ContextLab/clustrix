@@ -35,13 +35,19 @@ class SchedulerManager:
         It is not a defence against a wholly compromised remote host -- that
         host runs the function anyway -- but it does stop an unrelated user,
         a stale file, or a truncated transfer from being loaded as code.
+
+        The key is written over SFTP rather than by a shell command. Writing it
+        with `printf '%s' <key> > file` would put the key in the remote command
+        line, and on a default Linux `/proc` any user on that login node can
+        read another user's command line out of `ps` -- which would hand the
+        secret to exactly the people the 0700 directory is meant to exclude.
         """
         self.connection_manager.execute_remote_command(
             f"mkdir -p {remote_job_dir} && chmod 700 {remote_job_dir}"
         )
         key = secrets.token_hex(32)
-        self.connection_manager.execute_remote_command(
-            f"umask 077 && printf '%s' {key} > {remote_job_dir}/.clustrix_result_key"
+        self.connection_manager.create_remote_file(
+            f"{remote_job_dir}/.clustrix_result_key", key, mode=0o600
         )
         return key
 
