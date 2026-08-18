@@ -27,7 +27,7 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     from .notebook_magic_mocks import display, HTML, widgets
 
-from .config import configure
+from .config import configure, get_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -1360,7 +1360,7 @@ class EnhancedClusterConfigWidget:
                     filename += ".yml"
 
                 # Determine save directory
-                save_dir = Path.home() / ".clustrix"
+                save_dir = get_config_dir()
                 save_dir.mkdir(exist_ok=True)
                 file_path = save_dir / filename
 
@@ -1412,7 +1412,7 @@ class EnhancedClusterConfigWidget:
     def _update_existing_files(self):
         """Update the existing files dropdown."""
         try:
-            config_dirs = [Path.home() / ".clustrix", Path(".")]
+            config_dirs = [get_config_dir(), Path(".")]
             existing_files = []
             for config_dir in config_dirs:
                 if config_dir.exists():

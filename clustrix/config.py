@@ -325,6 +325,25 @@ def save_config(config_path: str) -> None:
             json.dump(config_data, f, indent=2)
 
 
+CONFIG_DIR_ENV_VAR = "CLUSTRIX_CONFIG_DIR"
+
+
+def get_config_dir() -> Path:
+    """Return the directory clustrix reads and writes user configuration in.
+
+    Defaults to ``~/.clustrix``. Setting ``CLUSTRIX_CONFIG_DIR`` redirects it,
+    which matters in three situations: containers and CI images where ``$HOME``
+    is not writable or not persistent, machines shared by several projects, and
+    tests. Without an override the notebook widget's "save configuration"
+    button writes into the developer's own ``~/.clustrix`` during a test run,
+    silently editing real cluster profiles.
+    """
+    override = os.environ.get(CONFIG_DIR_ENV_VAR)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".clustrix"
+
+
 def get_config() -> ClusterConfig:
     """Get current configuration."""
     return _config
@@ -333,10 +352,11 @@ def get_config() -> ClusterConfig:
 # Try to load configuration from default locations
 def _load_default_config():
     """Load configuration from default locations."""
+    config_dir = get_config_dir()
     default_paths = [
-        Path.home() / ".clustrix" / "config.yml",
-        Path.home() / ".clustrix" / "config.yaml",
-        Path.home() / ".clustrix" / "config.json",
+        config_dir / "config.yml",
+        config_dir / "config.yaml",
+        config_dir / "config.json",
         Path.cwd() / "clustrix.yml",
         Path.cwd() / "clustrix.yaml",
         Path.cwd() / "clustrix.json",

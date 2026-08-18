@@ -94,6 +94,16 @@ dev = [
     "types-PyYAML",
     "types-requests", 
     "types-paramiko",
+    # The notebook widget suite (tests/test_notebook_magic*.py,
+    # tests/test_modern_widget*.py, tests/test_widget_fixes.py) imports these at
+    # module scope. Without them 44 tests error out on an ImportError that looks
+    # like a code defect but is a missing dependency. CI installed the "widget"
+    # extra explicitly and so never saw it; a plain `pip install -e ".[dev]"` did.
+    "ipywidgets>=7.6.0",
+    "ipython>=7.0.0",
+    # tests/ uses @pytest.mark.timeout and several deadlock regression tests
+    # hang forever without it.
+    "pytest-timeout>=2.0",
 ]
 test = [
     "pytest>=6.0",

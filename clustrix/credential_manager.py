@@ -10,6 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 from abc import ABC, abstractmethod
+from .config import get_config_dir
 
 # Try to import python-dotenv
 try:
@@ -301,7 +302,7 @@ class FlexibleCredentialManager:
 
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize credential manager with automatic setup."""
-        self.config_dir = config_dir or (Path.home() / ".clustrix")
+        self.config_dir = config_dir or get_config_dir()
         self.env_file = self.config_dir / ".env"
 
         # Initialize credential sources in priority order
