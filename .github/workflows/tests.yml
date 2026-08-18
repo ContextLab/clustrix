@@ -17,13 +17,17 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        python-version: ['3.8', '3.9', '3.10', '3.11', '3.12']
+        # 3.8 and 3.9 were never actually supported: click, requests,
+        # huggingface_hub and python-dotenv all require >=3.10 at their current
+        # versions, so those jobs installed years-old dependencies or failed
+        # outright. 3.8 has been end-of-life since October 2024. (See #110.)
+        python-version: ['3.10', '3.11', '3.12']
         exclude:
           # Reduce matrix size by excluding some combinations
           - os: windows-latest
-            python-version: '3.8'
+            python-version: '3.10'
           - os: macos-latest
-            python-version: '3.8'
+            python-version: '3.10'
 
     steps:
     - uses: actions/checkout@v4
@@ -39,8 +43,7 @@ jobs:
         pip install -e ".[dev,test,kubernetes,widget]"
 
     # Linting is version-independent, so run it once on the primary target
-    # rather than on all 13 matrix combinations. This also keeps the black pin
-    # off Python 3.8, which black 25.1.0 does not support (see #110).
+    # rather than on every matrix combination.
     - name: Lint with black
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |

@@ -82,43 +82,43 @@ jobs:
       - name: Run local executor test
         run: |
           python -c "
-from clustrix import cluster, configure
+          from clustrix import cluster, configure
 
-# Configure for local execution
-configure(cluster_type='local')
+          # Configure for local execution
+          configure(cluster_type='local')
 
-@cluster(cores=2, memory='2GB')
-def test_function(x, y):
-    import numpy as np
-    return np.array([x, y]).sum()
+          @cluster(cores=2, memory='2GB')
+          def test_function(x, y):
+              import numpy as np
+              return np.array([x, y]).sum()
 
-result = test_function(10, 20)
-assert result == 30, f'Expected 30, got {result}'
-print('✅ Local execution test passed')
-"
+          result = test_function(10, 20)
+          assert result == 30, f'Expected 30, got {result}'
+          print('✅ Local execution test passed')
+          "
       
       - name: Run serialization test
         run: |
           python -c "
-from clustrix import cluster
-import pickle
-import cloudpickle
+          from clustrix import cluster
+          import pickle
+          import cloudpickle
 
-@cluster(cores=1)
-def test_serialization():
-    return {'status': 'success', 'value': 42}
+          @cluster(cores=1)
+          def test_serialization():
+              return {'status': 'success', 'value': 42}
 
-# Test function can be serialized
-serialized = cloudpickle.dumps(test_serialization)
-assert len(serialized) > 0
-print('✅ Serialization test passed')
+          # Test function can be serialized
+          serialized = cloudpickle.dumps(test_serialization)
+          assert len(serialized) > 0
+          print('✅ Serialization test passed')
 
-# Test execution
-result = test_serialization()
-assert result['status'] == 'success'
-assert result['value'] == 42
-print('✅ Execution test passed')
-"
+          # Test execution
+          result = test_serialization()
+          assert result['status'] == 'success'
+          assert result['value'] == 42
+          print('✅ Execution test passed')
+          "
 
   docker-test:
     name: Docker Container Test
@@ -146,22 +146,22 @@ print('✅ Execution test passed')
           
           # Test with actual computation
           docker run --rm clustrix-test python -c "
-from clustrix import cluster, configure
-import numpy as np
+          from clustrix import cluster, configure
+          import numpy as np
 
-configure(cluster_type='local')
+          configure(cluster_type='local')
 
-@cluster(cores=1, memory='1GB')
-def compute():
-    data = np.random.randn(1000, 1000)
-    return {'mean': float(np.mean(data)), 'std': float(np.std(data))}
+          @cluster(cores=1, memory='1GB')
+          def compute():
+              data = np.random.randn(1000, 1000)
+              return {'mean': float(np.mean(data)), 'std': float(np.std(data))}
 
-result = compute()
-print(f'Result: {result}')
-assert abs(result['mean']) < 0.1
-assert abs(result['std'] - 1.0) < 0.1
-print('✅ Container test passed')
-"
+          result = compute()
+          print(f'Result: {result}')
+          assert abs(result['mean']) < 0.1
+          assert abs(result['std'] - 1.0) < 0.1
+          print('✅ Container test passed')
+          "
 
   security-scan:
     name: Security Scan
