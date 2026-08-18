@@ -4,3 +4,10 @@ sphinx-autodoc-typehints>=1.12
 nbsphinx>=0.8
 jupyter>=1.0
 ipython>=7.0
+
+# Not used to build the docs: black arrives transitively through the Jupyter
+# stack, and every release from 24.3.0 up to 26.3.1 carries a high-severity
+# advisory (arbitrary file writes via the cache file name). Pinning a floor
+# here keeps the docs environment off the affected range; pyproject and
+# setup.py carry the same constraint for the package itself.
+black>=26.3.1

@@ -69,8 +69,15 @@ jobs:
         git config --local user.email "action@github.com"
         git config --local user.name "GitHub Action"
         git add README.md
-        git diff --staged --quiet || git commit -m "Update coverage badge [skip ci]"
-        git push
+        # Only push when there is something to push. The README carries no
+        # coverage badge, so there never is; pushing anyway asked the runner to
+        # resolve a branch it may not be on, for no change.
+        if git diff --staged --quiet; then
+          echo "No coverage badge change to commit."
+        else
+          git commit -m "Update coverage badge [skip ci]"
+          git push
+        fi
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

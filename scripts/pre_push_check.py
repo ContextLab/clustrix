@@ -8,13 +8,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+#: Tools that must come from the environment running this script, not from
+#: whatever is first on PATH. Anaconda's mypy 1.19 sat ahead of the project's
+#: 2.3 here and reported 27 "Library stubs not installed" errors for stubs
+#: pyproject does declare -- so this script failed while CI, which installs
+#: the dev extra, passed.
+PYTHON_TOOLS = ("black", "flake8", "mypy", "pytest")
+
+
+def _use_this_interpreter(cmd):
+    """Rewrite `black ...` as `<this python> -m black ...`."""
+    tool = cmd.split(None, 1)[0]
+    if tool in PYTHON_TOOLS:
+        return f"{sys.executable} -m {cmd}"
+    return cmd
+
 
 def run_command(cmd, description):
     """Run a command and return success status."""
     print(f"Running {description}...")
     try:
         result = subprocess.run(
-            cmd,
+            _use_this_interpreter(cmd),
             shell=True,
             capture_output=True,
             text=True,
@@ -44,7 +59,8 @@ def main():
         checks = [
             ("black clustrix/ tests/", "Black formatting"),  # Format, don't just check
             (
-                "flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824",
+                "flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore="
+                "E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824",
                 "Flake8 linting",
             ),
             ("mypy clustrix/", "MyPy type checking"),

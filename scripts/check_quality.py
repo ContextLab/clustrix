@@ -21,7 +21,7 @@ def check_tests():
                 print(f"✅ Tests: {line}")
                 return True
     else:
-        print(f"❌ Tests failed")
+        print("❌ Tests failed")
         return False
 
 
@@ -109,7 +109,7 @@ def main():
 
     # Display badge URLs
     if results["coverage"] is not None:
-        print(f"\n🏷️  Coverage badge URL:")
+        print("\n🏷️  Coverage badge URL:")
         color = (
             "brightgreen"
             if results["coverage"] >= 80

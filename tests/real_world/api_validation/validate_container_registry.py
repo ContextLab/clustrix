@@ -6,6 +6,7 @@ This script validates container registry operations (push/pull) that Clustrix
 might use for Kubernetes and container-based deployments.
 """
 
+import json
 import sys
 import subprocess
 import tempfile

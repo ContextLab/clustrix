@@ -5,14 +5,15 @@ This script helps set up all the credentials needed for external service validat
 in a secure way using 1Password CLI.
 """
 
-import json
 import sys
 from pathlib import Path
 
 # Add clustrix to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import (
+# Imported after the path is set, which is the point of this script running
+# standalone against a checkout.
+from clustrix.secure_credentials import (  # noqa: E402
     SecureCredentialManager,
     ensure_secure_environment,
 )
@@ -131,19 +132,19 @@ def guide_credential_setup():
         },
     ]
 
-    print(f"\n📝 To set up credentials in 1Password:")
-    print(f"   1. Open 1Password app")
-    print(f"   2. Navigate to 'clustrix-dev' vault (or create it)")
-    print(f"   3. Create new items with these exact names:")
+    print("\n📝 To set up credentials in 1Password:")
+    print("   1. Open 1Password app")
+    print("   2. Navigate to 'clustrix-dev' vault (or create it)")
+    print("   3. Create new items with these exact names:")
     print()
 
     for cred in credentials_to_setup:
         print(f"🔑 {cred['name']}")
         print(f"   Description: {cred['description']}")
-        print(f"   Fields to add:")
+        print("   Fields to add:")
         for field_name, field_desc in cred["fields"].items():
             print(f"     - {field_name}: {field_desc}")
-        print(f"   Setup notes:")
+        print("   Setup notes:")
         for note in cred["setup_notes"]:
             print(f"     • {note}")
         print()

@@ -411,7 +411,7 @@ def main():
         with open(error_file, "w") as f:
             json.dump({{
                 "test_name": "{test_name}",
-                "status": "ERROR", 
+                "status": "ERROR",
                 "error": str(e),
                 "traceback": traceback.format_exc(),
                 "metadata": {{
@@ -456,7 +456,7 @@ echo "Date: $(date)"
 # Load required modules
 module load python
 
-# Set environment variables  
+# Set environment variables
 export OMP_NUM_THREADS=1
 
 # Change to test directory
@@ -546,7 +546,7 @@ def main():
         
         # Run the packaged execution script
         print("Running packaged execution script with dependency resolution...")
-        result = subprocess.run([sys.executable, "execute.py"], 
+        result = subprocess.run([sys.executable, "execute.py"],
                               capture_output=False, text=True)
         
         print(f"Execution completed with exit code: {{result.returncode}}")

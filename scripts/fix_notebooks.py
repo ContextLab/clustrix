@@ -4,7 +4,6 @@ Fix Jupyter notebooks by adding missing execution_count fields and ensuring prop
 """
 
 import json
-import os
 from pathlib import Path
 
 

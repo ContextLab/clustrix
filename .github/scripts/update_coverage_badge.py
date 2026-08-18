@@ -81,9 +81,18 @@ def update_readme_badge(readme_path, coverage_percent):
                 print(f"🔍 Found badge: {match.group()}")
                 return True  # Success - no change needed
             else:
-                print("❌ No coverage badge found to update")
-                print(f"🔍 Searched for pattern: {badge_pattern}")
-                return False
+                # Not an error. The README deliberately carries no coverage
+                # badge: the figure it used to show was one of several
+                # conflicting numbers, none of them measured in a way anyone
+                # could reproduce, and it was removed rather than left to
+                # assert something untrue (see #115). Failing here made every
+                # push to master red *after* the tests had passed, and only on
+                # master, since this step does not run for pull requests.
+                print("ℹ️  README carries no coverage badge; nothing to update.")
+                print(f"    Measured coverage this run: {coverage_percent}%")
+                print("    Add a badge matching the documented pattern to have")
+                print("    it kept up to date automatically.")
+                return True
             
     except Exception as e:
         print(f"❌ Error updating README: {e}")
