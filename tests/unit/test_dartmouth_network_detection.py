@@ -46,3 +46,35 @@ def test_a_positive_answer_means_the_gated_hosts_resolve():
         "is_dartmouth_network() reported the Dartmouth network, but these "
         f"hosts do not resolve: {', '.join(unreachable)}"
     )
+
+
+def test_detection_is_bounded():
+    """It gates which tests run, so it must answer fast even off-network.
+
+    On a macOS CI runner, where these lookups blackhole, each call took about
+    seventy seconds and three of them exhausted the job's fifteen-minute
+    budget before the suite could finish.
+    """
+    import time
+
+    from tests.real_world.conftest import is_dartmouth_network as detect
+
+    detect.cache_clear()
+    start = time.time()
+    detect()
+    assert time.time() - start < 10
+
+
+def test_a_slow_lookup_is_abandoned():
+    """The bound is real: a `with` block around the executor silently waited
+    for the worker anyway, so a three-second budget still took thirty."""
+    import time
+
+    from tests.real_world.conftest import NETWORK_DETECTION_TIMEOUT, _within
+
+    start = time.time()
+    result = _within(NETWORK_DETECTION_TIMEOUT, time.sleep, 30)
+    elapsed = time.time() - start
+
+    assert result is None
+    assert elapsed < NETWORK_DETECTION_TIMEOUT + 2

@@ -6,8 +6,9 @@ import os
 import pytest
 from pathlib import Path
 import tempfile
+import concurrent.futures
+import functools
 import socket
-import subprocess
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
 
@@ -15,42 +16,48 @@ from tests.real_world import RealWorldTestManager, TestCredentials, TempResource
 test_manager = RealWorldTestManager()
 
 
-def is_dartmouth_network():
-    """
-    Check if we're on Dartmouth network (on campus or VPN).
+#: Whole-detection budget. This only gates which tests run, so it must answer
+#: quickly and wrongly-but-safely rather than slowly and exactly. Off-network
+#: CI runners blackhole the lookups below: on a macOS runner each call took
+#: about seventy seconds, and three calls exhausted the job's fifteen-minute
+#: budget before the suite could finish.
+NETWORK_DETECTION_TIMEOUT = 3.0
 
-    Returns:
-        bool: True if on Dartmouth network, False otherwise
+
+def _within(seconds, func, *args):
+    """Run `func`, giving up if it takes longer than `seconds`.
+
+    The resolver calls here are not interruptible, so the worker thread is left
+    to finish on its own; it is a daemon and holds nothing the caller needs.
     """
+    # Deliberately not a `with` block: its __exit__ calls shutdown(wait=True)
+    # and blocks until the worker finishes, which defeats the timeout entirely
+    # -- a call that should have been abandoned after three seconds still took
+    # thirty.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        # Method 1: Check hostname
-        hostname = socket.getfqdn()
-        if ".dartmouth.edu" in hostname:
-            return True
+        return pool.submit(func, *args).result(timeout=seconds)
+    except (concurrent.futures.TimeoutError, OSError):
+        return None
+    finally:
+        pool.shutdown(wait=False)
 
-        # Method 2: Try to resolve a Dartmouth-specific host
-        try:
-            socket.gethostbyname("tensor01.dartmouth.edu")
-            return True
-        except socket.gaierror:
-            pass
 
-        # Method 3: Check if we can ping tensor01 (VPN test)
-        try:
-            result = subprocess.run(
-                ["ping", "-c", "1", "-W", "3000", "tensor01.dartmouth.edu"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+@functools.lru_cache(maxsize=1)
+def is_dartmouth_network():
+    """Whether the Dartmouth-only hosts are reachable from here.
 
-        return False
+    Cached: this is consulted repeatedly to decide whether to skip, and the
+    answer cannot change usefully within one test run.
+    """
+    hostname = _within(NETWORK_DETECTION_TIMEOUT, socket.getfqdn)
+    if hostname and ".dartmouth.edu" in hostname:
+        return True
 
-    except Exception:
-        return False
+    resolved = _within(
+        NETWORK_DETECTION_TIMEOUT, socket.gethostbyname, "tensor01.dartmouth.edu"
+    )
+    return bool(resolved)
 
 
 @pytest.fixture(scope="session")
