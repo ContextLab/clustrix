@@ -386,10 +386,18 @@ def main():
         with open('{remote_work_dir}/func_data.pkl', 'rb') as f:
             func_data = cloudpickle.load(f)
 
-        # Execute function
-        func = func_data['func']
-        args = func_data.get('args', ())
-        kwargs = func_data.get('kwargs', {{}})
+        # Unpack what serialize_function() actually produced. It stores the
+        # function as dill (or cloudpickle) bytes under "function", and the
+        # arguments as pickle bytes -- not as live objects. Reading 'func'
+        # here raised KeyError on the first line of every cloud job, which is
+        # proof this path had never run.
+        try:
+            import dill
+            func = dill.loads(func_data['function'])
+        except Exception:
+            func = cloudpickle.loads(func_data['function'])
+        args = pickle.loads(func_data['args'])
+        kwargs = pickle.loads(func_data['kwargs'])
 
         result = func(*args, **kwargs)
 
