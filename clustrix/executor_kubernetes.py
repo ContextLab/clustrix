@@ -175,9 +175,14 @@ try:
     kwargs_bytes = func_data['kwargs']
     func_source = func_data.get('function_source')
 
-    # Load arguments
-    args = pickle.loads(args_bytes)
-    kwargs = pickle.loads(kwargs_bytes)
+    # Load arguments with dill: they may carry classes defined in the
+    # caller's __main__, which stdlib pickle can only store by name.
+    try:
+        import dill as _argser
+    except ImportError:
+        _argser = cloudpickle
+    args = _argser.loads(args_bytes)
+    kwargs = _argser.loads(kwargs_bytes)
 
     # Try to load function, with fallback for __main__ issues
     func = None

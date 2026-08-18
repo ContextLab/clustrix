@@ -392,12 +392,17 @@ def main():
         # here raised KeyError on the first line of every cloud job, which is
         # proof this path had never run.
         try:
-            import dill
-            func = dill.loads(func_data['function'])
+            import dill as _ser
+        except ImportError:
+            _ser = cloudpickle
+        try:
+            func = _ser.loads(func_data['function'])
         except Exception:
             func = cloudpickle.loads(func_data['function'])
-        args = pickle.loads(func_data['args'])
-        kwargs = pickle.loads(func_data['kwargs'])
+        # _ser, not stdlib pickle: args may carry classes defined in the
+        # caller's __main__, which pickle can only store by qualified name.
+        args = _ser.loads(func_data['args'])
+        kwargs = _ser.loads(func_data['kwargs'])
 
         result = func(*args, **kwargs)
 

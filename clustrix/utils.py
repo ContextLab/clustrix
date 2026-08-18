@@ -7,7 +7,7 @@ import pickle
 import inspect
 import importlib
 import subprocess
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
@@ -124,6 +124,27 @@ def make_portable_function(source: str, name: str) -> Callable:
     return namespace[name]
 
 
+def _dumps_by_value(obj: Any) -> bytes:
+    """Serialize `obj` so a fresh interpreter can rebuild it without imports.
+
+    Tries the richest serializer first and degrades. Every fallback still
+    produces bytes; if none can, the exception propagates rather than shipping
+    a payload that will fail remotely with an unrelated error.
+    """
+    try:
+        return dill.dumps(obj, protocol=4, recurse=True)
+    except Exception:
+        pass
+    try:
+        return dill.dumps(obj, protocol=4)
+    except Exception:
+        pass
+    try:
+        return cloudpickle.dumps(obj, protocol=4)
+    except Exception:
+        return pickle.dumps(obj, protocol=4)
+
+
 def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """
     Serialize function and all its dependencies.
@@ -150,20 +171,21 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
         # Cannot get source code - this is common for dynamically defined functions
         pass
 
-    # Serialize function using dill for better cross-Python compatibility
-    try:
-        func_bytes = dill.dumps(func, protocol=4)
-    except Exception:
-        try:
-            # Fallback to cloudpickle
-            func_bytes = cloudpickle.dumps(func, protocol=4)
-        except Exception:
-            # Final fallback to built-in pickle
-            func_bytes = pickle.dumps(func, protocol=4)
+    # Serialize the function by VALUE, including everything it refers to.
+    #
+    # `dill.dumps(func)` alone captures closure cells but NOT `func.__globals__`,
+    # so a function that calls a module-level helper or reads a module-level
+    # constant serializes fine and then dies on the worker with
+    # `NameError: name '_helper' is not defined`. `recurse=True` walks the
+    # globals the body actually names and bundles them. It can fail on objects
+    # that refuse deep traversal, so the plain form remains the fallback.
+    func_bytes = _dumps_by_value(func)
 
-    # Serialize arguments
-    args_bytes = pickle.dumps(args, protocol=4)
-    kwargs_bytes = pickle.dumps(kwargs, protocol=4)
+    # Arguments need the same treatment: stdlib pickle stores a class by
+    # qualified name, so passing an instance of a class defined in the caller's
+    # __main__ fails on the worker with "Can't get attribute 'Point'".
+    args_bytes = _dumps_by_value(args)
+    kwargs_bytes = _dumps_by_value(kwargs)
 
     # Get function metadata
     func_info = {
@@ -210,34 +232,65 @@ def deserialize_function(func_data: bytes) -> tuple:
         except Exception:
             func = cloudpickle.loads(func_data["function"])
 
-        args = pickle.loads(func_data["args"])
-        kwargs = pickle.loads(func_data["kwargs"])
+        # dill, to match _dumps_by_value -- args may carry classes defined in
+        # the caller's __main__, which stdlib pickle can only store by name.
+        args = dill.loads(func_data["args"])
+        kwargs = dill.loads(func_data["kwargs"])
 
         return func, args, kwargs
     else:
         raise ValueError("Invalid function data format")
 
 
+def _freeze_commands() -> List[List[str]]:
+    """Freeze commands to try, richest first, for the local environment.
+
+    Which one applies depends on how the environment was built:
+
+    * **uv** manages its own resolution, and ``uv pip freeze`` reports what it
+      installed into the active environment;
+    * **conda** environments are covered by pip's freeze, because
+      ``pip list --format=freeze`` reports conda-installed distributions too --
+      unlike ``pip freeze``, which omits them;
+    * plain **pip** environments are the same command.
+
+    Ordering matters only in that the first command to produce output wins.
+    """
+    commands = []
+    if os.environ.get("UV_PROJECT_ENVIRONMENT") or is_uv_available():
+        commands.append(["uv", "pip", "freeze", "--python", sys.executable])
+    commands.append([sys.executable, "-m", "pip", "list", "--format=freeze"])
+    return commands
+
+
 def get_environment_requirements() -> Dict[str, str]:
-    """Get current Python environment requirements."""
+    """Get current Python environment requirements.
+
+    Returns a name -> version map of everything installed locally, so the
+    remote execution environment can be rebuilt to match. Entries pip reports
+    without a plain ``==`` pin -- editable installs, local paths, VCS and
+    direct URL references -- are skipped: they name a location on this machine
+    that does not exist on the cluster.
+    """
 
     requirements = {}
 
-    try:
-        # Use pip list --format=freeze to capture all packages including conda-installed ones
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "list", "--format=freeze"],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            for line in result.stdout.strip().split("\n"):
-                if "==" in line and not line.startswith("-e"):
-                    package, version = line.split("==", 1)
-                    requirements[package] = version
-    except Exception:
-        pass
+    for command in _freeze_commands():
+        try:
+            result = subprocess.run(command, capture_output=True, text=True)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if not line or line.startswith(("-e", "#")) or "@" in line:
+                continue
+            if "==" in line:
+                package, version = line.split("==", 1)
+                requirements[package.strip()] = version.strip()
+        if requirements:
+            break
 
     # Always include essential packages
     essential_packages = ["cloudpickle", "dill"]
@@ -673,46 +726,51 @@ def setup_two_venv_environment(
                 )
             commands.append("deactivate")
 
-    # Install packages from local environment requirements (selective)
-    if requirements:
-        # Filter out essential packages already installed
-        remaining_reqs = {
-            k: v for k, v in requirements.items() if k not in essential_packages
+    # Rebuild the local environment on the worker.
+    #
+    # This used to install a hardcoded list of nine "core scientific" packages
+    # and drop everything else, so a function importing anything outside that
+    # list -- torch, networkx, polars, the user's own dependency -- failed
+    # remotely with ModuleNotFoundError while running fine locally. The
+    # environment is now mirrored from whatever the local package manager
+    # reports, which is what this function's docstring has always promised.
+    #
+    # The specs go into a requirements file rather than one `pip install` per
+    # package: a single resolve is far faster over a few hundred packages, and
+    # pip reports a conflict once instead of leaving a half-built environment.
+    if requirements and getattr(config, "replicate_local_environment", True):
+        excluded = {
+            str(name).lower()
+            for name in (getattr(config, "excluded_packages", None) or [])
         }
-
-        # Only install core scientific packages that are commonly needed
-        core_scientific_packages = {
-            "numpy",
-            "scipy",
-            "pandas",
-            "matplotlib",
-            "seaborn",
-            "scikit-learn",
-            "jupyter",
-            "ipython",
-            "requests",
-        }
-
-        # Filter to only install packages that are in both requirements and core list
-        filtered_reqs = {
+        mirrored = {
             k: v
-            for k, v in remaining_reqs.items()
-            if k.lower() in core_scientific_packages
+            for k, v in requirements.items()
+            if k not in essential_packages and k.lower() not in excluded
         }
 
-        if filtered_reqs:
-            # Install core scientific packages from local environment
-            for pkg, version in filtered_reqs.items():
-                if compatible_python == "conda":
-                    commands.append(
-                        f"conda run -n {conda_env2_name} pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in conda venv2'"
-                    )
-                else:
-                    commands.append(f"source {venv2_path}/bin/activate")
-                    commands.append(
-                        f"pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in venv2'"
-                    )
-                    commands.append("deactivate")
+        if mirrored:
+            spec_lines = "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items()))
+            requirements_path = f"{work_dir}/clustrix_requirements.txt"
+            commands.append(
+                f"cat > {requirements_path} <<'CLUSTRIX_REQUIREMENTS_EOF'\n"
+                f"{spec_lines}\n"
+                "CLUSTRIX_REQUIREMENTS_EOF"
+            )
+            commands.append(
+                f"echo 'Replicating local environment ({len(mirrored)} packages)...'"
+            )
+            # No `|| echo`: a package that cannot install here means the remote
+            # environment does not match the local one, and the function will
+            # fail later with a less obvious error. Name it now. `excluded_packages`
+            # is the documented way to drop one deliberately.
+            install = f"pip install -r {requirements_path} --timeout=300"
+            if compatible_python == "conda":
+                commands.append(f"conda run -n {conda_env2_name} {install}")
+            else:
+                commands.append(f"source {venv2_path}/bin/activate")
+                commands.append(install)
+                commands.append("deactivate")
 
     # Add cluster-specific package installations from config
     if hasattr(config, "cluster_packages") and config.cluster_packages:
@@ -1170,11 +1228,20 @@ def generate_two_venv_execution_commands(
             "'traceback': traceback.format_exc(), "
             f"'stage': '{stage}'"
             "}",
+            # Ship the exception OBJECT too, so the caller can catch the type
+            # the function actually raised instead of a generic RuntimeError.
+            # _ser (dill) handles exception classes defined in the caller's
+            # __main__; an exception that refuses to serialize at all must not
+            # take the error report down with it.
+            "    try:",
+            "        _blob = _ser.dumps(dict(_payload, exception=e), protocol=4)",
+            "    except Exception:",
+            "        _blob = pickle.dumps(_payload, protocol=4)",
             f"    with open('error_{stage}.pkl', 'wb') as f:",
-            "        pickle.dump(_payload, f, protocol=4)",
+            "        f.write(_blob)",
             "    if not _os.path.exists('error.pkl'):",
             "        with open('error.pkl', 'wb') as f:",
-            "            pickle.dump(_payload, f, protocol=4)",
+            "            f.write(_blob)",
             "    raise",
         ]
 
@@ -1253,8 +1320,10 @@ def generate_two_venv_execution_commands(
             "            else:",
             "                raise Exception('All deserialization methods failed')",
             "    ",
-            "    args = pickle.loads(data['args'])",
-            "    kwargs = pickle.loads(data['kwargs'])",
+            "    # _ser, not stdlib pickle: args may carry classes defined in",
+            "    # the caller's __main__, which pickle can only store by name.",
+            "    args = _ser.loads(data['args'])",
+            "    kwargs = _ser.loads(data['kwargs'])",
             "    ",
             "    # Pass data to VENV2 for execution. _ser (dill/cloudpickle) is",
             "    # required here: stdlib pickle cannot serialize a function that",
@@ -1589,8 +1658,11 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
                 "    except:",
                 "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
                 "    ",
-                "    args = pickle.loads(data['args'])",
-                "    kwargs = pickle.loads(data['kwargs'])",
+                "    # dill, not stdlib pickle: args may carry classes defined",
+                "    # in the caller's __main__, which pickle stores only by name.",
+                "    _argser = dill or cloudpickle or pickle",
+                "    args = _argser.loads(data['args'])",
+                "    kwargs = _argser.loads(data['kwargs'])",
                 "    ",
                 "    result = func(*args, **kwargs)",
                 "    ",
@@ -1599,8 +1671,16 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
             + [
                 "    ",
                 "except Exception as e:",
+                "    _payload = {'error': str(e), 'traceback': traceback.format_exc()}",
+                # Preserve the exception object so the caller catches the real
+                # type, not a RuntimeError rebuilt from the message alone.
+                "    _errser = dill or cloudpickle or pickle",
+                "    try:",
+                "        _blob = _errser.dumps(dict(_payload, exception=e), protocol=4)",
+                "    except Exception:",
+                "        _blob = pickle.dumps(_payload, protocol=4)",
                 "    with open('error.pkl', 'wb') as f:",
-                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "        f.write(_blob)",
                 "    raise",
                 '"',
             ]

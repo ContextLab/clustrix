@@ -133,8 +133,12 @@ def _bootstrap_source() -> str:
     """
     return (
         "import base64,hashlib,hmac,os,subprocess,sys\n"
-        "subprocess.run([sys.executable,'-m','pip','install','-q','dill','cloudpickle'],"
-        "check=True)\n"
+        # The base image carries nothing but Python. Everything the function
+        # imports has to be installed here, so CLUSTRIX_PACKAGES names what
+        # config.cluster_packages asked for -- the same field the SSH and SLURM
+        # backends honour, so a function is not tied to one backend.
+        "_pkgs=['dill','cloudpickle']+os.environ.get('CLUSTRIX_PACKAGES','').split()\n"
+        "subprocess.run([sys.executable,'-m','pip','install','-q']+_pkgs,check=True)\n"
         "import cloudpickle\n"
         "import dill\n"
         "k=os.environ['CLUSTRIX_HMAC_KEY'].encode()\n"
@@ -144,7 +148,6 @@ def _bootstrap_source() -> str:
         "    print(hmac.new(k,b,hashlib.sha256).hexdigest())\n"
         "    print(base64.b64encode(b).decode())\n"
         "    print(end)\n"
-        "import pickle\n"
         "p=dill.loads(base64.b64decode(os.environ['CLUSTRIX_PAYLOAD']))\n"
         "try:\n"
         "    try:\n"
@@ -153,14 +156,24 @@ def _bootstrap_source() -> str:
         # serialize_function() falls back to cloudpickle when dill cannot
         # handle a function, so the container has to try both.
         "        f=cloudpickle.loads(p['function'])\n"
-        "    a=pickle.loads(p['args'])\n"
-        "    kw=pickle.loads(p['kwargs'])\n"
+        # dill, not pickle: args may carry classes defined in the caller's
+        # __main__, which stdlib pickle can only store by qualified name.
+        "    a=dill.loads(p['args'])\n"
+        "    kw=dill.loads(p['kwargs'])\n"
         "    r=f(*a,**kw)\n"
         f"    emit('{RESULT_BEGIN}','{RESULT_END}',r)\n"
         "except Exception as e:\n"
         "    import traceback\n"
-        f"    emit('{ERROR_BEGIN}','{ERROR_END}',"
-        "{'error':str(e),'traceback':traceback.format_exc()})\n"
+        # The exception OBJECT travels alongside the message so the caller can
+        # catch the type the function raised. An exception that will not
+        # serialize must not suppress the error report itself.
+        "    _p={'error':str(e),'traceback':traceback.format_exc()}\n"
+        "    try:\n"
+        "        dill.dumps(e)\n"
+        "        _p['exception']=e\n"
+        "    except Exception:\n"
+        "        pass\n"
+        f"    emit('{ERROR_BEGIN}','{ERROR_END}',_p)\n"
         "    raise\n"
     )
 
@@ -219,6 +232,49 @@ class HFJobsManager:
             return configured
         return f"python:{sys.version_info.major}.{sys.version_info.minor}-slim"
 
+    def _extra_packages(
+        self, job_config: Dict[str, Any], requirements: Optional[Dict[str, str]] = None
+    ) -> List[str]:
+        """Packages to pip install in the container before the function runs.
+
+        Two sources, both the same fields the SSH and SLURM backends read, so a
+        dependency declared once works on every backend:
+
+        * the local environment, mirrored when ``replicate_local_environment``
+          is on, minus anything in ``excluded_packages``. The container starts
+          from a bare Python image, so without this a function importing numpy
+          fails here while running fine on a cluster;
+        * ``cluster_packages``, for anything the local environment does not
+          have. Entries may be bare names, pinned specs, or the dict form the
+          SSH path accepts for pip options.
+
+        Unlike the cluster backends, containers are ephemeral: this reinstalls
+        on every job. Set ``replicate_local_environment=False`` when the
+        function only needs the standard library.
+        """
+        excluded = {
+            str(name).lower()
+            for name in (getattr(self.config, "excluded_packages", None) or [])
+        }
+        packages: List[str] = []
+
+        if getattr(self.config, "replicate_local_environment", True):
+            for name, version in sorted((requirements or {}).items()):
+                if name.lower() not in excluded:
+                    packages.append(f"{name}=={version}")
+
+        declared = job_config.get("cluster_packages") or getattr(
+            self.config, "cluster_packages", None
+        )
+        for spec in declared or []:
+            if isinstance(spec, str) and spec.strip():
+                packages.append(spec.strip())
+            elif isinstance(spec, dict) and spec.get("package"):
+                packages.append(str(spec["package"]))
+
+        # pip takes these as argv, so a name with a space would split into two.
+        return [p for p in packages if " " not in p]
+
     def _flavor(self, job_config: Dict[str, Any]) -> str:
         flavor = (
             job_config.get("hf_flavor")
@@ -272,6 +328,9 @@ class HFJobsManager:
             or DEFAULT_TIMEOUT
         )
         image = self._image()
+        packages = " ".join(
+            self._extra_packages(job_config, func_data.get("requirements"))
+        )
 
         logger.info(
             "Submitting HuggingFace Job (image=%s flavor=%s namespace=%s payload=%dB)",
@@ -287,7 +346,7 @@ class HFJobsManager:
         job = self.api.run_job(
             image=image,
             command=["python", "-c", _bootstrap_source()],
-            env={"CLUSTRIX_PAYLOAD": encoded},
+            env={"CLUSTRIX_PAYLOAD": encoded, "CLUSTRIX_PACKAGES": packages},
             secrets={"CLUSTRIX_HMAC_KEY": hmac_key},
             flavor=flavor,
             timeout=timeout,
@@ -402,6 +461,10 @@ class HFJobsManager:
             logs = list(
                 self.api.fetch_job_logs(job_id=job_id, namespace=self._namespace())
             )
+            # Raised outside the try below: the container ships the real
+            # exception object, and re-raising a remote RuntimeError inside
+            # would be caught by the garbled-log handler and retried.
+            remote_exception = None
             try:
                 result = self._decode_between(logs, RESULT_BEGIN, RESULT_END, hmac_key)
                 if result is not _MISSING:
@@ -409,14 +472,23 @@ class HFJobsManager:
 
                 error = self._decode_between(logs, ERROR_BEGIN, ERROR_END, hmac_key)
                 if error is not _MISSING:
-                    raise RemoteExecutionError(
-                        f"HuggingFace Job {job_id} raised {error['error']}\n"
-                        f"Remote traceback:\n{error['traceback']}"
+                    original = (
+                        error.get("exception") if isinstance(error, dict) else None
                     )
+                    if isinstance(original, BaseException):
+                        remote_exception = original
+                    else:
+                        raise RemoteExecutionError(
+                            f"HuggingFace Job {job_id} raised {error['error']}\n"
+                            f"Remote traceback:\n{error['traceback']}"
+                        )
             except RemoteExecutionError:
                 raise
             except RuntimeError as e:
                 last_error = e  # truncated/garbled: worth one more read
+
+            if remote_exception is not None:
+                raise remote_exception
 
         if last_error is not None:
             raise last_error

@@ -22,18 +22,11 @@ def run_command(cmd, description="", check=True, capture_output=True):
     try:
         if isinstance(cmd, str):
             result = subprocess.run(
-                cmd, 
-                shell=True,
-                check=check, 
-                capture_output=capture_output,
-                text=True
+                cmd, shell=True, check=check, capture_output=capture_output, text=True
             )
         else:
             result = subprocess.run(
-                cmd,
-                check=check, 
-                capture_output=capture_output,
-                text=True
+                cmd, check=check, capture_output=capture_output, text=True
             )
         return result
     except subprocess.CalledProcessError as e:
@@ -53,17 +46,20 @@ def get_staged_python_files():
     """Get list of staged Python files."""
     result = run_command(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        "Getting staged files"
+        "Getting staged files",
     )
-    
+
     if result.returncode != 0:
         return []
-    
+
     files = []
-    for line in result.stdout.strip().split('\n'):
-        if line and (line.endswith('.py') and (line.startswith('clustrix/') or line.startswith('tests/'))):
+    for line in result.stdout.strip().split("\n"):
+        if line and (
+            line.endswith(".py")
+            and (line.startswith("clustrix/") or line.startswith("tests/"))
+        ):
             files.append(line)
-    
+
     return files
 
 
@@ -71,50 +67,48 @@ def main():
     """Main pre-commit hook function."""
     # Get the files that are staged for commit
     staged_files = get_staged_python_files()
-    
+
     if not staged_files:
         print("ℹ️  No Python files in clustrix/ or tests/ staged for commit")
         sys.exit(0)
-    
+
     print(f"🔍 Checking formatting for {len(staged_files)} staged Python files...")
-    
+
     # Check if black would make changes to staged files
     black_check = run_command(
         ["black", "--check"] + staged_files,
         "Checking black formatting on staged files",
-        check=False
+        check=False,
     )
-    
+
     if black_check.returncode == 0:
         print("✅ All staged files are properly formatted")
         sys.exit(0)
-    
+
     print("⚠️  Formatting issues detected in staged files. Auto-correcting...")
-    
+
     # Apply black formatting to staged files
     format_result = run_command(
-        ["black"] + staged_files,
-        "Applying black formatting to staged files"
+        ["black"] + staged_files, "Applying black formatting to staged files"
     )
-    
+
     if format_result.returncode != 0:
         print("❌ Failed to apply black formatting")
         sys.exit(1)
-    
+
     # Re-stage the formatted files
     print("📝 Re-staging formatted files...")
     add_result = run_command(
-        ["git", "add"] + staged_files,
-        "Re-staging formatted files"
+        ["git", "add"] + staged_files, "Re-staging formatted files"
     )
-    
+
     if add_result.returncode != 0:
         print("❌ Failed to re-stage formatted files")
         sys.exit(1)
-    
+
     print("✅ Files formatted and re-staged successfully")
     print("💡 Your commit will now proceed with properly formatted code")
-    
+
     # Exit with success to allow the commit to proceed
     sys.exit(0)
 

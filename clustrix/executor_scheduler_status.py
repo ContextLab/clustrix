@@ -753,11 +753,15 @@ class SchedulerStatusManager:
                 # Return the exception object if it is one
                 if isinstance(error_data, Exception):
                     return error_data
-                elif isinstance(error_data, dict) and "error" in error_data:
-                    # Try to recreate exception from dict
-                    error_str = error_data["error"]
-                    # This is a simplified approach - in practice you'd want more sophisticated exception recreation
-                    return RuntimeError(error_str)
+                elif isinstance(error_data, dict):
+                    # The remote stages ship the exception object itself under
+                    # 'exception'. Prefer it: rebuilding from the message alone
+                    # loses the type, so `except ValueError` would not fire.
+                    original = error_data.get("exception")
+                    if isinstance(original, Exception):
+                        return original
+                    if "error" in error_data:
+                        return RuntimeError(error_data["error"])
 
             except Exception:
                 # If we can't extract the exception, return None

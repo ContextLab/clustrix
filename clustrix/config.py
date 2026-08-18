@@ -170,6 +170,14 @@ class ClusterConfig:
     pre_execution_commands: Optional[list] = None
 
     # Cluster-specific package and setup configuration
+    # The execution environment mirrors the local one by default: whatever the
+    # local package manager reports (pip freeze, or the uv/conda equivalent) is
+    # installed on the worker. A function that runs locally then runs remotely
+    # without anyone listing its dependencies by hand.
+    replicate_local_environment: bool = True
+    # Names to leave out of that mirror -- platform-specific wheels that cannot
+    # install on the cluster, or anything simply not needed there.
+    excluded_packages: Optional[list] = None
     cluster_packages: Optional[list] = None  # Additional packages to install in VENV2
     venv_post_install_commands: Optional[list] = (
         None  # Commands to run after package installation
@@ -202,6 +210,8 @@ class ClusterConfig:
             self.pre_execution_commands = []
         if self.cluster_packages is None:
             self.cluster_packages = []
+        if self.excluded_packages is None:
+            self.excluded_packages = []
         if self.venv_post_install_commands is None:
             self.venv_post_install_commands = []
 
