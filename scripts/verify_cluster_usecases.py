@@ -592,8 +592,28 @@ def run_case(name: str, builder, decorate) -> Dict[str, Any]:
     ok = actual == expected
     print(f"  expected: {_abbrev(expected)}")
     print(f"  actual  : {_abbrev(actual)}")
-    print("  OK — values match" if ok else "  FAIL — values differ")
+    if ok:
+        print("  OK — values match")
+    else:
+        print(f"  FAIL — values differ ({_explain_mismatch(expected, actual)})")
     return {"case": name, "ok": ok}
+
+
+def _explain_mismatch(expected: Any, actual: Any) -> str:
+    """Say what actually differs, so a repr that looks identical is not a riddle."""
+    et, at = type(expected), type(actual)
+    if et is not at and et.__qualname__ == at.__qualname__:
+        # Same class by name, different class object: the class was serialized
+        # by value, so `isinstance(result, MyClass)` is False on return. This
+        # only happens for classes defined in a __main__ script -- a class in an
+        # installed package ships by reference and keeps its identity.
+        return (
+            f"same class name {et.__qualname__!r} but different class objects; "
+            "a by-value class does not satisfy isinstance() on return"
+        )
+    if et is not at:
+        return f"expected {et.__name__}, got {at.__name__}"
+    return "same type, different contents"
 
 
 def _abbrev(value: Any, limit: int = 110) -> str:

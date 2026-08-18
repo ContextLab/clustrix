@@ -453,22 +453,45 @@ dependencies:
         return f"{venv_path}/bin/python"
 
 
-def _environment_key(python_version: str, requirements: Dict[str, str]) -> str:
+# Bump when the recipe below changes what actually lands in an environment.
+# The key hashes the *inputs*; without this, a policy change (as when VENV2
+# stopped installing nine hardcoded packages and started mirroring the local
+# environment) leaves every existing environment matching its old key, so the
+# cache serves a stale environment and the new packages are never installed.
+ENVIRONMENT_RECIPE_VERSION = "2"
+
+
+def _environment_key(
+    python_version: str,
+    requirements: Dict[str, str],
+    config: Optional[ClusterConfig] = None,
+) -> str:
     """A short, stable name for an environment with these exact contents.
 
-    Two calls asking for the same Python version and the same requirements get
-    the same key, so the environment is built once and reused. Any difference
-    produces a different key, so environments are never silently shared
-    between jobs that need different packages.
+    Two calls asking for the same Python version, the same requirements and the
+    same install policy get the same key, so the environment is built once and
+    reused. Any difference produces a different key, so environments are never
+    silently shared between jobs that need different packages.
     """
     import hashlib
 
-    material = (
-        python_version
-        + "|"
-        + ";".join(
-            f"{name}=={version}" for name, version in sorted(requirements.items())
-        )
+    excluded = sorted(
+        str(name).lower() for name in (getattr(config, "excluded_packages", None) or [])
+    )
+    extra = sorted(
+        str(spec) for spec in (getattr(config, "cluster_packages", None) or [])
+    )
+    material = "|".join(
+        [
+            ENVIRONMENT_RECIPE_VERSION,
+            python_version,
+            ";".join(
+                f"{name}=={version}" for name, version in sorted(requirements.items())
+            ),
+            f"replicate={bool(getattr(config, 'replicate_local_environment', True))}",
+            "excluded=" + ",".join(excluded),
+            "extra=" + ",".join(extra),
+        ]
     )
     digest = hashlib.sha256(material.encode()).hexdigest()[:12]
     return f"py{python_version.replace('.', '')}_{digest}"
@@ -640,7 +663,7 @@ def setup_two_venv_environment(
     # is skipped when the environment already exists.
     venv1_path = f"{work_dir}/venv1_serialization"
     venv2_path = f"{work_dir}/venv2_execution"
-    env_key = _environment_key(remote_python_version, requirements)
+    env_key = _environment_key(remote_python_version, requirements, config)
     conda_env1_name = f"clustrix_venv1_{env_key}"
     conda_env2_name = f"clustrix_venv2_{env_key}"
 
