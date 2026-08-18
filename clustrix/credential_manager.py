@@ -391,7 +391,7 @@ class FlexibleCredentialManager:
 # ============================================================================
 # HuggingFace Credentials (for HF Spaces execution)
 # ============================================================================
-# HF_TOKEN=hf_abcdefghijklmnopqrstuvwxyz123456789
+# HF_TOKEN=hf_your_token_here
 # HF_USERNAME=your-huggingface-username
 
 # ============================================================================
