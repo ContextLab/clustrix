@@ -122,7 +122,6 @@ HuggingFace Jobs
 Used when ``cluster_type='huggingface'``:
 
 - ``hf_token``: HuggingFace token. Required, and must be set explicitly --
-  a bare ``HF_TOKEN`` in the environment is not picked up.
 - ``hf_namespace``: Account the job is billed to. Personal accounts are often
   not on a plan that can run jobs, so this is usually an organization. Falls
   back to ``hf_username``.

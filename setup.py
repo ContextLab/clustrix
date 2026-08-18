@@ -20,8 +20,6 @@ setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
-        "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
@@ -29,7 +27,8 @@ setup(
         "Topic :: Software Development :: Libraries :: Python Modules",
         "Topic :: System :: Distributed Computing",
     ],
-    python_requires=">=3.8",
+    # Must match pyproject.toml: four hard dependencies require >=3.10.
+    python_requires=">=3.10",
     install_requires=[
         "paramiko>=2.7.0",
         "pyyaml>=5.4.0",

@@ -142,11 +142,19 @@ def ndoli_credentials(test_credentials, require_dartmouth_network):
 
 
 @pytest.fixture
-def screenshots_dir():
-    """Directory for screenshot outputs."""
-    screenshots_dir = Path("tests/real_world/screenshots")
-    screenshots_dir.mkdir(parents=True, exist_ok=True)
-    return screenshots_dir
+def screenshots_dir(tmp_path_factory):
+    """Directory for screenshot outputs.
+
+    A tmp directory, not `tests/real_world/screenshots`. Writing generated
+    artefacts back into the source tree meant every test run left the working
+    copy dirty, so a `git status` after running the suite could not be read at
+    a glance -- and the checked-in copies drifted with whoever ran it last.
+    Set CLUSTRIX_SCREENSHOT_DIR to keep them somewhere durable for inspection.
+    """
+    override = os.environ.get("CLUSTRIX_SCREENSHOT_DIR")
+    directory = Path(override) if override else tmp_path_factory.mktemp("screenshots")
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 @pytest.fixture
@@ -275,12 +283,9 @@ def configure_test_limits(request):
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Set up test environment."""
-    # Create screenshots directory
-    screenshots_dir = Path("tests/real_world/screenshots")
-    screenshots_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create temporary files directory
-    temp_dir = Path("tests/real_world/temp")
+    # Screenshots and scratch files go to a temp directory; see screenshots_dir
+    # for why the source tree is not a good place for generated artefacts.
+    temp_dir = Path(tempfile.gettempdir()) / "clustrix-real-world"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     yield

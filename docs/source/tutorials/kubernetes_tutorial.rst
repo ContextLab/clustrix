@@ -10,7 +10,8 @@ This tutorial demonstrates how to use Clustrix with Kubernetes clusters for clou
    something that has been run.
 
    Two limitations are worth knowing before you start. The notebook widget
-   offers no Kubernetes fields, so ``k8s_*`` settings can only come from a
+   has a Kubernetes section covering namespace, image, service account and
+   image pull policy; the remaining ``k8s_*`` settings come from a
    configuration file or ``configure()``. And per-job Kubernetes overrides are
    not implemented: the executor reads only the configuration-level ``k8s_*``
    settings and derives pod resource requests and limits from ``cores`` and
@@ -42,7 +43,8 @@ Importing ``clustrix`` registers the magic but does not display anything. Run
 
    %%remote
 
-Selecting ``kubernetes`` shows no dedicated fields, so the ``k8s_*`` settings
+Selecting ``kubernetes`` shows a Kubernetes section with namespace, image,
+service account and image pull policy. The remaining ``k8s_*`` settings
 below have to come from a configuration file or ``configure()``.
 
 **Option 2: Programmatic Configuration**

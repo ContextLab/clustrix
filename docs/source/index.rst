@@ -226,7 +226,7 @@ Supported Cluster Types
 | ``kubernetes``     | Untested          | Not verified against a real cluster. Per-job     |
 |                    |                   | overrides are unsupported -- the executor reads  |
 |                    |                   | only configuration-level ``k8s_*`` settings --   |
-|                    |                   | and the widget offers no Kubernetes fields.      |
+|                    |                   | The widget has a Kubernetes section.             |
 +--------------------+-------------------+--------------------------------------------------+
 
 **Cloud VM backends**

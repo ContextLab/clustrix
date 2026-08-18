@@ -7,7 +7,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/clustrix.svg)](https://pypi.org/project/clustrix/)
 [![Downloads](https://static.pepy.tech/badge/clustrix)](https://pepy.tech/project/clustrix)
 [![Documentation](https://readthedocs.org/projects/clustrix/badge/?version=latest)](https://clustrix.readthedocs.io/en/latest/?badge=latest)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.
@@ -116,7 +116,7 @@ The cluster type dropdown offers `local`, `ssh`, `slurm`, `pbs`, `sge`,
 - `huggingface` shows namespace, flavor, token, and an "Allow paid GPU flavors"
   checkbox. GPU flavors bill by the second, so that box has to be ticked before
   one is accepted.
-- `kubernetes` shows **no** dedicated fields. The Kubernetes settings
+- `kubernetes` shows a Kubernetes section with namespace, image, service account and image pull policy.
   (`k8s_namespace`, `k8s_image` and the rest) can only be set from a config file
   or `clustrix.configure()`.
 
@@ -415,7 +415,7 @@ from clustrix import cluster
 
 clustrix.configure(
     cluster_type='huggingface',
-    hf_token='hf_...',        # required; HF_TOKEN is not read automatically
+    hf_token='hf_...',        # optional: HF_TOKEN or `hf auth login` also work
     hf_namespace='my-org',    # usually an org, not a personal account
 )
 
@@ -438,7 +438,6 @@ Configuration:
 
 | Option | Default | Notes |
 |-|-|-|
-| `hf_token` | none | Required, and must be set explicitly. Despite what the error message and the widget's placeholder say, a bare `HF_TOKEN` in the environment is *not* picked up. |
 | `hf_namespace` | `hf_username` | The account the job is billed to. Personal accounts are often not on a plan that can run jobs, so this is usually an org. |
 | `hf_flavor` | `cpu-basic` | Hardware tier. |
 | `hf_image` | `python:<your minor version>-slim` | See below. |
@@ -555,7 +554,6 @@ result = my_function(5)  # Works correctly
 | `local` | Runs in local processes. Used for development and the fast tests. |
 | `pbs` | Implemented, **not verified**. PBS and SGE do not use the two-venv setup path and have not been run against real hardware. |
 | `sge` | Implemented, **not verified**. Same caveat as PBS. |
-| `kubernetes` | Implemented, **not verified** against a real cluster. Per-job overrides are not supported: the executor reads only the configuration-level `k8s_*` settings. The widget offers no Kubernetes fields. |
 | AWS / GCP / Azure / Lambda VM backends | **Unverified.** No cloud job has been shown to run end to end. See [Cloud Providers](#cloud-providers). |
 
 The three "Verified" rows are the backends exercised by
