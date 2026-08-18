@@ -313,10 +313,26 @@ class TestAuthenticationErrors:
     def test_cli_login_token_is_honoured(self, monkeypatch, tmp_path):
         """`hf auth login` writes here; clustrix should not ask again."""
         monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.delenv("HF_HOME", raising=False)
+        # expanduser("~") reads HOME on POSIX and USERPROFILE on Windows, so a
+        # test that sets only HOME silently reads the real user's token there.
         monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path))
         cache = tmp_path / ".cache" / "huggingface"
         cache.mkdir(parents=True)
         (cache / "token").write_text("hf_from_the_cli\n")
+
+        assert _manager().api is not None
+
+    def test_hf_home_relocates_the_token(self, monkeypatch, tmp_path):
+        """HF_HOME moves the whole directory; the token moves with it."""
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path / "empty"))
+        monkeypatch.setenv("USERPROFILE", str(tmp_path / "empty"))
+        elsewhere = tmp_path / "scratch" / "hf"
+        elsewhere.mkdir(parents=True)
+        (elsewhere / "token").write_text("hf_from_hf_home\n")
+        monkeypatch.setenv("HF_HOME", str(elsewhere))
 
         assert _manager().api is not None
 

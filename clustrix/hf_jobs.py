@@ -101,10 +101,20 @@ MAX_PAYLOAD_BYTES = 256 * 1024
 
 
 def _token_from_hf_cli_cache() -> Optional[str]:
-    """The token `hf auth login` writes, if there is one."""
+    """The token `hf auth login` writes, if there is one.
+
+    HF_HOME relocates that whole directory, so a user who sets it -- common on
+    shared machines and clusters with small home quotas -- was being told to log
+    in again despite already having done so.
+    """
+    hf_home = os.environ.get("HF_HOME")
+    home = (
+        hf_home
+        if hf_home
+        else os.path.join(os.path.expanduser("~"), ".cache", "huggingface")
+    )
     try:
-        path = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "token")
-        with open(path) as handle:
+        with open(os.path.join(home, "token")) as handle:
             return handle.read().strip() or None
     except OSError:
         return None
