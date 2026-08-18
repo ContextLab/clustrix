@@ -342,3 +342,85 @@ class TestAuthenticationErrors:
 
         manager = _manager(hf_token="hf_from_the_config")
         assert manager.api.token == "hf_from_the_config"
+
+
+class TestAFunctionRaisingIsNotAJobFailure:
+    """A raised exception is an ordinary outcome, not a broken job.
+
+    The container reported the exception faithfully and then re-raised, so the
+    process exited non-zero, Hugging Face marked the job ERROR, and the account
+    owner got a "status changed to ERROR" email -- for a Python function doing
+    exactly what it was written to do. Only a failure to *report* is a job
+    failure.
+
+    These run the real bootstrap in a subprocess. The pip step is satisfied
+    from the local environment, so no network is needed.
+    """
+
+    @staticmethod
+    def _run_bootstrap(func, args):
+        import base64
+        import os
+        import subprocess
+        import sys
+
+        import dill
+
+        from clustrix.hf_jobs import _bootstrap_source
+
+        payload = dill.dumps(
+            {
+                "function": dill.dumps(func, recurse=True),
+                "args": dill.dumps(args),
+                "kwargs": dill.dumps({}),
+            },
+            protocol=4,
+        )
+        env = dict(
+            os.environ,
+            CLUSTRIX_PAYLOAD=base64.b64encode(payload).decode(),
+            CLUSTRIX_HMAC_KEY="0" * 64,
+            CLUSTRIX_PACKAGES="",
+        )
+        return subprocess.run(
+            [sys.executable, "-c", _bootstrap_source()],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+    def test_the_container_exits_cleanly_when_the_function_raises(self):
+        def explode(x):
+            raise ValueError(f"boom {x}")
+
+        result = self._run_bootstrap(explode, (7,))
+        assert result.returncode == 0, result.stderr[-500:]
+
+    def test_the_error_is_still_reported(self):
+        """Exiting cleanly must not mean exiting quietly."""
+        from clustrix.hf_jobs import ERROR_BEGIN, ERROR_END
+
+        def explode(x):
+            raise ValueError(f"boom {x}")
+
+        result = self._run_bootstrap(explode, (7,))
+        assert ERROR_BEGIN in result.stdout and ERROR_END in result.stdout
+
+    def test_the_traceback_stays_in_the_job_log(self):
+        """Whoever opens the job page should still see what went wrong."""
+
+        def explode(x):
+            raise ValueError(f"boom {x}")
+
+        result = self._run_bootstrap(explode, (7,))
+        assert "ValueError: boom 7" in result.stdout + result.stderr
+
+    def test_a_successful_function_still_emits_a_result(self):
+        from clustrix.hf_jobs import RESULT_BEGIN
+
+        def double(x):
+            return x * 2
+
+        result = self._run_bootstrap(double, (21,))
+        assert result.returncode == 0
+        assert RESULT_BEGIN in result.stdout

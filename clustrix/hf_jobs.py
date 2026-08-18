@@ -184,7 +184,15 @@ def _bootstrap_source() -> str:
         "    except Exception:\n"
         "        pass\n"
         f"    emit('{ERROR_BEGIN}','{ERROR_END}',_p)\n"
-        "    raise\n"
+        # The traceback stays in the job log, but the process exits cleanly.
+        # A function raising ValueError is an ordinary outcome that clustrix
+        # re-raises locally with its original type -- not a failed job. Exiting
+        # non-zero marked the job ERROR in the Hugging Face console and sent
+        # the account owner a "status changed to ERROR" email for every such
+        # exception. Only a failure to *report* is a job failure, and that path
+        # still propagates: if emit() itself raises, this exit is never reached.
+        "    traceback.print_exc()\n"
+        "    sys.exit(0)\n"
     )
 
 
