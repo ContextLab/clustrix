@@ -1,4 +1,5 @@
 import functools
+import logging
 from typing import Any, Callable, Optional, Dict, List
 
 from .config import get_config
@@ -15,6 +16,8 @@ from .function_flattening import (
     auto_flatten_if_needed,
     create_simple_subprocess_fallback,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Cluster types that submit work over an API instead of SSH, and therefore
 #: never have a ``cluster_host``.
@@ -494,6 +497,21 @@ def _detect_remote_gpu_count(
         )
         return {"output": result.stdout}
 
+    config = executor.config
+    if config.cluster_type in HOSTLESS_CLUSTER_TYPES:
+        # Probing costs a whole extra billed container per @cluster call, and
+        # for a CPU flavor the answer is known in advance. Ask the flavor.
+        from .hf_jobs import is_gpu_flavor, DEFAULT_FLAVOR
+
+        flavor = (
+            job_config.get("hf_flavor")
+            or getattr(config, "hf_flavor", None)
+            or getattr(config, "hf_hardware", None)
+            or DEFAULT_FLAVOR
+        )
+        if not is_gpu_flavor(flavor):
+            return {"available": False, "count": 0}
+
     try:
         from .utils import serialize_function
 
@@ -509,7 +527,12 @@ def _detect_remote_gpu_count(
 
         return None
 
-    except Exception:
+    except Exception as e:
+        # Swallowing this made a real failure -- the probe function lives in
+        # clustrix.decorator, so dill ships it by reference and any worker
+        # without clustrix installed raises ModuleNotFoundError -- look
+        # identical to "this cluster has no GPUs".
+        logger.warning("Could not detect remote GPU count: %s", e)
         return None
 
 

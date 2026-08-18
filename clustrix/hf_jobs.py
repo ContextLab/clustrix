@@ -33,11 +33,13 @@ to get an "unknown opcode" failure out of this backend.
 """
 
 import base64
+import binascii
 import hashlib
 import hmac
 import logging
 import secrets
 import sys
+import time
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -58,39 +60,56 @@ except ImportError:
     HF_AVAILABLE = False
 
 
+#: Sentinel distinguishing "no block found" from "the block held None".
+#: A function that legitimately returns None must not look like a missing
+#: result, or every such call fails with "produced no clustrix result marker".
+_MISSING = object()
+
 RESULT_BEGIN = "---CLUSTRIX-RESULT-BEGIN---"
 RESULT_END = "---CLUSTRIX-RESULT-END---"
 ERROR_BEGIN = "---CLUSTRIX-ERROR-BEGIN---"
 ERROR_END = "---CLUSTRIX-ERROR-END---"
 
-#: Flavors that cost real money. Selecting one requires an explicit opt-in so
-#: that a stray ``cores=64`` in a notebook cannot quietly rent an H100.
-GPU_FLAVORS = frozenset(
-    {
-        "t4-small",
-        "t4-medium",
-        "l4x1",
-        "l4x4",
-        "l40sx1",
-        "l40sx4",
-        "l40sx8",
-        "a10g-small",
-        "a10g-large",
-        "a10g-largex2",
-        "a10g-largex4",
-        "a100-large",
-        "h100",
-        "h100x8",
-    }
-)
+#: Flavors whose names start with this are CPU tiers. Everything else HF
+#: offers is a GPU tier that bills by the second.
+#:
+#: The gate is a prefix test rather than a list of GPU names on purpose: HF
+#: adds hardware regularly (a100x8, h200x8 and rtx-pro-6000x8 all postdate the
+#: first draft of this file), and a stale denylist fails *open* -- it would
+#: have waved through an h200x8 while carefully blocking an "h100" that does
+#: not exist. A prefix test fails closed.
+CPU_FLAVOR_PREFIX = "cpu-"
+
+
+def is_gpu_flavor(flavor: str) -> bool:
+    """True for any flavor that is not one of the CPU tiers."""
+    return not str(flavor).startswith(CPU_FLAVOR_PREFIX)
+
 
 DEFAULT_FLAVOR = "cpu-basic"
 DEFAULT_TIMEOUT = "30m"
+
+#: A job that has only just finished may still be flushing its log stream.
+LOG_FETCH_ATTEMPTS = 3
+LOG_FETCH_DELAY_SECONDS = 2.0
 
 #: HF rejects very large environment variables. Well under any documented
 #: limit, but large enough for a function plus modest arguments; anything
 #: bigger should be read from a dataset inside the job rather than shipped.
 MAX_PAYLOAD_BYTES = 256 * 1024
+
+
+def _constant_time_equals(candidate: str, expected: str) -> bool:
+    """Constant-time compare that tolerates junk in the candidate.
+
+    ``hmac.compare_digest`` raises TypeError on a non-ASCII str, and the
+    candidate comes off a log stream, so it may be anything at all. A tag that
+    cannot even be encoded is simply not a match.
+    """
+    try:
+        return hmac.compare_digest(candidate.encode("ascii"), expected.encode("ascii"))
+    except (UnicodeEncodeError, AttributeError):
+        return False
 
 
 def _bootstrap_source() -> str:
@@ -103,7 +122,9 @@ def _bootstrap_source() -> str:
     """
     return (
         "import base64,hashlib,hmac,os,subprocess,sys\n"
-        "subprocess.run([sys.executable,'-m','pip','install','-q','dill'],check=True)\n"
+        "subprocess.run([sys.executable,'-m','pip','install','-q','dill','cloudpickle'],"
+        "check=True)\n"
+        "import cloudpickle\n"
         "import dill\n"
         "k=os.environ['CLUSTRIX_HMAC_KEY'].encode()\n"
         "def emit(begin,end,obj):\n"
@@ -115,7 +136,12 @@ def _bootstrap_source() -> str:
         "import pickle\n"
         "p=dill.loads(base64.b64decode(os.environ['CLUSTRIX_PAYLOAD']))\n"
         "try:\n"
-        "    f=dill.loads(p['function'])\n"
+        "    try:\n"
+        "        f=dill.loads(p['function'])\n"
+        "    except Exception:\n"
+        # serialize_function() falls back to cloudpickle when dill cannot
+        # handle a function, so the container has to try both.
+        "        f=cloudpickle.loads(p['function'])\n"
         "    a=pickle.loads(p['args'])\n"
         "    kw=pickle.loads(p['kwargs'])\n"
         "    r=f(*a,**kw)\n"
@@ -126,6 +152,10 @@ def _bootstrap_source() -> str:
         "{'error':str(e),'traceback':traceback.format_exc()})\n"
         "    raise\n"
     )
+
+
+class RemoteExecutionError(RuntimeError):
+    """The remote function raised. Distinct from a transport problem."""
 
 
 class HFJobsManager:
@@ -179,13 +209,13 @@ class HFJobsManager:
             or getattr(self.config, "hf_hardware", None)
             or DEFAULT_FLAVOR
         )
-        if flavor in GPU_FLAVORS and not getattr(
+        if is_gpu_flavor(flavor) and not getattr(
             self.config, "hf_allow_gpu_flavors", False
         ):
             raise ValueError(
-                f"Flavor {flavor!r} is a paid GPU flavor. Set "
-                "hf_allow_gpu_flavors=True to confirm you intend to be billed "
-                f"for it; otherwise use one of the CPU flavors (default: "
+                f"Flavor {flavor!r} is a GPU flavor and bills by the second. "
+                "Set hf_allow_gpu_flavors=True to confirm you intend to pay "
+                f"for it; otherwise use a CPU flavor (default: "
                 f"{DEFAULT_FLAVOR})."
             )
         return flavor
@@ -271,37 +301,54 @@ class HFJobsManager:
         logger.warning("Unrecognised HuggingFace job stage %r for %s", stage, job_id)
         return "unknown"
 
-    def _decode_between(
-        self, lines, begin: str, end: str, hmac_key: str
-    ) -> Optional[Any]:
+    def _decode_between(self, lines, begin: str, end: str, hmac_key: str) -> Any:
         """Decode the payload the bootstrap printed between two markers.
 
+        Returns ``_MISSING`` when the block is absent, so that a function
+        which legitimately returned ``None`` is not mistaken for a job that
+        produced nothing.
+
         The first line after the opening marker is the HMAC of the payload
-        bytes. It is checked with a constant-time compare *before* anything is
-        handed to dill, because unpickling is code execution: an unverified
-        blob from a log stream is not something to deserialize.
+        bytes, checked with a constant-time compare *before* anything reaches
+        dill, because unpickling is code execution.
+
+        Both markers are only honoured while actually inside a block. A
+        function is free to print anything it likes, including a line that
+        happens to equal one of these markers, and that must not be able to
+        truncate or hijack the real block.
         """
         collecting = False
-        tag: Optional[str] = None
+        tag = None
         chunks: List[str] = []
         for line in lines:
             line = line.strip()
-            if line == begin:
-                collecting = True
+            if not collecting:
+                if line == begin:
+                    collecting = True
                 continue
             if line == end:
                 break
-            if collecting and line:
+            if line:
                 if tag is None:
                     tag = line
                 else:
                     chunks.append(line)
         if tag is None or not chunks:
-            return None
+            return _MISSING
 
-        raw = base64.b64decode("".join(chunks))
+        try:
+            raw = base64.b64decode("".join(chunks), validate=True)
+        except (ValueError, binascii.Error) as e:
+            # Truncated or interleaved logs, not an attack. Saying "integrity
+            # check failed" here would send someone hunting a forgery that
+            # never happened.
+            raise RuntimeError(
+                "HuggingFace Job result could not be decoded; the log stream "
+                f"appears truncated or interleaved ({e}). Re-run the job."
+            ) from e
+
         expected = hmac.new(hmac_key.encode(), raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(tag, expected):
+        if not _constant_time_equals(tag, expected):
             raise RuntimeError(
                 "HuggingFace Job result failed its integrity check: the HMAC "
                 "does not match the per-job key. Refusing to deserialize it."
@@ -326,20 +373,37 @@ class HFJobsManager:
 
         self.api.wait_for_job(job_id, namespace=self._namespace())
 
-        logs = list(self.api.fetch_job_logs(job_id=job_id, namespace=self._namespace()))
-
-        result = self._decode_between(logs, RESULT_BEGIN, RESULT_END, hmac_key)
-        if result is not None:
-            return result
-
-        error = self._decode_between(logs, ERROR_BEGIN, ERROR_END, hmac_key)
-        if error is not None:
-            raise RuntimeError(
-                f"HuggingFace Job {job_id} raised {error['error']}\n"
-                f"Remote traceback:\n{error['traceback']}"
+        # fetch_job_logs returns whatever is available now, and a job that has
+        # only just finished may still be flushing. A truncated tail looks
+        # exactly like a missing result, so give it a couple of chances before
+        # concluding the job produced nothing.
+        last_error: Optional[Exception] = None
+        logs: list = []
+        for attempt in range(LOG_FETCH_ATTEMPTS):
+            if attempt:
+                time.sleep(LOG_FETCH_DELAY_SECONDS)
+            logs = list(
+                self.api.fetch_job_logs(job_id=job_id, namespace=self._namespace())
             )
+            try:
+                result = self._decode_between(logs, RESULT_BEGIN, RESULT_END, hmac_key)
+                if result is not _MISSING:
+                    return result
 
-        # No markers at all: the bootstrap never got far enough to print them.
+                error = self._decode_between(logs, ERROR_BEGIN, ERROR_END, hmac_key)
+                if error is not _MISSING:
+                    raise RemoteExecutionError(
+                        f"HuggingFace Job {job_id} raised {error['error']}\n"
+                        f"Remote traceback:\n{error['traceback']}"
+                    )
+            except RemoteExecutionError:
+                raise
+            except RuntimeError as e:
+                last_error = e  # truncated/garbled: worth one more read
+
+        if last_error is not None:
+            raise last_error
+
         tail = "\n".join(logs[-30:]) if logs else "<no logs returned>"
         raise RuntimeError(
             f"HuggingFace Job {job_id} produced no clustrix result marker. "
@@ -347,10 +411,16 @@ class HFJobsManager:
         )
 
     def cancel_job(self, job_id: str) -> bool:
-        """Cancel a running job. Returns True if the API accepted the request."""
+        """Cancel a running job. Returns True if the API accepted the request.
+
+        A False here means the job may still be running and still billing, so
+        callers must not treat it as "cancelled" -- see executor_core.
+        """
         try:
             self.api.cancel_job(job_id=job_id, namespace=self._namespace())
-            return True
         except Exception as e:
             logger.error("Could not cancel HuggingFace Job %s: %s", job_id, e)
             return False
+        finally:
+            self._jobs.pop(job_id, None)
+        return True

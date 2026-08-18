@@ -257,7 +257,15 @@ class ClusterExecutor:
             manager_type = self.active_jobs[job_id]["manager"]
 
             if manager_type == "huggingface":
-                self.hf_jobs_manager.cancel_job(job_id)
+                if not self.hf_jobs_manager.cancel_job(job_id):
+                    # Keep tracking it: an uncancelled job is still running
+                    # and still billing, and forgetting it here would make it
+                    # invisible.
+                    raise RuntimeError(
+                        f"Could not cancel HuggingFace Job {job_id}; it may "
+                        "still be running. Check the Jobs page for your "
+                        "namespace."
+                    )
                 del self.active_jobs[job_id]
                 return
             if manager_type == "cloud":
