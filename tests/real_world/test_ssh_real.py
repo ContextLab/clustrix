@@ -310,9 +310,7 @@ Host localhost
     HostName 127.0.0.1
     User {username}
     Port 22
-""".format(
-                username=os.getenv("USER", "user")
-            )
+""".format(username=os.getenv("USER", "user"))
 
             config_file = temp_mgr.create_temp_file(ssh_config_content, ".config")
 

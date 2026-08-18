@@ -1,0 +1,232 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    /* JupyterLab light theme tokens, lifted verbatim from
+       theme-light-extension/index.css so this artboard shows the widget
+       exactly as the notebook paints it. In the real widget these are NOT
+       redefined -- JupyterLab already supplies them, which is the whole
+       point: the widget inherits the user's theme instead of hardcoding one. */
+    :root {
+      --jp-layout-color1: #212121;
+      --jp-layout-color2: #424242;
+      --jp-border-color1: #616161;
+      --jp-border-color2: #424242;
+      --jp-brand-color1: #2196f3;
+      --jp-brand-color3: #bbdefb;
+      --jp-ui-font-color1: rgba(255,255,255,.87);
+      --jp-ui-font-color2: rgba(255,255,255,.54);
+      --jp-ui-font-color3: rgba(255,255,255,.38);
+      --jp-success-color1: #4caf50;
+      --jp-error-color1: #f44336;
+      --jp-warn-color1: #ff9800;
+      --jp-ui-font-size1: 13px;
+      --jp-ui-font-family: system-ui, -apple-system, "Segoe UI", helvetica, arial, sans-serif;
+      --jp-code-font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+    }
+    body {
+      margin: 0;
+      background: var(--jp-layout-color2);
+      font-family: var(--jp-ui-font-family);
+      font-size: var(--jp-ui-font-size1);
+      color: var(--jp-ui-font-color1);
+    }
+    a { color: var(--jp-brand-color1); }
+    a:hover { color: #64b5f6; }
+    .lbl {
+      font-size: 11px;
+      color: var(--jp-ui-font-color2);
+      margin-bottom: 3px;
+      display: block;
+    }
+    .fld {
+      width: 100%;
+      box-sizing: border-box;
+      height: 26px;
+      padding: 0 7px;
+      font-family: inherit;
+      font-size: 13px;
+      color: var(--jp-ui-font-color1);
+      background: var(--jp-layout-color1);
+      border: 1px solid var(--jp-border-color1);
+      border-radius: 3px;
+    }
+    .fld:focus { outline: 2px solid var(--jp-brand-color3); border-color: var(--jp-brand-color1); }
+    .btn {
+      height: 26px;
+      padding: 0 11px;
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 3px;
+      border: 1px solid var(--jp-border-color1);
+      background: var(--jp-layout-color1);
+      color: var(--jp-ui-font-color1);
+      cursor: pointer;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .btn:hover { background: var(--jp-layout-color2); }
+    .btn-primary {
+      background: var(--jp-brand-color1);
+      border-color: var(--jp-brand-color1);
+      color: #fff;
+    }
+    .btn-primary:hover { background: #42a5f5; }
+    .btn-icon { width: 26px; padding: 0; justify-content: center; }
+    .sect {
+      font-size: 10px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--jp-ui-font-color3);
+      margin: 0;
+    }
+  </style>
+</helmet>
+
+<div style="padding: 24px; display: flex; justify-content: center;">
+  <div style="width: 780px; background: var(--jp-layout-color1); border: 1px solid var(--jp-border-color2); border-radius: 4px; overflow: hidden;">
+
+    <!-- Header: identity + live status. Replaces the old bare grid with an
+         anchor that tells you which cluster you are about to run on. -->
+    <div style="display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--jp-border-color2); background: var(--jp-layout-color2);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="{{accent}}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <rect x="2" y="3" width="20" height="6" rx="1"></rect>
+        <rect x="2" y="15" width="20" height="6" rx="1"></rect>
+        <line x1="6" y1="6" x2="6.01" y2="6"></line>
+        <line x1="6" y1="18" x2="6.01" y2="18"></line>
+      </svg>
+      <span style="font-weight: 600; font-size: 13px;">Clustrix</span>
+      <span style="color: var(--jp-ui-font-color3);">/</span>
+      <span style="color: var(--jp-ui-font-color2); font-size: 12px;">cluster configuration</span>
+      <span style="flex-grow: 1;"></span>
+      <span style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 9px; border-radius: 10px; background: rgba(76,175,80,.16); color: var(--jp-success-color1); font-size: 11px; font-weight: 500;">
+        <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="4" fill="currentColor"></circle></svg>
+        connected
+      </span>
+    </div>
+
+    <div style="padding: 14px; display: flex; flex-direction: column; gap: 16px;">
+
+      <!-- Profile row -->
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <p class="sect">Profile</p>
+        <div style="display: grid; grid-template-columns: 1fr auto auto auto auto; gap: 6px; align-items: end;">
+          <div>
+            <label class="lbl">Active profile</label>
+            <select class="fld">
+              <option>discovery — SLURM (Dartmouth)</option>
+            </select>
+          </div>
+          <button class="btn btn-icon" title="Add profile" aria-label="Add profile">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+          <button class="btn btn-icon" title="Remove profile" aria-label="Remove profile">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          </button>
+          <button class="btn" title="Save configuration to file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Save
+          </button>
+          <button class="btn" title="Load configuration from file">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg>
+            Load
+          </button>
+        </div>
+      </div>
+
+      <!-- Resources -->
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <p class="sect">Resources</p>
+        <div style="display: grid; grid-template-columns: 2fr 1fr 1fr 1.2fr; gap: 8px;">
+          <div>
+            <label class="lbl">Cluster type</label>
+            <select class="fld"><option>slurm</option></select>
+          </div>
+          <div>
+            <label class="lbl">CPUs</label>
+            <input class="fld" value="8">
+          </div>
+          <div>
+            <label class="lbl">Memory</label>
+            <input class="fld" value="32GB">
+          </div>
+          <div>
+            <label class="lbl">Walltime</label>
+            <input class="fld" value="02:00:00">
+          </div>
+        </div>
+      </div>
+
+      <!-- Connection -->
+      <div style="display: flex; flex-direction: column; gap: 7px;">
+        <p class="sect">Connection</p>
+        <div style="display: grid; grid-template-columns: 2fr 1fr 1.4fr; gap: 8px;">
+          <div>
+            <label class="lbl">Host</label>
+            <input class="fld" value="discovery.dartmouth.edu">
+          </div>
+          <div>
+            <label class="lbl">Username</label>
+            <input class="fld" value="f002d6b">
+          </div>
+          <div>
+            <label class="lbl">Authentication</label>
+            <select class="fld"><option>SSH key</option></select>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">Remote work directory</label>
+          <input class="fld" style="font-family: var(--jp-code-font-family); font-size: 12px;" value="~/.clustrix/jobs">
+        </div>
+      </div>
+
+      <!-- Actions. Full labels, no truncation; the destructive-ish
+           "submit a real job" action is visually separated from Apply. -->
+      <div style="display: flex; align-items: center; gap: 8px; padding-top: 2px; border-top: 1px solid var(--jp-border-color2);">
+        <button class="btn" style="margin-top: 12px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path></svg>
+          Advanced settings
+        </button>
+        <span style="flex-grow: 1;"></span>
+        <button class="btn" style="margin-top: 12px;">Test connection</button>
+        <button class="btn" style="margin-top: 12px;">Test job submission</button>
+        <button class="btn btn-primary" style="margin-top: 12px;">Apply</button>
+      </div>
+
+      <!-- Output. Was an unstyled ipywidgets Output; now a readable log
+           surface that distinguishes success from failure at a glance. -->
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <p class="sect">Output</p>
+        <div style="background: var(--jp-layout-color2); border: 1px solid var(--jp-border-color2); border-radius: 3px; padding: 9px 11px; font-family: var(--jp-code-font-family); font-size: 12px; line-height: 1.65; color: var(--jp-ui-font-color2); white-space: pre-line;">{{log}}</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+
+<script data-dc-script data-props='{
+  "accent": {"editor": "color", "default": "#2196f3", "options": ["#1976d2", "#00796b", "#5e35b1", "#c2185b"]},
+  "log": {"editor": "text", "default": "$ sinfo -o %P\nstandard*  up  30-00:00:00\n✓ connected to discovery.dartmouth.edu as f002d6b\n✓ SLURM 23.02.7 detected, 45 nodes available"},
+  "$preview": {"width": 828, "height": 640}
+}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {
+      accent: this.props.accent ?? '#2196f3',
+      log: this.props.log ?? '',
+    };
+  }
+}
+</script>
+</body>
+</html>

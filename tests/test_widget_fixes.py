@@ -89,18 +89,25 @@ class TestWidgetConfigurationFixes:
         # Add config to widget
         widget.configs["test_config"] = test_config
 
+        # KNOWN FAILURE (shipped-code regression): commit 46ad192 dropped the
+        # "if value in options" guards this test was written for (issue #53), so
+        # _load_config_to_widgets now raises TraitError on any dropdown value
+        # that is not in the widget's hardcoded option list.
         # Should not crash when loading the configuration
         # Values not in dropdown should fall back to defaults
         widget._load_config_to_widgets("test_config")
 
         # Verify that text fields are set correctly
-        assert widget.azure_subscription_id.value == "test-sub-id"
-        assert widget.azure_client_id.value == "test-client-id"
-        assert widget.azure_client_secret.value == "test-secret"
+        assert widget.azure_subscription_field.value == "test-sub-id"
+        assert widget.azure_client_id_field.value == "test-client-id"
+        assert widget.azure_client_secret_field.value == "test-secret"
 
         # Verify that dropdown fields fall back to safe defaults
-        assert widget.azure_region.value in widget.azure_region.options
-        assert widget.azure_instance_type.value in widget.azure_instance_type.options
+        assert widget.azure_region_field.value in widget.azure_region_field.options
+        assert (
+            widget.azure_instance_type_field.value
+            in widget.azure_instance_type_field.options
+        )
 
     @pytest.mark.skipif(
         not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"
@@ -109,13 +116,19 @@ class TestWidgetConfigurationFixes:
         """Test that widget can save and load configurations correctly."""
         widget = ClusterConfigWidget(auto_display=False)
 
+        # KNOWN FAILURE (shipped-code regression): typing into config_name
+        # re-keys self.configs, which rebuilds the dropdown options, which
+        # re-fires _on_config_select and reloads the stored config over every
+        # edit made beforehand -- so the values set below are discarded.
         # Set up a complete cloud provider configuration
         widget.cluster_type.value = "aws"
-        widget.aws_region.value = "us-east-1"  # Use value that exists in options
-        widget.aws_instance_type.value = "t3.medium"  # Use value that exists in options
-        widget.aws_access_key.value = "test-access-key"
-        widget.aws_secret_key.value = "test-secret-key"
-        widget.aws_cluster_type.value = "ec2"
+        widget.aws_region_field.value = "us-east-1"  # Use value that exists in options
+        widget.aws_instance_type_field.value = (
+            "t3.medium"  # Use value that exists in options
+        )
+        widget.aws_access_key_field.value = "test-access-key"
+        widget.aws_secret_key_field.value = "test-secret-key"
+        widget.aws_cluster_type_field.value = "ec2"
         widget.config_name.value = "Test AWS Config"
 
         # Save configuration
@@ -125,8 +138,10 @@ class TestWidgetConfigurationFixes:
         assert saved_config["cluster_type"] == "aws"
         assert saved_config["aws_region"] == "us-east-1"
         assert saved_config["aws_instance_type"] == "t3.medium"
-        assert saved_config["aws_access_key"] == "test-access-key"
-        assert saved_config["aws_secret_key"] == "test-secret-key"
+        # Credentials are saved under the boto3 field names, which are the ones
+        # ClusterConfig/executor_cloud actually read.
+        assert saved_config["aws_access_key_id"] == "test-access-key"
+        assert saved_config["aws_secret_access_key"] == "test-secret-key"
         assert saved_config["aws_cluster_type"] == "ec2"
 
     def test_cloud_provider_fields_in_config(self):
@@ -204,21 +219,21 @@ class TestWidgetConfigurationFixes:
         widget = ClusterConfigWidget(auto_display=False)
 
         # Test that cloud provider dropdowns have sensible defaults
-        assert len(widget.aws_region.options) > 0
-        assert "us-east-1" in widget.aws_region.options
+        assert len(widget.aws_region_field.options) > 0
+        assert "us-east-1" in widget.aws_region_field.options
 
-        assert len(widget.azure_region.options) > 0
-        assert "eastus" in widget.azure_region.options
+        assert len(widget.azure_region_field.options) > 0
+        assert "eastus" in widget.azure_region_field.options
 
-        assert len(widget.gcp_region.options) > 0
-        assert "us-central1" in widget.gcp_region.options
+        assert len(widget.gcp_region_field.options) > 0
+        assert "us-central1" in widget.gcp_region_field.options
 
         # Test that instance type dropdowns have options
-        assert len(widget.aws_instance_type.options) > 0
-        assert len(widget.azure_instance_type.options) > 0
-        assert len(widget.gcp_instance_type.options) > 0
-        assert len(widget.lambda_instance_type.options) > 0
-        assert len(widget.hf_hardware.options) > 0
+        assert len(widget.aws_instance_type_field.options) > 0
+        assert len(widget.azure_instance_type_field.options) > 0
+        assert len(widget.gcp_instance_type_field.options) > 0
+        assert len(widget.lambda_instance_type_field.options) > 0
+        assert len(widget.hf_hardware_field.options) > 0
 
     @pytest.mark.skip(
         reason="Test isolation issue - configs being contaminated by other tests"
@@ -250,13 +265,13 @@ class TestWidgetConfigurationFixes:
 
         # Verify AWS fields are displayed and have options
         assert widget.aws_fields.layout.display == ""
-        assert len(widget.aws_region.options) > 0
-        assert len(widget.aws_instance_type.options) > 0
+        assert len(widget.aws_region_field.options) > 0
+        assert len(widget.aws_instance_type_field.options) > 0
 
         # Simulate cluster type change to Azure
         widget._on_cluster_type_change({"new": "azure"})
 
         # Verify Azure fields are displayed and have options
         assert widget.azure_fields.layout.display == ""
-        assert len(widget.azure_region.options) > 0
-        assert len(widget.azure_instance_type.options) > 0
+        assert len(widget.azure_region_field.options) > 0
+        assert len(widget.azure_instance_type_field.options) > 0

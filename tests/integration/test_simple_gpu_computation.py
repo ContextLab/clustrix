@@ -3,7 +3,6 @@
 Test simple GPU computation to isolate the issue.
 """
 
-
 from clustrix.config import load_config, configure, get_config
 from clustrix import cluster
 from tests.real_world import TestCredentials

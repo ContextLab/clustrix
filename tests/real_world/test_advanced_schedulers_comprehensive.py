@@ -418,7 +418,9 @@ class TestAdvancedSchedulersComprehensive:
                         f"   Queue info: {len(result.stdout.strip().split(chr(10)))} lines"
                     )
                 else:
-                    logger.warning(f"⚠️ {scheduler.upper()} queue system not accessible")
+                    logger.warning(
+                        f"⚠️ {scheduler.upper()} queue system not accessible"
+                    )
 
             except subprocess.TimeoutExpired:
                 queue_tests.append(

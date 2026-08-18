@@ -1,0 +1,24 @@
+{
+  "artboards": [
+    { "file": "Current.dc.html", "x": 0, "y": 0, "w": 828, "h": 300, "title": "Today — as it ships" },
+    { "file": "Main.dc.html", "x": 0, "y": 380, "w": 828, "h": 640, "title": "Redesign — JupyterLab light" },
+    { "file": "Dark.dc.html", "x": 900, "y": 380, "w": 828, "h": 640, "title": "Redesign — JupyterLab dark" }
+  ],
+  "annotations": [
+    {
+      "id": "why-native",
+      "x": 900,
+      "y": 0,
+      "w": 320,
+      "text": "Direction: stop styling the widget and start inheriting JupyterLab.\n\nEvery colour and font here is a --jp-* variable that JupyterLab already defines. That single decision fixes three of the four problems at once:\n\n· dark mode works because the tokens change with the theme, not because we wrote a second stylesheet\n· the Google Fonts @import disappears, so the widget stops breaking offline and stops phoning out\n· it looks like part of the notebook instead of a navy rectangle pasted into one\n\nThe fourth (truncated buttons) is fixed by putting labels above fields instead of right-aligning them inline, which frees the whole row width for real button text."
+    },
+    {
+      "id": "what-changed",
+      "x": 900,
+      "y": 1060,
+      "w": 320,
+      "text": "Also changed:\n\n· save/load glyphs were unicode characters that render as boxes in many fonts — now inline stroked SVG on a 24px grid\n· the four ungrouped rows become four labelled sections, so the eye can find the resource fields without reading every label\n· a header states which cluster you are about to run on, and whether it answered\n· the output area is a real log surface rather than an unstyled ipywidgets Output"
+    }
+  ],
+  "launch": { "view": "canvas" }
+}

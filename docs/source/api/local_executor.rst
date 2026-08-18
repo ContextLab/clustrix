@@ -60,20 +60,26 @@ Loop Parallelization
 .. code-block:: python
 
    from clustrix.local_executor import LocalExecutor
-   
-   def process_data(data_chunk):
-       return [x * 2 for x in data_chunk]
-   
+
+   def process_item(x):
+       return x * 2
+
    data = list(range(100))
-   
-   with LocalExecutor(max_workers=4) as executor:
+
+   # use_threads=True is required here: execute_loop_parallel builds its
+   # chunk worker as a closure, which a process pool cannot pickle.
+   with LocalExecutor(max_workers=4, use_threads=True) as executor:
        results = executor.execute_loop_parallel(
-           func=process_data,
-           loop_var='data_chunk',
+           func=process_item,
+           loop_var='x',
            iterable=data,
            chunk_size=25
        )
-       print(len(results))  # 200
+       print(len(results))  # 100
+
+``loop_var`` names the keyword argument that each item of ``iterable`` is bound
+to, so ``func`` is called once per item, not once per chunk. ``chunk_size``
+controls how the work is grouped across workers.
 
 Choosing Threads vs Processes
 -----------------------------

@@ -3,7 +3,6 @@
 Test GPU detection and VENV setup functionality.
 """
 
-
 from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
 from clustrix.config import ClusterConfig
 import logging
@@ -230,4 +229,6 @@ if __name__ == "__main__":
     if passed == total:
         print("\n🎉 All GPU detection tests passed!")
     else:
-        print(f"\n⚠️  {total - passed} tests failed - GPU functionality needs attention")
+        print(
+            f"\n⚠️  {total - passed} tests failed - GPU functionality needs attention"
+        )

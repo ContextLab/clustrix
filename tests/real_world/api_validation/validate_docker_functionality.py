@@ -171,8 +171,7 @@ def test_clustrix_like_container_execution():
 
         # Create a test script similar to what Clustrix might generate
         test_script = temp_path / "clustrix_test.py"
-        test_script.write_text(
-            """
+        test_script.write_text("""
 import sys
 import os
 import json
@@ -220,8 +219,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"❌ Test function failed: {e}")
         sys.exit(1)
-"""
-        )
+""")
 
         # Create a simple requirements file
         requirements_file = temp_path / "requirements.txt"

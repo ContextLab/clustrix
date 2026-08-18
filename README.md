@@ -1,14 +1,13 @@
 # Clustrix
 
 [![Tests](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
-[![Coverage](https://img.shields.io/badge/coverage-10%25-red.svg)](https://github.com/ContextLab/clustrix/actions/workflows/tests.yml)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Linting: flake8](https://img.shields.io/badge/linting-flake8-blue.svg)](https://github.com/PyCQA/flake8)
 [![Type Checking: mypy](https://img.shields.io/badge/mypy-checked-2a6db2.svg)](https://mypy-lang.org/)
 [![PyPI version](https://img.shields.io/pypi/v/clustrix.svg)](https://pypi.org/project/clustrix/)
 [![Downloads](https://static.pepy.tech/badge/clustrix)](https://pepy.tech/project/clustrix)
 [![Documentation](https://readthedocs.org/projects/clustrix/badge/?version=latest)](https://clustrix.readthedocs.io/en/latest/?badge=latest)
-[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.
@@ -16,18 +15,18 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 ## Features
 
 - **Simple Decorator Interface**: Just add `@cluster` to any function
-- **Automated SSH Key Setup**: Create and deplot SSH keys to enable secure passwordless authentication with one click or API call
-- **Interactive Jupyter Widget**: `%%clusterfy` magic command with GUI configuration manager
-- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, SSH, and major cloud providers
-- **Cloud Provider Integration**: Native support for AWS (EC2/EKS), Google Cloud (GCE/GKE), Azure (VM/AKS), Lambda Cloud, and HuggingFace Spaces
+- **Automated SSH Key Setup**: Create and deploy SSH keys to enable secure passwordless authentication with one click or API call
+- **Interactive Jupyter Widget**: `%%remote` magic command with GUI configuration manager
+- **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working; PBS, SGE and Kubernetes are implemented but untested (see [Supported Cluster Types](#supported-cluster-types))
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Native Cost Monitoring**: Built-in cost tracking for all major cloud providers
-- **Kubernetes Support**: Deploy to EKS, GKE, AKS, or any Kubernetes cluster
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
 - **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
-- **Dynamic Instance Selection**: Auto-populated dropdowns for cloud instance types and regions
 - **Error Handling**: Comprehensive error reporting and job monitoring
+
+Read [Supported Cluster Types](#supported-cluster-types) before relying on a
+backend. Not everything in this package works, and the sections below say which
+parts do.
 
 ## Quick Start
 
@@ -60,9 +59,10 @@ from clustrix import cluster
 @cluster(cores=8, memory='16GB', time='02:00:00')
 def expensive_computation(data, iterations=1000):
     import numpy as np
+    array = np.asarray(data)
     result = 0
     for i in range(iterations):
-        result += np.sum(data ** 2)
+        result += np.sum(array ** 2)
     return result
 
 # This function will execute on the cluster
@@ -73,105 +73,66 @@ print(f"Result: {result}")
 
 ### Jupyter Notebook Integration
 
-Clustrix provides seamless integration with Jupyter notebooks through an interactive widget:
-
-```python
-import clustrix  # Auto-loads the magic command
-
-# Use the %%clusterfy magic command to open the configuration widget
-```
+Clustrix ships an IPython magic that opens a configuration widget in the
+notebook:
 
 ```jupyter
-%%clusterfy
-# Interactive widget appears with:
-# - Dropdown to select configurations
-# - Forms to create/edit cluster setups  
-# - One-click configuration application
-# - Save/load configurations to files
+%%remote
 ```
+
+Importing `clustrix` registers the magic but does **not** display the widget --
+a library should not inject UI as a side effect of being imported. Run
+`%%remote` in a cell when you want the widget, or call
+`clustrix.notebook_magic.display_config_widget()`. Setting
+`CLUSTRIX_AUTO_WIDGET=1` restores the old display-on-import behaviour.
+
+`%%clusterfy` still works as a deprecated alias and emits a `DeprecationWarning`.
 
 #### Interactive Configuration Widget
 
-The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks. Here's what you'll see when you use the `%%clusterfy` magic command:
+The widget edits the same settings as `clustrix.configure()` and applies them to
+the current session.
 
-##### Default View
-When the widget first loads, it displays the "Local Single-core" configuration for quick testing:
+![Clustrix widget in JupyterLab, light theme](docs/evidence/widget/02-after-light.jpg)
 
-![Default widget view showing Local Single-core configuration](https://github.com/user-attachments/assets/44baefd7-9dd7-452d-bc43-ef53136d13a4)
+Its colours resolve through JupyterLab's own theme variables, so it follows the
+notebook theme instead of carrying a second hand-maintained dark stylesheet:
 
-##### Configuration Dropdown
-The dropdown menu includes pre-built templates for various cluster types and cloud providers:
+![The same widget in JupyterLab's dark theme](docs/evidence/widget/03-after-dark.jpg)
 
-![Configuration dropdown showing available templates](https://github.com/user-attachments/assets/744e2eef-e03e-46bd-9bb1-e0ed2c11cf45)
+"Show advanced" reveals package manager, Python executable, environment
+variables, module loads and pre-execution commands:
 
-The widget includes pre-built templates for:
-- **Local Development**: 
-  - Local Single-core: Run jobs on one CPU core
-  - Local Multi-core: Utilize all available CPU cores
-- **HPC Clusters**:
-  - SLURM: University and research cluster support
-  - PBS/SGE: Traditional HPC schedulers
-- **Cloud Providers**:
-  - **AWS**: EC2 instances and EKS Kubernetes clusters
-  - **Google Cloud**: Compute Engine VMs and GKE clusters
-  - **Azure**: Virtual Machines and AKS Kubernetes clusters
-  - **Lambda Cloud**: GPU-optimized instances for ML/AI
-  - **HuggingFace Spaces**: Deploy to HF Spaces infrastructure
-- **Kubernetes**: Native container orchestration support
+![Widget with the Advanced panel expanded](docs/evidence/widget/04-advanced-light.jpg)
 
-##### Cluster Configuration Examples
+##### What the widget covers
 
-###### SLURM Cluster Configuration
-For traditional HPC clusters, the widget provides all essential fields:
+The cluster type dropdown offers `local`, `ssh`, `slurm`, `pbs`, `sge`,
+`kubernetes` and `huggingface`.
 
-![SLURM configuration with basic settings](https://github.com/user-attachments/assets/994a803d-485e-4d14-bf93-2f0223066510)
+- `ssh`, `slurm`, `pbs`, `sge` show the connection section: host, port,
+  username, SSH key file, password, remote work directory, an environment
+  variable to read the password from, and an "Auto setup SSH keys" button.
+- `huggingface` shows namespace, flavor, token, and an "Allow paid GPU flavors"
+  checkbox. GPU flavors bill by the second, so that box has to be ticked before
+  one is accepted.
+- `kubernetes` shows a Kubernetes section with namespace, image, service account and image pull policy.
+  (`k8s_namespace`, `k8s_image` and the rest) can only be set from a config file
+  or `clustrix.configure()`.
 
-The advanced settings accordion reveals additional options:
+There are no AWS, GCP, Azure or Lambda Cloud entries: those backends are
+unverified (see [Cloud Providers](#cloud-providers)).
 
-![SLURM advanced configuration options](https://github.com/user-attachments/assets/0930eee0-ee52-4d53-9165-81e907c7d962)
+##### Using the widget
 
-Advanced options include:
-- Module loads (e.g., `python/3.9`, `cuda/11.2`)
-- Environment variables
-- Pre-execution commands
-- Custom SSH key paths
-- Cost monitoring toggles
-
-###### Cloud Provider Configuration
-
-**Google Cloud Platform:**
-When selecting a cloud provider, only relevant fields are displayed:
-
-![GCP VM configuration interface](https://github.com/user-attachments/assets/53acb782-65cd-4b65-93a0-98286144f223)
-
-**Lambda Cloud GPU Instances:**
-The widget dynamically populates instance type dropdowns based on the selected provider:
-
-![Lambda Cloud with GPU instance dropdown](https://github.com/user-attachments/assets/4bd0e176-d5f3-430e-86af-ddbfff827d77)
-
-##### Key Widget Features
-
-1. **Dynamic Field Visibility**: Only shows fields relevant to the selected cluster type
-2. **Provider-Specific Options**: 
-   - AWS: Region selection, instance types, EKS cluster options
-   - Azure: Resource groups, VM sizes, AKS configuration
-   - GCP: Projects, zones, machine types, GKE options
-   - Lambda Cloud: GPU instance selection with live pricing
-3. **Input Validation**: Real-time validation for hostnames, IP addresses, and configuration values
-4. **Tooltips**: Hover over any field label to see detailed help text
-5. **Configuration Management**:
-   - Save configurations to YAML/JSON files
-   - Load existing configurations
-   - Test configurations before applying
-   - Add/delete custom configurations
-
-##### Using the Widget
-
-1. **Select a Configuration**: Choose from the dropdown or create a new one
-2. **Edit Settings**: Modify cluster connection details and resource requirements
-3. **Advanced Options**: Expand the accordion for environment setup and additional settings
-4. **Apply Configuration**: Click "Apply Configuration" to use these settings for subsequent `@cluster` decorated functions
-5. **Save for Later**: Use "Save Configuration" to persist settings to a file
+1. **Select a profile**: choose one from the dropdown or add a new one with `+`
+2. **Edit settings**: cluster type, resources, connection details
+3. **Advanced options**: click "Show advanced" for environment setup
+4. **Test**: "Test connection" and "Test job submission" report into the Output
+   panel at the bottom of the widget
+5. **Apply**: "Apply" calls `configure()` with these settings, so subsequent
+   `@cluster` functions use them
+6. **Save for later**: "Save" writes the profile to the named configuration file
 
 ### Configuration File
 
@@ -203,24 +164,47 @@ environment_variables:
   CUDA_VISIBLE_DEVICES: "0,1"
 ```
 
+`remote_work_dir` defaults to `~/.clustrix/jobs`. It must be on a filesystem
+the compute node can see: on SLURM, PBS and SGE each node has its own `/tmp`,
+so an environment built on the login node is simply absent at run time and the
+job dies with exit 127 before writing any diagnostics. A home directory or a
+shared scratch path (as above) both work; `/tmp` does not.
+
+Clustrix reads `config.yml`, `config.yaml` or `config.json` from `~/.clustrix`,
+then `clustrix.yml`/`.yaml`/`.json` from the current directory, and stops at the
+first one it finds. Setting `CLUSTRIX_CONFIG_DIR` moves the first of those
+locations somewhere else, which matters in containers and CI images where
+`$HOME` is not writable or not persistent, on machines shared by several
+projects, and in tests -- without it, the widget's "Save" button writes into
+your real `~/.clustrix` during a test run.
+
+Two timeouts are worth knowing about:
+
+- `ssh_connect_timeout` (default 30 seconds) bounds how long paramiko waits to
+  establish a connection. The OS default is minutes, which turns an unreachable
+  host into a hang rather than an error.
+- `venv_setup_timeout` (default 300 seconds) bounds remote virtualenv creation.
+
 ## SSH Key Automation
 
-Clustrix provides automated SSH key setup to eliminate the manual process of generating and deploying SSH keys to clusters. This feature transforms a 15-30 minute manual setup into a **15-second automated process**.
+Clustrix provides automated SSH key setup: it generates a key, deploys it to
+the cluster and writes the `~/.ssh/config` entry in one call, instead of doing
+those three steps by hand.
 
 ### Quick Setup Methods
 
 #### Method 1: Jupyter Widget (Recommended)
-The easiest way is using the interactive widget that appears when you import Clustrix:
+Open the widget with the `%%remote` magic:
 
-```python
-import clustrix
-# Look for the "SSH Key Setup" section in the widget interface
+```jupyter
+%%remote
 ```
 
-1. Enter your cluster hostname and username
-2. Enter your password  
-3. Click "Setup SSH Keys"
-4. ✅ Done! Secure access in <15 seconds
+1. Choose a remote cluster type (`ssh`, `slurm`, `pbs` or `sge`) so the
+   connection section appears
+2. Enter your cluster hostname and username
+3. Enter your password
+4. Click "Auto setup SSH keys"
 
 #### Method 2: CLI Command
 ```bash
@@ -341,29 +325,32 @@ def process_datasets(config):
 
 ### Cost Monitoring
 
-Clustrix includes built-in cost monitoring for cloud providers:
+Clustrix includes cost estimation for cloud providers. This is independent of
+the (broken) cloud execution backends: it queries pricing and reports local
+resource usage, and never submits a job.
 
 ```python
-from clustrix import cost_tracking_decorator, get_cost_monitor
+from clustrix import get_cost_monitor
 
-# Automatic cost tracking with decorator
-@cost_tracking_decorator('aws', 'p3.2xlarge')  
-@cluster(cores=8, memory='60GB')
-def expensive_training():
-    # Your training code here
-    pass
-
-# Manual cost monitoring
 monitor = get_cost_monitor('gcp')
+
 cost_estimate = monitor.estimate_cost('n2-standard-4', hours_used=2.0)
 print(f"Estimated cost: ${cost_estimate.estimated_cost:.2f}")
 
-# Get pricing information
-pricing = monitor.get_pricing_info()
-recommendations = monitor.get_cost_optimization_recommendations()
+pricing = monitor.get_pricing_info()          # {instance_type: hourly_usd}
+
+usage = monitor.get_resource_usage()          # CPU/memory/GPU on this machine
+recommendations = monitor.get_cost_optimization_recommendations(
+    usage, cost_estimate
+)
 ```
 
-Supported cloud providers: **AWS**, **Google Cloud**, **Azure**, **Lambda Cloud**
+`get_cost_optimization_recommendations()` takes the usage and the estimate as
+positional arguments; calling it with none raises `TypeError`.
+
+Providers with a cost monitor: **AWS**, **Google Cloud**, **Azure**, **Lambda
+Cloud**. Where a live pricing API is unavailable the monitor falls back to a
+hardcoded table and says so on stderr.
 
 ### Custom Resource Requirements
 
@@ -404,125 +391,102 @@ def parallel_computation(data):
 # SLURM cluster
 clustrix.configure(cluster_type='slurm', cluster_host='slurm.example.com')
 
-# PBS cluster  
-clustrix.configure(cluster_type='pbs', cluster_host='pbs.example.com')
-
-# Kubernetes cluster
-clustrix.configure(cluster_type='kubernetes')
-
 # Simple SSH execution (no scheduler)
 clustrix.configure(cluster_type='ssh', cluster_host='server.example.com')
+
+# HuggingFace Jobs (no host: work is submitted over an HTTP API)
+clustrix.configure(cluster_type='huggingface', hf_namespace='my-org')
+
+# PBS and SGE clusters (implemented, not verified against real hardware)
+clustrix.configure(cluster_type='pbs', cluster_host='pbs.example.com')
+clustrix.configure(cluster_type='sge', cluster_host='sge.example.com')
+
+# Kubernetes (implemented, not verified against a real cluster)
+clustrix.configure(cluster_type='kubernetes')
 ```
 
-### Cloud Provider Integration
+### HuggingFace Jobs
 
-Clustrix provides native integration with major cloud providers for both VM and Kubernetes deployments:
-
-#### AWS Integration
+`cluster_type="huggingface"` runs each function inside a HuggingFace Job. It
+needs no cluster reservation, no VPN and no institutional SSH credentials,
+which is why the integration tests use it.
 
 ```python
-# Configure AWS credentials and region
+import clustrix
+from clustrix import cluster
+
 clustrix.configure(
-    cluster_type='aws',
-    access_key_id='YOUR_ACCESS_KEY',
-    secret_access_key='YOUR_SECRET_KEY',
-    region='us-west-2'
+    cluster_type='huggingface',
+    hf_token='hf_...',        # optional: HF_TOKEN or `hf auth login` also work
+    hf_namespace='my-org',    # usually an org, not a personal account
 )
 
-# Run on EC2 instance
-@cluster(provider='aws', instance_type='p3.2xlarge', cores=8, memory='61GB')
-def train_on_aws():
-    # GPU-accelerated training on AWS
-    pass
+@cluster(cores=2)
+def where_am_i():
+    import platform
+    return platform.node(), platform.python_version()
 
-# Run on EKS Kubernetes cluster
-@cluster(provider='aws', cluster_type='kubernetes', cluster_name='my-eks-cluster')
-def distributed_training():
-    # Runs on Amazon EKS
-    pass
+print(where_am_i())
 ```
 
-#### Google Cloud Integration
+How a job is carried out: the function, its arguments and its keyword arguments
+are serialized with dill and passed to the container in an environment
+variable; the container decodes them, calls the function, and prints the
+serialized result between two marker lines; this side reads the job's logs and
+decodes what is between them. There is no shared filesystem, so nothing is
+uploaded and nothing is left behind.
 
-```python
-# Configure GCP with service account
-clustrix.configure(
-    cluster_type='gcp',
-    project_id='your-project-id',
-    service_account_key='path/to/service-account-key.json',
-    region='us-central1'
-)
+Configuration:
 
-# Run on Compute Engine
-@cluster(provider='gcp', machine_type='n1-highmem-8', cores=8, memory='52GB')
-def analyze_data():
-    # High-memory computation on GCP
-    pass
+| Option | Default | Notes |
+|-|-|-|
+| `hf_namespace` | `hf_username` | The account the job is billed to. Personal accounts are often not on a plan that can run jobs, so this is usually an org. |
+| `hf_flavor` | `cpu-basic` | Hardware tier. |
+| `hf_image` | `python:<your minor version>-slim` | See below. |
+| `hf_job_timeout` | `30m` | Passed to the HF API. |
+| `hf_allow_gpu_flavors` | `False` | Must be `True` before any non-`cpu-` flavor is accepted. |
 
-# Run on GKE cluster
-@cluster(provider='gcp', cluster_type='kubernetes', cluster_name='my-gke-cluster')
-def kubernetes_job():
-    # Runs on Google Kubernetes Engine
-    pass
-```
+Three things regularly catch people out:
 
-#### Azure Integration
+- **The image tracks your local Python.** dill payloads carry CPython bytecode,
+  which is not portable across minor versions, so the container image defaults
+  to the calling interpreter's version. Overriding `hf_image` with a mismatched
+  Python is the single most likely way to get an "unknown opcode" failure.
+- **GPU flavors bill by the second.** Any flavor whose name does not start with
+  `cpu-` is treated as a GPU tier and rejected unless
+  `hf_allow_gpu_flavors=True`. The check is a prefix test rather than a list of
+  GPU names, so new HF hardware fails closed rather than being waved through.
+- **Payloads are capped at 256 KB** once base64-encoded. Pass large data through
+  a Hub dataset and load it inside the function rather than closing over it.
 
-```python
-# Configure Azure with service principal
-clustrix.configure(
-    cluster_type='azure',
-    subscription_id='YOUR_SUBSCRIPTION_ID',
-    client_id='YOUR_CLIENT_ID',
-    client_secret='YOUR_CLIENT_SECRET',
-    tenant_id='YOUR_TENANT_ID',
-    region='eastus'
-)
+Deserializing a dill payload executes arbitrary code, so results are not
+trusted on sight. Each job is given a fresh random key as a job secret; the
+container prints an HMAC-SHA256 of the bytes it emitted, and clustrix refuses
+to unpickle anything whose tag does not verify. The SSH and scheduler paths
+verify their results the same way.
 
-# Run on Azure VM
-@cluster(provider='azure', vm_size='Standard_NC6', cores=6, memory='56GB')
-def gpu_workload():
-    # GPU computation on Azure
-    pass
+### Cloud Providers
 
-# Run on AKS cluster
-@cluster(provider='azure', cluster_type='kubernetes', cluster_name='my-aks-cluster')
-def container_workload():
-    # Runs on Azure Kubernetes Service
-    pass
-```
+The `provider=` argument to `@cluster` (`'aws'`, `'gcp'`, `'azure'`,
+`'lambda'`, `'huggingface'`) routes to the AWS EC2, Google Compute Engine,
+Azure VM and Lambda Cloud backends. **None of them has been shown to run a job
+end to end.** Until recently the path could not have run at all: the serializer
+writes the function under a `"function"` key while the remote bootstrap read
+`"func"`, so every cloud job died with a `KeyError` on its first line. That was
+fixed (issue #119), but nothing has since demonstrated a completed cloud job,
+and `scripts/collect_execution_evidence.py` does not cover these backends.
 
-#### Lambda Cloud Integration
+Treat the cloud tutorials in the documentation as a description of the intended
+interface rather than a record of something that has been run. The notebook
+widget does not offer these as cluster types.
 
-```python
-# Configure Lambda Cloud for GPU workloads
-clustrix.configure(
-    cluster_type='lambda_cloud',
-    api_key='YOUR_LAMBDA_API_KEY'
-)
+The pricing and cost-estimation clients for those providers (see
+[Cost Monitoring](#cost-monitoring)) are separate code and do work; they query
+provider pricing APIs and do not submit jobs.
 
-# Run on Lambda GPU instance
-@cluster(provider='lambda_cloud', instance_type='gpu_1x_a100', cores=30, memory='200GB')
-def train_large_model():
-    # A100 GPU training on Lambda Cloud
-    pass
-```
-
-#### HuggingFace Spaces Integration
-
-```python
-# Configure HuggingFace Spaces
-clustrix.configure(
-    cluster_type='huggingface_spaces',
-    token='YOUR_HF_TOKEN'
-)
-
-# Deploy to HuggingFace Spaces
-@cluster(provider='huggingface_spaces', space_hardware='gpu-t4-medium')
-def inference_endpoint():
-    # Runs on HuggingFace infrastructure
-    pass
-```
+`cluster_type='huggingface'` (HuggingFace Jobs, above) is a different thing
+from `provider='huggingface'` (the HuggingFace Spaces provider, which never
+satisfied the dispatch interface). Use the former.
 
 ## Command Line Interface
 
@@ -538,6 +502,12 @@ clustrix load my-config.yml
 
 # Check cluster status
 clustrix status
+
+# Set up SSH keys for a cluster
+clustrix ssh-setup --host cluster.example.com --user myuser
+
+# Manage stored credentials
+clustrix credentials --help
 ```
 
 ## How It Works
@@ -578,11 +548,30 @@ result = my_function(5)  # Works correctly
 
 ## Supported Cluster Types
 
-- **SLURM**: Full support for Slurm Workload Manager
-- **PBS/Torque**: Support for PBS Professional and Torque
-- **SGE**: Sun Grid Engine support
-- **Kubernetes**: Execute jobs as Kubernetes pods
-- **SSH**: Direct execution via SSH (no scheduler)
+| `cluster_type` | Status |
+|-|-|
+| `slurm` | Verified. A real job ran on `discovery.dartmouth.edu` and returned its result. |
+| `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
+| `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
+| `local` | Runs in local processes. Used for development and the fast tests. |
+| `pbs` | Implemented, **not verified**. PBS and SGE do not use the two-venv setup path and have not been run against real hardware. |
+| `sge` | Implemented, **not verified**. Same caveat as PBS. |
+| AWS / GCP / Azure / Lambda VM backends | **Unverified.** No cloud job has been shown to run end to end. See [Cloud Providers](#cloud-providers). |
+
+The three "Verified" rows are the backends exercised by
+`scripts/collect_execution_evidence.py`, which submits a genuine job to each
+reachable target, waits for it, and prints what came back. Nothing in it is
+mocked, and a target it cannot reach is reported as skipped rather than as
+passing:
+
+```bash
+python scripts/collect_execution_evidence.py            # all reachable targets
+python scripts/collect_execution_evidence.py slurm gpu  # a subset
+```
+
+Credentials come from `~/.clustrix-dev-credentials` or from the environment
+(`CLUSTRIX_SLURM_PASSWORD`, `CLUSTRIX_GPU_PASSWORD`, `HF_TOKEN`). The transcript
+of the last run is in [docs/evidence/execution-evidence.txt](docs/evidence/execution-evidence.txt).
 
 ## Repository Structure
 
@@ -602,7 +591,8 @@ clustrix/
 │   └── pricing_clients/  # Cost monitoring integrations
 ├── tests/                # Test suite organized by category
 │   ├── unit/            # Fast unit tests (run in CI)
-│   ├── integration/     # Integration tests (run in CI)
+│   ├── integration/     # Provisions REAL billable AWS resources;
+│   │                    # refuses to run without CLUSTRIX_ALLOW_BILLABLE=1
 │   ├── real_world/      # Tests requiring actual cluster access
 │   ├── comprehensive/   # Performance and edge case tests
 │   └── infrastructure/  # Test infrastructure setup
@@ -611,9 +601,10 @@ clustrix/
 │   ├── notebooks/       # Tutorial notebooks
 │   └── *.md             # Various documentation files
 ├── scripts/             # Utility scripts for development
-│   ├── check_quality.py        # Code quality validation
-│   ├── pre_push_check.py       # Pre-push validation script
-│   └── run_real_world_tests.py # Real world test runner
+│   ├── check_quality.py               # Code quality validation
+│   ├── pre_push_check.py              # Pre-push validation script
+│   ├── run_real_world_tests.py        # Real world test runner
+│   └── collect_execution_evidence.py  # Real job on every reachable backend
 └── .github/             # CI/CD configuration
     ├── workflows/       # GitHub Actions workflows
     └── ISSUE_TEMPLATE/  # Issue templates
@@ -621,7 +612,9 @@ clustrix/
 
 ### Development Workflow
 
-- **Testing**: Use `pytest tests/unit/ tests/integration/` for development testing
+- **Testing**: Use `pytest tests/unit/` for development testing.
+  `tests/integration/` provisions real, billable AWS resources and is
+  refused unless `CLUSTRIX_ALLOW_BILLABLE=1` is set deliberately (#109).
 - **Quality Checks**: Run `python scripts/check_quality.py` before committing
 - **Real World Tests**: Use `python scripts/run_real_world_tests.py` when credentials available
 - **Documentation**: Build with `cd docs && make html`
@@ -643,7 +636,7 @@ from clustrix import ClusterExecutor
 # Monitor job status
 executor = ClusterExecutor(clustrix.get_config())
 job_id = "12345"
-status = executor._check_job_status(job_id)
+status = executor.get_job_status(job_id)
 
 # Cancel jobs if needed
 executor.cancel_job(job_id)
@@ -715,18 +708,34 @@ processed_data = process_large_dataset('/path/to/large_file.csv')
 
 ## Testing Philosophy
 
-Clustrix follows a strict **NO MOCKS** testing policy. All tests use real infrastructure to ensure reliability:
+The goal is that anything claimed to work has been run for real, against real
+infrastructure, and that the transcript is reproducible by someone else in one
+command. `scripts/collect_execution_evidence.py` is that command, and
+`docs/evidence/execution-evidence.txt` is its output.
 
-- **✅ Real Infrastructure**: Tests run on actual clusters, containers, and cloud services
-- **✅ Real Computations**: Genuine data processing validates functionality
-- **✅ Real Failures**: Actual error conditions test recovery mechanisms
-- **❌ No Mock Objects**: Zero use of `@patch`, `Mock()`, or simulations
+The existing test suite does not meet that goal yet. It is being worked
+towards, and the README should not be read as saying it has been reached:
+
+- 42 of 197 test modules (21%) still use `unittest.mock`. Migrating
+  them is in progress; the claim that this project uses zero mocks was not true.
+- The main CI workflow runs `tests/unit/` plus a local-only slice of the
+  integration tests. The SSH, scheduler and cloud tests need credentials CI
+  does not have.
+- No trustworthy coverage figure has been measured. Several conflicting numbers
+  exist in old artifacts; none of them is reproducible, which is why this README
+  no longer carries a coverage badge.
 
 ### Running Tests
 
 ```bash
-# Quick unit tests (local execution)
+# Fast unit tests (what CI runs)
+pytest tests/unit/ -q
+
+# Everything except tests needing real cluster access
 pytest tests/ -m "not real_world"
+
+# A real job on every reachable backend, nothing mocked
+python scripts/collect_execution_evidence.py
 
 # Comprehensive real-world tests (requires infrastructure)
 python tests/run_real_world_tests.py
@@ -763,7 +772,6 @@ Clustrix provides Docker-based local test infrastructure for cost-free testing:
 
 Clustrix maintains high code quality standards:
 
-- **Testing**: Real-world tests following NO MOCKS principle
 - **Code Style**: Enforced with Black formatter
 - **Linting**: Checked with flake8
 - **Type Checking**: Validated with mypy

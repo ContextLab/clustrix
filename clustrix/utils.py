@@ -1,15 +1,21 @@
 import ast
+import logging
+import contextlib
 import os
+import re
+import threading
 import sys
 import pickle
 import inspect
 import importlib
 import subprocess
-from typing import Any, Dict, Optional, Callable
+from typing import Any, Callable, Dict, List, Optional
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
+
+logger = logging.getLogger(__name__)
 
 
 def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
@@ -94,6 +100,304 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
         return None
 
 
+def make_portable_function(source: str, name: str) -> Callable:
+    """Build a function that can be shipped to a worker without clustrix.
+
+    dill pickles a function belonging to an importable module BY REFERENCE --
+    a few dozen bytes that merely name the module -- so the worker has to
+    import that module to load it. That is fine for the user's own code, which
+    lives in ``__main__``, but it is fatal for helper functions clustrix ships
+    itself: a bare container has no clustrix, and the job dies with
+    ``ModuleNotFoundError: No module named 'clustrix'`` before it runs a line.
+
+    Compiling the source into a fresh namespace gives the function
+    ``__module__ = None`` and no reference to anything importable, so dill
+    serializes it by value and the worker needs nothing installed.
+
+    Args:
+        source: Source of a single top-level function.
+        name: The function's name within that source.
+
+    Returns:
+        The compiled function, safe to serialize for a bare worker.
+    """
+    namespace: Dict[str, Any] = {}
+    exec(source, namespace)
+    return namespace[name]
+
+
+def _is_local_module(module: Any) -> bool:
+    """True when `module` lives in the user's project rather than an install.
+
+    Anything under the standard library or a site-packages directory is
+    installed on the worker too, because the execution environment mirrors the
+    local one. Anything else -- a sibling file, a package in the working tree --
+    exists only on this machine and has to travel with the function.
+    """
+    name = getattr(module, "__name__", "")
+    path = getattr(module, "__file__", None)
+    # __main__ is already serialized by value. clustrix is the machinery
+    # running the job, not part of the user's function; embedding a checkout of
+    # it would bloat every payload for nothing.
+    if (
+        not path
+        or name == "__main__"
+        or name == "clustrix"
+        or name.startswith("clustrix.")
+    ):
+        return False
+    resolved = os.path.realpath(path)
+    for root in _INSTALLED_ROOTS:
+        if resolved.startswith(root):
+            return False
+    return True
+
+
+def _installed_roots() -> tuple:
+    """Directories whose contents are installed rather than project-local."""
+    import site
+    import sysconfig
+
+    roots = set()
+    for key in ("stdlib", "platstdlib", "purelib", "platlib"):
+        path = sysconfig.get_paths().get(key)
+        if path:
+            roots.add(os.path.realpath(path) + os.sep)
+    try:
+        for path in site.getsitepackages():
+            roots.add(os.path.realpath(path) + os.sep)
+    except AttributeError:  # virtualenvs without getsitepackages
+        pass
+    user_site = getattr(site, "getusersitepackages", None)
+    if user_site:
+        roots.add(os.path.realpath(user_site()) + os.sep)
+    return tuple(sorted(roots))
+
+
+_INSTALLED_ROOTS = _installed_roots()
+
+
+#: Ceiling on the object graph walked when looking for project-local modules.
+#: Generous for real code; a backstop against a pathological argument.
+_MAX_WALK_NODES = 20000
+
+#: Values that can never carry a module reference, so never worth enqueueing.
+_SCALAR_TYPES = (bool, int, float, complex, str, bytes, bytearray, type(None))
+
+
+def _is_scalar(value: Any) -> bool:
+    return type(value) in _SCALAR_TYPES
+
+
+def _referenced_local_modules(obj: Any) -> List[Any]:
+    """Project-local modules `obj` reaches, directly or through other locals.
+
+    A function that calls `mypkg.helpers.clean` serializes that call by
+    *reference* -- dill and cloudpickle both store importable objects as
+    "import mypkg.helpers; get clean" -- and the worker, which has no mypkg,
+    fails with ModuleNotFoundError. Naming those modules lets cloudpickle embed
+    them instead. Parent packages come along because `mypkg.helpers` cannot be
+    rebuilt without `mypkg`.
+    """
+    found: Dict[str, Any] = {}
+    seen: set = set()
+    queue = [obj]
+    budget = _MAX_WALK_NODES
+
+    while queue:
+        current = queue.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+
+        budget -= 1
+        if budget < 0:
+            # A pathological structure must not stall submission. Whatever was
+            # found so far is still embedded; anything missed fails loudly on
+            # the worker rather than silently here.
+            logger.warning(
+                "Stopped scanning for project-local modules after %d objects; "
+                "found %s.",
+                _MAX_WALK_NODES,
+                sorted(found) or "none",
+            )
+            break
+
+        # Only functions carry a real __globals__ dict. Reading the attribute
+        # off a class yields the member descriptor from `types.FunctionType`,
+        # which is not a mapping.
+        namespace = None
+        if inspect.isfunction(current):
+            namespace = current.__globals__
+            # Names bound in an enclosing scope live in closure cells, not in
+            # globals. `from mypkg.util import helper` inside a function makes
+            # `helper` a cell, and a walk of globals alone never sees it.
+            for cell in current.__closure__ or ():
+                try:
+                    queue.append(cell.cell_contents)
+                except ValueError:
+                    pass  # an empty cell in a recursive definition
+        elif inspect.ismodule(current):
+            namespace = vars(current)
+        elif inspect.isclass(current):
+            namespace = dict(vars(current))
+
+        module_name = None
+        if inspect.ismodule(current):
+            module_name = getattr(current, "__name__", None)
+        elif inspect.isfunction(current) or inspect.isclass(current):
+            module_name = getattr(current, "__module__", None)
+        elif not isinstance(current, (tuple, list, set, frozenset, dict)):
+            # An argument is usually an instance, not a class. Its class is
+            # what has to travel, so follow the type.
+            module_name = getattr(type(current), "__module__", None)
+            queue.append(type(current))
+
+        if module_name:
+            module = sys.modules.get(module_name)
+            if module is not None and _is_local_module(module):
+                # Register the whole chain: mypkg.helpers needs mypkg.
+                parts = module_name.split(".")
+                for depth in range(1, len(parts) + 1):
+                    name = ".".join(parts[:depth])
+                    parent = sys.modules.get(name)
+                    if (
+                        parent is not None
+                        and name not in found
+                        and _is_local_module(parent)
+                    ):
+                        found[name] = parent
+                if namespace is None:
+                    namespace = vars(module)
+
+        # Arguments arrive wrapped in the args tuple and kwargs dict, so the
+        # instances that matter are one or more containers deep. Scalars are
+        # never enqueued: a million-element list of ints would otherwise cost a
+        # million entries in `seen`, on every submission, for nothing.
+        if isinstance(current, (tuple, list, set, frozenset)):
+            queue.extend(v for v in current if not _is_scalar(v))
+        elif isinstance(current, dict):
+            queue.extend(v for v in current.keys() if not _is_scalar(v))
+            queue.extend(v for v in current.values() if not _is_scalar(v))
+
+        if namespace:
+            for value in list(namespace.values()):
+                if inspect.isfunction(value) or inspect.isclass(value):
+                    queue.append(value)
+                elif inspect.ismodule(value) and _is_local_module(value):
+                    queue.append(value)
+
+    return list(found.values())
+
+
+#: cloudpickle's by-value registry is process-global, so registering around a
+#: dump is a read-modify-write on shared state. AsyncClusterExecutor serializes
+#: on a ThreadPoolExecutor, where two unsynchronized threads both snapshot the
+#: registry before either registers, and the first to finish unregisters the
+#: module out from under the second -- whose payload then silently reverts to
+#: by-reference and fails on the cluster. One lock, and a refcount so
+#: overlapping users share a single registration.
+_BY_VALUE_LOCK = threading.RLock()
+_BY_VALUE_REFCOUNTS: Dict[str, int] = {}
+
+
+@contextlib.contextmanager
+def _pickled_by_value(modules: List[Any]):
+    """Have cloudpickle embed `modules` instead of importing them remotely.
+
+    Modules the caller registered themselves are left exactly as found.
+    """
+    if not hasattr(cloudpickle, "list_registry_pickle_by_value"):
+        # Guaranteed by the cloudpickle>=2.0 requirement. If it is missing we
+        # cannot tell our registrations from the user's, and unregistering
+        # theirs would silently change how *their* code serializes.
+        raise RuntimeError(
+            "cloudpickle is too old to embed project-local modules safely; "
+            "clustrix requires cloudpickle>=2.0."
+        )
+
+    held = []
+    with _BY_VALUE_LOCK:
+        preexisting = {
+            getattr(m, "__name__", m)
+            for m in cloudpickle.list_registry_pickle_by_value()
+        }
+        for module in modules:
+            name = getattr(module, "__name__", None)
+            if not name:
+                continue
+            if name in preexisting and name not in _BY_VALUE_REFCOUNTS:
+                continue  # the user registered this one; not ours to touch
+            if _BY_VALUE_REFCOUNTS.get(name):
+                _BY_VALUE_REFCOUNTS[name] += 1
+                held.append(name)
+                continue
+            cloudpickle.register_pickle_by_value(module)
+            _BY_VALUE_REFCOUNTS[name] = 1
+            held.append(name)
+    try:
+        yield
+    finally:
+        with _BY_VALUE_LOCK:
+            for name in held:
+                remaining = _BY_VALUE_REFCOUNTS.get(name, 0) - 1
+                if remaining > 0:
+                    _BY_VALUE_REFCOUNTS[name] = remaining
+                    continue
+                _BY_VALUE_REFCOUNTS.pop(name, None)
+                module = sys.modules.get(name)
+                if module is not None:
+                    cloudpickle.unregister_pickle_by_value(module)
+
+
+def _dumps_by_value(obj: Any) -> bytes:
+    """Serialize `obj` so a fresh interpreter can rebuild it without imports.
+
+    Tries the richest serializer first and degrades. Every fallback still
+    produces bytes; if none can, the exception propagates rather than shipping
+    a payload that will fail remotely with an unrelated error.
+    """
+    # Modules from the user's own project do not exist on the worker, so
+    # anything reaching into them must be embedded rather than imported.
+    local_modules = []
+    try:
+        local_modules = _referenced_local_modules(obj)
+    except Exception:
+        pass
+    if local_modules:
+        # No silent degradation here. Falling back to a by-reference payload
+        # would produce exactly the ModuleNotFoundError this branch exists to
+        # prevent -- minutes later, on the cluster, naming a module the user
+        # can plainly see on their own disk.
+        try:
+            with _pickled_by_value(local_modules):
+                return cloudpickle.dumps(obj, protocol=4)
+        except Exception as e:
+            names = ", ".join(
+                sorted(getattr(m, "__name__", "?") for m in local_modules)
+            )
+            raise RuntimeError(
+                f"Cannot send your local module(s) [{names}] to the cluster: {e}. "
+                "Something reachable from them cannot be serialized -- a lock, "
+                "an open file, a database handle or similar held at module "
+                "level. Move it inside a function, or install the package so "
+                "the worker imports it instead of receiving a copy."
+            ) from e
+
+    try:
+        return dill.dumps(obj, protocol=4, recurse=True)
+    except Exception:
+        pass
+    try:
+        return dill.dumps(obj, protocol=4)
+    except Exception:
+        pass
+    try:
+        return cloudpickle.dumps(obj, protocol=4)
+    except Exception:
+        return pickle.dumps(obj, protocol=4)
+
+
 def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
     """
     Serialize function and all its dependencies.
@@ -120,20 +424,21 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
         # Cannot get source code - this is common for dynamically defined functions
         pass
 
-    # Serialize function using dill for better cross-Python compatibility
-    try:
-        func_bytes = dill.dumps(func, protocol=4)
-    except Exception:
-        try:
-            # Fallback to cloudpickle
-            func_bytes = cloudpickle.dumps(func, protocol=4)
-        except Exception:
-            # Final fallback to built-in pickle
-            func_bytes = pickle.dumps(func, protocol=4)
+    # Serialize the function by VALUE, including everything it refers to.
+    #
+    # `dill.dumps(func)` alone captures closure cells but NOT `func.__globals__`,
+    # so a function that calls a module-level helper or reads a module-level
+    # constant serializes fine and then dies on the worker with
+    # `NameError: name '_helper' is not defined`. `recurse=True` walks the
+    # globals the body actually names and bundles them. It can fail on objects
+    # that refuse deep traversal, so the plain form remains the fallback.
+    func_bytes = _dumps_by_value(func)
 
-    # Serialize arguments
-    args_bytes = pickle.dumps(args, protocol=4)
-    kwargs_bytes = pickle.dumps(kwargs, protocol=4)
+    # Arguments need the same treatment: stdlib pickle stores a class by
+    # qualified name, so passing an instance of a class defined in the caller's
+    # __main__ fails on the worker with "Can't get attribute 'Point'".
+    args_bytes = _dumps_by_value(args)
+    kwargs_bytes = _dumps_by_value(kwargs)
 
     # Get function metadata
     func_info = {
@@ -180,34 +485,65 @@ def deserialize_function(func_data: bytes) -> tuple:
         except Exception:
             func = cloudpickle.loads(func_data["function"])
 
-        args = pickle.loads(func_data["args"])
-        kwargs = pickle.loads(func_data["kwargs"])
+        # dill, to match _dumps_by_value -- args may carry classes defined in
+        # the caller's __main__, which stdlib pickle can only store by name.
+        args = dill.loads(func_data["args"])
+        kwargs = dill.loads(func_data["kwargs"])
 
         return func, args, kwargs
     else:
         raise ValueError("Invalid function data format")
 
 
+def _freeze_commands() -> List[List[str]]:
+    """Freeze commands to try, richest first, for the local environment.
+
+    Which one applies depends on how the environment was built:
+
+    * **uv** manages its own resolution, and ``uv pip freeze`` reports what it
+      installed into the active environment;
+    * **conda** environments are covered by pip's freeze, because
+      ``pip list --format=freeze`` reports conda-installed distributions too --
+      unlike ``pip freeze``, which omits them;
+    * plain **pip** environments are the same command.
+
+    Ordering matters only in that the first command to produce output wins.
+    """
+    commands = []
+    if os.environ.get("UV_PROJECT_ENVIRONMENT") or is_uv_available():
+        commands.append(["uv", "pip", "freeze", "--python", sys.executable])
+    commands.append([sys.executable, "-m", "pip", "list", "--format=freeze"])
+    return commands
+
+
 def get_environment_requirements() -> Dict[str, str]:
-    """Get current Python environment requirements."""
+    """Get current Python environment requirements.
+
+    Returns a name -> version map of everything installed locally, so the
+    remote execution environment can be rebuilt to match. Entries pip reports
+    without a plain ``==`` pin -- editable installs, local paths, VCS and
+    direct URL references -- are skipped: they name a location on this machine
+    that does not exist on the cluster.
+    """
 
     requirements = {}
 
-    try:
-        # Use pip list --format=freeze to capture all packages including conda-installed ones
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "list", "--format=freeze"],
-            capture_output=True,
-            text=True,
-        )
-
-        if result.returncode == 0:
-            for line in result.stdout.strip().split("\n"):
-                if "==" in line and not line.startswith("-e"):
-                    package, version = line.split("==", 1)
-                    requirements[package] = version
-    except Exception:
-        pass
+    for command in _freeze_commands():
+        try:
+            result = subprocess.run(command, capture_output=True, text=True)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.strip().split("\n"):
+            line = line.strip()
+            if not line or line.startswith(("-e", "#")) or "@" in line:
+                continue
+            if "==" in line:
+                package, version = line.split("==", 1)
+                requirements[package.strip()] = version.strip()
+        if requirements:
+            break
 
     # Always include essential packages
     essential_packages = ["cloudpickle", "dill"]
@@ -370,6 +706,85 @@ dependencies:
         return f"{venv_path}/bin/python"
 
 
+# Bump when the recipe below changes what actually lands in an environment.
+# The key hashes the *inputs*; without this, a policy change (as when VENV2
+# stopped installing nine hardcoded packages and started mirroring the local
+# environment) leaves every existing environment matching its old key, so the
+# cache serves a stale environment and the new packages are never installed.
+ENVIRONMENT_RECIPE_VERSION = "3"
+
+
+def _environment_key(
+    python_version: str,
+    requirements: Dict[str, str],
+    config: Optional[ClusterConfig] = None,
+) -> str:
+    """A short, stable name for an environment with these exact contents.
+
+    Two calls asking for the same Python version, the same requirements and the
+    same install policy get the same key, so the environment is built once and
+    reused. Any difference produces a different key, so environments are never
+    silently shared between jobs that need different packages.
+    """
+    import hashlib
+
+    excluded = sorted(
+        str(name).lower() for name in (getattr(config, "excluded_packages", None) or [])
+    )
+    extra = sorted(
+        str(spec) for spec in (getattr(config, "cluster_packages", None) or [])
+    )
+    material = "|".join(
+        [
+            ENVIRONMENT_RECIPE_VERSION,
+            python_version,
+            ";".join(
+                f"{name}=={version}" for name, version in sorted(requirements.items())
+            ),
+            f"replicate={bool(getattr(config, 'replicate_local_environment', True))}",
+            "excluded=" + ",".join(excluded),
+            "extra=" + ",".join(extra),
+        ]
+    )
+    digest = hashlib.sha256(material.encode()).hexdigest()[:12]
+    return f"py{python_version.replace('.', '')}_{digest}"
+
+
+def _conda_envs_exist(ssh_client, conda_setup_prefix: str, *env_names: str) -> bool:
+    """True when every named conda environment is already present remotely."""
+    prefix = f"{conda_setup_prefix} && " if conda_setup_prefix else ""
+    try:
+        stdin, stdout, stderr = ssh_client.exec_command(
+            f"bash -c '{prefix}conda env list' 2>/dev/null"
+        )
+        listing = stdout.read().decode()
+    except Exception as e:  # pragma: no cover - defensive
+        logger.debug(f"Could not list conda environments: {e}")
+        return False
+    existing = {
+        line.split()[0]
+        for line in listing.splitlines()
+        if line.strip() and not line.startswith("#")
+    }
+    return all(name in existing for name in env_names)
+
+
+def _write_remote_text(ssh_client, remote_path: str, content: str) -> None:
+    """Write `content` to `remote_path` over SFTP.
+
+    Used for anything multi-line. Shell heredocs cannot be composed into a
+    `cmd && cmd` chain, and quoting a long payload into `echo` invites the
+    exact escaping bugs that are hardest to notice: the command succeeds and
+    the file holds something subtly wrong.
+    """
+    sftp = ssh_client.open_sftp()
+    try:
+        with sftp.open(remote_path, "w") as handle:
+            handle.write(content)
+    finally:
+        sftp.close()
+
+
 def setup_two_venv_environment(
     ssh_client,
     work_dir: str,
@@ -400,17 +815,63 @@ def setup_two_venv_environment(
 
     local_python_version = f"{sys.version_info.major}.{sys.version_info.minor}"
 
-    # Check if conda is available first - on many clusters, only conda Python works
+    # Check if conda is available first - on many clusters, only conda Python
+    # works. Two things make this harder than `conda --version`:
+    #
+    #  * paramiko's exec_command starts a non-interactive, non-login shell,
+    #    which never sources the profile scripts that put conda on PATH.
+    #  * On many HPC installs `conda` is a wrapper that refuses to do anything
+    #    until conda.sh has been sourced ("The 'conda' system must be
+    #    initialized as shell functions"), so PATH alone is not enough.
+    #
+    # So locate conda.sh and source it ahead of every conda command. Without
+    # this, clustrix built two virtualenvs with pip over NFS instead, which
+    # took longer than venv_setup_timeout and failed.
     conda_available = False
-    stdin, stdout, stderr = ssh_client.exec_command("conda --version 2>/dev/null")
-    if "conda" in stdout.read().decode():
+    conda_setup_prefix = ""
+    conda_probe = (
+        "bash -lc '"
+        'for p in "$CONDA_PREFIX" "$(conda info --base 2>/dev/null)" '
+        '"$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" '
+        "/opt/conda /usr/local/miniconda3 /usr/local/anaconda3; do "
+        'if [ -n "$p" ] && [ -f "$p/etc/profile.d/conda.sh" ]; then '
+        'echo "$p/etc/profile.d/conda.sh"; exit 0; fi; done; '
+        # An uninitialised conda wrapper names conda.sh in the very error it
+        # prints, which at some sites is the only pointer available.
+        'conda --version 2>&1 | grep -oE "/[^ ]*/etc/profile.d/conda.sh" | head -1'
+        "'"
+    )
+    stdin, stdout, stderr = ssh_client.exec_command(conda_probe)
+    conda_sh = ""
+    for line in stdout.read().decode().splitlines():
+        line = line.strip()
+        if line.endswith("/etc/profile.d/conda.sh"):
+            conda_sh = line
+            break
+
+    if conda_sh:
         conda_available = True
-        print("Conda available on remote system, using conda for both venvs")
+        conda_setup_prefix = f"source {conda_sh}"
+        print(f"Conda available on remote system ({conda_sh}), using it for both venvs")
+    else:
+        stdin, stdout, stderr = ssh_client.exec_command(
+            "bash -lc 'conda --version' 2>/dev/null"
+        )
+        if "conda" in stdout.read().decode():
+            conda_available = True
+            print("Conda available on remote system, using it for both venvs")
 
     if conda_available:
-        # Use conda for both VENV1 and VENV2 to ensure compatibility
+        # Use conda for both VENV1 and VENV2 to ensure compatibility.
+        #
+        # Both environments are pinned to the *local* Python version. dill and
+        # cloudpickle embed CPython bytecode in the payload, and that bytecode
+        # is not portable across minor versions -- a function pickled under
+        # 3.12 and loaded under 3.9 raises "unknown opcode". Since the function
+        # object is handed from the caller to VENV1 and on to VENV2, every hop
+        # has to agree on the interpreter version.
         compatible_python = "conda"  # Special marker to use conda
-        remote_python_version = "3.9"  # Default to 3.9 via conda
+        remote_python_version = local_python_version
     else:
         # Fall back to system Python search
         compatible_python = None
@@ -456,24 +917,62 @@ def setup_two_venv_environment(
                 "No compatible Python version found on remote system. Consider installing conda."
             )
 
-    # Create environment names
+    # Environment names.
+    #
+    # Conda environments are named after what is IN them -- the Python version
+    # and the requirement set -- not after the job directory. Naming them per
+    # job meant every single @cluster call built two fresh conda environments
+    # and left them behind: on a shared filesystem that is roughly ten minutes
+    # each, twenty minutes before any user code runs, repeated for every job,
+    # accumulating environments nothing ever removes.
+    #
+    # Keying on content means the second job with the same requirements reuses
+    # the first job's environments, and a job whose requirements differ gets
+    # its own rather than silently inheriting the wrong ones. `conda create`
+    # is skipped when the environment already exists.
     venv1_path = f"{work_dir}/venv1_serialization"
     venv2_path = f"{work_dir}/venv2_execution"
-    conda_env1_name = f"clustrix_venv1_{work_dir.split('/')[-1]}"
-    conda_env2_name = f"clustrix_venv2_{work_dir.split('/')[-1]}"
+    env_key = _environment_key(remote_python_version, requirements, config)
+    conda_env1_name = f"clustrix_venv1_{env_key}"
+    conda_env2_name = f"clustrix_venv2_{env_key}"
 
     commands = [f"cd {work_dir}"]
+    if conda_setup_prefix:
+        # Every `conda ...` below runs in a fresh non-login shell, so conda.sh
+        # has to be sourced first. The generated job script does the same.
+        commands.insert(0, conda_setup_prefix)
+
+    if compatible_python == "conda" and _conda_envs_exist(
+        ssh_client, conda_setup_prefix, conda_env1_name, conda_env2_name
+    ):
+        # Already built by an earlier job with the same requirements. Building
+        # them again would cost ten minutes per environment for no change.
+        print(f"Reusing existing conda environments ({env_key})")
+        return {
+            "compatible_python": compatible_python,
+            "remote_python_version": remote_python_version,
+            "venv1_python": f"conda run -n {conda_env1_name} python",
+            "venv1_path": f"conda:{conda_env1_name}",
+            "venv2_python": f"conda run -n {conda_env2_name} python",
+            "venv2_path": f"conda:{conda_env2_name}",
+            "conda_env1_name": conda_env1_name,
+            "conda_env2_name": conda_env2_name,
+            "conda_env_name": conda_env2_name,
+            "conda_setup_prefix": conda_setup_prefix,
+            "uses_conda": True,
+        }
 
     if compatible_python == "conda":
         # Use conda for both VENV1 and VENV2 (preferred for clusters)
         commands.extend(
             [
-                # Create VENV1 using conda with Python 3.9 for serialization compatibility
-                f"conda create -n {conda_env1_name} python=3.9 -y",
+                # Create VENV1 using conda, matching the local Python version
+                # so dill payloads round-trip (see remote_python_version above)
+                f"conda create -n {conda_env1_name} python={remote_python_version} -y",
                 f"conda run -n {conda_env1_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv1'",
                 f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in conda venv1'",
-                # Create VENV2 using conda with Python 3.9 for execution
-                f"conda create -n {conda_env2_name} python=3.9 -y",
+                # Create VENV2 using conda, same version as VENV1 for execution
+                f"conda create -n {conda_env2_name} python={remote_python_version} -y",
                 f"conda run -n {conda_env2_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
             ]
         )
@@ -519,46 +1018,53 @@ def setup_two_venv_environment(
                 )
             commands.append("deactivate")
 
-    # Install packages from local environment requirements (selective)
-    if requirements:
-        # Filter out essential packages already installed
-        remaining_reqs = {
-            k: v for k, v in requirements.items() if k not in essential_packages
+    # Rebuild the local environment on the worker.
+    #
+    # This used to install a hardcoded list of nine "core scientific" packages
+    # and drop everything else, so a function importing anything outside that
+    # list -- torch, networkx, polars, the user's own dependency -- failed
+    # remotely with ModuleNotFoundError while running fine locally. The
+    # environment is now mirrored from whatever the local package manager
+    # reports, which is what this function's docstring has always promised.
+    #
+    # The specs go into a requirements file rather than one `pip install` per
+    # package: a single resolve is far faster over a few hundred packages, and
+    # pip reports a conflict once instead of leaving a half-built environment.
+    if requirements and getattr(config, "replicate_local_environment", True):
+        excluded = {
+            str(name).lower()
+            for name in (getattr(config, "excluded_packages", None) or [])
         }
-
-        # Only install core scientific packages that are commonly needed
-        core_scientific_packages = {
-            "numpy",
-            "scipy",
-            "pandas",
-            "matplotlib",
-            "seaborn",
-            "scikit-learn",
-            "jupyter",
-            "ipython",
-            "requests",
-        }
-
-        # Filter to only install packages that are in both requirements and core list
-        filtered_reqs = {
+        mirrored = {
             k: v
-            for k, v in remaining_reqs.items()
-            if k.lower() in core_scientific_packages
+            for k, v in requirements.items()
+            if k not in essential_packages and k.lower() not in excluded
         }
 
-        if filtered_reqs:
-            # Install core scientific packages from local environment
-            for pkg, version in filtered_reqs.items():
-                if compatible_python == "conda":
-                    commands.append(
-                        f"conda run -n {conda_env2_name} pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in conda venv2'"
-                    )
-                else:
-                    commands.append(f"source {venv2_path}/bin/activate")
-                    commands.append(
-                        f"pip install {pkg}=={version} --timeout=120 || echo 'Failed to install {pkg}=={version} in venv2'"
-                    )
-                    commands.append("deactivate")
+        if mirrored:
+            spec_lines = "\n".join(f"{k}=={v}" for k, v in sorted(mirrored.items()))
+            requirements_path = f"{work_dir}/clustrix_requirements.txt"
+            # Written over SFTP rather than emitted as a shell heredoc: these
+            # commands are joined with " && ", which would put the heredoc
+            # terminator on a line with `&& ...` after it. Bash would not
+            # recognise it as a terminator, and `cat` would swallow the rest of
+            # the setup script into the requirements file -- so pip never ran
+            # and the environment silently stayed empty.
+            _write_remote_text(ssh_client, requirements_path, spec_lines + "\n")
+            commands.append(
+                f"echo 'Replicating local environment ({len(mirrored)} packages)...'"
+            )
+            # No `|| echo`: a package that cannot install here means the remote
+            # environment does not match the local one, and the function will
+            # fail later with a less obvious error. Name it now. `excluded_packages`
+            # is the documented way to drop one deliberately.
+            install = f"pip install -r {requirements_path} --timeout=300"
+            if compatible_python == "conda":
+                commands.append(f"conda run -n {conda_env2_name} {install}")
+            else:
+                commands.append(f"source {venv2_path}/bin/activate")
+                commands.append(install)
+                commands.append("deactivate")
 
     # Add cluster-specific package installations from config
     if hasattr(config, "cluster_packages") and config.cluster_packages:
@@ -638,6 +1144,7 @@ def setup_two_venv_environment(
                     "conda_env1_name": conda_env1_name,
                     "conda_env2_name": conda_env2_name,
                     "conda_env_name": conda_env2_name,  # For backward compatibility with job script generation
+                    "conda_setup_prefix": conda_setup_prefix,
                     "uses_conda": True,
                 }
             )
@@ -759,6 +1266,65 @@ def setup_python_compatible_environment(
         return setup_remote_environment(ssh_client, work_dir, requirements, config)
 
 
+def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
+    """Find a remote interpreter that can actually run this job.
+
+    An explicitly configured `python_executable` is respected as given -- if
+    the user named it, they mean it.
+
+    Otherwise the version must MATCH the caller's. dill embeds CPython
+    bytecode, so a function pickled under 3.12 and unpickled under 3.9 fails
+    with things like "code() takes at most 15 arguments (20 given)" -- an
+    error that names neither Python nor the version gap. The two-venv path
+    solves this by creating a conda environment at the right version; the
+    single-venv path can only use what is already installed, so if nothing
+    matches it has to say so rather than proceed to that traceback.
+
+    The default "python" is also not assumed to exist: Python 3 installs ship
+    `python3`, and `python` is only present where somebody added a
+    compatibility symlink.
+    """
+    configured = getattr(config, "python_executable", None)
+    if configured and configured != "python":
+        return configured
+
+    import sys as _sys
+
+    wanted = f"python{_sys.version_info.major}.{_sys.version_info.minor}"
+
+    def exists(candidate: str) -> bool:
+        try:
+            stdin, stdout, stderr = ssh_client.exec_command(f"command -v {candidate}")
+            return bool(stdout.read().decode().strip())
+        except Exception:  # pragma: no cover - defensive
+            return False
+
+    if exists(wanted):
+        logger.debug("Using remote interpreter %s", wanted)
+        return wanted
+
+    # Report what IS there, so the message is actionable.
+    available = []
+    for candidate in ("python3", "python"):
+        if exists(candidate):
+            try:
+                stdin, stdout, stderr = ssh_client.exec_command(
+                    f"{candidate} -c 'import sys; print(sys.version.split()[0])'"
+                )
+                version = stdout.read().decode().strip()
+            except Exception:  # pragma: no cover - defensive
+                version = "?"
+            available.append(f"{candidate} ({version})")
+
+    raise RuntimeError(
+        f"No {wanted} on the remote host, and dill payloads cannot cross "
+        f"Python minor versions. Found: {', '.join(available) or 'no Python at all'}. "
+        f"Either install {wanted} there, set python_executable to a matching "
+        "interpreter, or leave use_two_venv enabled so clustrix can build a "
+        "conda environment at the right version."
+    )
+
+
 def setup_remote_environment(
     ssh_client,
     work_dir: str,
@@ -823,8 +1389,14 @@ dependencies:
             for cmd in config.pre_execution_commands:
                 commands.append(cmd)
 
-        # Now create virtual environment using the configured python executable
-        python_cmd = config.python_executable if config.python_executable else "python"
+        # Now create the virtual environment. `python_executable` defaults to
+        # "python", which does not exist on most modern systems -- Python 3
+        # installs ship `python3`, and `python` is only present where someone
+        # added a compatibility symlink. tensor01 is one of the many hosts
+        # where it is absent, so `python -m venv venv` failed, the venv was
+        # never created, and the job script then died on
+        # `source venv/bin/activate` with "python: command not found".
+        python_cmd = resolve_remote_python(ssh_client, config)
         commands.extend(
             [
                 f"{python_cmd} -m venv venv",
@@ -832,24 +1404,26 @@ dependencies:
             ]
         )
 
-        if requirements:
-            # Only install essential packages, skip complex requirements
-            essential_pkgs = []
-            for pkg, version in requirements.items():
-                if pkg.lower() in ["dill", "cloudpickle"]:
-                    essential_pkgs.append(f"{pkg}=={version}")
-
-            if essential_pkgs:
-                # Install essential packages with timeout
-                pkg_list = " ".join(essential_pkgs)
-                commands.append(
-                    f"{pkg_manager} install {pkg_list} --timeout=30 || echo 'Package installation failed, continuing...'"
-                )
-            else:
-                # Just install basic packages
-                commands.append(
-                    f"{pkg_manager} install dill cloudpickle --timeout=30 || echo 'Package installation failed, continuing...'"
-                )
+        # dill and cloudpickle are not optional: the job script deserializes
+        # the function with them, and without them it gets `func = None` and
+        # dies twenty lines into a remote traceback with
+        # "'NoneType' object is not callable" -- which names neither the
+        # missing package nor the failed install. So this must not be swallowed
+        # by `|| echo ... continuing`, as it was.
+        #
+        # Versions are pinned to the caller's when known, because dill embeds
+        # CPython bytecode and a mismatched pair is its own class of failure;
+        # an unpinned install is the fallback, not the default.
+        pinned = [
+            f"{pkg}=={version}"
+            for pkg, version in (requirements or {}).items()
+            if pkg.lower() in ("dill", "cloudpickle")
+        ]
+        wanted = " ".join(pinned) if pinned else "dill cloudpickle"
+        commands.append(
+            f"{pkg_manager} install {wanted} --timeout=120 "
+            f"|| {pkg_manager} install dill cloudpickle --timeout=120"
+        )
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -864,6 +1438,32 @@ dependencies:
     return "Environment setup completed successfully"
 
 
+def result_key_export_line(remote_job_dir: str) -> str:
+    """Shell line making the per-job result-signing key available to the job.
+
+    Read from a 0600 file in the job directory rather than baked into job.sh,
+    which is world-readable on some shared filesystems.
+    """
+    return (
+        f"export CLUSTRIX_RESULT_KEY=$(cat {remote_job_dir}/.clustrix_result_key "
+        f"2>/dev/null || true)"
+    )
+
+
+def conda_activation_lines(config) -> list:
+    """Lines a generated job script needs before it can run `conda`.
+
+    A batch script runs under a non-login shell, on a compute node, so conda
+    is uninitialised there even when the submitting host found it. Every
+    script generator calls this; keeping it in one place is what stops one
+    backend from being fixed while another silently keeps emitting bare
+    `conda run` and failing with "conda: command not found".
+    """
+    venv_info = getattr(config, "venv_info", None) or {}
+    prefix = venv_info.get("conda_setup_prefix", "")
+    return [prefix] if prefix else []
+
+
 def generate_two_venv_execution_commands(
     remote_job_dir: str,
     conda_env1_name: Optional[str] = None,
@@ -875,204 +1475,377 @@ def generate_two_venv_execution_commands(
     This centralizes the two-venv logic to eliminate code duplication across
     different cluster types (SLURM, SSH, PBS, SGE).
 
+    The three stages hand objects to each other through files on disk. Those
+    handoffs use dill (falling back to cloudpickle, then stdlib pickle) rather
+    than pickle directly: the function being executed is almost always defined
+    in the caller's ``__main__``, and stdlib pickle serializes such functions by
+    qualified name, which cannot be resolved in a fresh remote interpreter. Both
+    venvs get dill and cloudpickle installed by ``setup_two_venv_environment``.
+
     Args:
         remote_job_dir: Remote working directory path
+        conda_env1_name: Conda environment for serialization (VENV1), if any
+        conda_env2_name: Conda environment for execution (VENV2), if any
 
     Returns:
         List of command strings for two-venv execution
     """
-    return [
-        "# Two-venv approach for cross-version compatibility",
-        "# VENV1: Serialization/deserialization with compatible Python",
-        "# VENV2: Function execution with proper environment",
-        "",
-        "# Step 1: Use VENV1 to deserialize function data",
-        (
-            f"# Using conda environment {conda_env1_name}"
-            if conda_env1_name
-            else f"source {remote_job_dir}/venv1_serialization/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env1_name} python -c "'
-            if conda_env1_name
-            else 'python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "try:",
-        "    import dill",
-        "except ImportError:",
-        "    dill = None",
-        "try:",
-        "    import cloudpickle",
-        "except ImportError:",
-        "    cloudpickle = None",
-        "",
-        "print('VENV1 - Deserializing function data')",
-        "print('Python version:', sys.version)",
-        "",
-        "try:",
-        "    with open('function_data.pkl', 'rb') as f:",
-        "        data = pickle.load(f)",
-        "    ",
-        "    # Try to deserialize function",
-        "    func = None",
-        "    try:",
-        "        func = dill.loads(data['function']) if dill else None",
-        "        print('Successfully deserialized function with dill')",
-        "    except Exception as e:",
-        "        print('Dill deserialization failed:', str(e))",
-        "        try:",
-        "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
-        "            print('Successfully deserialized function with cloudpickle')",
-        "        except Exception as e2:",
-        "            print('Cloudpickle deserialization failed:', str(e2))",
-        "            # Try source code fallback",
-        "            func_info = data.get('func_info', {})",
-        "            if func_info.get('source'):",
-        "                print('Using source code fallback')",
-        "                # Remove @cluster decorator from source",
-        "                import textwrap",
-        "                source = func_info['source']",
-        "                lines = source.split('\\n')",
-        "                clean_lines = []",
-        "                for line in lines:",
-        "                    if not line.strip().startswith('@'):",
-        "                        clean_lines.append(line)",
-        "                clean_source = '\\n'.join(clean_lines)",
-        "                clean_source = textwrap.dedent(clean_source)",
-        "                ",
-        "                # Create function from source",
-        "                namespace = {}",
-        "                exec(clean_source, namespace)",
-        "                func = namespace[func_info['name']]",
-        "                print('Successfully created function from source code')",
-        "            else:",
-        "                raise Exception('All deserialization methods failed')",
-        "    ",
-        "    args = pickle.loads(data['args'])",
-        "    kwargs = pickle.loads(data['kwargs'])",
-        "    ",
-        "    # Pass data to VENV2 for execution",
-        "    with open('function_deserialized.pkl', 'wb') as f:",
-        "        if 'clean_source' in locals():",
-        "            # Function was created from source code, pass the source",
-        "            pickle.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
-        "        else:",
-        "            # Function was deserialized from binary, pass the function object",
-        "            pickle.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
-        "    ",
-        "    print('VENV1 - Function data prepared for VENV2')",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV1 - Error during deserialization:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-        "# Step 2: Use VENV2 to execute the function",
-        ("# No deactivation needed for conda run" if conda_env1_name else "deactivate"),
-        (
-            f"# Using conda environment {conda_env2_name}"
-            if conda_env2_name
-            else f"source {remote_job_dir}/venv2_execution/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env2_name} python -c "'
-            if conda_env2_name
-            else f'{remote_job_dir}/venv2_execution/bin/python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "print('VENV2 - Executing function')",
-        "print('Python version:', sys.version)",
-        "",
-        "try:",
-        "    import os",
-        "    if not os.path.exists('function_deserialized.pkl'):",
-        "        raise FileNotFoundError('function_deserialized.pkl not found - VENV1 deserialization may have failed')",
-        "    with open('function_deserialized.pkl', 'rb') as f:",
-        "        exec_data = pickle.load(f)",
-        "    ",
-        "    if 'func' in exec_data:",
-        "        # Function object was passed",
-        "        func = exec_data['func']",
-        "    elif 'source' in exec_data:",
-        "        # Source code was passed, recreate function",
-        "        print('Recreating function from source code in VENV2')",
-        "        namespace = {}",
-        "        exec(exec_data['source'], namespace)",
-        "        func = namespace[exec_data['func_name']]",
-        "    else:",
-        "        raise Exception('No function or source code found')",
-        "    ",
-        "    args = exec_data['args']",
-        "    kwargs = exec_data['kwargs']",
-        "    ",
-        "    # Execute the function",
-        "    print('Executing function with args:', args)",
-        "    result = func(*args, **kwargs)",
-        "    print('Function execution completed successfully')",
-        "    ",
-        "    # Save result for VENV1 to serialize",
-        "    with open('result_raw.pkl', 'wb') as f:",
-        "        pickle.dump(result, f, protocol=4)",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV2 - Error during execution:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-        "# Step 3: Use VENV1 to serialize the result",
-        ("# No deactivation needed for conda run" if conda_env2_name else "deactivate"),
-        (
-            f"# Using conda environment {conda_env1_name}"
-            if conda_env1_name
-            else f"source {remote_job_dir}/venv1_serialization/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env1_name} python -c "'
-            if conda_env1_name
-            else 'python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "print('VENV1 - Serializing result')",
-        "",
-        "try:",
-        "    import os",
-        "    if not os.path.exists('result_raw.pkl'):",
-        "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
-        "    with open('result_raw.pkl', 'rb') as f:",
-        "        result = pickle.load(f)",
-        "    ",
-        "    print('Result loaded from VENV2:', type(result))",
-        "    ",
-        "    with open('result.pkl', 'wb') as f:",
-        "        pickle.dump(result, f, protocol=4)",
-        "        ",
-        "    print('Result serialized successfully')",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV1 - Error during result serialization:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-    ]
+
+    def _serializer_preamble() -> list:
+        """Lines selecting the richest available serializer as ``_ser``."""
+        return [
+            "import pickle",
+            "try:",
+            "    import dill as _ser",
+            "except ImportError:",
+            "    try:",
+            "        import cloudpickle as _ser",
+            "    except ImportError:",
+            "        _ser = pickle",
+        ]
+
+    def _error_handler(stage: str, message: str) -> list:
+        """Lines recording a stage failure without masking an earlier one.
+
+        Each stage writes its own ``error_<stage>.pkl`` unconditionally, but
+        only claims the shared ``error.pkl`` if no earlier stage already did.
+        Without this, a stage-1 failure is overwritten by the cascade it
+        causes, and the caller is shown the symptom instead of the cause.
+        """
+        return [
+            "except Exception as e:",
+            f"    print('{message}', str(e))",
+            "    traceback.print_exc()",
+            "    import os as _os",
+            "    _payload = {"
+            "'error': str(e), "
+            "'traceback': traceback.format_exc(), "
+            f"'stage': '{stage}'"
+            "}",
+            # Ship the exception OBJECT too, so the caller can catch the type
+            # the function actually raised instead of a generic RuntimeError.
+            # _ser (dill) handles exception classes defined in the caller's
+            # __main__; an exception that refuses to serialize at all must not
+            # take the error report down with it.
+            "    try:",
+            "        _blob = _ser.dumps(dict(_payload, exception=e), protocol=4)",
+            "    except Exception:",
+            "        _blob = pickle.dumps(_payload, protocol=4)",
+            f"    with open('error_{stage}.pkl', 'wb') as f:",
+            "        f.write(_blob)",
+            "    if not _os.path.exists('error.pkl'):",
+            "        with open('error.pkl', 'wb') as f:",
+            "            f.write(_blob)",
+            "    raise",
+        ]
+
+    return (
+        [
+            "# Two-venv approach for cross-version compatibility",
+            "# VENV1: Serialization/deserialization with compatible Python",
+            "# VENV2: Function execution with proper environment",
+            "",
+            "# Step 1: Use VENV1 to deserialize function data",
+            (
+                f"# Using conda environment {conda_env1_name}"
+                if conda_env1_name
+                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env1_name} python -c "'
+                if conda_env1_name
+                else 'python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "try:",
+            "    import dill",
+            "except ImportError:",
+            "    dill = None",
+            "try:",
+            "    import cloudpickle",
+            "except ImportError:",
+            "    cloudpickle = None",
+            "",
+            "print('VENV1 - Deserializing function data')",
+            "print('Python version:', sys.version)",
+            "",
+            "try:",
+            "    with open('function_data.pkl', 'rb') as f:",
+            "        data = pickle.load(f)",
+            "    ",
+            "    # Try to deserialize function",
+            "    func = None",
+            "    clean_source = None",
+            "    func_info = data.get('func_info', {})",
+            "    try:",
+            "        func = dill.loads(data['function']) if dill else None",
+            "        print('Successfully deserialized function with dill')",
+            "    except Exception as e:",
+            "        print('Dill deserialization failed:', str(e))",
+            "        try:",
+            "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
+            "            print('Successfully deserialized function with cloudpickle')",
+            "        except Exception as e2:",
+            "            print('Cloudpickle deserialization failed:', str(e2))",
+            "            # Try source code fallback",
+            "            if func_info.get('source'):",
+            "                print('Using source code fallback')",
+            "                # Remove @cluster decorator from source",
+            "                import textwrap",
+            "                source = func_info['source']",
+            "                lines = source.split('\\n')",
+            "                clean_lines = []",
+            "                for line in lines:",
+            "                    if not line.strip().startswith('@'):",
+            "                        clean_lines.append(line)",
+            "                clean_source = '\\n'.join(clean_lines)",
+            "                clean_source = textwrap.dedent(clean_source)",
+            "                ",
+            "                # Create function from source",
+            "                namespace = {}",
+            "                exec(clean_source, namespace)",
+            "                func = namespace[func_info['name']]",
+            "                print('Successfully created function from source code')",
+            "            else:",
+            "                raise Exception('All deserialization methods failed')",
+            "    ",
+            "    # _ser, not stdlib pickle: args may carry classes defined in",
+            "    # the caller's __main__, which pickle can only store by name.",
+            "    args = _ser.loads(data['args'])",
+            "    kwargs = _ser.loads(data['kwargs'])",
+            "    ",
+            "    # Pass data to VENV2 for execution. _ser (dill/cloudpickle) is",
+            "    # required here: stdlib pickle cannot serialize a function that",
+            "    # is not importable by name in this interpreter.",
+            "    with open('function_deserialized.pkl', 'wb') as f:",
+            "        if clean_source is not None:",
+            "            # Function was created from source code, pass the source",
+            "            _ser.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+            "        else:",
+            "            # Function was deserialized from binary, pass the function object",
+            "            _ser.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+            "    ",
+            "    print('VENV1 - Function data prepared for VENV2 using', _ser.__name__)",
+            "    ",
+        ]
+        + _error_handler("venv1_deserialize", "VENV1 - Error during deserialization:")
+        + [
+            '"',
+            "",
+            "# Step 2: Use VENV2 to execute the function",
+            (
+                "# No deactivation needed for conda run"
+                if conda_env1_name
+                else "deactivate"
+            ),
+            (
+                f"# Using conda environment {conda_env2_name}"
+                if conda_env2_name
+                else f"source {remote_job_dir}/venv2_execution/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env2_name} python -c "'
+                if conda_env2_name
+                else f'{remote_job_dir}/venv2_execution/bin/python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "print('VENV2 - Executing function')",
+            "print('Python version:', sys.version)",
+            "",
+            "try:",
+            "    import os",
+            "    if not os.path.exists('function_deserialized.pkl'):",
+            "        raise FileNotFoundError('function_deserialized.pkl not found - VENV1 deserialization may have failed')",
+            "    with open('function_deserialized.pkl', 'rb') as f:",
+            "        exec_data = _ser.load(f)",
+            "    ",
+            "    if 'func' in exec_data:",
+            "        # Function object was passed",
+            "        func = exec_data['func']",
+            "    elif 'source' in exec_data:",
+            "        # Source code was passed, recreate function",
+            "        print('Recreating function from source code in VENV2')",
+            "        namespace = {}",
+            "        exec(exec_data['source'], namespace)",
+            "        func = namespace[exec_data['func_name']]",
+            "    else:",
+            "        raise Exception('No function or source code found')",
+            "    ",
+            "    args = exec_data['args']",
+            "    kwargs = exec_data['kwargs']",
+            "    ",
+            "    # Execute the function",
+            "    print('Executing function with args:', args)",
+            "    result = func(*args, **kwargs)",
+            "    print('Function execution completed successfully')",
+            "    ",
+            "    # Save result for VENV1 to serialize",
+            "    with open('result_raw.pkl', 'wb') as f:",
+            "        _ser.dump(result, f, protocol=4)",
+            "    ",
+        ]
+        + _error_handler("venv2_execute", "VENV2 - Error during execution:")
+        + [
+            '"',
+            "",
+            "# Step 3: Use VENV1 to serialize the result",
+            (
+                "# No deactivation needed for conda run"
+                if conda_env2_name
+                else "deactivate"
+            ),
+            (
+                f"# Using conda environment {conda_env1_name}"
+                if conda_env1_name
+                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env1_name} python -c "'
+                if conda_env1_name
+                else 'python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "print('VENV1 - Serializing result')",
+            "",
+            "try:",
+            "    import os",
+            "    if not os.path.exists('result_raw.pkl'):",
+            "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
+            "    with open('result_raw.pkl', 'rb') as f:",
+            "        result = _ser.load(f)",
+            "    ",
+            "    print('Result loaded from VENV2:', type(result))",
+            "    ",
+            "    _payload_bytes = _ser.dumps(result, protocol=4)",
+            "    with open('result.pkl', 'wb') as f:",
+            "        f.write(_payload_bytes)",
+            "    ",
+            "    # Tag the result so the caller can tell it apart from anything",
+            "    # else that may have been written into this directory. Loading a",
+            "    # pickle executes code, so the caller must not do it on trust.",
+            "    import hashlib as _hashlib",
+            "    import hmac as _hmac",
+            "    _key = os.environ.get('CLUSTRIX_RESULT_KEY', '')",
+            "    if _key:",
+            "        _tag = _hmac.new(_key.encode(), _payload_bytes, "
+            "_hashlib.sha256).hexdigest()",
+            "        with open('result.pkl.hmac', 'w') as f:",
+            "            f.write(_tag)",
+            "    ",
+            "    print('Result serialized successfully')",
+            "    ",
+        ]
+        + _error_handler(
+            "venv1_serialize", "VENV1 - Error during result serialization:"
+        )
+        + [
+            '"',
+            "",
+        ]
+    )
+
+
+MEMORY_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?)(i?)B?\s*$", re.I)
+
+
+def normalize_memory(value: Any, target: str) -> str:
+    """Render a memory size in the form a given scheduler accepts.
+
+    Clustrix's own configuration uses human sizes like ``"16GB"``. Schedulers
+    do not agree on that spelling:
+
+    * Kubernetes quantities are ``16G`` (decimal) or ``16Gi`` (binary) and a
+      pod carrying ``16GB`` is rejected outright by the API server.
+    * SLURM's ``--mem`` takes a bare number with an optional ``K|M|G|T``.
+    * PBS and SGE accept ``16gb`` and ``16G`` respectively.
+
+    Passing the configured string through unchanged is what made
+    ``default_memory`` unusable on Kubernetes.
+
+    Args:
+        value: A size such as ``"16GB"``, ``"512Mi"``, ``16`` (GB assumed).
+        target: ``"kubernetes"``, ``"slurm"``, ``"pbs"`` or ``"sge"``.
+
+    Returns:
+        The size spelled the way ``target`` expects it.
+    """
+    text = str(value).strip()
+    match = MEMORY_PATTERN.match(text)
+    if not match:
+        # Not a shape we recognise. Passing it through unchanged is better
+        # than guessing: the scheduler's own error names the real problem.
+        logger.warning(
+            "Could not parse memory value %r; passing it to %s unchanged.",
+            value,
+            target,
+        )
+        return text
+
+    amount, unit = match.group(1), match.group(2).upper()
+    if not unit:
+        unit = "G"  # a bare number has always meant gigabytes here
+
+    # Schedulers take integers. "1.5GB" would reach SLURM as --mem=1.5G and
+    # PBS as mem=1.5gb, both of which they reject, so round up to the next
+    # whole unit rather than emit something that cannot be submitted. Rounding
+    # *up* because a job asking for 1.5G and given 1G would be killed.
+    if "." in amount:
+        import math
+
+        whole = math.ceil(float(amount))
+        logger.info(
+            "Rounding memory %s%s up to %d%s: schedulers take whole units.",
+            amount,
+            unit,
+            whole,
+            unit,
+        )
+        amount = str(whole)
+
+    if target == "kubernetes":
+        # "16GB" means 16 gibibytes in every other part of clustrix, so keep
+        # the binary suffix rather than silently shrinking the request by 7%.
+        return f"{amount}{unit}i" if unit else amount
+    if target == "slurm":
+        return f"{amount}{unit}"
+    if target == "pbs":
+        return f"{amount.lower()}{unit.lower()}b"
+    if target == "sge":
+        return f"{amount}{unit}"
+    return text
+
+
+def resolve_job_resources(
+    job_config: Dict[str, Any], config: ClusterConfig
+) -> Dict[str, Any]:
+    """Fill in resource keys the caller left out, from the configured defaults.
+
+    The scheduler script generators index job_config["cores"], ["memory"] and
+    ["time"] directly, so a caller that omits one gets a bare
+    ``KeyError: 'time'`` -- which is what the GPU-detection probe hit, and
+    what got swallowed into "Could not detect remote GPU count". The defaults
+    exist for exactly this; use them.
+    """
+    resolved = dict(job_config)
+    resolved.setdefault("cores", config.default_cores)
+    resolved.setdefault("memory", config.default_memory)
+    resolved.setdefault("time", config.default_time)
+    return resolved
 
 
 def create_job_script(
@@ -1082,6 +1855,8 @@ def create_job_script(
     config: ClusterConfig,
 ) -> str:
     """Create job submission script for different cluster types."""
+
+    job_config = resolve_job_resources(job_config, config)
 
     if cluster_type == "slurm":
         return _create_slurm_script(job_config, remote_job_dir, config)
@@ -1095,37 +1870,41 @@ def create_job_script(
         raise ValueError(f"Unsupported cluster type: {cluster_type}")
 
 
-def _create_slurm_script(
-    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
-) -> str:
-    """Create SLURM job script."""
+def result_signing_lines(indent: str = "    ") -> list:
+    """Python lines that write result.pkl together with its HMAC.
 
-    script_lines = [
-        "#!/bin/bash",
-        "#SBATCH --job-name=clustrix",
-        f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
-        f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
-        f"#SBATCH --cpus-per-task={job_config['cores']}",
-        f"#SBATCH --mem={job_config['memory']}",
-        f"#SBATCH --time={job_config['time']}",
+    Both execution branches must emit this. The single-venv branch did not,
+    while the submitter recorded a signing key regardless -- so every job that
+    fell back to it (use_two_venv=False, or any two-venv setup failure or
+    timeout) produced a result the caller then refused as unsigned. A degraded
+    but working path became a hard failure.
+    """
+    return [
+        f"{indent}_payload_bytes = pickle.dumps(result, protocol=4)",
+        f"{indent}with open('result.pkl', 'wb') as f:",
+        f"{indent}    f.write(_payload_bytes)",
+        f"{indent}import hashlib as _hashlib",
+        f"{indent}import hmac as _hmac",
+        f"{indent}import os as _os",
+        f"{indent}_key = _os.environ.get('CLUSTRIX_RESULT_KEY', '')",
+        f"{indent}if _key:",
+        f"{indent}    _tag = _hmac.new(_key.encode(), _payload_bytes, "
+        "_hashlib.sha256).hexdigest()",
+        f"{indent}    with open('result.pkl.hmac', 'w') as f:",
+        f"{indent}        f.write(_tag)",
     ]
 
-    if job_config.get("partition"):
-        script_lines.append(f"#SBATCH --partition={job_config['partition']}")
 
-    # Add environment setup
-    if config.module_loads:
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
+def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
+    """The lines that actually run the user's function in a job script.
 
-    if config.environment_variables:
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-
-    if config.pre_execution_commands:
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
-
+    Shared by every scheduler. It used to live only inside the SLURM
+    generator: PBS ran `python execute_function.py`, a file nothing in
+    clustrix has ever created, and SGE carried its own divergent copy of
+    the single-venv script. Both therefore missed the two-venv path, the
+    result signing and every fix made to the SLURM one.
+    """
+    script_lines: list = []
     # Add execution commands
     python_cmd = config.python_executable if config.python_executable else "python"
 
@@ -1135,6 +1914,8 @@ def _create_slurm_script(
         script_lines.append(f"cd {remote_job_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        script_lines.append(result_key_export_line(remote_job_dir))
+        script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
             generate_two_venv_execution_commands(
                 remote_job_dir, conda_env1_name, conda_env2_name
@@ -1142,6 +1923,7 @@ def _create_slurm_script(
         )
     else:
         # Use the original single-venv approach
+        script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(
             [
                 f"cd {remote_job_dir}",
@@ -1170,21 +1952,69 @@ def _create_slurm_script(
                 "    except:",
                 "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
                 "    ",
-                "    args = pickle.loads(data['args'])",
-                "    kwargs = pickle.loads(data['kwargs'])",
+                "    # dill, not stdlib pickle: args may carry classes defined",
+                "    # in the caller's __main__, which pickle stores only by name.",
+                "    _argser = dill or cloudpickle or pickle",
+                "    args = _argser.loads(data['args'])",
+                "    kwargs = _argser.loads(data['kwargs'])",
                 "    ",
                 "    result = func(*args, **kwargs)",
                 "    ",
-                "    with open('result.pkl', 'wb') as f:",
-                "        pickle.dump(result, f, protocol=4)",
-                "        ",
+            ]
+            + result_signing_lines()
+            + [
+                "    ",
                 "except Exception as e:",
+                "    _payload = {'error': str(e), 'traceback': traceback.format_exc()}",
+                # Preserve the exception object so the caller catches the real
+                # type, not a RuntimeError rebuilt from the message alone.
+                "    _errser = dill or cloudpickle or pickle",
+                "    try:",
+                "        _blob = _errser.dumps(dict(_payload, exception=e), protocol=4)",
+                "    except Exception:",
+                "        _blob = pickle.dumps(_payload, protocol=4)",
                 "    with open('error.pkl', 'wb') as f:",
-                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
+                "        f.write(_blob)",
                 "    raise",
                 '"',
             ]
         )
+
+    return script_lines
+
+
+def _create_slurm_script(
+    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
+) -> str:
+    """Create SLURM job script."""
+
+    script_lines = [
+        "#!/bin/bash",
+        "#SBATCH --job-name=clustrix",
+        f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
+        f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
+        f"#SBATCH --cpus-per-task={job_config['cores']}",
+        f"#SBATCH --mem={normalize_memory(job_config['memory'], 'slurm')}",
+        f"#SBATCH --time={job_config['time']}",
+    ]
+
+    if job_config.get("partition"):
+        script_lines.append(f"#SBATCH --partition={job_config['partition']}")
+
+    # Add environment setup
+    if config.module_loads:
+        for module in config.module_loads:
+            script_lines.append(f"module load {module}")
+
+    if config.environment_variables:
+        for var, value in config.environment_variables.items():
+            script_lines.append(f"export {var}={value}")
+
+    if config.pre_execution_commands:
+        for cmd in config.pre_execution_commands:
+            script_lines.append(cmd)
+
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 
@@ -1200,7 +2030,7 @@ def _create_pbs_script(
         f"#PBS -o {remote_job_dir}/job.out",
         f"#PBS -e {remote_job_dir}/job.err",
         f"#PBS -l nodes=1:ppn={job_config['cores']}",
-        f"#PBS -l mem={job_config['memory']}",
+        f"#PBS -l mem={normalize_memory(job_config['memory'], 'pbs')}",
         f"#PBS -l walltime={job_config['time']}",
     ]
 
@@ -1218,14 +2048,7 @@ def _create_pbs_script(
         for cmd in config.pre_execution_commands:
             script_lines.append(cmd)
 
-    # Add similar execution logic as SLURM
-    script_lines.extend(
-        [
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate",
-            "python execute_function.py",
-        ]
-    )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 
@@ -1241,7 +2064,7 @@ def _create_sge_script(
         f"#$ -o {remote_job_dir}/job.out",
         f"#$ -e {remote_job_dir}/job.err",
         f"#$ -pe smp {job_config['cores']}",
-        f"#$ -l h_vmem={job_config['memory']}",
+        f"#$ -l h_vmem={normalize_memory(job_config['memory'], 'sge')}",
         f"#$ -l h_rt={job_config['time']}",
         "#$ -cwd",
         "",
@@ -1258,71 +2081,7 @@ def _create_sge_script(
         for cmd in config.pre_execution_commands:
             script_lines.append(cmd)
 
-    script_lines.extend(
-        [
-            f"cd {remote_job_dir}",
-            "source venv/bin/activate",
-            f'{config.python_executable if config.python_executable else "python"} -c "',
-            "import pickle",
-            "import sys",
-            "import traceback",
-            "",
-            "try:",
-            "    import dill",
-            "except ImportError:",
-            "    dill = None",
-            "try:",
-            "    import cloudpickle",
-            "except ImportError:",
-            "    cloudpickle = None",
-            "",
-            "try:",
-            "    with open('function_data.pkl', 'rb') as f:",
-            "        data = pickle.load(f)",
-            "    ",
-            "    # Try dill first, then cloudpickle, then source code",
-            "    func = None",
-            "    if dill:",
-            "        try:",
-            "            func = dill.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and cloudpickle:",
-            "        try:",
-            "            func = cloudpickle.loads(data['function'])",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None and data.get('function_source'):",
-            "        try:",
-            "            import textwrap",
-            "            source = data['function_source']",
-            "            # Execute the source code to create the function",
-            "            namespace = {}",
-            "            exec(source, namespace)",
-            "            # Get the function name from func_info",
-            "            func_name = data['func_info']['name']",
-            "            func = namespace[func_name]",
-            "        except Exception as e:",
-            "            pass",
-            "    if func is None:",
-            "        error_msg = 'Could not deserialize function with dill, cloudpickle, or source code. '",
-            "        error_msg += f'dill available: {dill is not None}, cloudpickle available: {cloudpickle is not None}, '",
-            "        raise RuntimeError('Could not deserialize function with dill, cloudpickle, or source code')",
-            "    ",
-            "    args = pickle.loads(data['args'])",
-            "    kwargs = pickle.loads(data['kwargs'])",
-            "    ",
-            "    result = func(*args, **kwargs)",
-            "    ",
-            "    with open('result.pkl', 'wb') as f:",
-            "        pickle.dump(result, f, protocol=4)",
-            "except Exception as e:",
-            "    with open('error.pkl', 'wb') as f:",
-            "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-            "    raise",
-            '"',
-        ]
-    )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 
@@ -1331,8 +2090,6 @@ def _create_ssh_script(
     job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
 ) -> str:
     """Create simple execution script for SSH."""
-
-    python_cmd = config.python_executable if config.python_executable else "python"
 
     # Start with base script structure
     script_lines = [
@@ -1361,95 +2118,7 @@ def _create_ssh_script(
         script_lines.append("")
 
     # Check if we have two-venv setup
-    if hasattr(config, "venv_info") and config.venv_info:
-        # Use the centralized two-venv approach for cross-version compatibility
-        conda_env1_name = config.venv_info.get("conda_env1_name", None)
-        conda_env2_name = config.venv_info.get("conda_env2_name", None)
-        script_lines.extend(
-            generate_two_venv_execution_commands(
-                remote_job_dir, conda_env1_name, conda_env2_name
-            )
-        )
-    else:
-        # Single-venv approach
-        script_lines.extend(
-            [
-                "",
-                f'{python_cmd} -c "',
-                "import pickle",
-                "import sys",
-                "import traceback",
-                "",
-                "try:",
-                "    import dill",
-                "except ImportError:",
-                "    dill = None",
-                "try:",
-                "    import cloudpickle",
-                "except ImportError:",
-                "    cloudpickle = None",
-                "",
-                "try:",
-                "    with open('function_data.pkl', 'rb') as f:",
-                "        data = pickle.load(f)",
-                "    ",
-                "    print('Python version: ' + sys.version)",
-                "    print('Data keys: ' + str(list(data.keys())))",
-                "    print('Function source available: ' + str(data.get('function_source') is not None))",
-                "    print('Function data size: ' + str(len(data['function'])) + ' bytes')",
-                "    ",
-                "    # Try dill first, then cloudpickle, then built-in pickle, then source code",
-                "    func = None",
-                "    if dill:",
-                "        try:",
-                "            func = dill.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Dill deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None and cloudpickle:",
-                "        try:",
-                "            func = cloudpickle.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Cloudpickle deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None:",
-                "        try:",
-                "            func = pickle.loads(data['function'])",
-                "        except Exception as e:",
-                "            print('Pickle deserialization failed: ' + str(e))",
-                "            pass",
-                "    if func is None and data.get('function_source'):",
-                "        try:",
-                "            import textwrap",
-                "            source = data['function_source']",
-                "            # Execute the source code to create the function",
-                "            namespace = {}",
-                "            exec(source, namespace)",
-                "            # Get the function name from func_info",
-                "            func_name = data['func_info']['name']",
-                "            func = namespace[func_name]",
-                "        except Exception as e:",
-                "            pass",
-                "    if func is None:",
-                "        error_msg = 'Could not deserialize function with dill, cloudpickle, pickle, or source code. '",
-                "        error_msg += 'dill available: ' + str(dill is not None) + ', cloudpickle available: ' + str(cloudpickle is not None)",
-                "        raise RuntimeError(error_msg)",
-                "    ",
-                "    args = pickle.loads(data['args'])",
-                "    kwargs = pickle.loads(data['kwargs'])",
-                "    ",
-                "    result = func(*args, **kwargs)",
-                "    ",
-                "    with open('result.pkl', 'wb') as f:",
-                "        pickle.dump(result, f, protocol=4)",
-                "        ",
-                "except Exception as e:",
-                "    with open('error.pkl', 'wb') as f:",
-                "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-                "    sys.exit(1)",
-                '"',
-            ]
-        )
+    script_lines.extend(job_execution_lines(remote_job_dir, config))
 
     return "\n".join(script_lines)
 

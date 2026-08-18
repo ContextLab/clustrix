@@ -5,6 +5,8 @@ HPC schedulers including SLURM, PBS/Torque, and Sun Grid Engine (SGE).
 """
 
 import os
+import secrets
+import shlex
 import time
 import tempfile
 import pickle
@@ -19,6 +21,47 @@ logger = logging.getLogger(__name__)
 
 
 class SchedulerManager:
+    """Submits jobs to SLURM, PBS, SGE and plain SSH hosts."""
+
+    def _prepare_job_dir(self, remote_job_dir: str) -> str:
+        """Create the job directory and give the job a result-signing key.
+
+        The key lets the caller verify result.pkl before unpickling it, which
+        matters because unpickling executes code (#121). It is written inside
+        the job directory with 0600, and the directory itself is 0700, so on a
+        shared filesystem another user can neither read the key nor forge a
+        result that verifies against it.
+
+        This bounds the trust to whoever can already read the job directory.
+        It is not a defence against a wholly compromised remote host -- that
+        host runs the function anyway -- but it does stop an unrelated user,
+        a stale file, or a truncated transfer from being loaded as code.
+
+        The key is written over SFTP rather than by a shell command. Writing it
+        with `printf '%s' <key> > file` would put the key in the remote command
+        line, and on a default Linux `/proc` any user on that login node can
+        read another user's command line out of `ps` -- which would hand the
+        secret to exactly the people the 0700 directory is meant to exclude.
+        """
+        # `mkdir -p` succeeds on a directory that already exists and is owned
+        # by somebody else, and an unchecked `chmod` then fails silently. Job
+        # directory names were fully predictable, so on a world-writable
+        # remote_work_dir an attacker could pre-create the directory, receive
+        # the signing key into it, and forge a result -- turning the defence
+        # into a code-execution path on the *submitting* machine. Create it
+        # exclusively, and refuse to continue if that fails.
+        self.connection_manager.execute_remote_command(
+            f"mkdir -p {shlex.quote(os.path.dirname(remote_job_dir))}", check=True
+        )
+        self.connection_manager.execute_remote_command(
+            f"mkdir -m 700 {shlex.quote(remote_job_dir)}", check=True
+        )
+        key = secrets.token_hex(32)
+        self.connection_manager.create_remote_file(
+            f"{remote_job_dir}/.clustrix_result_key", key, mode=0o600
+        )
+        return key
+
     """Manages jobs for traditional HPC schedulers (SLURM, PBS, SGE)."""
 
     def __init__(self, config, connection_manager):
@@ -38,8 +81,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via SLURM."""
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -148,6 +194,7 @@ class SchedulerManager:
         # Store job info
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -159,8 +206,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via PBS."""
         # Similar to SLURM but with PBS commands
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -191,6 +241,7 @@ class SchedulerManager:
 
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -202,8 +253,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via SGE."""
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -245,6 +299,7 @@ class SchedulerManager:
         # Store job info
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "submitted",
             "submit_time": time.time(),
         }
@@ -255,8 +310,11 @@ class SchedulerManager:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via direct SSH using two-venv approach."""
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
-        self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
+        result_key = self._prepare_job_dir(remote_job_dir)
 
         # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
@@ -321,10 +379,27 @@ class SchedulerManager:
 
             except Exception as e:
                 logger.warning(f"Failed to setup two-venv environment: {e}")
-                # Fall back to original approach
+                # Fall back to the single-venv approach -- which means actually
+                # building that venv. Both fallback branches used to set
+                # venv_info = None and stop there, so the generated script
+                # activated a virtualenv nobody had created and every job died
+                # with "venv/bin/activate: No such file or directory". The
+                # SLURM path has always called this; the SSH path never did.
+                setup_remote_environment(
+                    self.connection_manager.ssh_client,
+                    remote_job_dir,
+                    func_data["requirements"],
+                    self.config,
+                )
                 updated_config.venv_info = None
         else:
             logger.info("Two-venv setup disabled, using basic environment setup")
+            setup_remote_environment(
+                self.connection_manager.ssh_client,
+                remote_job_dir,
+                func_data["requirements"],
+                self.config,
+            )
             updated_config.venv_info = None
 
         # Create execution script
@@ -347,6 +422,7 @@ class SchedulerManager:
 
         self.active_jobs[job_id] = {
             "remote_dir": remote_job_dir,
+            "result_key": result_key,
             "status": "running",
             "submit_time": time.time(),
         }

@@ -4,8 +4,12 @@ This module provides the main ClusterExecutor class that acts as a coordinator
 for different job execution backends (schedulers, Kubernetes, cloud providers).
 """
 
+import hashlib
+import shlex
+import hmac
 import time
 import tempfile
+import dill
 import pickle
 import logging
 from typing import Any, Dict, Optional
@@ -16,6 +20,7 @@ from .executor_connections import ConnectionManager
 from .executor_schedulers import SchedulerManager
 from .executor_kubernetes import KubernetesJobManager
 from .executor_cloud import CloudJobManager
+from .hf_jobs import HFJobsManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +41,7 @@ class ClusterExecutor:
         self.scheduler_manager = SchedulerManager(config, self.connection_manager)
         self.k8s_manager = KubernetesJobManager(config, self.connection_manager)
         self.cloud_manager = CloudJobManager(config)
+        self.hf_jobs_manager = HFJobsManager(config)
 
         # Combined active jobs tracking
         self.active_jobs: Dict[str, Any] = {}
@@ -74,6 +80,14 @@ class ClusterExecutor:
                 )
 
         # If no provider specified, use traditional cluster routing
+
+        # HuggingFace Jobs talks to an HTTP API, not a host: there is nothing
+        # to SSH into, and calling connect() here would fail on a config that
+        # is perfectly valid for this backend.
+        if self.config.cluster_type == "huggingface":
+            job_id = self.hf_jobs_manager.submit_job(func_data, job_config)
+            self.active_jobs[job_id] = {"manager": "huggingface", "job_id": job_id}
+            return job_id
 
         # Ensure connection is established for traditional cluster types
         self.connect()
@@ -123,6 +137,10 @@ class ClusterExecutor:
                 result = self.k8s_manager.wait_for_k8s_result(job_id)
                 del self.active_jobs[job_id]
                 return result
+            elif manager_type == "huggingface":
+                result = self.hf_jobs_manager.wait_for_result(job_id)
+                del self.active_jobs[job_id]
+                return result
             elif manager_type == "scheduler":
                 # For scheduler jobs, delegate to wait_for_scheduler_result
                 result = self._wait_for_scheduler_result(job_id)
@@ -143,6 +161,59 @@ class ClusterExecutor:
             return self.k8s_manager.wait_for_k8s_result(job_id)
         else:
             return self._wait_for_scheduler_result(job_id)
+
+    def _verify_result_signature(
+        self, job_id: str, remote_dir: str, payload: bytes
+    ) -> None:
+        """Check result.pkl against the key this job was given, before loading.
+
+        Unpickling executes arbitrary code, so a result file is not something
+        to open on trust (#121). At submission the job directory is created
+        0700 with a random key inside it; the job tags its result with an
+        HMAC over the exact bytes it wrote, and this refuses anything that
+        does not match.
+
+        This bounds the trust to whoever can already read the job directory.
+        It is not a defence against a wholly compromised remote host, which
+        runs the function anyway -- but it does stop an unrelated user on a
+        shared filesystem, a stale file from an earlier run, or a truncated
+        transfer from being handed to the unpickler.
+        """
+        job_info = self.scheduler_manager.active_jobs.get(job_id) or {}
+        key = job_info.get("result_key")
+        if not key:
+            # Nothing to check against: a job submitted before this existed,
+            # or one adopted from another process.
+            logger.warning(
+                "No result-signing key for job %s; loading its result " "unverified.",
+                job_id,
+            )
+            return
+
+        try:
+            stdout, _ = self.connection_manager.execute_remote_command(
+                f"cat {shlex.quote(f'{remote_dir}/result.pkl.hmac')} 2>/dev/null"
+            )
+        except Exception as e:  # pragma: no cover - defensive
+            raise RuntimeError(
+                f"Could not read the signature for job {job_id}: {e}"
+            ) from e
+
+        tag = (stdout or "").strip()
+        if not tag:
+            raise RuntimeError(
+                f"Job {job_id} produced a result with no signature. Refusing "
+                "to deserialize it: loading a pickle executes code, and an "
+                "unsigned result cannot be told apart from a file someone "
+                "else wrote into the job directory."
+            )
+
+        expected = hmac.new(key.encode(), payload, hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(tag, expected):
+            raise RuntimeError(
+                f"Job {job_id} result failed its integrity check. Refusing to "
+                "deserialize it."
+            )
 
     def _wait_for_scheduler_result(self, job_id: str) -> Any:
         """Wait for scheduler job result (SLURM/PBS/SGE/SSH)."""
@@ -169,7 +240,16 @@ class ClusterExecutor:
                     )
 
                     with open(local_result_path, "rb") as f:
-                        result = pickle.load(f)
+                        payload = f.read()
+
+                    self._verify_result_signature(job_id, remote_dir, payload)
+                    # dill, not stdlib pickle, because the worker wrote
+                    # this with dill. Replaying dill's reconstruction opcodes
+                    # through stdlib pickle builds a *fresh* class for anything
+                    # defined in the caller's __main__, so a returned instance
+                    # failed isinstance() against the very class that defined
+                    # it. dill's loader reuses the existing one.
+                    result = dill.loads(payload)
 
                     # Cleanup
                     if self.config.cleanup_on_success:
@@ -213,6 +293,8 @@ class ClusterExecutor:
                 return self.cloud_manager.get_cloud_job_status(job_id)
             elif manager_type == "kubernetes":
                 return self.k8s_manager.check_k8s_job_status(job_id)
+            elif manager_type == "huggingface":
+                return self.hf_jobs_manager.get_job_status(job_id)
             elif manager_type == "scheduler":
                 return self.scheduler_manager.check_job_status(job_id)
 
@@ -240,6 +322,18 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             manager_type = self.active_jobs[job_id]["manager"]
 
+            if manager_type == "huggingface":
+                if not self.hf_jobs_manager.cancel_job(job_id):
+                    # Keep tracking it: an uncancelled job is still running
+                    # and still billing, and forgetting it here would make it
+                    # invisible.
+                    raise RuntimeError(
+                        f"Could not cancel HuggingFace Job {job_id}; it may "
+                        "still be running. Check the Jobs page for your "
+                        "namespace."
+                    )
+                del self.active_jobs[job_id]
+                return
             if manager_type == "cloud":
                 self.cloud_manager.cancel_cloud_job(job_id)
                 del self.active_jobs[job_id]

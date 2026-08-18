@@ -4,7 +4,7 @@ import pytest
 import tempfile
 import shutil
 from unittest.mock import Mock, patch
-from clustrix.config import ClusterConfig, configure
+from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig, configure
 
 _INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
 _OPT_IN_VAR = "CLUSTRIX_ALLOW_BILLABLE"
@@ -182,6 +182,29 @@ def sample_loop_function():
         return results
 
     return loop_func
+
+
+@pytest.fixture(autouse=True, scope="session")
+def isolate_config_dir():
+    """Point clustrix's config directory at a throwaway for the whole run.
+
+    Without this the suite writes into whoever is running it. Observed on a
+    developer machine: an `integration_test` profile appended to the real
+    ~/.clustrix/clustrix.yml, plus test.yml and test_all_configs.yml beside
+    it, and a stray test_config.yml dropped into the repository root. Tests
+    that chdir into a tmpdir do not help, because the save path is derived
+    from the config directory rather than the working directory.
+    """
+    with tempfile.TemporaryDirectory(prefix="clustrix-test-config-") as tmp:
+        previous = os.environ.get(CONFIG_DIR_ENV_VAR)
+        os.environ[CONFIG_DIR_ENV_VAR] = tmp
+        try:
+            yield tmp
+        finally:
+            if previous is None:
+                os.environ.pop(CONFIG_DIR_ENV_VAR, None)
+            else:
+                os.environ[CONFIG_DIR_ENV_VAR] = previous
 
 
 @pytest.fixture(autouse=True)

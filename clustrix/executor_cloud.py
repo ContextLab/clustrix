@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 
 import paramiko
 import cloudpickle
-import pickle
+import dill
 
 if TYPE_CHECKING:
     from .cloud_providers.base import CloudProvider
@@ -355,7 +355,10 @@ class CloudJobManager:
             try:
                 sftp_client.get(result_path, temp_result_path)
                 with open(temp_result_path, "rb") as f:
-                    result = pickle.load(f)
+                    # dill: the worker wrote this with dill, and stdlib
+                    # pickle would rebuild __main__ classes instead of reusing
+                    # the caller's.
+                    result = dill.load(f)
             finally:
                 os.unlink(temp_result_path)
 
@@ -386,10 +389,23 @@ def main():
         with open('{remote_work_dir}/func_data.pkl', 'rb') as f:
             func_data = cloudpickle.load(f)
 
-        # Execute function
-        func = func_data['func']
-        args = func_data.get('args', ())
-        kwargs = func_data.get('kwargs', {{}})
+        # Unpack what serialize_function() actually produced. It stores the
+        # function as dill (or cloudpickle) bytes under "function", and the
+        # arguments as pickle bytes -- not as live objects. Reading 'func'
+        # here raised KeyError on the first line of every cloud job, which is
+        # proof this path had never run.
+        try:
+            import dill as _ser
+        except ImportError:
+            _ser = cloudpickle
+        try:
+            func = _ser.loads(func_data['function'])
+        except Exception:
+            func = cloudpickle.loads(func_data['function'])
+        # _ser, not stdlib pickle: args may carry classes defined in the
+        # caller's __main__, which pickle can only store by qualified name.
+        args = _ser.loads(func_data['args'])
+        kwargs = _ser.loads(func_data['kwargs'])
 
         result = func(*args, **kwargs)
 

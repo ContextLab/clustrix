@@ -3,7 +3,7 @@ import yaml
 import os
 from pathlib import Path
 from typing import Dict, Optional, Any
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 
 
 @dataclass
@@ -107,6 +107,15 @@ class ClusterConfig:
     hf_token: Optional[str] = None  # Required for authentication
     hf_username: Optional[str] = None
     hf_sdk: Optional[str] = None
+    # HuggingFace Jobs backend (cluster_type="huggingface"). The namespace is
+    # usually an org rather than the personal account, which is often not on a
+    # plan that can run jobs.
+    hf_namespace: Optional[str] = None
+    hf_flavor: Optional[str] = None  # defaults to cpu-basic
+    hf_image: Optional[str] = None  # defaults to python:<local minor>-slim
+    hf_job_timeout: Optional[str] = None  # e.g. "30m"
+    # GPU flavors bill real money, so selecting one is an explicit act.
+    hf_allow_gpu_flavors: bool = False
 
     # Resource defaults
     default_cores: int = 4
@@ -116,7 +125,10 @@ class ClusterConfig:
     default_queue: Optional[str] = None
 
     # Paths
-    remote_work_dir: str = "/tmp/clustrix"
+    # Home-relative, not /tmp: on SLURM/PBS/SGE the compute node has its own
+    # /tmp, so an environment built on the login node is simply absent at run
+    # time and the job dies with exit 127 before writing any diagnostics.
+    remote_work_dir: str = "~/.clustrix/jobs"
     local_work_dir: Optional[str] = None  # If None, uses current working directory
     local_cache_dir: str = "~/.clustrix/cache"
     conda_env_name: Optional[str] = None
@@ -136,6 +148,10 @@ class ClusterConfig:
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
     async_submit: bool = False  # Use asynchronous job submission
     use_two_venv: bool = True  # Use two-venv setup for cross-version compatibility
+    # Seconds paramiko waits to establish an SSH connection. The OS default
+    # is minutes, which turns an unreachable host into a hang rather than an
+    # error.
+    ssh_connect_timeout: int = 30
     venv_setup_timeout: int = 300  # Timeout for venv setup in seconds (5 minutes)
 
     # Monitoring settings
@@ -154,6 +170,14 @@ class ClusterConfig:
     pre_execution_commands: Optional[list] = None
 
     # Cluster-specific package and setup configuration
+    # The execution environment mirrors the local one by default: whatever the
+    # local package manager reports (pip freeze, or the uv/conda equivalent) is
+    # installed on the worker. A function that runs locally then runs remotely
+    # without anyone listing its dependencies by hand.
+    replicate_local_environment: bool = True
+    # Names to leave out of that mirror -- platform-specific wheels that cannot
+    # install on the cluster, or anything simply not needed there.
+    excluded_packages: Optional[list] = None
     cluster_packages: Optional[list] = None  # Additional packages to install in VENV2
     venv_post_install_commands: Optional[list] = (
         None  # Commands to run after package installation
@@ -186,6 +210,8 @@ class ClusterConfig:
             self.pre_execution_commands = []
         if self.cluster_packages is None:
             self.cluster_packages = []
+        if self.excluded_packages is None:
+            self.excluded_packages = []
         if self.venv_post_install_commands is None:
             self.venv_post_install_commands = []
 
@@ -302,6 +328,29 @@ def load_config(config_path: str) -> None:
         else:
             config_data = json.load(f)
 
+    if not isinstance(config_data, dict):
+        raise ValueError(
+            f"{config_path} does not contain a configuration mapping "
+            f"(parsed as {type(config_data).__name__})."
+        )
+
+    # An unknown key used to surface as a bare
+    # "ClusterConfig.__init__() got an unexpected keyword argument
+    # 'cleanup_remote_files'", which names the internals rather than the file
+    # the user wrote, and stops at the first offender.
+    known = {f.name for f in fields(ClusterConfig)}
+    unknown = sorted(set(config_data) - known)
+    if unknown:
+        import difflib
+
+        hints = []
+        for name in unknown:
+            close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+            hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
+        raise ValueError(
+            f"{config_path} contains unknown setting(s): {'; '.join(hints)}"
+        )
+
     _config = ClusterConfig(**config_data)
 
 
@@ -322,6 +371,25 @@ def save_config(config_path: str) -> None:
             json.dump(config_data, f, indent=2)
 
 
+CONFIG_DIR_ENV_VAR = "CLUSTRIX_CONFIG_DIR"
+
+
+def get_config_dir() -> Path:
+    """Return the directory clustrix reads and writes user configuration in.
+
+    Defaults to ``~/.clustrix``. Setting ``CLUSTRIX_CONFIG_DIR`` redirects it,
+    which matters in three situations: containers and CI images where ``$HOME``
+    is not writable or not persistent, machines shared by several projects, and
+    tests. Without an override the notebook widget's "save configuration"
+    button writes into the developer's own ``~/.clustrix`` during a test run,
+    silently editing real cluster profiles.
+    """
+    override = os.environ.get(CONFIG_DIR_ENV_VAR)
+    if override:
+        return Path(override).expanduser()
+    return Path.home() / ".clustrix"
+
+
 def get_config() -> ClusterConfig:
     """Get current configuration."""
     return _config
@@ -330,10 +398,11 @@ def get_config() -> ClusterConfig:
 # Try to load configuration from default locations
 def _load_default_config():
     """Load configuration from default locations."""
+    config_dir = get_config_dir()
     default_paths = [
-        Path.home() / ".clustrix" / "config.yml",
-        Path.home() / ".clustrix" / "config.yaml",
-        Path.home() / ".clustrix" / "config.json",
+        config_dir / "config.yml",
+        config_dir / "config.yaml",
+        config_dir / "config.json",
         Path.cwd() / "clustrix.yml",
         Path.cwd() / "clustrix.yaml",
         Path.cwd() / "clustrix.json",

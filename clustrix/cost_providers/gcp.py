@@ -181,6 +181,20 @@ class GCPCostMonitor(BaseCostMonitor):
                 instance_type, self.compute_pricing["default"]
             )
             pricing_source = "hardcoded"
+            if instance_type not in self.compute_pricing:
+                # The "default" rate has nothing to do with this
+                # instance. Appended rather than assigned, so an
+                # outdated-data warning cannot displace the more
+                # important fact that the figure is a placeholder.
+                unknown = (
+                    f"Unrecognised instance type {instance_type!r}; "
+                    f"priced at the placeholder default rate of "
+                    f"${hourly_rate}/hr. This is not a real quote."
+                )
+                logger.warning(unknown)
+                pricing_warning = (
+                    f"{pricing_warning} {unknown}" if pricing_warning else unknown
+                )
 
             if self.pricing_client and self.pricing_client.is_pricing_data_outdated():
                 pricing_warning = (

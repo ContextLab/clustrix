@@ -8,7 +8,7 @@ import os
 import time
 import tempfile
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Optional
 import yaml
 import paramiko
 
@@ -28,6 +28,7 @@ class ConnectionManager:
         self.ssh_client = None
         self.sftp_client = None
         self.k8s_client = None
+        self._remote_home = None  # cache for resolve_remote_path()
 
     def setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
@@ -216,14 +217,69 @@ class ConnectionManager:
             logger.error(f"Failed to configure kubectl for provisioned cluster: {e}")
             raise
 
-    def execute_remote_command(self, command: str) -> tuple:
-        """Execute command on remote cluster."""
+    def execute_remote_command(self, command: str, check: bool = False) -> tuple:
+        """Execute command on remote cluster.
+
+        ``check`` raises when the command exits non-zero. It is off by default
+        because most callers here inspect the output themselves and tolerate
+        failure, but anything whose failure would be *unsafe* rather than
+        merely unhelpful must opt in -- a `chmod 700` that quietly does nothing
+        leaves a secret readable.
+        """
         if self.ssh_client is None:
             raise RuntimeError(
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         stdin, stdout, stderr = self.ssh_client.exec_command(command)
-        return stdout.read().decode(), stderr.read().decode()
+        out = stdout.read().decode()
+        err = stderr.read().decode()
+        if check:
+            status = stdout.channel.recv_exit_status()
+            if status != 0:
+                raise RuntimeError(
+                    f"Remote command failed (exit {status}): {command}\n{err.strip()}"
+                )
+        return out, err
+
+    def resolve_remote_path(self, path: str) -> str:
+        """Expand a leading ``~/`` against the remote account's home directory.
+
+        Shell commands expand ``~`` themselves, but SFTP does not: it treats
+        ``~/.clustrix/jobs`` as a *relative* directory literally named ``~``.
+        A work directory that is created correctly by ``mkdir -p`` and then
+        uploaded into the wrong place is a confusing failure, so every path
+        derived from ``remote_work_dir`` goes through here first.
+
+        Only ``~`` and ``~/...`` are expanded. ``~otheruser/...`` refers to a
+        different account's home and cannot be derived from ``$HOME``;
+        rewriting it by string concatenation would silently produce
+        ``/home/alicebob/...``, so it is left alone for the shell to resolve.
+
+        The remote home directory is resolved once and cached per connection.
+        """
+        if path != "~" and not path.startswith("~/"):
+            return path
+
+        if self._remote_home is None:
+            stdout, _ = self.execute_remote_command("echo $HOME")
+            # Take the LAST line: an interactive-style profile can print a
+            # login banner ahead of the value, and prepending "*** Welcome ***"
+            # to a path produces a directory nobody can explain.
+            candidates = [
+                ln.strip() for ln in (stdout or "").splitlines() if ln.strip()
+            ]
+            home = candidates[-1] if candidates else ""
+            if not home.startswith("/"):
+                raise RuntimeError(
+                    "Could not determine the remote home directory (got "
+                    f"{home!r}), so remote_work_dir={path!r} cannot be "
+                    "resolved. Set remote_work_dir to an absolute path."
+                )
+            self._remote_home = home.rstrip("/")
+
+        if path == "~":
+            return self._remote_home
+        return self._remote_home + path[1:]
 
     def upload_file(self, local_path: str, remote_path: str):
         """Upload file to remote cluster."""
@@ -245,16 +301,26 @@ class ConnectionManager:
         sftp.get(remote_path, local_path)
         sftp.close()
 
-    def create_remote_file(self, remote_path: str, content: str):
-        """Create file with content on remote cluster."""
+    def create_remote_file(
+        self, remote_path: str, content: str, mode: Optional[int] = None
+    ):
+        """Create file with content on remote cluster.
+
+        ``mode`` sets the file's permissions before anything is written, so a
+        secret never exists on disk world-readable even briefly.
+        """
         if self.ssh_client is None:
             raise RuntimeError(
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         sftp = self.ssh_client.open_sftp()
-        with sftp.open(remote_path, "w") as f:
-            f.write(content)
-        sftp.close()
+        try:
+            with sftp.open(remote_path, "w") as f:
+                if mode is not None:
+                    sftp.chmod(remote_path, mode)
+                f.write(content)
+        finally:
+            sftp.close()
 
     def remote_file_exists(self, remote_path: str) -> bool:
         """Check if file exists on remote cluster."""
@@ -279,6 +345,9 @@ class ConnectionManager:
 
     def disconnect(self):
         """Disconnect from cluster."""
+        # A later connect() may use a different username, and a home directory
+        # cached from the previous account would be silently wrong.
+        self._remote_home = None
         if self.sftp_client:
             self.sftp_client.close()
             self.sftp_client = None

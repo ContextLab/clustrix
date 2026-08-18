@@ -4,7 +4,6 @@ Comprehensive test suite for function flattening capabilities.
 Tests nested functions, inline functions, closures, and edge cases.
 """
 
-
 from clustrix.function_flattening import (
     auto_flatten_if_needed,
     analyze_function_complexity,

@@ -7,7 +7,8 @@ HPC scheduler jobs (SLURM, PBS, SGE).
 import os
 import time
 import tempfile
-import pickle
+import dill
+
 import logging
 from typing import Dict, Any, Optional
 
@@ -249,7 +250,28 @@ class SchedulerStatusManager:
         except Exception as e:
             logger.warning(f"Error checking SLURM queue status for job {job_id}: {e}")
 
-        # Job not in queue - could be completed or failed
+        # Job not in the queue. That does NOT mean it finished: squeue does not
+        # list a job for a short window right after sbatch accepts it, and it
+        # stops listing a job the moment it finishes. Asking the accounting
+        # database first distinguishes "not started yet" and "still running"
+        # from "gone", which the file probe below cannot do -- it would poll
+        # for about fifteen seconds, find no result.pkl, and report the job
+        # unknown while it was in fact still queued.
+        sacct_info = self._query_sacct(job_id)
+        if sacct_info:
+            state = sacct_info["state"]
+            if state.startswith(("PENDING", "REQUEUED", "RESIZING", "SUSPENDED")):
+                return "queued"
+            if state.startswith(("RUNNING", "CONFIGURING", "COMPLETING")):
+                return "running"
+            if any(state.startswith(f) for f in self._TERMINAL_FAILURE_STATES):
+                reason = self._get_scheduler_failure_reason(job_id)
+                logger.error(f"Job {job_id} {reason or 'failed'}")
+                return "failed"
+            # COMPLETED, or a state we do not recognise: fall through to the
+            # file probe, which distinguishes a real result from a job that
+            # exited zero without producing one.
+
         # Use robust file-based detection with retry logic
         if job_id not in active_jobs:
             logger.warning(f"Job {job_id} not found in active_jobs, assuming completed")
@@ -401,7 +423,101 @@ class SchedulerStatusManager:
         except Exception as e:
             logger.error(f"Could not list job {job_id} directory: {e}")
 
+        # Last resort: ask the scheduler itself what happened. A job that leaves
+        # no result.pkl, no error.pkl and no output files never got far enough to
+        # write them -- typically the working directory was not visible from the
+        # compute node, so the job script died before its first redirect. The
+        # accounting database is the only place that still knows, and reporting
+        # "unknown" instead of its verdict is what makes this failure so
+        # expensive to diagnose.
+        accounting = self._get_scheduler_failure_reason(job_id)
+        if accounting:
+            logger.error(f"Job {job_id} {accounting}")
+            return "failed"
+
         return "unknown"
+
+    # Scheduler states that mean the job is over and did not succeed.
+    _TERMINAL_FAILURE_STATES = (
+        "FAILED",
+        "CANCELLED",
+        "TIMEOUT",
+        "OUT_OF_MEMORY",
+        "NODE_FAIL",
+        "PREEMPTED",
+        "BOOT_FAIL",
+        "DEADLINE",
+    )
+
+    def _query_sacct(self, job_id: str) -> Optional[Dict[str, str]]:
+        """Ask SLURM's accounting database about a job.
+
+        Returns a dict with ``state``, ``exit_code``, ``nodelist`` and
+        ``workdir``, or None when the cluster is not SLURM, sacct is
+        unavailable, or it has no record of the job.
+        """
+        if self.config.cluster_type != "slurm":
+            return None
+
+        # WorkDir is only useful for the exit-127 diagnostic and is not a
+        # supported field on older SLURM, where asking for it makes the whole
+        # query fail. Fall back to the fields every version has rather than
+        # losing the state as well.
+        field_sets = ("State,ExitCode,NodeList,WorkDir", "State,ExitCode,NodeList")
+        line = ""
+        for fields in field_sets:
+            cmd = (
+                f"sacct -j {job_id} --format={fields} "
+                f"--parsable2 --noheader 2>/dev/null | head -1"
+            )
+            try:
+                stdout, _ = self.connection_manager.execute_remote_command(cmd)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"Could not query sacct for job {job_id}: {e}")
+                return None
+            line = (stdout or "").strip()
+            if line:
+                break
+
+        if not line:
+            return None
+
+        parts = line.split("|")
+        return {
+            "state": parts[0].strip() if parts else "",
+            "exit_code": parts[1].strip() if len(parts) > 1 else "?",
+            "nodelist": parts[2].strip() if len(parts) > 2 else "?",
+            "workdir": parts[3].strip() if len(parts) > 3 else "?",
+        }
+
+    def _get_scheduler_failure_reason(self, job_id: str) -> Optional[str]:
+        """Ask the scheduler's accounting database why a job produced nothing.
+
+        Returns a human-readable explanation, or None if the scheduler has no
+        record of a failure (or cannot be reached).
+        """
+        info = self._query_sacct(job_id)
+        if not info:
+            return None
+
+        state = info["state"]
+        if not any(state.startswith(s) for s in self._TERMINAL_FAILURE_STATES):
+            return None
+
+        detail = (
+            f"failed according to sacct: state={state} "
+            f"exit_code={info['exit_code']} node={info['nodelist']} "
+            f"workdir={info['workdir']}"
+        )
+        if info["exit_code"].startswith("127"):
+            detail += (
+                ". Exit code 127 means the job script could not find a command it "
+                "tried to run. The usual cause is that remote_work_dir points at "
+                "storage the compute node cannot see -- /tmp is node-local on most "
+                "clusters, so an environment built on the login node is absent at "
+                "run time. Set remote_work_dir to a shared filesystem path."
+            )
+        return detail
 
     def _check_pbs_status(self, job_id: str) -> str:
         """Check PBS job status."""
@@ -530,7 +646,9 @@ class SchedulerStatusManager:
                 self.connection_manager.download_file(error_pkl_path, local_error_path)
 
                 with open(local_error_path, "rb") as f:
-                    error_data = pickle.load(f)
+                    # dill: matches how the stages write it, and keeps
+                    # a custom exception class bound to the caller's own.
+                    error_data = dill.load(f)
 
                 os.unlink(local_error_path)
 
@@ -631,18 +749,24 @@ class SchedulerStatusManager:
                 self.connection_manager.download_file(error_pkl_path, local_error_path)
 
                 with open(local_error_path, "rb") as f:
-                    error_data = pickle.load(f)
+                    # dill: matches how the stages write it, and keeps
+                    # a custom exception class bound to the caller's own.
+                    error_data = dill.load(f)
 
                 os.unlink(local_error_path)
 
                 # Return the exception object if it is one
                 if isinstance(error_data, Exception):
                     return error_data
-                elif isinstance(error_data, dict) and "error" in error_data:
-                    # Try to recreate exception from dict
-                    error_str = error_data["error"]
-                    # This is a simplified approach - in practice you'd want more sophisticated exception recreation
-                    return RuntimeError(error_str)
+                elif isinstance(error_data, dict):
+                    # The remote stages ship the exception object itself under
+                    # 'exception'. Prefer it: rebuilding from the message alone
+                    # loses the type, so `except ValueError` would not fire.
+                    original = error_data.get("exception")
+                    if isinstance(original, Exception):
+                        return original
+                    if "error" in error_data:
+                        return RuntimeError(error_data["error"])
 
             except Exception:
                 # If we can't extract the exception, return None

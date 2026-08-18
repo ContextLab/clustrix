@@ -33,15 +33,6 @@ This directory contains essential utility scripts for development and maintenanc
 - Runs full quality check suite
 - Pushes changes automatically
 
-#### `pre_commit_auto_format.py`
-**Purpose**: Pre-commit hook utility for automatic formatting  
-**Usage**: Used by Git pre-commit hooks  
-**Features**:
-- Lightweight formatting check for Git workflow
-- Prevents commits with formatting issues
-- Integrates with `.git/hooks/pre-commit`
-
-### Project Maintenance
 
 #### `generate_badges.py`
 **Purpose**: README badge generator for project status  

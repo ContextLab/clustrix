@@ -3,27 +3,34 @@ PBS/Torque Cluster Tutorial
 
 This tutorial demonstrates how to use Clustrix with PBS (Portable Batch System) and Torque clusters, commonly used in academic and research computing environments.
 
+.. warning::
+
+   The PBS backend is implemented but has not been verified against real
+   hardware. Unlike SLURM and SSH, it does not use the two-venv environment
+   setup path. Treat this tutorial as a description of the intended interface,
+   not as a record of something that has been run.
+
 Prerequisites
-------------
+-------------
 
 1. Access to a PBS/Torque cluster
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
 
 Configuration Options
---------------------
+---------------------
 
 **Option 1: Interactive Widget (Recommended for Jupyter)**
 
 For Jupyter notebook users, use the interactive configuration widget:
 
-.. code-block:: python
+Importing ``clustrix`` registers the magic but does not display anything. Run
+``%%remote`` in a cell of its own to open the widget, and select ``pbs`` as the
+cluster type to reveal the connection fields:
 
-   import clustrix  # Auto-loads the magic command
-   
-   # Use the magic command to open the configuration widget
-   %%clusterfy
-   # Interactive widget appears with PBS/Torque templates and GUI configuration
+.. code-block:: ipython3
+
+   %%remote
 
 **Option 2: Programmatic Configuration**
 
@@ -55,8 +62,6 @@ PBS uses different resource syntax compared to SLURM:
        memory="16GB",         # Memory requirement
        time="02:00:00",       # Wall time (HH:MM:SS)
        queue="batch",         # PBS queue name
-       nodes=1,               # Number of nodes
-       ppn=8                  # Processors per node (PBS-specific)
    )
    def pbs_computation():
        """Example computation on PBS cluster."""
@@ -81,10 +86,10 @@ PBS uses different resource syntax compared to SLURM:
    print(f"Matrix computation result: {result}")
 
 Advanced PBS Configuration
--------------------------
+--------------------------
 
 Environment and Queue Setup
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -95,12 +100,11 @@ Environment and Queue Setup
        
        # PBS-specific settings
        default_queue="normal",        # Default queue
-       default_walltime="04:00:00",  # Default wall time
+       default_time="04:00:00",       # Default wall time
        
        # Resource defaults
        default_cores=4,
        default_memory="8GB",
-       default_nodes=1,
        
        # Environment setup
        environment_variables={
@@ -110,7 +114,7 @@ Environment and Queue Setup
    )
 
 Configuration File for PBS
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Create ``~/.clustrix/config.yml``:
 
@@ -124,22 +128,21 @@ Create ``~/.clustrix/config.yml``:
    
    # PBS-specific settings
    default_queue: "batch"
-   default_walltime: "02:00:00"
+   default_time: "02:00:00"
    
    # Resource defaults
    default_cores: 8
    default_memory: "16GB"
-   default_nodes: 1
    
    # Job management
    job_poll_interval: 30  # Check job status every 30 seconds
    cleanup_on_success: true
 
 PBS Job Examples
----------------
+----------------
 
 Array-style Processing
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -187,7 +190,7 @@ Array-style Processing
        print(f"File {r['file_id']}: {r['result']:.4f}")
 
 Bioinformatics Pipeline
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -246,10 +249,10 @@ Bioinformatics Pipeline
    print(f"Average GC content: {avg_gc:.3f}")
 
 PBS Job Management
------------------
+------------------
 
 Resource Monitoring
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -294,10 +297,10 @@ Resource Monitoring
    print(f"Memory increased by: {result['memory_increase_mb']:.2f} MB")
 
 Error Handling and Debugging
----------------------------
+----------------------------
 
 Handling PBS-specific Errors
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -337,7 +340,7 @@ Handling PBS-specific Errors
            print(f"✗ {case}: {type(e).__name__}: {e}")
 
 Debugging with Logs
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -375,10 +378,10 @@ Debugging with Logs
    result = logged_function()
 
 Best Practices for PBS
----------------------
+----------------------
 
 Queue Selection Strategy
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -409,7 +412,7 @@ Queue Selection Strategy
        return "Computation with optimal queue selection"
 
 Efficient Data Handling
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -447,10 +450,10 @@ Efficient Data Handling
    print(f"Processed {result['chunks_processed']} chunks efficiently")
 
 Complete PBS Example
--------------------
+--------------------
 
 Scientific Computing Workflow
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -466,7 +469,7 @@ Scientific Computing Workflow
        
        # PBS-specific settings
        default_queue="normal",
-       default_walltime="04:00:00",
+       default_time="04:00:00",
        
        # Default resources
        default_cores=8,

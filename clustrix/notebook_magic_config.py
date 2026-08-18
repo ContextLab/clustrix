@@ -5,6 +5,7 @@ This module contains default configurations and configuration-related utilities
 for the notebook magic interface.
 """
 
+import ipaddress
 import json
 import yaml
 import re
@@ -71,7 +72,7 @@ DEFAULT_CONFIGS = {
         "cluster_port": 22,
         "default_cores": 4,
         "default_memory": "16GB",
-        "remote_work_dir": "/tmp/clustrix",
+        "remote_work_dir": "~/.clustrix/jobs",
         "package_manager": "pip",
     },
     # Cloud Provider Configurations
@@ -162,41 +163,57 @@ def detect_config_files(search_dirs: Optional[List[str]] = None) -> List[Path]:
     return config_files
 
 
-def load_config_from_file(file_path: Union[Path, str]) -> Dict[str, Any]:
-    """Load configuration from a YAML or JSON file."""
-    try:
-        # Convert string to Path if needed
-        if isinstance(file_path, str):
-            file_path = Path(file_path)
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    """Coerce a parsed document to a mapping, discarding anything else."""
+    return value if isinstance(value, dict) else {}
 
-        # Read and parse the file
-        content = file_path.read_text()
-        if file_path.suffix.lower() in [".yml", ".yaml"]:
-            return yaml.safe_load(content) or {}
-        elif file_path.suffix.lower() == ".json":
-            return json.loads(content)
-        else:
-            # Try YAML first, then JSON
-            try:
-                return yaml.safe_load(content) or {}
-            except yaml.YAMLError:
-                return json.loads(content)
+
+def load_config_from_file(file_path: Union[Path, str]) -> Dict[str, Any]:
+    """Load configuration from a YAML or JSON file, tolerating a bad one.
+
+    Returns an empty mapping for anything it cannot read or parse. That is a
+    deliberate contract -- four tests pin it -- because this is the widget's
+    "Load" path, where a raised exception would escape into a notebook cell
+    rather than the widget's own output area. The caller reports the empty
+    result to the user.
+
+    Use `clustrix.config.load_config` when a bad file should be an error: it
+    raises, and it names the offending settings.
+
+    Always returns a *mapping*. YAML happily parses a file of prose into a bare
+    string, so an unrecognised extension used to return a `str` from a function
+    annotated `-> Dict[str, Any]`; every caller then had to guess.
+    """
+    try:
+        path = Path(file_path) if isinstance(file_path, str) else file_path
+        content = path.read_text()
+        suffix = path.suffix.lower()
+
+        if suffix in (".yml", ".yaml"):
+            return _as_mapping(yaml.safe_load(content))
+        if suffix == ".json":
+            return _as_mapping(json.loads(content))
+
+        # Unknown extension: try both.
+        try:
+            return _as_mapping(yaml.safe_load(content))
+        except yaml.YAMLError:
+            return _as_mapping(json.loads(content))
     except Exception:
         return {}
 
 
 def validate_ip_address(ip: str) -> bool:
-    """Validate IP address format."""
+    """Validate an IP address, v4 or v6.
+
+    This was hand-rolled IPv4-only parsing, so a cluster reachable at an IPv6
+    address was reported invalid by the widget's host validation. The stdlib
+    already knows the grammar for both.
+    """
     if not ip:
         return False
-    # IPv4 validation
-    parts = ip.split(".")
-    if len(parts) != 4:
-        return False
     try:
-        for part in parts:
-            if not (0 <= int(part) <= 255):
-                return False
+        ipaddress.ip_address(ip)
         return True
     except ValueError:
         return False

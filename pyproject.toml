@@ -11,7 +11,12 @@ authors = [
 description = "Seamless distributed computing for Python functions"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.8"
+# Four hard dependencies -- click, requests, huggingface_hub and python-dotenv
+# -- require >=3.10 at their current versions, and paramiko and dill require
+# >=3.9. A ">=3.8" floor was therefore never true: installing on 3.8 or 3.9
+# either fails or silently pins years-old releases. 3.8 has also been
+# end-of-life since October 2024. (See #110.)
+requires-python = ">=3.10"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers", 
@@ -19,8 +24,6 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
-    "Programming Language :: Python :: 3.9", 
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -36,7 +39,9 @@ dependencies = [
     "dill>=0.3.4",
     "click>=8.0.0",
     "requests>=2.25.0",
-    "huggingface_hub>=0.16.0",
+    # run_job / inspect_job / fetch_job_logs -- the whole Jobs API the
+    # huggingface backend is built on -- arrived well after 0.16.
+    "huggingface_hub>=0.34.0",
     "python-dotenv>=1.0.0",
 ]
 
@@ -88,12 +93,23 @@ dev = [
     # them those modules raise ModuleNotFoundError during collection (see #130).
     "numpy>=1.19",
     "pandas>=1.1",
-    "black==25.1.0; python_version >= '3.9'",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
+    "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
+    # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8", 
     "mypy>=0.812",
     "types-PyYAML",
     "types-requests", 
     "types-paramiko",
+    # The notebook widget suite (tests/test_notebook_magic*.py,
+    # tests/test_modern_widget*.py, tests/test_widget_fixes.py) imports these at
+    # module scope. Without them 44 tests error out on an ImportError that looks
+    # like a code defect but is a missing dependency. CI installed the "widget"
+    # extra explicitly and so never saw it; a plain `pip install -e ".[dev]"` did.
+    "ipywidgets>=7.6.0",
+    "ipython>=7.0.0",
+    # tests/ uses @pytest.mark.timeout and several deadlock regression tests
+    # hang forever without it.
+    "pytest-timeout>=2.0",
 ]
 test = [
     "pytest>=6.0",
@@ -137,7 +153,8 @@ all = [
     # Development dependencies
     "pytest>=6.0",
     "pytest-cov>=2.0",
-    "black==25.1.0; python_version >= '3.9'",  # pinned - unbounded ">=" let CI pull 26.5.1 (see #110)
+    "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
+    # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8",
     "mypy>=0.812",
     # Documentation dependencies
@@ -157,10 +174,11 @@ include = ["clustrix*"]
 
 [tool.black]
 line-length = 88
-target-version = ['py38']
+target-version = ['py310']
 
 [tool.mypy]
-python_version = "3.8"
+# mypy refuses anything below 3.10 outright ("Python 3.8 is not supported")
+python_version = "3.10"
 warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false

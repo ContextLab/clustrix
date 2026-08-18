@@ -1,4 +1,5 @@
 import functools
+import logging
 from typing import Any, Callable, Optional, Dict, List
 
 from .config import get_config
@@ -15,6 +16,12 @@ from .function_flattening import (
     auto_flatten_if_needed,
     create_simple_subprocess_fallback,
 )
+
+logger = logging.getLogger(__name__)
+
+#: Cluster types that submit work over an API instead of SSH, and therefore
+#: never have a ``cluster_host``.
+HOSTLESS_CLUSTER_TYPES = frozenset({"huggingface"})
 
 
 def cluster(
@@ -149,11 +156,34 @@ def cluster(
                 "key_file",
                 "terminate_on_completion",
                 "instance_startup_timeout",
+                # Per-job overrides for the API-backed backends. hf_jobs.py
+                # already reads hf_flavor/hf_timeout off job_config and
+                # executor_kubernetes.py reads the k8s_* ones; they were simply
+                # never put there, so the documented
+                # @cluster(k8s_namespace="compute") was silently dropped.
+                "hf_flavor",
+                "hf_timeout",
+                "hf_namespace",
+                "k8s_namespace",
+                "k8s_image",
+                "k8s_service_account",
+                "k8s_pull_policy",
             ]
 
             for param in cloud_params:
                 if param in kwargs:
                     job_config[param] = kwargs[param]
+
+            # A silently ignored option is worse than a rejected one: the job
+            # runs with settings the caller believes they changed.
+            unknown_kwargs = sorted(set(kwargs) - set(cloud_params))
+            if unknown_kwargs:
+                logger.warning(
+                    "@cluster received unrecognised option(s) %s; they have no "
+                    "effect. Recognised extras: %s",
+                    ", ".join(unknown_kwargs),
+                    ", ".join(sorted(cloud_params)),
+                )
 
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
@@ -490,6 +520,21 @@ def _detect_remote_gpu_count(
         )
         return {"output": result.stdout}
 
+    config = executor.config
+    if config.cluster_type in HOSTLESS_CLUSTER_TYPES:
+        # Probing costs a whole extra billed container per @cluster call, and
+        # for a CPU flavor the answer is known in advance. Ask the flavor.
+        from .hf_jobs import is_gpu_flavor, DEFAULT_FLAVOR
+
+        flavor = (
+            job_config.get("hf_flavor")
+            or getattr(config, "hf_flavor", None)
+            or getattr(config, "hf_hardware", None)
+            or DEFAULT_FLAVOR
+        )
+        if not is_gpu_flavor(flavor):
+            return {"available": False, "count": 0}
+
     try:
         from .utils import serialize_function
 
@@ -505,7 +550,12 @@ def _detect_remote_gpu_count(
 
         return None
 
-    except Exception:
+    except Exception as e:
+        # Swallowing this made a real failure -- the probe function lives in
+        # clustrix.decorator, so dill ships it by reference and any worker
+        # without clustrix installed raises ModuleNotFoundError -- look
+        # identical to "this cluster has no GPUs".
+        logger.warning("Could not detect remote GPU count: %s", e)
         return None
 
 
@@ -645,6 +695,14 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     if config.cluster_type == "kubernetes" and getattr(
         config, "auto_provision_k8s", False
     ):
+        return "remote"
+
+    # Some backends reach their compute over an HTTP API rather than SSH, so
+    # they legitimately have no cluster_host. Without this they fall into the
+    # "no cluster configured" branch below and run on the caller's machine --
+    # silently, while reporting success, which is the worst possible outcome
+    # for someone who asked for remote execution.
+    if config.cluster_type in HOSTLESS_CLUSTER_TYPES:
         return "remote"
 
     # If no cluster is configured, use local execution

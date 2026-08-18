@@ -27,7 +27,7 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     from .notebook_magic_mocks import display, HTML, widgets
 
-from .config import configure
+from .config import configure, get_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,7 @@ class EnhancedClusterConfigWidget:
         # Remote work directory
         self.work_dir_field = widgets.Text(
             description="Work Directory:",
-            value="/tmp/clustrix",
+            value="~/.clustrix/jobs",
             placeholder="e.g., /scratch/username/clustrix",
             tooltip="Directory on remote cluster for job files",
             style=style,
@@ -204,7 +204,23 @@ class EnhancedClusterConfigWidget:
         self._setup_change_tracking()
 
     def _update_config_dropdown(self):
-        """Update the configuration dropdown with current config names."""
+        """Update the configuration dropdown with current config names.
+
+        Rebuilding `options` makes ipywidgets re-fire the selection observer,
+        which calls `_load_config_to_widgets` and overwrites whatever the user
+        has typed since the last load. Renaming a configuration therefore
+        discarded every edit made before the rename *and* left the widget
+        showing a different profile. The rebuild is guarded so the observer
+        only responds to a selection the user actually made.
+        """
+        self._rebuilding_dropdown = True
+        try:
+            self._rebuild_config_dropdown()
+        finally:
+            self._rebuilding_dropdown = False
+
+    def _rebuild_config_dropdown(self):
+        """The actual rebuild; always called with the observer suppressed."""
         if not self.configs:
             self.config_dropdown.options = []
             self.config_dropdown.value = None
@@ -605,6 +621,29 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
+        # Module loads and pre-execution commands.
+        #
+        # Both are real ClusterConfig fields that utils.py emits into every job
+        # script, and neither had a widget after the #80 refactor -- so saving
+        # a profile through this widget silently erased a user's `module load`
+        # lines, which on an HPC cluster is the difference between a job that
+        # runs and one that cannot find its compiler.
+        self.module_loads_field = widgets.Textarea(
+            description="Module Loads:",
+            placeholder="python/3.12\ncuda/12.1",
+            tooltip="Environment modules to load, one per line",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
+        self.pre_exec_commands_field = widgets.Textarea(
+            description="Pre-exec Commands:",
+            placeholder="source /path/to/setup.sh",
+            tooltip="Shell commands to run before the job, one per line",
+            rows=3,
+            style=style,
+            layout=full_layout,
+        )
         # Job queue/partition
         self.queue_field = widgets.Text(
             description="Queue/Partition:",
@@ -703,6 +742,8 @@ class EnhancedClusterConfigWidget:
             self.package_manager,
             self.cost_monitoring_checkbox,
             self.env_vars_field,
+            self.module_loads_field,
+            self.pre_exec_commands_field,
             self.queue_field,
             self.ssh_key_field,
         ]
@@ -1046,6 +1087,29 @@ class EnhancedClusterConfigWidget:
         except Exception:
             pass  # Keep current options
 
+    @staticmethod
+    def _set_choice(field, value):
+        """Select a value in a dropdown, widening the options if need be.
+
+        Every one of these assignments used to be bare `field.value = ...`, so
+        loading a configuration whose region or instance type was not in the
+        hardcoded ten-item list raised
+
+            TraitError: Invalid selection: value not found
+
+        and broke the widget outright. AWS alone has far more than ten regions,
+        so this was reachable with a perfectly ordinary config file.
+
+        The saved configuration is authoritative -- a list baked into the UI
+        should not be able to veto it -- so an unrecognised value is added to
+        the options rather than discarded.
+        """
+        if value in (None, ""):
+            return
+        if value not in field.options:
+            field.options = list(field.options) + [value]
+        field.value = value
+
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
         if config_name not in self.configs:
@@ -1059,7 +1123,7 @@ class EnhancedClusterConfigWidget:
         self.cores_field.value = config.get("default_cores", 1)
         self.memory_field.value = config.get("default_memory", "16GB")
         self.time_field.value = config.get("default_time", "01:00:00")
-        self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
+        self.work_dir_field.value = config.get("remote_work_dir", "~/.clustrix/jobs")
 
         # Connection fields
         self.host_field.value = config.get("cluster_host", "")
@@ -1073,18 +1137,21 @@ class EnhancedClusterConfigWidget:
         self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
 
         # AWS fields
-        self.aws_region_field.value = config.get("aws_region", "us-east-1")
-        self.aws_instance_type_field.value = config.get(
-            "aws_instance_type", "t3.medium"
+        self._set_choice(self.aws_region_field, config.get("aws_region", "us-east-1"))
+        self._set_choice(
+            self.aws_instance_type_field, config.get("aws_instance_type", "t3.medium")
         )
-        self.aws_cluster_type_field.value = config.get("aws_cluster_type", "ec2")
+        self._set_choice(
+            self.aws_cluster_type_field, config.get("aws_cluster_type", "ec2")
+        )
         self.aws_access_key_field.value = config.get("aws_access_key_id", "")
         self.aws_secret_key_field.value = config.get("aws_secret_access_key", "")
 
         # Azure fields
-        self.azure_region_field.value = config.get("azure_region", "eastus")
-        self.azure_instance_type_field.value = config.get(
-            "azure_instance_type", "Standard_D2s_v3"
+        self._set_choice(self.azure_region_field, config.get("azure_region", "eastus"))
+        self._set_choice(
+            self.azure_instance_type_field,
+            config.get("azure_instance_type", "Standard_D2s_v3"),
         )
         self.azure_subscription_field.value = config.get("azure_subscription_id", "")
         self.azure_client_id_field.value = config.get("azure_client_id", "")
@@ -1092,9 +1159,9 @@ class EnhancedClusterConfigWidget:
         self.azure_tenant_id_field.value = config.get("azure_tenant_id", "")
 
         # GCP fields
-        self.gcp_region_field.value = config.get("gcp_region", "us-central1")
-        self.gcp_instance_type_field.value = config.get(
-            "gcp_instance_type", "e2-medium"
+        self._set_choice(self.gcp_region_field, config.get("gcp_region", "us-central1"))
+        self._set_choice(
+            self.gcp_instance_type_field, config.get("gcp_instance_type", "e2-medium")
         )
         self.gcp_project_field.value = config.get("gcp_project", "")
         self.gcp_zone_field.value = config.get("gcp_zone", "")
@@ -1102,15 +1169,16 @@ class EnhancedClusterConfigWidget:
 
         # Lambda Cloud fields
         self.lambda_api_key_field.value = config.get("lambda_api_key", "")
-        self.lambda_instance_type_field.value = config.get(
-            "lambda_instance_type", "gpu_1x_a10"
+        self._set_choice(
+            self.lambda_instance_type_field,
+            config.get("lambda_instance_type", "gpu_1x_a10"),
         )
 
         # HuggingFace fields
         self.hf_token_field.value = config.get("hf_token", "")
         self.hf_space_name_field.value = config.get("hf_space_name", "")
-        self.hf_hardware_field.value = config.get("hf_hardware", "cpu-basic")
-        self.hf_sdk_field.value = config.get("hf_sdk", "gradio")
+        self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
+        self._set_choice(self.hf_sdk_field, config.get("hf_sdk", "gradio"))
 
         # Advanced options
         self.package_manager.value = config.get("package_manager", "pip")
@@ -1124,6 +1192,11 @@ class EnhancedClusterConfigWidget:
             self.env_vars_field.value = json.dumps(env_vars, indent=2)
         else:
             self.env_vars_field.value = ""
+
+        self.module_loads_field.value = "\n".join(config.get("module_loads", []) or [])
+        self.pre_exec_commands_field.value = "\n".join(
+            config.get("pre_execution_commands", []) or []
+        )
 
         self.queue_field.value = config.get("queue", "")
         self.ssh_key_field.value = config.get("ssh_key_path", "")
@@ -1249,12 +1322,27 @@ class EnhancedClusterConfigWidget:
             except json.JSONDecodeError:
                 pass  # Ignore invalid JSON
 
+        # One entry per line, blanks dropped.
+        for field, key in (
+            (self.module_loads_field, "module_loads"),
+            (self.pre_exec_commands_field, "pre_execution_commands"),
+        ):
+            entries = [
+                line.strip() for line in field.value.splitlines() if line.strip()
+            ]
+            if entries:
+                config[key] = entries
+
         # Remove empty string values
         config = {k: v for k, v in config.items() if v != ""}
         return config
 
     def _on_config_select(self, change):
         """Handle configuration selection from dropdown."""
+        if getattr(self, "_rebuilding_dropdown", False):
+            # Fired by _update_config_dropdown rebuilding options, not by the
+            # user picking something. Reloading here would discard their edits.
+            return
         config_name = change["new"]
         if config_name:
             self._load_config_to_widgets(config_name)
@@ -1360,7 +1448,7 @@ class EnhancedClusterConfigWidget:
                     filename += ".yml"
 
                 # Determine save directory
-                save_dir = Path.home() / ".clustrix"
+                save_dir = get_config_dir()
                 save_dir.mkdir(exist_ok=True)
                 file_path = save_dir / filename
 
@@ -1412,7 +1500,7 @@ class EnhancedClusterConfigWidget:
     def _update_existing_files(self):
         """Update the existing files dropdown."""
         try:
-            config_dirs = [Path.home() / ".clustrix", Path(".")]
+            config_dirs = [get_config_dir(), Path(".")]
             existing_files = []
             for config_dir in config_dirs:
                 if config_dir.exists():
@@ -1982,6 +2070,8 @@ class EnhancedClusterConfigWidget:
             [
                 widgets.HBox([self.package_manager, self.cost_monitoring_checkbox]),
                 self.env_vars_field,
+                self.module_loads_field,
+                self.pre_exec_commands_field,
                 widgets.HBox([self.queue_field, widgets.HTML("")]),
             ]
         )

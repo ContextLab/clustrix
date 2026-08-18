@@ -81,7 +81,10 @@ class TestConfigFileOperations:
 
     def test_detect_config_files_multiple_search_dirs(self):
         """Test config file detection across multiple directories."""
-        with tempfile.TemporaryDirectory() as tmpdir1, tempfile.TemporaryDirectory() as tmpdir2:
+        with (
+            tempfile.TemporaryDirectory() as tmpdir1,
+            tempfile.TemporaryDirectory() as tmpdir2,
+        ):
             (Path(tmpdir1) / "clustrix.yml").touch()
             (Path(tmpdir2) / "config.yaml").touch()
 
@@ -131,6 +134,9 @@ class TestConfigFileOperations:
             temp_path = Path(f.name)
 
         try:
+            # KNOWN FAILURE: load_config_from_file is annotated -> Dict[str, Any]
+            # but returns whatever yaml.safe_load produced, so a non-mapping
+            # file yields a str instead of {}.
             config = load_config_from_file(temp_path)
             assert config == {}
         finally:
@@ -147,11 +153,18 @@ class TestValidationExtended:
 
     def test_validate_ip_address_edge_cases(self):
         """Test IP address validation with edge cases."""
+        # KNOWN FAILURE: validate_ip_address is IPv4-only, so a valid IPv6
+        # cluster host is rejected by the widget's host validation.
         # IPv6 addresses (should be supported by the regex)
         assert validate_ip_address("2001:0db8:0000:0000:0000:ff00:0042:8329") is True
 
         # Leading zeros (actually valid in this implementation)
-        assert validate_ip_address("192.168.001.001") is True
+        # Leading zeros are rejected on purpose. CPython stopped accepting
+        # them in 3.9.5 (bpo-36384) because "010" is read as octal by some
+        # resolvers and decimal by others, which is an SSRF primitive. The
+        # old hand-rolled int() parsing accepted them; the stdlib does not,
+        # and the stdlib is right.
+        assert validate_ip_address("192.168.001.001") is False
 
         # Decimal with extra dots
         assert validate_ip_address("192.168.1.1.1") is False
@@ -245,7 +258,7 @@ class TestWidgetErrorHandling:
         """Test widget initialization when config loading fails."""
         notebook_magic, _ = mock_widget_environment
 
-        with patch("clustrix.notebook_magic.detect_config_files") as mock_detect:
+        with patch("clustrix.notebook_magic_widget.detect_config_files") as mock_detect:
             mock_detect.return_value = []  # Return empty instead of raising
 
             # Should not raise exception, should use defaults
@@ -263,7 +276,7 @@ class TestWidgetErrorHandling:
                 yaml.dump({"not_a_config": "invalid"}, f)
 
             with patch(
-                "clustrix.notebook_magic.detect_config_files",
+                "clustrix.notebook_magic_widget.detect_config_files",
                 return_value=[config_file],
             ):
                 widget = notebook_magic.EnhancedClusterConfigWidget()
@@ -434,14 +447,31 @@ class TestAutoDisplayFunctionality:
             # Should handle gracefully
 
 
+def make_magics_shell():
+    """Build a stand-in IPython shell that Magics.__init__ will accept.
+
+    IPython's Magics is a traitlets Configurable: it copies the shell into the
+    ``parent`` and ``config`` traits, both of which are type-checked. A bare
+    MagicMock fails that check, so spec it as an InteractiveShell (which makes
+    isinstance pass) and give it a real Config.
+    """
+    from IPython.core.interactiveshell import InteractiveShell
+    from traitlets.config import Config
+
+    shell = MagicMock(spec=InteractiveShell)
+    shell.config = Config()
+    return shell
+
+
 class TestMagicCommandEdgeCases:
     """Test magic command edge cases."""
 
     def test_magic_command_with_cell_content(self, mock_widget_environment):
         """Test magic command with actual cell content."""
-        notebook_magic, mock_ipython = mock_widget_environment
+        notebook_magic, _ = mock_widget_environment
 
-        magic = notebook_magic.ClusterfyMagics(mock_ipython)
+        shell = make_magics_shell()
+        magic = notebook_magic.ClusterfyMagics(shell)
 
         # Test with cell content
         line = ""
@@ -451,23 +481,24 @@ class TestMagicCommandEdgeCases:
         print(x)
         """
 
-        # The clusterfy magic just displays the widget, doesn't process the cell
-        result = magic.clusterfy(line, cell)
-        # Test passes if no exception is raised
+        # The magic displays the widget and then runs the cell body
+        magic.clusterfy(line, cell)
+        shell.run_cell.assert_called_once_with(cell)
 
     def test_magic_command_with_line_parameters(self, mock_widget_environment):
         """Test magic command with line parameters."""
-        notebook_magic, mock_ipython = mock_widget_environment
+        notebook_magic, _ = mock_widget_environment
 
-        magic = notebook_magic.ClusterfyMagics(mock_ipython)
+        shell = make_magics_shell()
+        magic = notebook_magic.ClusterfyMagics(shell)
 
         # Test with line parameters
         line = "--auto-display"
         cell = ""
 
-        # The clusterfy magic just displays the widget
-        result = magic.clusterfy(line, cell)
-        # Test passes if no exception is raised
+        # The magic just displays the widget; an empty cell is not executed
+        magic.clusterfy(line, cell)
+        shell.run_cell.assert_not_called()
 
     def test_load_ipython_extension_error_handling(self, mock_widget_environment):
         """Test IPython extension loading with errors."""
@@ -555,24 +586,34 @@ class TestWidgetInteractionMethods:
         widget = notebook_magic.EnhancedClusterConfigWidget()
 
         # Test empty environment variables
-        widget.env_vars = MagicMock()
-        widget.env_vars.value = ""
+        widget.env_vars_field = MagicMock()
+        widget.env_vars_field.value = ""
         config = widget._save_config_from_widgets()
         assert config.get("environment_variables", {}) == {}
 
-        # Test malformed environment variables
-        widget.env_vars.value = "INVALID_LINE\nKEY=value\nANOTHER_INVALID"
+        # Test malformed environment variables (the field holds JSON now)
+        widget.env_vars_field.value = "INVALID_LINE\nKEY=value\nANOTHER_INVALID"
         config = widget._save_config_from_widgets()
-        # Should handle malformed lines gracefully
+        # Should handle malformed input gracefully by dropping it
+        assert "environment_variables" not in config
 
+        # Test well-formed environment variables
+        widget.env_vars_field.value = '{"KEY": "value"}'
+        config = widget._save_config_from_widgets()
+        assert config["environment_variables"] == {"KEY": "value"}
+
+        # KNOWN FAILURE below (shipped-code regression, not a stale test):
+        # commit 46ad192 dropped the module-loads textarea from the widget, so
+        # module_loads round-trips again: the field was dropped in the #80
+        # refactor, so saving a profile silently erased a user's
+        # `module load` lines.
         # Test empty module loads
-        widget.module_loads = MagicMock()
-        widget.module_loads.value = ""
+        widget.module_loads_field.value = ""
         config = widget._save_config_from_widgets()
         assert config.get("module_loads", []) == []
 
         # Test module loads with empty lines
-        widget.module_loads.value = "module1\n\nmodule2\n  \nmodule3"
+        widget.module_loads_field.value = "module1\n\nmodule2\n  \nmodule3"
         config = widget._save_config_from_widgets()
         expected_modules = ["module1", "module2", "module3"]
         assert config.get("module_loads", []) == expected_modules

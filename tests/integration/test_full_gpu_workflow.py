@@ -3,7 +3,6 @@
 Test complete GPU-enabled workflow including function flattening and GPU detection.
 """
 
-
 from clustrix.function_flattening import auto_flatten_if_needed
 from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
 from clustrix.config import ClusterConfig

@@ -16,7 +16,7 @@ try:
     from azure.mgmt.resource import ResourceManagementClient
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.authorization import AuthorizationManagementClient
-    from azure.core.exceptions import AzureError, ResourceNotFoundError
+    from azure.core.exceptions import ResourceNotFoundError
 
     AZURE_AVAILABLE = True
 except ImportError:

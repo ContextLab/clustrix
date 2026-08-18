@@ -11,7 +11,7 @@ import time
 from typing import Dict, Any, List
 
 try:
-    from huggingface_hub import HfApi, HfFolder
+    from huggingface_hub import HfApi
     from huggingface_hub.utils import HfHubHTTPError
 
     HF_AVAILABLE = True

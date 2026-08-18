@@ -19,7 +19,7 @@ from clustrix.notebook_magic import (
     validate_hostname,
     load_ipython_extension,
 )
-from clustrix.config import ClusterConfig
+from clustrix.config import ClusterConfig, load_config
 from clustrix import cluster
 
 
@@ -390,20 +390,25 @@ result = compute_statistics(test_data)
         with open(bad_yaml, "w") as f:
             f.write("invalid: yaml: content: [")
 
+        # load_config_from_file is the widget's tolerant loader and returns {}
+        # by design (see its docstring); load_config is the one that raises.
+        assert load_config_from_file(str(bad_yaml)) == {}
         with pytest.raises(Exception):
-            load_config_from_file(str(bad_yaml))
+            load_config(str(bad_yaml))
 
         # Test malformed JSON
         bad_json = temp_config_dir / "bad.json"
         with open(bad_json, "w") as f:
             f.write('{"invalid": json content}')
 
+        assert load_config_from_file(str(bad_json)) == {}
         with pytest.raises(Exception):
-            load_config_from_file(str(bad_json))
+            load_config(str(bad_json))
 
         # Test non-existent file
+        assert load_config_from_file("/nonexistent/config.yml") == {}
         with pytest.raises(FileNotFoundError):
-            load_config_from_file("/nonexistent/config.yml")
+            load_config("/nonexistent/config.yml")
 
 
 class TestNotebookMagicIntegrationWorkflows:
@@ -411,6 +416,12 @@ class TestNotebookMagicIntegrationWorkflows:
 
     @pytest.mark.real_world
     def test_complete_notebook_workflow(self, ipython_environment, temp_config_dir):
+        # The workflow this exercises builds a dataset with scikit-learn, which
+        # is not a clustrix dependency. Without it the cell raises, `results`
+        # is never bound, and the failure looks like a magic that did not run
+        # its body -- it does; verified separately.
+        pytest.importorskip("sklearn")
+
         """
         Test complete notebook workflow as users would use it.
 
@@ -430,7 +441,7 @@ class TestNotebookMagicIntegrationWorkflows:
                     "cluster_type": "local",
                     "default_cores": 4,
                     "default_memory": "8GB",
-                    "cleanup_remote_files": True,
+                    "cleanup_on_success": True,
                 },
                 f,
             )

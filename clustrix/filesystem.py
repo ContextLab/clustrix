@@ -5,6 +5,7 @@ This module provides a consistent interface for filesystem operations that work
 both locally and on remote clusters based on the ClusterConfig object.
 """
 
+import logging
 import os
 import glob as glob_module
 from pathlib import Path
@@ -13,6 +14,8 @@ from typing import List, Optional, Dict, Any
 import paramiko
 
 from .config import ClusterConfig
+
+logger = logging.getLogger(__name__)
 
 
 class FileInfo:
@@ -128,97 +131,51 @@ class ClusterFilesystem:
             current_hostname = socket.gethostname()
             target_host = self.config.cluster_host
 
-            # Check various hostname matching scenarios
-            is_on_target_cluster = (
-                # Exact match
-                current_hostname == target_host
-                # Current host contains target (e.g., s17.hpcc.dartmouth.edu contains ndoli.dartmouth.edu)
-                or target_host in current_hostname
-                # Target contains current (e.g., compute node s17 part of ndoli.dartmouth.edu)
-                or current_hostname in target_host
-                # Domain matching (e.g., s04.hpcc.dartmouth.edu and ndoli.dartmouth.edu)
-                or self._same_domain(current_hostname, target_host)
-                # HPC cluster specific: check if both are in same institution domain
-                or self._same_institution_domain(current_hostname, target_host)
+            # Whether we can use local filesystem operations is a question
+            # about the FILESYSTEM, not about names. The previous test asked
+            # whether the two hostnames looked related -- substring matches
+            # plus "same institution domain" -- so a laptop on the VPN, whose
+            # hostname was vpn-two-factor-general-229-128-226.dartmouth.edu,
+            # was judged to be discovery.dartmouth.edu. Clustrix then looked
+            # for the job's result file on the laptop, found an empty
+            # directory, and reported the job's status as unknown.
+            #
+            # Two things are actually sufficient, and both are checkable:
+            #   * this host IS the target host, by name; or
+            #   * the remote working directory is visible here, which is what
+            #     "shared filesystem" means and what the code needs to be true.
+            fqdn = socket.getfqdn()
+            same_host = target_host in (current_hostname, fqdn) or fqdn.startswith(
+                target_host.split(".")[0] + "."
             )
 
-            if is_on_target_cluster:
-                # We're on the target cluster - use local filesystem operations
+            work_dir = os.path.expanduser(
+                getattr(self.config, "remote_work_dir", "") or ""
+            )
+            shared_filesystem = bool(work_dir) and os.path.isdir(work_dir)
+
+            if same_host and shared_filesystem:
                 original_cluster_type = self.config.cluster_type
                 self.config.cluster_type = "local"
-
-                # Log the detection for debugging
-                print(
-                    f"Cluster detection: Running on target cluster (hostname: {current_hostname})"
+                logger.info(
+                    "Running on %s with %s visible locally; using local "
+                    "filesystem operations instead of %s.",
+                    target_host,
+                    work_dir,
+                    original_cluster_type,
                 )
-                print(
-                    f"Switched from {original_cluster_type} to local filesystem operations"
+            elif same_host:
+                logger.debug(
+                    "Hostname matches %s but %s is not present locally; "
+                    "keeping remote filesystem operations.",
+                    target_host,
+                    work_dir,
                 )
 
         except Exception as e:
             # If detection fails, continue with original cluster_type
             print(f"Warning: Cluster detection failed: {e}")
             pass
-
-    def _same_domain(self, host1: str, host2: str) -> bool:
-        """Check if two hostnames are in the same domain."""
-        try:
-            # Extract domain parts (ignore first part which might be different)
-            domain1_parts = host1.split(".")[1:]  # Skip hostname, get domain
-            domain2_parts = host2.split(".")[1:]  # Skip hostname, get domain
-
-            # Check if domains match (at least 2 parts)
-            if len(domain1_parts) >= 2 and len(domain2_parts) >= 2:
-                return domain1_parts == domain2_parts
-
-        except (IndexError, AttributeError):
-            pass
-
-        return False
-
-    def _same_institution_domain(self, host1: str, host2: str) -> bool:
-        """
-        Check if two hostnames are from the same institution.
-
-        This handles cases like:
-        - s04.hpcc.dartmouth.edu (compute node)
-        - ndoli.dartmouth.edu (head node)
-
-        Both should be considered the same cluster.
-        """
-        try:
-            # Split hostnames into parts
-            parts1 = host1.split(".")
-            parts2 = host2.split(".")
-
-            # For HPC clusters, check if they share the institution domain
-            # e.g., both end in "dartmouth.edu"
-            if len(parts1) >= 2 and len(parts2) >= 2:
-                # Get the last 2 parts (institution.tld)
-                institution1 = ".".join(parts1[-2:])
-                institution2 = ".".join(parts2[-2:])
-
-                if institution1 == institution2:
-                    # Same institution - likely same cluster
-                    return True
-
-            # Also check for common HPC patterns
-            # e.g., login.cluster.edu and compute01.cluster.edu
-            if len(parts1) >= 3 and len(parts2) >= 3:
-                # Check if middle part matches (cluster name)
-                cluster1_parts = parts1[-3:]  # Get last 3 parts
-                cluster2_parts = parts2[-3:]  # Get last 3 parts
-
-                # If the cluster and institution parts match
-                if (
-                    cluster1_parts[1:] == cluster2_parts[1:]
-                ):  # Same cluster.institution.edu
-                    return True
-
-        except (IndexError, AttributeError):
-            pass
-
-        return False
 
     def __del__(self):
         """Clean up SSH connections."""
@@ -244,6 +201,12 @@ class ClusterFilesystem:
                 "hostname": self.config.cluster_host,
                 "port": self.config.cluster_port,
                 "username": self.config.username,
+                # Without this paramiko waits on the OS default, which on an
+                # unreachable or non-answering host is minutes. A filesystem
+                # call that cannot connect should say so quickly.
+                "timeout": getattr(self.config, "ssh_connect_timeout", 30),
+                "auth_timeout": getattr(self.config, "ssh_connect_timeout", 30),
+                "banner_timeout": getattr(self.config, "ssh_connect_timeout", 30),
             }
 
             if self.config.key_file:

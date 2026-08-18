@@ -95,7 +95,7 @@ pytest --cov=clustrix    # Run tests with coverage
 - Remote environments are recreated based on local pip freeze output
 - Job scripts are bash-based with scheduler-specific directives
 - Results communicated via pickled files (result.pkl/error.pkl)
-- Automatic cleanup of remote files configurable via `cleanup_remote_files`
+- Automatic cleanup of remote files configurable via `cleanup_on_success`
 
 ## Common Tasks
 

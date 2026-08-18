@@ -1,112 +1,56 @@
 #!/usr/bin/env python3
-"""
-Test the signature fix for flattened functions.
+"""Flattened functions must keep the signature and the results of the original.
+
+This file used to `return False` on every failure path. pytest treats a
+returned value as a pass, so it reported success no matter what flattening did
+-- including the case where flattening emitted a parameterless script and the
+flattened function could not accept the arguments it was called with.
 """
 
+import inspect
+
+import pytest
 
 from clustrix.function_flattening import (
     analyze_function_complexity,
     auto_flatten_if_needed,
 )
-import logging
-
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 
 
-def test_signature_preservation():
-    """Test that flattened functions preserve original signatures."""
-    print("🧪 Testing signature preservation...")
+def function_with_args(x, y, z=42):
+    """Positional, keyword and default arguments, plus a nested function."""
 
-    def test_function_with_args(x, y, z=42):
-        """Function with positional and keyword arguments."""
+    def inner_add(a, b):
+        return a + b
 
-        def inner_add(a, b):
-            return a + b
-
-        result = inner_add(x, y)
-        return result + z
-
-    # Test complexity analysis
-    complexity = analyze_function_complexity(test_function_with_args)
-    print(f"Complexity: {complexity}")
-
-    if complexity.get("nested_functions", 0) > 0:
-        print("✅ Nested function detected")
-
-        # Test flattening
-        flattened_func, flattening_info = auto_flatten_if_needed(
-            test_function_with_args
-        )
-
-        if flattening_info and flattening_info.get("success"):
-            print("✅ Flattening successful")
-
-            # Test that signatures match
-            import inspect
-
-            original_sig = inspect.signature(test_function_with_args)
-            flattened_sig = inspect.signature(flattened_func)
-
-            print(f"Original signature: {original_sig}")
-            print(f"Flattened signature: {flattened_sig}")
-
-            # Test execution with different argument patterns
-            try:
-                # Test with positional args
-                original_result1 = test_function_with_args(1, 2)
-                flattened_result1 = flattened_func(1, 2)
-                print(
-                    f"Positional args - Original: {original_result1}, Flattened: {flattened_result1}"
-                )
-
-                # Test with keyword args
-                original_result2 = test_function_with_args(1, 2, z=100)
-                flattened_result2 = flattened_func(1, 2, z=100)
-                print(
-                    f"Keyword args - Original: {original_result2}, Flattened: {flattened_result2}"
-                )
-
-                # Test with mixed args
-                original_result3 = test_function_with_args(x=5, y=10)
-                flattened_result3 = flattened_func(x=5, y=10)
-                print(
-                    f"Mixed args - Original: {original_result3}, Flattened: {flattened_result3}"
-                )
-
-                # Check if results match
-                if (
-                    original_result1 == flattened_result1
-                    and original_result2 == flattened_result2
-                    and original_result3 == flattened_result3
-                ):
-                    print("✅ All signature tests passed!")
-                    return True
-                else:
-                    print("❌ Results don't match")
-                    return False
-
-            except Exception as e:
-                print(f"❌ Execution failed: {e}")
-                import traceback
-
-                traceback.print_exc()
-                return False
-        else:
-            print(f"❌ Flattening failed: {flattening_info}")
-            return False
-    else:
-        print("❌ Nested function not detected")
-        return False
+    return inner_add(x, y) + z
 
 
-if __name__ == "__main__":
-    print("🚀 Testing Function Signature Preservation")
-    print("=" * 50)
+CALLS = [
+    ((1, 2), {}),
+    ((1, 2), {"z": 100}),
+    ((), {"x": 5, "y": 10}),
+]
 
-    success = test_signature_preservation()
 
-    if success:
-        print("\n🎉 Signature preservation test passed!")
-    else:
-        print("\n❌ Signature preservation test failed!")
+def test_nested_function_is_detected():
+    """Flattening only engages when a nested function is found."""
+    complexity = analyze_function_complexity(function_with_args)
+    assert complexity.get("nested_functions", 0) > 0, complexity
+
+
+def test_signature_is_preserved():
+    flattened, info = auto_flatten_if_needed(function_with_args)
+    if not (info and info.get("success")):
+        pytest.skip(f"flattening did not engage: {info}")
+
+    assert inspect.signature(flattened) == inspect.signature(function_with_args)
+
+
+@pytest.mark.parametrize("args,kwargs", CALLS, ids=["positional", "keyword", "named"])
+def test_flattened_function_returns_the_same_answer(args, kwargs):
+    flattened, info = auto_flatten_if_needed(function_with_args)
+    if not (info and info.get("success")):
+        pytest.skip(f"flattening did not engage: {info}")
+
+    assert flattened(*args, **kwargs) == function_with_args(*args, **kwargs)

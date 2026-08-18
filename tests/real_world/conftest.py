@@ -6,52 +6,58 @@ import os
 import pytest
 from pathlib import Path
 import tempfile
+import concurrent.futures
+import functools
 import socket
-import subprocess
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
-
 
 # Create global test manager instance
 test_manager = RealWorldTestManager()
 
 
-def is_dartmouth_network():
-    """
-    Check if we're on Dartmouth network (on campus or VPN).
+#: Whole-detection budget. This only gates which tests run, so it must answer
+#: quickly and wrongly-but-safely rather than slowly and exactly. Off-network
+#: CI runners blackhole the lookups below: on a macOS runner each call took
+#: about seventy seconds, and three calls exhausted the job's fifteen-minute
+#: budget before the suite could finish.
+NETWORK_DETECTION_TIMEOUT = 3.0
 
-    Returns:
-        bool: True if on Dartmouth network, False otherwise
+
+def _within(seconds, func, *args):
+    """Run `func`, giving up if it takes longer than `seconds`.
+
+    The resolver calls here are not interruptible, so the worker thread is left
+    to finish on its own; it is a daemon and holds nothing the caller needs.
     """
+    # Deliberately not a `with` block: its __exit__ calls shutdown(wait=True)
+    # and blocks until the worker finishes, which defeats the timeout entirely
+    # -- a call that should have been abandoned after three seconds still took
+    # thirty.
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
     try:
-        # Method 1: Check hostname
-        hostname = socket.getfqdn()
-        if ".dartmouth.edu" in hostname:
-            return True
+        return pool.submit(func, *args).result(timeout=seconds)
+    except (concurrent.futures.TimeoutError, OSError):
+        return None
+    finally:
+        pool.shutdown(wait=False)
 
-        # Method 2: Try to resolve a Dartmouth-specific host
-        try:
-            socket.gethostbyname("tensor01.dartmouth.edu")
-            return True
-        except socket.gaierror:
-            pass
 
-        # Method 3: Check if we can ping tensor01 (VPN test)
-        try:
-            result = subprocess.run(
-                ["ping", "-c", "1", "-W", "3000", "tensor01.dartmouth.edu"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                timeout=5,
-            )
-            return result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            pass
+@functools.lru_cache(maxsize=1)
+def is_dartmouth_network():
+    """Whether the Dartmouth-only hosts are reachable from here.
 
-        return False
+    Cached: this is consulted repeatedly to decide whether to skip, and the
+    answer cannot change usefully within one test run.
+    """
+    hostname = _within(NETWORK_DETECTION_TIMEOUT, socket.getfqdn)
+    if hostname and ".dartmouth.edu" in hostname:
+        return True
 
-    except Exception:
-        return False
+    resolved = _within(
+        NETWORK_DETECTION_TIMEOUT, socket.gethostbyname, "tensor01.dartmouth.edu"
+    )
+    return bool(resolved)
 
 
 @pytest.fixture(scope="session")
@@ -142,11 +148,19 @@ def ndoli_credentials(test_credentials, require_dartmouth_network):
 
 
 @pytest.fixture
-def screenshots_dir():
-    """Directory for screenshot outputs."""
-    screenshots_dir = Path("tests/real_world/screenshots")
-    screenshots_dir.mkdir(parents=True, exist_ok=True)
-    return screenshots_dir
+def screenshots_dir(tmp_path_factory):
+    """Directory for screenshot outputs.
+
+    A tmp directory, not `tests/real_world/screenshots`. Writing generated
+    artefacts back into the source tree meant every test run left the working
+    copy dirty, so a `git status` after running the suite could not be read at
+    a glance -- and the checked-in copies drifted with whoever ran it last.
+    Set CLUSTRIX_SCREENSHOT_DIR to keep them somewhere durable for inspection.
+    """
+    override = os.environ.get("CLUSTRIX_SCREENSHOT_DIR")
+    directory = Path(override) if override else tmp_path_factory.mktemp("screenshots")
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
 
 
 @pytest.fixture
@@ -275,12 +289,9 @@ def configure_test_limits(request):
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Set up test environment."""
-    # Create screenshots directory
-    screenshots_dir = Path("tests/real_world/screenshots")
-    screenshots_dir.mkdir(parents=True, exist_ok=True)
-
-    # Create temporary files directory
-    temp_dir = Path("tests/real_world/temp")
+    # Screenshots and scratch files go to a temp directory; see screenshots_dir
+    # for why the source tree is not a good place for generated artefacts.
+    temp_dir = Path(tempfile.gettempdir()) / "clustrix-real-world"
     temp_dir.mkdir(parents=True, exist_ok=True)
 
     yield

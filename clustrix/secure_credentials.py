@@ -13,6 +13,7 @@ import os
 import logging
 from pathlib import Path
 from typing import Dict, Optional
+from .config import get_config_dir
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +112,7 @@ class ValidationCredentials:
 
 def ensure_secure_environment():
     """Ensure environment is set up securely for credential handling."""
-    clustrix_dir = Path.home() / ".clustrix"
+    clustrix_dir = get_config_dir()
     clustrix_dir.mkdir(exist_ok=True)
 
     # Create .gitignore patterns to prevent credential leaks

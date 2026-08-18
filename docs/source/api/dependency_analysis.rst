@@ -155,9 +155,12 @@ Advanced Analysis
         import_types[imp.module] = "from" if imp.is_from_import else "direct"
     print("Import types:", import_types)
     
-    # Analyze loops for parallelization
+    # Analyze loops for parallelization. LoopAnalyzer works on an AST, and
+    # DependencyGraph carries the source rather than a parsed tree.
+    import ast
+
     loop_analyzer = LoopAnalyzer()
-    loops = loop_analyzer.analyze_loops(deps.ast_tree)
+    loops = loop_analyzer.analyze_loops(ast.parse(deps.source_code))
     
     for i, loop in enumerate(loops):
         print(f"Loop {i+1}: {loop['type']} loop")
@@ -280,7 +283,7 @@ File Reference Detection
         print(f"File reference: {file_ref.path}")
         print(f"  Operation: {file_ref.operation}")
         print(f"  Line: {file_ref.lineno}")
-        print(f"  Accessible: {file_ref.accessible}")
+        print(f"  Relative: {file_ref.is_relative}")
 
 Error Handling
 --------------
@@ -342,7 +345,7 @@ The dependency analysis is automatically used by the file packaging system:
     
     # Access the dependency analysis results
     print(f"Package ID: {package_info.package_id}")
-    print(f"Dependencies detected: {package_info.metadata['has_dependencies']}")
+    print(f"Filesystem ops detected: {package_info.metadata['has_filesystem_ops']}")
 
 Limitations
 -----------

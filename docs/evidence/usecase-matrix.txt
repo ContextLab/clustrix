@@ -1,0 +1,1513 @@
+caller: vpn-two-factor-general-229-128-226.dartmouth.edu · python 3.12.10
+cases : provenance, arithmetic, closure, module_global, helper_call, custom_class, local_module_function, local_module_class, local_instance_argument, disk_roundtrip, external_library, large_argument, third_party_import, returns_none, large_return, keyword_arguments, nested_data, raises
+
+==============================================================================
+TARGET: SLURM · discovery.dartmouth.edu
+==============================================================================
+
+configuration used (secrets redacted):
+
+  configure(
+      auto_gpu_parallel=False,
+      auto_parallel=False,
+      cluster_host='discovery.dartmouth.edu',
+      default_cores=1,
+      default_memory='4GB',
+      default_time='00:15:00',
+      job_poll_interval=5,
+      password='<redacted>',
+      remote_work_dir='/dartfs-hpc/rc/home/b/f002d6b/clustrix_usecases',
+      username='f002d6b',
+      venv_setup_timeout=1800,
+  )
+
+submitting to discovery.dartmouth.edu
+
+--- case: provenance ------------------------------------------------
+def whoami(_):
+    import os
+    import platform
+    import socket
+    import sys
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+    }
+
+call: whoami(0)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  caller: vpn-two-factor-general-229-128-226.dartmouth.edu pid=36170 macOS-26.5.2-arm64-arm-64bit
+  worker: q03.hpcc.dartmouth.edu pid=3827961 Linux-4.18.0-553.124.1.el8_10.x86_64-x86_64-with-glibc2.28
+          python 3.12.13 at /dartfs-hpc/rc/home/b/f002d6b/.conda/envs/clustrix_venv2_py312_2a4e29f72c91/bin/python
+  OK — ran on a different machine
+
+--- case: arithmetic ------------------------------------------------
+def total(n):
+    return sum(i * i for i in range(n))
+
+call: total(1000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 332833500
+  actual  : 332833500
+  OK — values match
+
+--- case: closure ---------------------------------------------------
+def scaled(values):
+    return [v * scale + offset for v in values]
+
+call: scaled([1, 2, 3, 4, 5])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: [20, 23, 26, 29, 32]
+  actual  : [20, 23, 26, 29, 32]
+  OK — values match
+
+--- case: module_global ---------------------------------------------
+def with_tax(amount):
+    return amount * TAX_RATE
+
+call: with_tax(11)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 77
+  actual  : 77
+  OK — values match
+
+--- case: helper_call -----------------------------------------------
+def billed(amount):
+    return _apply_rate(amount) + 1
+
+call: billed(6)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 43
+  actual  : 43
+  OK — values match
+
+--- case: custom_class ----------------------------------------------
+def translate(point, dx, dy):
+    return Point(point.x + dx, point.y + dy)
+
+call: translate(Point(x=2, y=3), 10, 20)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+Unknown SLURM status 'COMPLETING' for job 9222414
+  expected: Point(x=12, y=23)
+  actual  : Point(x=12, y=23)
+  OK — values match
+
+--- case: local_module_function -------------------------------------
+def scaled_up(value):
+    return triple(value) + SCALE
+
+call: scaled_up(4)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 17
+  actual  : 17
+  OK — values match
+
+--- case: local_module_class ----------------------------------------
+def widget_value(n):
+    return Widget(n).value()
+
+call: widget_value(3)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 15
+  actual  : 15
+  OK — values match
+
+--- case: local_instance_argument -----------------------------------
+def doubled(widget):
+    return widget.value() * 2
+
+call: doubled(<mypkg.mathutils.Widget object at 0x10ba2ecc0>)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 20
+  actual  : 20
+  OK — values match
+
+--- case: disk_roundtrip --------------------------------------------
+def through_disk(rows):
+    import csv
+    import os
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["name", "value"])
+        writer.writerows(rows)
+
+    with open(path) as handle:
+        parsed = list(csv.DictReader(handle))
+
+    return {
+        "rows": len(parsed),
+        "total": sum(int(r["value"]) for r in parsed),
+        "names": [r["name"] for r in parsed],
+        "bytes_on_disk": os.path.getsize(path),
+    }
+
+call: through_disk([['alpha', 3], ['beta', 4], ['gamma', 5]])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  actual  : {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  OK — values match
+
+--- case: external_library ------------------------------------------
+def via_yaml(mapping):
+    import yaml
+
+    text = yaml.safe_dump(mapping, sort_keys=True)
+    return {"roundtrip": yaml.safe_load(text), "text_lines": len(text.splitlines())}
+
+call: via_yaml({'b': [1, 2], 'a': 'x'})
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  actual  : {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  OK — values match
+
+--- case: large_argument --------------------------------------------
+def checksum(data):
+    return {"n": len(data), "total": sum(data), "first": data[0], "last": data[-1]}
+
+call: checksum([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,… (list, len=100000))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  actual  : {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  OK — values match
+
+--- case: third_party_import ----------------------------------------
+def stats(values):
+    import numpy as np
+
+    arr = np.array(values, dtype=float)
+    return {
+        "mean": round(float(arr.mean()), 6),
+        "std": round(float(arr.std()), 6),
+        "shape": list(arr.shape),
+    }
+
+call: stats([1.0, 2.0, 3.0, 4.0, 5.0])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  actual  : {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  OK — values match
+
+--- case: returns_none ----------------------------------------------
+def side_effect_only(x):
+    _ = x * 2
+    return None
+
+call: side_effect_only(21)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: None
+  actual  : None
+  OK — values match
+
+--- case: large_return ----------------------------------------------
+def expand(n):
+    return {"values": list(range(n)), "count": n}
+
+call: expand(50000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  actual  : {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  OK — values match
+
+--- case: keyword_arguments -----------------------------------------
+def combine(a, b=10, *, c=100):
+    return a + b + c
+
+call: combine(1, b=20, c=300)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 321
+  actual  : 321
+  OK — values match
+
+--- case: nested_data -----------------------------------------------
+def summarise(records):
+    by_group: Dict[str, List[int]] = {}
+    for record in records:
+        by_group.setdefault(record["group"], []).append(record["value"])
+    return {g: {"n": len(v), "sum": sum(v)} for g, v in sorted(by_group.items())}
+
+call: summarise([{'group': 'a', 'value': 1}, {'group': 'b', 'value': 2}, {'group': 'a', 'value': 3}, {'group': 'b', 'value': 4… (list, len=4))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  actual  : {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  OK — values match
+
+--- case: raises ----------------------------------------------------
+def explode(x):
+    raise ValueError(f"deliberate failure with x={x}")
+
+call: explode(5)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+Job 9222513 failed according to sacct: state=FAILED exit_code=1:0 node=s17 workdir=/dartfs-hpc/rc/home/b/f002d6b/clustrix_usecases/job_1787066385_1721d6d2
+  local raised : ValueError: deliberate failure with x=5
+  remote raised: ValueError: deliberate failure with x=5
+  OK — original type and message both preserved
+
+SLURM · discovery.dartmouth.edu: 18/18 cases returned the correct answer
+
+==============================================================================
+TARGET: SLURM · ndoli.dartmouth.edu
+==============================================================================
+
+configuration used (secrets redacted):
+
+  configure(
+      auto_gpu_parallel=False,
+      auto_parallel=False,
+      cluster_host='ndoli.dartmouth.edu',
+      default_cores=1,
+      default_memory='4GB',
+      default_time='00:15:00',
+      job_poll_interval=5,
+      password='<redacted>',
+      remote_work_dir='/dartfs-hpc/rc/home/b/f002d6b/clustrix_usecases',
+      username='f002d6b',
+      venv_setup_timeout=1800,
+  )
+
+submitting to ndoli.dartmouth.edu
+
+--- case: provenance ------------------------------------------------
+def whoami(_):
+    import os
+    import platform
+    import socket
+    import sys
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+    }
+
+call: whoami(0)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  caller: vpn-two-factor-general-229-128-226.dartmouth.edu pid=36170 macOS-26.5.2-arm64-arm-64bit
+  worker: s17.hpcc.dartmouth.edu pid=1069075 Linux-4.18.0-553.124.1.el8_10.x86_64-x86_64-with-glibc2.28
+          python 3.12.13 at /dartfs-hpc/rc/home/b/f002d6b/.conda/envs/clustrix_venv2_py312_2a4e29f72c91/bin/python
+  OK — ran on a different machine
+
+--- case: arithmetic ------------------------------------------------
+def total(n):
+    return sum(i * i for i in range(n))
+
+call: total(1000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 332833500
+  actual  : 332833500
+  OK — values match
+
+--- case: closure ---------------------------------------------------
+def scaled(values):
+    return [v * scale + offset for v in values]
+
+call: scaled([1, 2, 3, 4, 5])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: [20, 23, 26, 29, 32]
+  actual  : [20, 23, 26, 29, 32]
+  OK — values match
+
+--- case: module_global ---------------------------------------------
+def with_tax(amount):
+    return amount * TAX_RATE
+
+call: with_tax(11)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 77
+  actual  : 77
+  OK — values match
+
+--- case: helper_call -----------------------------------------------
+def billed(amount):
+    return _apply_rate(amount) + 1
+
+call: billed(6)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 43
+  actual  : 43
+  OK — values match
+
+--- case: custom_class ----------------------------------------------
+def translate(point, dx, dy):
+    return Point(point.x + dx, point.y + dy)
+
+call: translate(Point(x=2, y=3), 10, 20)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: Point(x=12, y=23)
+  actual  : Point(x=12, y=23)
+  OK — values match
+
+--- case: local_module_function -------------------------------------
+def scaled_up(value):
+    return triple(value) + SCALE
+
+call: scaled_up(4)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 17
+  actual  : 17
+  OK — values match
+
+--- case: local_module_class ----------------------------------------
+def widget_value(n):
+    return Widget(n).value()
+
+call: widget_value(3)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 15
+  actual  : 15
+  OK — values match
+
+--- case: local_instance_argument -----------------------------------
+def doubled(widget):
+    return widget.value() * 2
+
+call: doubled(<mypkg.mathutils.Widget object at 0x10ba2cb60>)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: 20
+  actual  : 20
+  OK — values match
+
+--- case: disk_roundtrip --------------------------------------------
+def through_disk(rows):
+    import csv
+    import os
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["name", "value"])
+        writer.writerows(rows)
+
+    with open(path) as handle:
+        parsed = list(csv.DictReader(handle))
+
+    return {
+        "rows": len(parsed),
+        "total": sum(int(r["value"]) for r in parsed),
+        "names": [r["name"] for r in parsed],
+        "bytes_on_disk": os.path.getsize(path),
+    }
+
+call: through_disk([['alpha', 3], ['beta', 4], ['gamma', 5]])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_2a4e29f72c91)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  actual  : {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  OK — values match
+
+--- case: external_library ------------------------------------------
+def via_yaml(mapping):
+    import yaml
+
+    text = yaml.safe_dump(mapping, sort_keys=True)
+    return {"roundtrip": yaml.safe_load(text), "text_lines": len(text.splitlines())}
+
+call: via_yaml({'b': [1, 2], 'a': 'x'})
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+No GPUs detected, using standard VENV2 setup...
+  expected: {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  actual  : {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  OK — values match
+
+--- case: large_argument --------------------------------------------
+def checksum(data):
+    return {"n": len(data), "total": sum(data), "first": data[0], "last": data[-1]}
+
+call: checksum([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,… (list, len=100000))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  actual  : {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  OK — values match
+
+--- case: third_party_import ----------------------------------------
+def stats(values):
+    import numpy as np
+
+    arr = np.array(values, dtype=float)
+    return {
+        "mean": round(float(arr.mean()), 6),
+        "std": round(float(arr.std()), 6),
+        "shape": list(arr.shape),
+    }
+
+call: stats([1.0, 2.0, 3.0, 4.0, 5.0])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  actual  : {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  OK — values match
+
+--- case: returns_none ----------------------------------------------
+def side_effect_only(x):
+    _ = x * 2
+    return None
+
+call: side_effect_only(21)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: None
+  actual  : None
+  OK — values match
+
+--- case: large_return ----------------------------------------------
+def expand(n):
+    return {"values": list(range(n)), "count": n}
+
+call: expand(50000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  actual  : {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  OK — values match
+
+--- case: keyword_arguments -----------------------------------------
+def combine(a, b=10, *, c=100):
+    return a + b + c
+
+call: combine(1, b=20, c=300)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: 321
+  actual  : 321
+  OK — values match
+
+--- case: nested_data -----------------------------------------------
+def summarise(records):
+    by_group: Dict[str, List[int]] = {}
+    for record in records:
+        by_group.setdefault(record["group"], []).append(record["value"])
+    return {g: {"n": len(v), "sum": sum(v)} for g, v in sorted(by_group.items())}
+
+call: summarise([{'group': 'a', 'value': 1}, {'group': 'b', 'value': 2}, {'group': 'a', 'value': 3}, {'group': 'b', 'value': 4… (list, len=4))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+  expected: {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  actual  : {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  OK — values match
+
+--- case: raises ----------------------------------------------------
+def explode(x):
+    raise ValueError(f"deliberate failure with x={x}")
+
+call: explode(5)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+No GPUs detected, using standard VENV2 setup...
+Job 9222649 failed according to sacct: state=FAILED exit_code=1:0 node=s06 workdir=/dartfs-hpc/rc/home/b/f002d6b/clustrix_usecases/job_1787068226_c0c1fee6
+  local raised : ValueError: deliberate failure with x=5
+  remote raised: ValueError: deliberate failure with x=5
+  OK — original type and message both preserved
+
+SLURM · ndoli.dartmouth.edu: 18/18 cases returned the correct answer
+
+==============================================================================
+TARGET: SSH+GPU · tensor01.dartmouth.edu
+==============================================================================
+
+configuration used (secrets redacted):
+
+  configure(
+      auto_gpu_parallel=False,
+      auto_parallel=False,
+      cluster_host='tensor01.dartmouth.edu',
+      cluster_type='ssh',
+      job_poll_interval=5,
+      key_file='~/.ssh/id_ed25519_clustrix_f002d6b_test_tensor01_gpu',
+      remote_work_dir='~/.clustrix/usecases',
+      username='f002d6b',
+      venv_setup_timeout=1800,
+  )
+
+submitting to tensor01.dartmouth.edu
+
+--- case: provenance ------------------------------------------------
+def whoami(_):
+    import os
+    import platform
+    import socket
+    import sys
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+    }
+
+call: whoami(0)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  caller: vpn-two-factor-general-229-128-226.dartmouth.edu pid=36170 macOS-26.5.2-arm64-arm-64bit
+  worker: tensor01.dartmouth.edu pid=2504518 Linux-4.18.0-553.89.1.el8_10.x86_64-x86_64-with-glibc2.28
+          python 3.12.13 at /home/f002d6b/miniforge3/envs/clustrix_venv2_py312_238b2186333e/bin/python
+  OK — ran on a different machine
+
+--- case: arithmetic ------------------------------------------------
+def total(n):
+    return sum(i * i for i in range(n))
+
+call: total(1000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 332833500
+  actual  : 332833500
+  OK — values match
+
+--- case: closure ---------------------------------------------------
+def scaled(values):
+    return [v * scale + offset for v in values]
+
+call: scaled([1, 2, 3, 4, 5])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: [20, 23, 26, 29, 32]
+  actual  : [20, 23, 26, 29, 32]
+  OK — values match
+
+--- case: module_global ---------------------------------------------
+def with_tax(amount):
+    return amount * TAX_RATE
+
+call: with_tax(11)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 77
+  actual  : 77
+  OK — values match
+
+--- case: helper_call -----------------------------------------------
+def billed(amount):
+    return _apply_rate(amount) + 1
+
+call: billed(6)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 43
+  actual  : 43
+  OK — values match
+
+--- case: custom_class ----------------------------------------------
+def translate(point, dx, dy):
+    return Point(point.x + dx, point.y + dy)
+
+call: translate(Point(x=2, y=3), 10, 20)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: Point(x=12, y=23)
+  actual  : Point(x=12, y=23)
+  OK — values match
+
+--- case: local_module_function -------------------------------------
+def scaled_up(value):
+    return triple(value) + SCALE
+
+call: scaled_up(4)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 17
+  actual  : 17
+  OK — values match
+
+--- case: local_module_class ----------------------------------------
+def widget_value(n):
+    return Widget(n).value()
+
+call: widget_value(3)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 15
+  actual  : 15
+  OK — values match
+
+--- case: local_instance_argument -----------------------------------
+def doubled(widget):
+    return widget.value() * 2
+
+call: doubled(<mypkg.mathutils.Widget object at 0x10beb8410>)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 20
+  actual  : 20
+  OK — values match
+
+--- case: disk_roundtrip --------------------------------------------
+def through_disk(rows):
+    import csv
+    import os
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["name", "value"])
+        writer.writerows(rows)
+
+    with open(path) as handle:
+        parsed = list(csv.DictReader(handle))
+
+    return {
+        "rows": len(parsed),
+        "total": sum(int(r["value"]) for r in parsed),
+        "names": [r["name"] for r in parsed],
+        "bytes_on_disk": os.path.getsize(path),
+    }
+
+call: through_disk([['alpha', 3], ['beta', 4], ['gamma', 5]])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  actual  : {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  OK — values match
+
+--- case: external_library ------------------------------------------
+def via_yaml(mapping):
+    import yaml
+
+    text = yaml.safe_dump(mapping, sort_keys=True)
+    return {"roundtrip": yaml.safe_load(text), "text_lines": len(text.splitlines())}
+
+call: via_yaml({'b': [1, 2], 'a': 'x'})
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  actual  : {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  OK — values match
+
+--- case: large_argument --------------------------------------------
+def checksum(data):
+    return {"n": len(data), "total": sum(data), "first": data[0], "last": data[-1]}
+
+call: checksum([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,… (list, len=100000))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  actual  : {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  OK — values match
+
+--- case: third_party_import ----------------------------------------
+def stats(values):
+    import numpy as np
+
+    arr = np.array(values, dtype=float)
+    return {
+        "mean": round(float(arr.mean()), 6),
+        "std": round(float(arr.std()), 6),
+        "shape": list(arr.shape),
+    }
+
+call: stats([1.0, 2.0, 3.0, 4.0, 5.0])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  actual  : {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  OK — values match
+
+--- case: returns_none ----------------------------------------------
+def side_effect_only(x):
+    _ = x * 2
+    return None
+
+call: side_effect_only(21)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: None
+  actual  : None
+  OK — values match
+
+--- case: large_return ----------------------------------------------
+def expand(n):
+    return {"values": list(range(n)), "count": n}
+
+call: expand(50000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  actual  : {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  OK — values match
+
+--- case: keyword_arguments -----------------------------------------
+def combine(a, b=10, *, c=100):
+    return a + b + c
+
+call: combine(1, b=20, c=300)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 321
+  actual  : 321
+  OK — values match
+
+--- case: nested_data -----------------------------------------------
+def summarise(records):
+    by_group: Dict[str, List[int]] = {}
+    for record in records:
+        by_group.setdefault(record["group"], []).append(record["value"])
+    return {g: {"n": len(v), "sum": sum(v)} for g, v in sorted(by_group.items())}
+
+call: summarise([{'group': 'a', 'value': 1}, {'group': 'b', 'value': 2}, {'group': 'a', 'value': 3}, {'group': 'b', 'value': 4… (list, len=4))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  actual  : {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  OK — values match
+
+--- case: raises ----------------------------------------------------
+def explode(x):
+    raise ValueError(f"deliberate failure with x={x}")
+
+call: explode(5)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  local raised : ValueError: deliberate failure with x=5
+  remote raised: ValueError: deliberate failure with x=5
+  OK — original type and message both preserved
+
+SSH+GPU · tensor01.dartmouth.edu: 18/18 cases returned the correct answer
+
+==============================================================================
+TARGET: SSH+GPU · tensor02.dartmouth.edu
+==============================================================================
+
+configuration used (secrets redacted):
+
+  configure(
+      auto_gpu_parallel=False,
+      auto_parallel=False,
+      cluster_host='tensor02.dartmouth.edu',
+      cluster_type='ssh',
+      job_poll_interval=5,
+      password='<redacted>',
+      remote_work_dir='~/.clustrix/usecases',
+      username='f002d6b',
+      venv_setup_timeout=1800,
+  )
+
+submitting to tensor02.dartmouth.edu
+
+--- case: provenance ------------------------------------------------
+def whoami(_):
+    import os
+    import platform
+    import socket
+    import sys
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+    }
+
+call: whoami(0)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  caller: vpn-two-factor-general-229-128-226.dartmouth.edu pid=36170 macOS-26.5.2-arm64-arm-64bit
+  worker: tensor02.dartmouth.edu pid=2967910 Linux-4.18.0-553.89.1.el8_10.x86_64-x86_64-with-glibc2.28
+          python 3.12.13 at /home/f002d6b/.conda/envs/clustrix_venv2_py312_238b2186333e/bin/python
+  OK — ran on a different machine
+
+--- case: arithmetic ------------------------------------------------
+def total(n):
+    return sum(i * i for i in range(n))
+
+call: total(1000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 332833500
+  actual  : 332833500
+  OK — values match
+
+--- case: closure ---------------------------------------------------
+def scaled(values):
+    return [v * scale + offset for v in values]
+
+call: scaled([1, 2, 3, 4, 5])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: [20, 23, 26, 29, 32]
+  actual  : [20, 23, 26, 29, 32]
+  OK — values match
+
+--- case: module_global ---------------------------------------------
+def with_tax(amount):
+    return amount * TAX_RATE
+
+call: with_tax(11)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 77
+  actual  : 77
+  OK — values match
+
+--- case: helper_call -----------------------------------------------
+def billed(amount):
+    return _apply_rate(amount) + 1
+
+call: billed(6)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 43
+  actual  : 43
+  OK — values match
+
+--- case: custom_class ----------------------------------------------
+def translate(point, dx, dy):
+    return Point(point.x + dx, point.y + dy)
+
+call: translate(Point(x=2, y=3), 10, 20)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: Point(x=12, y=23)
+  actual  : Point(x=12, y=23)
+  OK — values match
+
+--- case: local_module_function -------------------------------------
+def scaled_up(value):
+    return triple(value) + SCALE
+
+call: scaled_up(4)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 17
+  actual  : 17
+  OK — values match
+
+--- case: local_module_class ----------------------------------------
+def widget_value(n):
+    return Widget(n).value()
+
+call: widget_value(3)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 15
+  actual  : 15
+  OK — values match
+
+--- case: local_instance_argument -----------------------------------
+def doubled(widget):
+    return widget.value() * 2
+
+call: doubled(<mypkg.mathutils.Widget object at 0x10c6c29c0>)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 20
+  actual  : 20
+  OK — values match
+
+--- case: disk_roundtrip --------------------------------------------
+def through_disk(rows):
+    import csv
+    import os
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["name", "value"])
+        writer.writerows(rows)
+
+    with open(path) as handle:
+        parsed = list(csv.DictReader(handle))
+
+    return {
+        "rows": len(parsed),
+        "total": sum(int(r["value"]) for r in parsed),
+        "names": [r["name"] for r in parsed],
+        "bytes_on_disk": os.path.getsize(path),
+    }
+
+call: through_disk([['alpha', 3], ['beta', 4], ['gamma', 5]])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  actual  : {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  OK — values match
+
+--- case: external_library ------------------------------------------
+def via_yaml(mapping):
+    import yaml
+
+    text = yaml.safe_dump(mapping, sort_keys=True)
+    return {"roundtrip": yaml.safe_load(text), "text_lines": len(text.splitlines())}
+
+call: via_yaml({'b': [1, 2], 'a': 'x'})
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  actual  : {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  OK — values match
+
+--- case: large_argument --------------------------------------------
+def checksum(data):
+    return {"n": len(data), "total": sum(data), "first": data[0], "last": data[-1]}
+
+call: checksum([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,… (list, len=100000))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  actual  : {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  OK — values match
+
+--- case: third_party_import ----------------------------------------
+def stats(values):
+    import numpy as np
+
+    arr = np.array(values, dtype=float)
+    return {
+        "mean": round(float(arr.mean()), 6),
+        "std": round(float(arr.std()), 6),
+        "shape": list(arr.shape),
+    }
+
+call: stats([1.0, 2.0, 3.0, 4.0, 5.0])
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  actual  : {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  OK — values match
+
+--- case: returns_none ----------------------------------------------
+def side_effect_only(x):
+    _ = x * 2
+    return None
+
+call: side_effect_only(21)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: None
+  actual  : None
+  OK — values match
+
+--- case: large_return ----------------------------------------------
+def expand(n):
+    return {"values": list(range(n)), "count": n}
+
+call: expand(50000)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  actual  : {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  OK — values match
+
+--- case: keyword_arguments -----------------------------------------
+def combine(a, b=10, *, c=100):
+    return a + b + c
+
+call: combine(1, b=20, c=300)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: 321
+  actual  : 321
+  OK — values match
+
+--- case: nested_data -----------------------------------------------
+def summarise(records):
+    by_group: Dict[str, List[int]] = {}
+    for record in records:
+        by_group.setdefault(record["group"], []).append(record["value"])
+    return {g: {"n": len(v), "sum": sum(v)} for g, v in sorted(by_group.items())}
+
+call: summarise([{'group': 'a', 'value': 1}, {'group': 'b', 'value': 2}, {'group': 'a', 'value': 3}, {'group': 'b', 'value': 4… (list, len=4))
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  expected: {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  actual  : {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  OK — values match
+
+--- case: raises ----------------------------------------------------
+def explode(x):
+    raise ValueError(f"deliberate failure with x={x}")
+
+call: explode(5)
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system, using it for both venvs
+Reusing existing conda environments (py312_238b2186333e)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+  local raised : ValueError: deliberate failure with x=5
+  remote raised: ValueError: deliberate failure with x=5
+  OK — original type and message both preserved
+
+SSH+GPU · tensor02.dartmouth.edu: 18/18 cases returned the correct answer
+
+==============================================================================
+TARGET: HuggingFace Jobs · container
+==============================================================================
+
+configuration used (secrets redacted):
+
+  configure(
+      auto_gpu_parallel=False,
+      auto_parallel=False,
+      cluster_type='huggingface',
+      hf_flavor='cpu-basic',
+      hf_job_timeout='20m',
+      hf_namespace='contextlab',
+      hf_token='<redacted>',
+  )
+
+submitting to huggingface-jobs (contextlab)
+
+--- case: provenance ------------------------------------------------
+def whoami(_):
+    import os
+    import platform
+    import socket
+    import sys
+
+    return {
+        "host": socket.gethostname(),
+        "pid": os.getpid(),
+        "platform": platform.platform(),
+        "python": sys.version.split()[0],
+        "executable": sys.executable,
+    }
+
+call: whoami(0)
+  caller: vpn-two-factor-general-229-128-226.dartmouth.edu pid=36170 macOS-26.5.2-arm64-arm-64bit
+  worker: j-contextlab-6a8480b8cd3824960fcbedb2-jx2mnr4l-e8bcd-x2xsl pid=1 Linux-6.12.95-124.187.amzn2023.x86_64-x86_64-with-glibc2.41
+          python 3.12.14 at /usr/local/bin/python
+  OK — ran on a different machine
+
+--- case: arithmetic ------------------------------------------------
+def total(n):
+    return sum(i * i for i in range(n))
+
+call: total(1000)
+  expected: 332833500
+  actual  : 332833500
+  OK — values match
+
+--- case: closure ---------------------------------------------------
+def scaled(values):
+    return [v * scale + offset for v in values]
+
+call: scaled([1, 2, 3, 4, 5])
+  expected: [20, 23, 26, 29, 32]
+  actual  : [20, 23, 26, 29, 32]
+  OK — values match
+
+--- case: module_global ---------------------------------------------
+def with_tax(amount):
+    return amount * TAX_RATE
+
+call: with_tax(11)
+  expected: 77
+  actual  : 77
+  OK — values match
+
+--- case: helper_call -----------------------------------------------
+def billed(amount):
+    return _apply_rate(amount) + 1
+
+call: billed(6)
+  expected: 43
+  actual  : 43
+  OK — values match
+
+--- case: custom_class ----------------------------------------------
+def translate(point, dx, dy):
+    return Point(point.x + dx, point.y + dy)
+
+call: translate(Point(x=2, y=3), 10, 20)
+  expected: Point(x=12, y=23)
+  actual  : Point(x=12, y=23)
+  OK — values match
+
+--- case: local_module_function -------------------------------------
+def scaled_up(value):
+    return triple(value) + SCALE
+
+call: scaled_up(4)
+  expected: 17
+  actual  : 17
+  OK — values match
+
+--- case: local_module_class ----------------------------------------
+def widget_value(n):
+    return Widget(n).value()
+
+call: widget_value(3)
+  expected: 15
+  actual  : 15
+  OK — values match
+
+--- case: local_instance_argument -----------------------------------
+def doubled(widget):
+    return widget.value() * 2
+
+call: doubled(<mypkg.mathutils.Widget object at 0x10beab920>)
+  expected: 20
+  actual  : 20
+  OK — values match
+
+--- case: disk_roundtrip --------------------------------------------
+def through_disk(rows):
+    import csv
+    import os
+    import tempfile
+
+    path = os.path.join(tempfile.mkdtemp(), "data.csv")
+    with open(path, "w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["name", "value"])
+        writer.writerows(rows)
+
+    with open(path) as handle:
+        parsed = list(csv.DictReader(handle))
+
+    return {
+        "rows": len(parsed),
+        "total": sum(int(r["value"]) for r in parsed),
+        "names": [r["name"] for r in parsed],
+        "bytes_on_disk": os.path.getsize(path),
+    }
+
+call: through_disk([['alpha', 3], ['beta', 4], ['gamma', 5]])
+  expected: {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  actual  : {'rows': 3, 'total': 12, 'names': ['alpha', 'beta', 'gamma'], 'bytes_on_disk': 38}
+  OK — values match
+
+--- case: external_library ------------------------------------------
+def via_yaml(mapping):
+    import yaml
+
+    text = yaml.safe_dump(mapping, sort_keys=True)
+    return {"roundtrip": yaml.safe_load(text), "text_lines": len(text.splitlines())}
+
+call: via_yaml({'b': [1, 2], 'a': 'x'})
+  expected: {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  actual  : {'roundtrip': {'a': 'x', 'b': [1, 2]}, 'text_lines': 4}
+  OK — values match
+
+--- case: large_argument --------------------------------------------
+def checksum(data):
+    return {"n": len(data), "total": sum(data), "first": data[0], "last": data[-1]}
+
+call: checksum([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29,… (list, len=100000))
+  expected: {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  actual  : {'n': 100000, 'total': 4999950000, 'first': 0, 'last': 99999}
+  OK — values match
+
+--- case: third_party_import ----------------------------------------
+def stats(values):
+    import numpy as np
+
+    arr = np.array(values, dtype=float)
+    return {
+        "mean": round(float(arr.mean()), 6),
+        "std": round(float(arr.std()), 6),
+        "shape": list(arr.shape),
+    }
+
+call: stats([1.0, 2.0, 3.0, 4.0, 5.0])
+  expected: {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  actual  : {'mean': 3.0, 'std': 1.414214, 'shape': [5]}
+  OK — values match
+
+--- case: returns_none ----------------------------------------------
+def side_effect_only(x):
+    _ = x * 2
+    return None
+
+call: side_effect_only(21)
+  expected: None
+  actual  : None
+  OK — values match
+
+--- case: large_return ----------------------------------------------
+def expand(n):
+    return {"values": list(range(n)), "count": n}
+
+call: expand(50000)
+  expected: {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  actual  : {'values': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, … (dict, len=2)
+  OK — values match
+
+--- case: keyword_arguments -----------------------------------------
+def combine(a, b=10, *, c=100):
+    return a + b + c
+
+call: combine(1, b=20, c=300)
+  expected: 321
+  actual  : 321
+  OK — values match
+
+--- case: nested_data -----------------------------------------------
+def summarise(records):
+    by_group: Dict[str, List[int]] = {}
+    for record in records:
+        by_group.setdefault(record["group"], []).append(record["value"])
+    return {g: {"n": len(v), "sum": sum(v)} for g, v in sorted(by_group.items())}
+
+call: summarise([{'group': 'a', 'value': 1}, {'group': 'b', 'value': 2}, {'group': 'a', 'value': 3}, {'group': 'b', 'value': 4… (list, len=4))
+  expected: {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  actual  : {'a': {'n': 2, 'sum': 4}, 'b': {'n': 2, 'sum': 6}}
+  OK — values match
+
+--- case: raises ----------------------------------------------------
+def explode(x):
+    raise ValueError(f"deliberate failure with x={x}")
+
+call: explode(5)
+  local raised : ValueError: deliberate failure with x=5
+  remote raised: ValueError: deliberate failure with x=5
+  OK — original type and message both preserved
+
+HuggingFace Jobs · container: 18/18 cases returned the correct answer
+
+==============================================================================
+SUMMARY
+==============================================================================
+slurm-discovery  PASSED   18/18 correct
+slurm-ndoli      PASSED   18/18 correct
+gpu-tensor01     PASSED   18/18 correct
+gpu-tensor02     PASSED   18/18 correct
+hf               PASSED   18/18 correct

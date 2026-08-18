@@ -479,7 +479,12 @@ def {func_name}_flattened({param_string}):
             'print(f\'RESULT:{json.dumps(locals().get("result", "no_result"))}\')'
         )
 
-        return "\\n".join(code_parts)
+        # "\\n" here would be a literal backslash followed by n, joining
+        # every statement onto one line and making the result fail to
+        # compile with "unexpected character after line continuation
+        # character" -- which is precisely what every flattening attempt
+        # reported before this was a newline.
+        return "\n".join(code_parts)
 
     def _create_helper_functions(self, components: Dict[str, Any]) -> List[str]:
         """Create helper functions for complex operations."""

@@ -16,23 +16,55 @@ def magics_class(cls):
     return cls
 
 
-def cell_magic(name):
-    def decorator(*args, **kwargs):
-        # If this is being used as a decorator (first call with just the function)
-        if len(args) == 1 and callable(args[0]) and len(kwargs) == 0:
-            func = args[0]
+def _magic_decorator(func):
+    """Wrap a magic method so calling it still runs its body."""
 
-            # Return a wrapper that can handle method calls
-            def method_wrapper(self, line="", cell=""):
-                return func(self, line, cell)
+    def method_wrapper(self, line="", cell=""):
+        return func(self, line, cell)
 
-            method_wrapper.__name__ = getattr(func, "__name__", "clusterfy")
-            method_wrapper.__doc__ = getattr(func, "__doc__", "")
-            method_wrapper._original = func
-            return method_wrapper
-        # If this is being called as a method (self, line, cell)
-        else:
-            return lambda *args, **kwargs: None
+    method_wrapper.__name__ = getattr(func, "__name__", "magic")
+    method_wrapper.__doc__ = getattr(func, "__doc__", "")
+    method_wrapper._original = func
+    return method_wrapper
+
+
+def cell_magic(*args, **kwargs):
+    """Stand-in for IPython's cell_magic, used when IPython is absent.
+
+    IPython allows both `@cell_magic` and `@cell_magic("name")`. This only
+    handled the second form: applied bare -- which is how clustrix uses it --
+    it returned its own inner `decorator`, so calling the magic invoked that
+    with (self, line, cell), fell through to the catch-all branch, and
+    returned `lambda: None` without ever running the method. Every magic was
+    therefore a no-op whenever IPython was unavailable, which is precisely the
+    situation this module exists for.
+    """
+    if len(args) == 1 and callable(args[0]) and not kwargs:
+        # Bare @cell_magic
+        return _magic_decorator(args[0])
+
+    # @cell_magic("name")
+    def decorator(func):
+        return _magic_decorator(func)
+
+    return decorator
+
+
+def line_magic(*args, **kwargs):
+    """Stand-in for IPython's line_magic; same two calling conventions."""
+    if len(args) == 1 and callable(args[0]) and not kwargs:
+        func = args[0]
+
+        def method_wrapper(self, line=""):
+            return func(self, line)
+
+        method_wrapper.__name__ = getattr(func, "__name__", "magic")
+        method_wrapper.__doc__ = getattr(func, "__doc__", "")
+        method_wrapper._original = func
+        return method_wrapper
+
+    def decorator(func):
+        return line_magic(func)
 
     return decorator
 

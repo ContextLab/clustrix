@@ -555,16 +555,14 @@ class TestDatabaseOperationsReal:
             conn = sqlite3.connect(str(db_path))
             cursor = conn.cursor()
 
-            cursor.execute(
-                """
+            cursor.execute("""
                 CREATE TABLE test_jobs (
                     id INTEGER PRIMARY KEY,
                     job_name TEXT NOT NULL,
                     status TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
-            """
-            )
+            """)
 
             # Insert test data
             test_jobs = [("job1", "running"), ("job2", "completed"), ("job3", "failed")]

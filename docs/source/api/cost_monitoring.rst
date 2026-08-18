@@ -372,15 +372,19 @@ The cost monitoring system includes robust error handling:
 
    from clustrix import get_cost_monitor
    
-   try:
-       monitor = get_cost_monitor('unsupported_provider')
-   except ValueError as e:
-       print(f"Provider not supported: {e}")
-   
-   try:
-       cost_estimate = monitor.estimate_cost('invalid_instance', 1.0)
-   except KeyError as e:
-       print(f"Instance type not found: {e}")
+   # An unsupported provider logs a warning and returns None -- it does not
+   # raise, so check the result before using it.
+   monitor = get_cost_monitor('unsupported_provider')
+   if monitor is None:
+       print("Provider not supported")
+
+   # An unrecognised instance type does not raise either. It is priced at a
+   # placeholder "default" rate, and says so in pricing_warning. Always read
+   # that field before treating an estimate as a real number.
+   monitor = get_cost_monitor('aws')
+   cost_estimate = monitor.estimate_cost('invalid_instance', 1.0)
+   if cost_estimate.pricing_warning:
+       print(f"Estimate is not reliable: {cost_estimate.pricing_warning}")
 
 Best Practices
 --------------
