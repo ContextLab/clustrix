@@ -129,8 +129,8 @@ Three things about it are deliberate:
   execution, and the result is recovered from a log stream. Each job gets a
   fresh key passed as a HuggingFace secret; the container emits an HMAC-SHA256
   over what it wrote, and the caller refuses anything whose tag fails a
-  constant-time compare. (The equivalent hole in the SSH and scheduler paths is
-  #121 and is still open — see below.)
+  constant-time compare. (The SSH and scheduler paths now do the
+  same thing — see "Security" below.)
 * **The image tracks the caller's Python minor version**, for the same reason
   defect 2 existed.
 * **GPU flavors require `hf_allow_gpu_flavors=True`.** The gate is a prefix
@@ -187,23 +187,91 @@ The magic is now `%%remote`. `%%clusterfy` still works and warns.
   a job per `@cluster` call that always died with
   `ModuleNotFoundError: No module named 'clustrix'`.
 
+## Security: results are verified before they are deserialized
+
+Loading a pickle executes arbitrary code, so `result.pkl` -- a file fetched
+from a remote host -- was a remote-to-local code execution path on every
+backend. It is now checked first, everywhere.
+
+At submission the job directory is created `0700` with a 32-byte random key
+inside it at `0600`. The job script reads the key from that file (rather than
+having it baked into `job.sh`, which is world-readable on some shared
+filesystems) and writes an HMAC-SHA256 over exactly the bytes it wrote. The
+caller compares in constant time before unpickling, and refuses an absent,
+truncated or mismatched signature.
+
+Demonstrated on tensor01 by overwriting a finished job's `result.pkl` in place
+and leaving the original signature -- what someone with write access to the
+job directory would do:
+
+```
+result.pkl overwritten with an unsigned payload
+REFUSED: Job ssh_1787030156 result failed its integrity check.
+         Refusing to deserialize it.
+```
+
+This bounds the trust to whoever can already read the job directory. It is
+deliberately not claimed as a defence against a wholly compromised remote
+host, which runs your function anyway.
+
+## Also fixed since the first draft
+
+* **PBS did not work at all.** Its script ended with
+  `python execute_function.py`, and that filename appears exactly once in the
+  codebase -- on that line. Nothing has ever created it. SGE carried its own
+  copy of the older single-venv script and so silently missed every fix made
+  to the SLURM one. All three schedulers now share one execution body; a test
+  compares them directly.
+* **`"16GB"` is not a Kubernetes quantity.** It went into the pod manifest
+  verbatim, so clustrix's own `default_memory` produced a manifest the API
+  server rejects. Memory is now rendered per scheduler: `16Gi` for Kubernetes,
+  `16G` for SLURM, `16gb` for PBS, `16G` for SGE.
+* **The cloud script's first line was a `KeyError`.** It read
+  `func_data['func']`, a key `serialize_function()` has never produced.
+* **The widget accepted anything** -- `cores=0`, `memory="banana"`,
+  `time="soon"`, `port=99999`, an empty host -- and reported success. It now
+  reports every problem at once and refuses to apply or submit.
+* **Kubernetes had no widget fields at all**, so only the shipped defaults were
+  reachable. It has a section now, as does HuggingFace Jobs.
+* **The test suite wrote into the developer's home and repository** -- an
+  `integration_test` profile appended to the real `~/.clustrix/clustrix.yml`,
+  plus stray `test.yml` and `test_config.yml`. Config paths are anchored, and a
+  session fixture points `CLUSTRIX_CONFIG_DIR` at a throwaway.
+* **An unreachable host hung instead of erroring.** SSH connections had no
+  timeout at all, so paramiko fell back to the OS default.
+
+## On the "~5,100 lines of dead code" figure
+
+It does not reproduce. Every module under `clustrix/` is imported by
+something; counting only production imports leaves four files, three of which
+are a declared entry point, the 1Password integration, and code with a live
+consumer. `vulture --min-confidence 90` finds thirteen items across the whole
+package: two genuinely unused imports (removed here) and eleven unused
+variables that are mostly `__exit__` parameters the protocol requires.
+
+Two files -- `enhanced_notebook_widget.py` and `validation_alerts.py`, 1,232
+lines together -- are plausible deletions, but each has exactly one consumer,
+so removing them means removing those too. That is a scope decision, not a
+cleanup, and it is not being smuggled in behind a number that turned out to be
+wrong.
+
 ## What is still broken
 
-This is a beta and the list is real.
-
-* **#121 — unauthenticated pickle of remote results.** The SSH and scheduler
-  paths still deserialize `result.pkl` without verifying it. The HuggingFace
-  backend does verify; the others should adopt the same scheme.
-* **PBS and SGE do not use the two-venv path at all** and are untested against
-  real hardware.
-* **The cloud provider backends (AWS, Azure, GCP, Lambda) remain broken.** The
-  Spaces provider never satisfied the dispatch interface.
-* **Kubernetes has no usable widget fields**, and `default_memory` ("16GB") is
-  not a valid Kubernetes quantity.
-* **The widget does not validate input.** `cores=0`, `memory="banana"`,
-  `time="soon"` are accepted and fail later on the cluster.
-* **~5,100 lines have no importers** (#122), and the suite still has failures
-  outside the paths exercised here.
+* **The cloud backends (AWS, Azure, GCP, Lambda) are not verified.** The
+  `KeyError` on their first line is fixed, but reaching that code needs
+  credentials and provisioned instances that were not exercised. #119's other
+  findings -- the provider interface mismatch, the placeholder hostnames --
+  are untouched.
+* **PBS and SGE have not been run against real hardware.** There is none to
+  hand. Their scripts are now correct where before PBS's could not possibly
+  have worked, which is a different claim from "tested".
+* **Kubernetes execution is unverified**, though it is now configurable and
+  its memory quantities are valid.
+* **The suite still has failures** outside the paths exercised here: 176
+  failed / 1313 passed / 36 errors, against 211 / 1194 / 72 at the start of
+  this branch. Re-baselining it properly is #114.
+* **The result-signing scheme does not defend against a compromised remote
+  host.** Nothing that runs your code for you can.
 
 ## Reproducing the evidence
 
