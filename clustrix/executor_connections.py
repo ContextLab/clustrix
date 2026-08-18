@@ -227,7 +227,7 @@ class ConnectionManager:
         return stdout.read().decode(), stderr.read().decode()
 
     def resolve_remote_path(self, path: str) -> str:
-        """Expand a leading ``~`` against the remote account's home directory.
+        """Expand a leading ``~/`` against the remote account's home directory.
 
         Shell commands expand ``~`` themselves, but SFTP does not: it treats
         ``~/.clustrix/jobs`` as a *relative* directory literally named ``~``.
@@ -235,22 +235,35 @@ class ConnectionManager:
         uploaded into the wrong place is a confusing failure, so every path
         derived from ``remote_work_dir`` goes through here first.
 
+        Only ``~`` and ``~/...`` are expanded. ``~otheruser/...`` refers to a
+        different account's home and cannot be derived from ``$HOME``;
+        rewriting it by string concatenation would silently produce
+        ``/home/alicebob/...``, so it is left alone for the shell to resolve.
+
         The remote home directory is resolved once and cached per connection.
         """
-        if not path.startswith("~"):
+        if path != "~" and not path.startswith("~/"):
             return path
 
         if self._remote_home is None:
             stdout, _ = self.execute_remote_command("echo $HOME")
-            home = stdout.strip()
-            if not home:
+            # Take the LAST line: an interactive-style profile can print a
+            # login banner ahead of the value, and prepending "*** Welcome ***"
+            # to a path produces a directory nobody can explain.
+            candidates = [
+                ln.strip() for ln in (stdout or "").splitlines() if ln.strip()
+            ]
+            home = candidates[-1] if candidates else ""
+            if not home.startswith("/"):
                 raise RuntimeError(
-                    "Could not determine the remote home directory, so "
-                    f"remote_work_dir={path!r} cannot be resolved. Set "
-                    "remote_work_dir to an absolute path."
+                    "Could not determine the remote home directory (got "
+                    f"{home!r}), so remote_work_dir={path!r} cannot be "
+                    "resolved. Set remote_work_dir to an absolute path."
                 )
             self._remote_home = home.rstrip("/")
 
+        if path == "~":
+            return self._remote_home
         return self._remote_home + path[1:]
 
     def upload_file(self, local_path: str, remote_path: str):
@@ -307,6 +320,9 @@ class ConnectionManager:
 
     def disconnect(self):
         """Disconnect from cluster."""
+        # A later connect() may use a different username, and a home directory
+        # cached from the previous account would be silently wrong.
+        self._remote_home = None
         if self.sftp_client:
             self.sftp_client.close()
             self.sftp_client = None

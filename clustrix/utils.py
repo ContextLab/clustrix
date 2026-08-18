@@ -916,6 +916,20 @@ dependencies:
     return "Environment setup completed successfully"
 
 
+def conda_activation_lines(config) -> list:
+    """Lines a generated job script needs before it can run `conda`.
+
+    A batch script runs under a non-login shell, on a compute node, so conda
+    is uninitialised there even when the submitting host found it. Every
+    script generator calls this; keeping it in one place is what stops one
+    backend from being fixed while another silently keeps emitting bare
+    `conda run` and failing with "conda: command not found".
+    """
+    venv_info = getattr(config, "venv_info", None) or {}
+    prefix = venv_info.get("conda_setup_prefix", "")
+    return [prefix] if prefix else []
+
+
 def generate_two_venv_execution_commands(
     remote_job_dir: str,
     conda_env1_name: Optional[str] = None,
@@ -1248,12 +1262,7 @@ def _create_slurm_script(
         script_lines.append(f"cd {remote_job_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
-        conda_setup_prefix = config.venv_info.get("conda_setup_prefix", "")
-        if conda_setup_prefix:
-            # The batch script runs on a compute node under a non-login shell,
-            # so conda is uninitialised there too even though the submit host
-            # found it.
-            script_lines.append(conda_setup_prefix)
+        script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
             generate_two_venv_execution_commands(
                 remote_job_dir, conda_env1_name, conda_env2_name
@@ -1484,6 +1493,7 @@ def _create_ssh_script(
         # Use the centralized two-venv approach for cross-version compatibility
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
             generate_two_venv_execution_commands(
                 remote_job_dir, conda_env1_name, conda_env2_name

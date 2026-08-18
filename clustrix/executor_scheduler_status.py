@@ -458,17 +458,26 @@ class SchedulerStatusManager:
         if self.config.cluster_type != "slurm":
             return None
 
-        cmd = (
-            f"sacct -j {job_id} --format=State,ExitCode,NodeList,WorkDir "
-            f"--parsable2 --noheader 2>/dev/null | head -1"
-        )
-        try:
-            stdout, _ = self.connection_manager.execute_remote_command(cmd)
-        except Exception as e:  # pragma: no cover - defensive
-            logger.debug(f"Could not query sacct for job {job_id}: {e}")
-            return None
+        # WorkDir is only useful for the exit-127 diagnostic and is not a
+        # supported field on older SLURM, where asking for it makes the whole
+        # query fail. Fall back to the fields every version has rather than
+        # losing the state as well.
+        field_sets = ("State,ExitCode,NodeList,WorkDir", "State,ExitCode,NodeList")
+        line = ""
+        for fields in field_sets:
+            cmd = (
+                f"sacct -j {job_id} --format={fields} "
+                f"--parsable2 --noheader 2>/dev/null | head -1"
+            )
+            try:
+                stdout, _ = self.connection_manager.execute_remote_command(cmd)
+            except Exception as e:  # pragma: no cover - defensive
+                logger.debug(f"Could not query sacct for job {job_id}: {e}")
+                return None
+            line = (stdout or "").strip()
+            if line:
+                break
 
-        line = (stdout or "").strip()
         if not line:
             return None
 

@@ -79,122 +79,187 @@ class ModernClustrixWidget:
             --cx-focus:     var(--jp-brand-color3, #bbdefb);
             --cx-ok:        var(--jp-success-color1, #388e3c);
             --cx-err:       var(--jp-error-color1, #d32f2f);
+            --cx-warn:      var(--jp-warn-color1, #f57c00);
             --cx-font:      var(--jp-ui-font-family, system-ui,
                             -apple-system, "Segoe UI", helvetica, arial, sans-serif);
             --cx-mono:      var(--jp-code-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
-            --cx-size:      var(--jp-ui-font-size1, 13px);
 
             font-family: var(--cx-font);
-            font-size: var(--cx-size);
+            font-size: var(--jp-ui-font-size1, 13px);
             color: var(--cx-fg);
             background: var(--cx-bg);
             border: 1px solid var(--cx-rule) !important;
             border-radius: 4px !important;
+            max-width: 780px;
+            overflow: hidden;
         }
-
         .clustrix-widget * { font-family: var(--cx-font); }
 
-        /* Buttons ------------------------------------------------------ */
-        .clustrix-widget .widget-button.clustrix-button {
-            background-color: var(--cx-accent) !important;
-            color: #fff !important;
-            border: 1px solid var(--cx-accent) !important;
-            border-radius: 3px !important;
-            font-weight: 400 !important;
-            font-size: 12px !important;
+        /* Header -------------------------------------------------------- */
+        .clustrix-header {
+            padding: 10px 14px !important;
+            border-bottom: 1px solid var(--cx-rule);
+            background: var(--cx-bg-sunken);
+            box-sizing: border-box;
         }
-        .clustrix-widget .widget-button.clustrix-button:hover {
-            filter: brightness(1.12);
-        }
-        .clustrix-widget .widget-button.clustrix-button-secondary {
-            background-color: var(--cx-bg) !important;
-            color: var(--cx-fg) !important;
-            border: 1px solid var(--cx-border) !important;
-            border-radius: 3px !important;
-            font-size: 12px !important;
-        }
-        .clustrix-widget .widget-button.clustrix-button-secondary:hover {
-            background-color: var(--cx-bg-sunken) !important;
-        }
+        .clustrix-brand { font-weight: 600; font-size: 13px; }
+        .clustrix-brand-sep { color: var(--cx-fg-faint); margin: 0 7px; }
+        .clustrix-brand-sub { color: var(--cx-fg-muted); font-size: 12px; }
 
-        /* Fields ------------------------------------------------------- */
-        .clustrix-widget .widget-text input,
-        .clustrix-widget .widget-dropdown select,
-        .clustrix-widget .widget-combobox input {
-            background: var(--cx-bg);
-            color: var(--cx-fg);
-            border: 1px solid var(--cx-border);
-            border-radius: 3px;
+        .clustrix-pill {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 500;
+            line-height: 1.5;
         }
-        .clustrix-widget .widget-text input:focus,
-        .clustrix-widget .widget-dropdown select:focus,
-        .clustrix-widget .widget-combobox input:focus {
-            outline: 2px solid var(--cx-focus);
-            border-color: var(--cx-accent);
+        .clustrix-pill::before {
+            content: "";
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+            margin-right: 6px;
+            vertical-align: -1px;
         }
+        .clustrix-pill-idle  { background: var(--cx-bg); color: var(--cx-fg-muted); }
+        .clustrix-pill-busy  { background: rgba(245,124,0,.14); color: var(--cx-warn); }
+        .clustrix-pill-ok    { background: rgba(56,142,60,.14); color: var(--cx-ok); }
+        .clustrix-pill-error { background: rgba(211,47,47,.14); color: var(--cx-err); }
 
-        /* Labels and section headings ---------------------------------- */
-        .clustrix-label {
-            text-align: right;
-            font-weight: normal;
-            color: var(--cx-fg-muted);
-            padding-right: 6px;
+        /* Body and sections --------------------------------------------- */
+        .clustrix-body {
+            padding: 14px !important;
+            box-sizing: border-box;
         }
+        .clustrix-section { margin-bottom: 16px !important; }
+        .clustrix-section:last-child { margin-bottom: 0 !important; }
+
         .clustrix-section-heading {
             font-size: 10px;
             font-weight: 600;
             letter-spacing: .08em;
             text-transform: uppercase;
             color: var(--cx-fg-faint);
-            border-bottom: 1px solid var(--cx-rule);
-            padding-bottom: 3px;
-            margin: 4px 0 2px 0;
+            margin: 0 0 7px 0;
         }
+        .clustrix-field-label {
+            font-size: 11px;
+            color: var(--cx-fg-muted);
+            margin: 0 0 3px 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-height: 15px;
+        }
+        .clustrix-row > .widget-vbox { margin-right: 8px !important; }
+        .clustrix-row > .widget-vbox:last-child { margin-right: 0 !important; }
+
+        /* Fields --------------------------------------------------------- */
+        .clustrix-widget .widget-text input,
+        .clustrix-widget .widget-password input,
+        .clustrix-widget .widget-dropdown select,
+        .clustrix-widget .widget-combobox input {
+            height: 26px !important;
+            min-height: 26px !important;
+            padding: 0 7px !important;
+            font-size: 13px !important;
+            line-height: 26px !important;
+            color: var(--cx-fg);
+            background: var(--cx-bg);
+            border: 1px solid var(--cx-border) !important;
+            border-radius: 3px !important;
+            box-sizing: border-box;
+        }
+        .clustrix-widget .widget-text,
+        .clustrix-widget .widget-password,
+        .clustrix-widget .widget-dropdown,
+        .clustrix-widget .widget-combobox {
+            height: 26px !important;
+            min-height: 26px !important;
+        }
+        .clustrix-widget .widget-text input:focus,
+        .clustrix-widget .widget-password input:focus,
+        .clustrix-widget .widget-dropdown select:focus {
+            outline: 2px solid var(--cx-focus);
+            border-color: var(--cx-accent) !important;
+        }
+        /* ipywidgets renders every control with a label slot; the labels are
+           our own HTML above the field, so reclaim the space. */
+        .clustrix-widget .widget-label { display: none !important; }
+        .clustrix-widget .clustrix-mono input { font-family: var(--cx-mono) !important; font-size: 12px !important; }
+
+        /* Buttons -------------------------------------------------------- */
+        .clustrix-widget .widget-button {
+            height: 26px !important;
+            min-height: 26px !important;
+            padding: 0 11px !important;
+            font-size: 12px !important;
+            font-weight: 400 !important;
+            border-radius: 3px !important;
+            box-shadow: none !important;
+        }
+        .clustrix-widget .widget-button.clustrix-button {
+            background-color: var(--cx-accent) !important;
+            color: #fff !important;
+            border: 1px solid var(--cx-accent) !important;
+        }
+        .clustrix-widget .widget-button.clustrix-button:hover { filter: brightness(1.12); }
+        .clustrix-widget .widget-button.clustrix-button-secondary {
+            background-color: var(--cx-bg) !important;
+            color: var(--cx-fg) !important;
+            border: 1px solid var(--cx-border) !important;
+        }
+        .clustrix-widget .widget-button.clustrix-button-secondary:hover {
+            background-color: var(--cx-bg-sunken) !important;
+        }
+
+        /* Actions row ---------------------------------------------------- */
+        .clustrix-actions {
+            border-top: 1px solid var(--cx-rule);
+            padding-top: 12px !important;
+            margin-bottom: 16px !important;
+        }
+        .clustrix-actions .widget-button { margin-left: 6px !important; }
+        .clustrix-actions > .widget-button:first-child { margin-left: 0 !important; }
+
+        /* Output ---------------------------------------------------------
+           Framed and given a floor height so an idle widget reads as a
+           console waiting for something rather than as a broken layout. */
+        .clustrix-output-panel .widget-output {
+            background: var(--cx-bg-sunken);
+            border: 1px solid var(--cx-rule);
+            border-radius: 3px;
+            padding: 9px 11px;
+            min-height: 46px;
+            max-height: 260px;
+            overflow: auto;
+            box-sizing: border-box;
+            width: 100%;
+        }
+        /* ipywidgets always renders a .jp-OutputArea child, so :empty on the
+           container never matches. The placeholder hangs off the empty output
+           AREA instead, which really is childless until something is printed. */
+        .clustrix-output-panel .jp-OutputArea:empty::before {
+            content: "Results from Test connect, Test submit and Apply appear here.";
+            font-family: var(--cx-font);
+            font-size: 12px;
+            color: var(--cx-fg-faint);
+        }
+        .clustrix-output-panel .jp-OutputArea-output,
+        .clustrix-output-panel .jp-OutputArea-output pre {
+            background: transparent !important;
+            font-family: var(--cx-mono) !important;
+            font-size: 12px !important;
+            line-height: 1.65 !important;
+            color: var(--cx-fg) !important;
+            padding: 0 !important;
+            margin: 0 !important;
+        }
+        .clustrix-output-panel .jp-OutputArea-prompt { display: none !important; }
         .clustrix-status-ok  { color: var(--cx-ok); }
         .clustrix-status-err { color: var(--cx-err); }
-        .clustrix-mono { font-family: var(--cx-mono) !important; }
-
-        /* Grid --------------------------------------------------------- */
-        .clustrix-grid {
-            display: grid;
-            gap: 8px;
-            align-items: center;
-        }
-
-        /* 19-column grid: each unit is 1/19th of the row width. */
-        .clustrix-row1, .clustrix-row2, .clustrix-row3, .clustrix-row4 {
-            grid-template-columns: repeat(19, 1fr);
-        }
-
-        /* Row 1: profile label | profile dropdown | add | remove */
-        .clustrix-row1-label { grid-column: 1 / 5; }
-        .clustrix-row1-profile { grid-column: 5 / 18; }
-        .clustrix-row1-add { grid-column: 18 / 19; }
-        .clustrix-row1-remove { grid-column: 19 / 20; }
-
-        /* Row 2: config label | field | save | load | apply | test | test
-         * The two test buttons get 3 columns each rather than 2: at 2
-         * columns their labels truncated to "Test conn..." / "Test sub...". */
-        .clustrix-row2-label { grid-column: 1 / 4; }
-        .clustrix-row2-field { grid-column: 4 / 10; }
-        .clustrix-row2-save  { grid-column: 10 / 11; }
-        .clustrix-row2-load  { grid-column: 11 / 12; }
-        .clustrix-row2-apply { grid-column: 12 / 14; }
-        .clustrix-row2-test1 { grid-column: 14 / 17; }
-        .clustrix-row2-test2 { grid-column: 17 / 20; }
-
-        /* Row 3: cluster type | CPUs | RAM | Time */
-        .clustrix-row3-label { grid-column: 1 / 5; }
-        .clustrix-row3-cluster { grid-column: 5 / 8; }
-        .clustrix-row3-cpu-label { grid-column: 8 / 10; }
-        .clustrix-row3-cpu-field { grid-column: 10 / 12; }
-        .clustrix-row3-ram-label { grid-column: 12 / 14; }
-        .clustrix-row3-ram-field { grid-column: 14 / 16; }
-        .clustrix-row3-time-label { grid-column: 16 / 18; }
-        .clustrix-row3-time-field { grid-column: 18 / 20; }
-
-        /* Row 4: advanced-settings button, centred */
-        .clustrix-row4-advanced { grid-column: 9 / 12; }
         </style>
         """
         # Display CSS
@@ -294,7 +359,7 @@ class ModernClustrixWidget:
         self.widgets["save_btn"] = widgets.Button(
             description="Save",
             tooltip="Save ALL profiles (not just active one) to specified config file",
-            layout=widgets.Layout(width="60px", height="35px"),
+            layout=widgets.Layout(width="66px", height="26px"),
         )
         self.widgets["save_btn"].add_class("clustrix-button-secondary")
 
@@ -302,7 +367,7 @@ class ModernClustrixWidget:
         self.widgets["load_btn"] = widgets.Button(
             description="Load",
             tooltip="Open file dialog to select .yml or .json file, replace ALL current profiles",
-            layout=widgets.Layout(width="60px", height="35px"),
+            layout=widgets.Layout(width="66px", height="26px"),
         )
         self.widgets["load_btn"].add_class("clustrix-button-secondary")
 
@@ -320,7 +385,7 @@ class ModernClustrixWidget:
             tooltip="Test full connection workflow: connect, create venv, run command, delete venv",
             layout=widgets.Layout(width="130px", height="35px"),
         )
-        self.widgets["test_connect_btn"].add_class("clustrix-button")
+        self.widgets["test_connect_btn"].add_class("clustrix-button-secondary")
 
         # 2.7 Test Submit Button - complete job submission test
         self.widgets["test_submit_btn"] = widgets.Button(
@@ -328,7 +393,7 @@ class ModernClustrixWidget:
             tooltip="Full job submission test: connect, create venv, submit 4 test jobs, verify, clean up",
             layout=widgets.Layout(width="130px", height="35px"),
         )
-        self.widgets["test_submit_btn"].add_class("clustrix-button")
+        self.widgets["test_submit_btn"].add_class("clustrix-button-secondary")
 
         # Config row container (Row 2) with proper spacing
         self.widgets["config_row"] = widgets.HBox(
@@ -430,7 +495,7 @@ class ModernClustrixWidget:
             tooltip="Show/hide advanced configuration section",
             layout=widgets.Layout(width="150px", height="35px"),
         )
-        self.widgets["advanced_toggle"].add_class("clustrix-button")
+        self.widgets["advanced_toggle"].add_class("clustrix-button-secondary")
 
         # Advanced settings button row (centered)
         self.widgets["advanced_button_row"] = widgets.HBox(
@@ -659,11 +724,6 @@ class ModernClustrixWidget:
             layout=widgets.Layout(width="60px", height="35px"),
         )
 
-        # 4.5 "Username:" Label (right-aligned)
-        username_label = widgets.HTML(
-            value="<div style='text-align: right; width: 80px;'>Username:</div>"
-        )
-
         # 4.6 Username Field (editable text)
         self.widgets["username"] = widgets.Text(
             value=os.getenv("USER", ""),
@@ -709,11 +769,6 @@ class ModernClustrixWidget:
             layout=widgets.Layout(width="20px", height="35px"),
         )
 
-        # 5.5 "Password:" Label (right-aligned)
-        password_label = widgets.HTML(
-            value="<div style='text-align: right; width: 80px;'>Password:</div>"
-        )
-
         # 5.6 Password Field (masked, optional)
         self.widgets["password"] = widgets.Password(
             value="",
@@ -737,266 +792,248 @@ class ModernClustrixWidget:
             ),
         )
 
-        # Row 6: Additional Authentication Options with styled box
-        # 6.1 "Local env var:" Label (right-aligned)
-        env_var_label = widgets.HTML(
-            value="<div style='text-align: right; width: 120px;'>Local env var:</div>"
-        )
-
-        # 6.2 Environment Variable Field (editable text)
+        # Fields used by the connection layout below. The old right-aligned
+        # label + spacer + field HBoxes that used to wrap them are gone: the
+        # connection section now uses the same label-above-field rows as the
+        # rest of the widget, so those wrappers had no readers.
         self.widgets["local_env_var"] = widgets.Text(
             value="",
             placeholder="MY_PASSWORD",
-            layout=widgets.Layout(width="150px", height="35px"),
+            layout=widgets.Layout(width="150px", height="26px"),
         )
 
-        # 6.5 "Home dir:" Label (right-aligned)
-        home_dir_label = widgets.HTML(
-            value="<div style='text-align: right; width: 80px;'>Home dir:</div>"
-        )
-
-        # 6.6 Home Directory Field (editable, optional, required for SSH setup)
+        # Remote work directory (optional; required for SSH key setup)
         self.widgets["home_dir"] = widgets.Text(
             value="",
-            placeholder="/home/researcher",
-            layout=widgets.Layout(width="150px", height="35px"),
+            placeholder="~/.clustrix/jobs",
+            layout=widgets.Layout(width="150px", height="26px"),
         )
 
-        # Authentication fields container with styled box (Username, Password, Home dir)
-        auth_fields_container = widgets.VBox(
+        other_auth_container = widgets.HBox(
             [
-                widgets.HBox(
-                    [
-                        username_label,
-                        widgets.HTML(
-                            value="<div style='width: 10px;'></div>"
-                        ),  # Spacer
-                        self.widgets["username"],
-                    ],
-                    layout=widgets.Layout(
-                        justify_content="flex-start", align_items="center"
-                    ),
-                ),
-                widgets.HBox(
-                    [
-                        password_label,
-                        widgets.HTML(
-                            value="<div style='width: 10px;'></div>"
-                        ),  # Spacer
-                        self.widgets["password"],
-                    ],
-                    layout=widgets.Layout(
-                        justify_content="flex-start", align_items="center"
-                    ),
-                ),
-                widgets.HBox(
-                    [
-                        home_dir_label,
-                        widgets.HTML(
-                            value="<div style='width: 10px;'></div>"
-                        ),  # Spacer
-                        self.widgets["home_dir"],
-                    ],
-                    layout=widgets.Layout(
-                        justify_content="flex-start", align_items="center"
-                    ),
+                self._field(
+                    "Password from env var",
+                    self.widgets["local_env_var"],
+                    width="100%",
                 ),
             ],
-            layout=widgets.Layout(
-                border="1px solid #dee2e6",
-                padding="10px",
-                background_color="#f8f9fa",
-                margin="5px 0px",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
+        other_auth_container.add_class("clustrix-row")
 
-        # Secondary container for other auth options (Env var only)
-        other_auth_container = widgets.VBox(
-            [
-                widgets.HBox(
-                    [
-                        env_var_label,
-                        widgets.HTML(
-                            value="<div style='width: 10px;'></div>"
-                        ),  # Spacer
-                        self.widgets["local_env_var"],
-                    ],
-                    layout=widgets.Layout(
-                        justify_content="flex-start", align_items="center"
-                    ),
-                ),
-            ],
-            layout=widgets.Layout(
-                margin="5px 0px",
-            ),
-        )
-
-        self.widgets["remote_row6"] = auth_fields_container
-
-        # 7.2 Auto Setup SSH Keys Button (only for remote)
         self.widgets["auto_setup_ssh"] = widgets.Button(
             description="Auto setup SSH keys",
             tooltip="Automatically configure SSH key authentication",
-            layout=widgets.Layout(width="180px", height="35px"),
+            layout=widgets.Layout(width="170px", height="26px"),
         )
-        self.widgets["auto_setup_ssh"].add_class("clustrix-button")
+        self.widgets["auto_setup_ssh"].add_class("clustrix-button-secondary")
 
-        # Row 7: Action Buttons for Remote
         remote_action_row = widgets.HBox(
-            [
-                self.widgets["auto_setup_ssh"],
-            ],
-            layout=widgets.Layout(justify_content="flex-start", margin="5px 0px"),
+            [self.widgets["auto_setup_ssh"]],
+            layout=widgets.Layout(width="100%", justify_content="flex-start"),
         )
+        remote_action_row.add_class("clustrix-row")
 
-        # Remote section container (initially hidden, only visible when cluster type != "local")
+        # The connection fields are re-laid-out here into the same
+        # label-above-field sections as the rest of the widget. The
+        # remote_rowN boxes above are kept because _update_ui_for_cluster_type
+        # and several tests refer to them by name.
+        connection_row = widgets.HBox(
+            [
+                self._field("Host", self.widgets["host"], width="100%"),
+                self._field("Port", self.widgets["port"], width="80px"),
+                self._field("Username", self.widgets["username"], width="150px"),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        connection_row.add_class("clustrix-row")
+
+        auth_row = widgets.HBox(
+            [
+                self._field("SSH key file", self.widgets["ssh_key_file"], width="100%"),
+                self._field("Password", self.widgets["password"], width="170px"),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        auth_row.add_class("clustrix-row")
+
+        workdir_row = widgets.HBox(
+            [
+                self._field(
+                    "Remote work directory", self.widgets["home_dir"], width="100%"
+                ),
+            ],
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
+        )
+        workdir_row.add_class("clustrix-row")
+        self.widgets["home_dir"].add_class("clustrix-mono")
+
         self.widgets["remote_section"] = widgets.VBox(
             [
-                self.widgets["remote_row4"],  # Host, port
-                self.widgets["remote_row5"],  # SSH key, refresh
-                self.widgets["remote_row6"],  # Username, Password, Home dir (styled)
+                self._section_heading("Connection"),
+                connection_row,
+                auth_row,
+                workdir_row,
                 other_auth_container,  # Env var
                 remote_action_row,  # SSH setup button
             ],
-            layout=widgets.Layout(display="none", margin="10px 0px"),
+            layout=widgets.Layout(display="none", width="100%"),
         )
+        self.widgets["remote_section"].add_class("clustrix-section")
 
     def _create_output_area(self) -> None:
         """Create output area for logs and status messages."""
-        self.widgets["output"] = widgets.Output(
+        # Sizing and colour live in the stylesheet, which resolves them
+        # through JupyterLab's theme tokens; setting them here would hardcode
+        # a light-theme grey that the dark theme cannot override. The panel is
+        # visible from the start: hiding it made the widget look like it had
+        # no output area at all, and it appeared mid-layout on first use.
+        self.widgets["output"] = widgets.Output(layout=widgets.Layout(width="100%"))
+
+    # -- layout helpers ------------------------------------------------
+    #
+    # The layout is built from three small pieces rather than one 19-column
+    # grid. The grid forced every control into a shared column rhythm, which
+    # is why the two test buttons had to be squeezed into two columns and
+    # truncated to "Test conn..." / "Test sub...", and why the labels were
+    # right-aligned into a narrow gutter with no room to grow.
+
+    @staticmethod
+    def _section_heading(text: str) -> "widgets.Widget":
+        """A small uppercase rule introducing a group of fields."""
+        heading = widgets.HTML(f"<div class='clustrix-section-heading'>{text}</div>")
+        heading.layout = widgets.Layout(width="100%", margin="0")
+        return heading
+
+    @staticmethod
+    def _field(label: str, control: "widgets.Widget", width: str = "auto"):
+        """A control with its label above it, not beside it.
+
+        Labels above are what makes the full button text fit: the row no
+        longer has to reserve a left-hand gutter wide enough for the longest
+        label in the whole widget.
+        """
+        caption = widgets.HTML(f"<div class='clustrix-field-label'>{label}</div>")
+        caption.layout = widgets.Layout(width="100%", margin="0")
+        control.layout.width = "100%"
+        control.layout.margin = "0"
+
+        # A fixed width is a floor, not a suggestion. Without flex 0 0 <width>
+        # the flex row shrinks these to fit whatever the stretchy field wants,
+        # which is how a 66px "Save" button ended up 40px wide and rendered
+        # as "S...".
+        if width in ("auto", "100%"):
+            flex = "1 1 auto"
+        else:
+            flex = f"0 0 {width}"
+
+        return widgets.VBox(
+            [caption, control],
             layout=widgets.Layout(
-                height="300px",
-                width="100%",
-                overflow_y="auto",
-                border="1px solid #ddd",
-                border_radius="4px",
-                padding="10px",
-                margin="10px 0px",
-                background_color="#f8f9fa",
-                display="none",  # Initially hidden
-            )
+                width=width, flex=flex, margin="0", overflow="hidden"
+            ),
         )
 
     def _create_grid_layout(self) -> None:
-        """Create grid layout for proper alignment."""
-        # Row 1: Profile Management (19-column grid: AAAABBBBBBBBBBBBBCD)
-        row1_label = widgets.HTML("Active profile:")
-        row1_label.add_class("clustrix-label")
-        row1_label.add_class("clustrix-row1-label")
+        """Assemble the widget body: a header, three field sections, actions."""
 
-        self.widgets["profile_dropdown"].add_class("clustrix-row1-profile")
-        self.widgets["add_profile_btn"].add_class("clustrix-row1-add")
-        self.widgets["remove_profile_btn"].add_class("clustrix-row1-remove")
+        # -- header: which cluster am I about to run on, and did it answer? --
+        self.widgets["status_pill"] = widgets.HTML(
+            "<span class='clustrix-pill clustrix-pill-idle'>not tested</span>"
+        )
+        self.widgets["status_pill"].layout = widgets.Layout(margin="0")
 
-        row1_grid = widgets.GridBox(
+        header = widgets.HBox(
             [
-                row1_label,
-                self.widgets["profile_dropdown"],
-                self.widgets["add_profile_btn"],
-                self.widgets["remove_profile_btn"],
+                widgets.HTML(
+                    "<span class='clustrix-brand'>Clustrix</span>"
+                    "<span class='clustrix-brand-sep'>/</span>"
+                    "<span class='clustrix-brand-sub'>cluster configuration</span>"
+                ),
+                widgets.HBox(
+                    [self.widgets["status_pill"]],
+                    layout=widgets.Layout(justify_content="flex-end", flex="1 1 auto"),
+                ),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="4fr 13fr 1fr 1fr",  # AAAABBBBBBBBBBBBBCD
-                grid_gap="4px",
-                align_items="center",
-            ),
+            layout=widgets.Layout(width="100%", align_items="center"),
         )
-        row1_grid.add_class("clustrix-grid")
-        row1_grid.add_class("clustrix-row1")
+        header.add_class("clustrix-header")
 
-        # Row 2: Configuration Management (19-column grid: EEEEFFFFFFFGHIIJJKK)
-        row2_label = widgets.HTML("Config filename:")
-        row2_label.add_class("clustrix-label")
-        row2_label.add_class("clustrix-row2-label")
-
-        self.widgets["config_filename"].add_class("clustrix-row2-field")
-        self.widgets["save_btn"].add_class("clustrix-row2-save")
-        self.widgets["load_btn"].add_class("clustrix-row2-load")
-        self.widgets["apply_btn"].add_class("clustrix-row2-apply")
-        self.widgets["test_connect_btn"].add_class("clustrix-row2-test1")
-        self.widgets["test_submit_btn"].add_class("clustrix-row2-test2")
-
-        row2_grid = widgets.GridBox(
+        # -- profile ---------------------------------------------------------
+        profile_row = widgets.HBox(
             [
-                row2_label,
-                self.widgets["config_filename"],
-                self.widgets["save_btn"],
-                self.widgets["load_btn"],
-                self.widgets["apply_btn"],
-                self.widgets["test_connect_btn"],
-                self.widgets["test_submit_btn"],
+                self._field(
+                    "Active profile", self.widgets["profile_dropdown"], width="100%"
+                ),
+                self._field("", self.widgets["add_profile_btn"], width="42px"),
+                self._field("", self.widgets["remove_profile_btn"], width="42px"),
+                self._field(
+                    "Configuration file", self.widgets["config_filename"], width="200px"
+                ),
+                self._field("", self.widgets["save_btn"], width="66px"),
+                self._field("", self.widgets["load_btn"], width="66px"),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="4fr 7fr 1fr 1fr 2fr 2fr 2fr",  # EEEEFFFFFFFGHIIJJKK
-                grid_gap="4px",
-                align_items="center",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
-        row2_grid.add_class("clustrix-grid")
-        row2_grid.add_class("clustrix-row2")
+        profile_row.add_class("clustrix-row")
 
-        # Row 3: Cluster Configuration (19-column grid: LLLLMMMNNOOPPQQRRSS)
-        row3_label = widgets.HTML("Cluster type:")
-        row3_label.add_class("clustrix-label")
-        row3_label.add_class("clustrix-row3-label")
+        profile_section = widgets.VBox(
+            [self._section_heading("Profile"), profile_row],
+            layout=widgets.Layout(width="100%"),
+        )
+        profile_section.add_class("clustrix-section")
 
-        row3_cpu_label = widgets.HTML("CPUs:")
-        row3_cpu_label.add_class("clustrix-label")
-        row3_cpu_label.add_class("clustrix-row3-cpu-label")
-
-        row3_ram_label = widgets.HTML("RAM:")
-        row3_ram_label.add_class("clustrix-label")
-        row3_ram_label.add_class("clustrix-row3-ram-label")
-
-        row3_time_label = widgets.HTML("Time:")
-        row3_time_label.add_class("clustrix-label")
-        row3_time_label.add_class("clustrix-row3-time-label")
-
-        self.widgets["cluster_type"].add_class("clustrix-row3-cluster")
-        self.widgets["cpus"].add_class("clustrix-row3-cpu-field")
-        self.widgets["ram"].add_class("clustrix-row3-ram-field")
-        self.widgets["time"].add_class("clustrix-row3-time-field")
-
-        row3_grid = widgets.GridBox(
+        # -- resources -------------------------------------------------------
+        resources_row = widgets.HBox(
             [
-                row3_label,
-                self.widgets["cluster_type"],
-                row3_cpu_label,
-                self.widgets["cpus"],
-                row3_ram_label,
-                self.widgets["ram"],
-                row3_time_label,
-                self.widgets["time"],
+                self._field("Cluster type", self.widgets["cluster_type"], width="100%"),
+                self._field("CPUs", self.widgets["cpus"], width="90px"),
+                self._field("Memory", self.widgets["ram"], width="110px"),
+                self._field("Walltime", self.widgets["time"], width="120px"),
             ],
-            layout=widgets.Layout(
-                grid_template_columns="4fr 3fr 2fr 2fr 2fr 2fr 2fr 2fr",  # LLLLMMMNNOOPPQQRRSS
-                grid_gap="4px",
-                align_items="center",
-            ),
+            layout=widgets.Layout(width="100%", align_items="flex-end"),
         )
-        row3_grid.add_class("clustrix-grid")
-        row3_grid.add_class("clustrix-row3")
+        resources_row.add_class("clustrix-row")
 
-        # Row 4: Advanced Settings Button (TTTTTTTTTTUUUVVVVVV)
-        # Use a centered grid with empty space + button + empty space
-        empty1 = widgets.HTML("")
-        empty2 = widgets.HTML("")
-
-        row4_grid = widgets.GridBox(
-            [empty1, self.widgets["advanced_toggle"], empty2],
-            layout=widgets.Layout(
-                grid_template_columns="10fr 3fr 6fr",  # TTTTTTTTTTUUUVVVVVV
-                grid_gap="4px",
-                justify_items="center",
-                margin="10px 0px",
-            ),
+        resources_section = widgets.VBox(
+            [self._section_heading("Resources"), resources_row],
+            layout=widgets.Layout(width="100%"),
         )
+        resources_section.add_class("clustrix-section")
 
-        # Store grid rows
-        self.widgets["grid_row1"] = row1_grid
-        self.widgets["grid_row2"] = row2_grid
-        self.widgets["grid_row3"] = row3_grid
-        self.widgets["grid_row4"] = row4_grid
+        # -- actions ---------------------------------------------------------
+        # Advanced settings sits on the left, away from the buttons that talk
+        # to the cluster, so opening a panel and submitting a job are not
+        # neighbouring clicks.
+        for key in ("test_connect_btn", "test_submit_btn"):
+            self.widgets[key].layout.width = "auto"
+        self.widgets["apply_btn"].layout.width = "auto"
+        self.widgets["advanced_toggle"].layout.width = "auto"
+
+        actions = widgets.HBox(
+            [
+                self.widgets["advanced_toggle"],
+                widgets.HBox(
+                    [
+                        self.widgets["test_connect_btn"],
+                        self.widgets["test_submit_btn"],
+                        self.widgets["apply_btn"],
+                    ],
+                    layout=widgets.Layout(
+                        justify_content="flex-end", flex="1 1 auto", grid_gap="6px"
+                    ),
+                ),
+            ],
+            layout=widgets.Layout(width="100%", align_items="center"),
+        )
+        actions.add_class("clustrix-actions")
+
+        # The old grid_rowN keys are what _update_ui_for_cluster_type and the
+        # tests reach for, so they stay -- they just name sections now.
+        self.widgets["grid_row1"] = header
+        self.widgets["grid_row2"] = profile_section
+        self.widgets["grid_row3"] = resources_section
+        self.widgets["grid_row4"] = actions
 
     def _setup_observers(self) -> None:
         """Setup widget observers and event handlers."""
@@ -1036,47 +1073,72 @@ class ModernClustrixWidget:
         cluster_type = self.widgets["cluster_type"].value
         self.current_cluster_type = cluster_type
 
-        # Show/hide remote section
-        if cluster_type in ["ssh", "slurm", "pbs", "sge"]:
-            self.widgets["remote_section"].layout.display = "block"
-            # Update remote_row4 to show both advanced toggle and SSH setup
-            self.widgets["remote_section"].children = list(
-                self.widgets["remote_section"].children[:3]
-            ) + [
-                widgets.HBox(
-                    [
-                        self.widgets["advanced_toggle"],
-                        self.widgets["auto_setup_ssh"],
-                    ],
-                    layout=widgets.Layout(margin="5px 0px"),
-                )
-            ]
-        else:
-            self.widgets["remote_section"].layout.display = "none"
+        # Show/hide the connection section. Its children are assembled once in
+        # _create_remote_section; rebuilding them here used to splice in a
+        # second "Advanced settings" button beside the one in the actions row
+        # and drop every field after the third.
+        remote = cluster_type in ["ssh", "slurm", "pbs", "sge"]
+        self.widgets["remote_section"].layout.display = "block" if remote else "none"
 
     def get_widget(self) -> "widgets.Widget":
-        """Get the complete widget for display."""
-        # Main container using grid layout for perfect alignment
-        main_container = widgets.VBox(
+        """Get the complete widget for display.
+
+        The header is set apart from the body so it reads as a title bar; the
+        body carries the field sections with their own padding. Sizes and
+        colours all come from the stylesheet, which resolves them through
+        JupyterLab's theme tokens.
+        """
+        body = widgets.VBox(
             [
-                self.widgets["grid_row1"],  # Profile management
-                self.widgets["grid_row2"],  # Configuration management
-                self.widgets["grid_row3"],  # Cluster configuration
-                self.widgets["grid_row4"],  # Advanced settings button
-                self.widgets["remote_section"],
+                self.widgets["grid_row2"],  # Profile
+                self.widgets["grid_row3"],  # Resources
+                self.widgets["remote_section"],  # Connection
+                self.widgets["grid_row4"],  # Actions
                 self.widgets["advanced_section"],
-                self.widgets["output"],
+                self._output_panel(),
             ],
-            layout=widgets.Layout(
-                padding="15px",
-                border="1px solid #dee2e6",
-                border_radius="8px",
-                background_color="#ffffff",
-            ),
+            layout=widgets.Layout(width="100%"),
+        )
+        body.add_class("clustrix-body")
+
+        main_container = widgets.VBox(
+            [self.widgets["grid_row1"], body],
+            layout=widgets.Layout(width="100%", overflow="hidden"),
         )
         main_container.add_class("clustrix-widget")
 
         return main_container
+
+    def _output_panel(self) -> "widgets.Widget":
+        """The log surface, framed and labelled instead of bare.
+
+        The Output widget on its own gives no indication of where results
+        appear, so an empty one reads as a broken widget rather than as a
+        console waiting for something to happen.
+        """
+        panel = widgets.VBox(
+            [self._section_heading("Output"), self.widgets["output"]],
+            layout=widgets.Layout(width="100%"),
+        )
+        panel.add_class("clustrix-section")
+        panel.add_class("clustrix-output-panel")
+        return panel
+
+    def set_status(self, state: str, text: str) -> None:
+        """Update the header pill.
+
+        ``state`` is one of ``idle``, ``busy``, ``ok`` or ``error`` and picks
+        the colour; ``text`` is what the pill says.
+        """
+        pill = self.widgets.get("status_pill")
+        if pill is None:
+            return
+        allowed = {"idle", "busy", "ok", "error"}
+        if state not in allowed:
+            raise ValueError(
+                f"Unknown status state {state!r}; expected one of {allowed}"
+            )
+        pill.value = f"<span class='clustrix-pill clustrix-pill-{state}'>{text}</span>"
 
     def display(self) -> None:
         """Display the widget in the notebook."""
@@ -1111,11 +1173,9 @@ class ModernClustrixWidget:
                 self.widgets["profile_dropdown"].value = new_name
 
                 with self.widgets["output"]:
-                    self.widgets["output"].layout.display = "block"
                     print(f"✅ Created new profile: '{new_name}'")
         except Exception as e:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"❌ Error creating profile: {e}")
 
     def _on_remove_profile(self, button):
@@ -1133,15 +1193,12 @@ class ModernClustrixWidget:
                     self._update_ui_for_cluster_type()
 
                 with self.widgets["output"]:
-                    self.widgets["output"].layout.display = "block"
                     print(f"✅ Removed profile: '{current_profile}'")
             else:
                 with self.widgets["output"]:
-                    self.widgets["output"].layout.display = "block"
                     print("⚠️ Cannot remove the last remaining profile")
         except Exception as e:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"❌ Error removing profile: {e}")
 
     def _update_profile_dropdown(self):
@@ -1168,11 +1225,9 @@ class ModernClustrixWidget:
             self.profile_manager.save_to_file(filename)
 
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"✅ Saved all profiles to: {filename}")
         except Exception as e:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"❌ Error saving configuration: {e}")
 
     def _on_load_config(self, button):
@@ -1194,7 +1249,6 @@ class ModernClustrixWidget:
                     self._update_ui_for_cluster_type()
 
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"✅ Loaded profiles from: {filename}")
                 profile_names = self.profile_manager.get_profile_names()
                 print(
@@ -1202,7 +1256,6 @@ class ModernClustrixWidget:
                 )
         except Exception as e:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"❌ Error loading configuration: {e}")
 
     def _on_apply_config(self, button):
@@ -1237,7 +1290,6 @@ class ModernClustrixWidget:
             # In a real implementation, you'd use a timer or similar
 
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"✅ Applied configuration from profile: {current_profile}")
                 print(f"   Cluster type: {config.cluster_type}")
                 if hasattr(config, "cluster_host") and config.cluster_host:
@@ -1247,7 +1299,6 @@ class ModernClustrixWidget:
                 )
         except Exception as e:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"❌ Error applying configuration: {e}")
 
     def _on_test_connect(self, button):
@@ -1256,9 +1307,10 @@ class ModernClustrixWidget:
         original_description = button.description
 
         with self.widgets["output"]:
-            self.widgets["output"].layout.display = "block"
+            self.set_status("busy", "testing…")
             print("🔍 Testing cluster connection...")
 
+            connected = False
             try:
                 config = self._get_config_from_widgets()
 
@@ -1291,19 +1343,30 @@ class ModernClustrixWidget:
                         # Test environment setup
                         print("   Testing environment setup...")
                         print("   ✅ Basic environment test passed")
+                        connected = True
                     else:
                         print("   ⚠️ Authentication test failed")
 
                 elif config.cluster_type == "local":
                     print("   ✅ Local execution environment ready")
+                    connected = True
 
                 else:
                     print(f"   ✅ {config.cluster_type} configuration validated")
+                    connected = True
 
-                print("✅ Connection test completed successfully")
+                if connected:
+                    print("✅ Connection test completed successfully")
+                    self.set_status("ok", "connected")
+                else:
+                    # The old code printed "completed successfully" even when
+                    # authentication had just failed two lines earlier.
+                    print("❌ Connection test did not succeed")
+                    self.set_status("error", "not connected")
 
             except Exception as e:
                 print(f"❌ Connection test failed: {e}")
+                self.set_status("error", "not connected")
 
             finally:
                 # Reset button
@@ -1316,7 +1379,7 @@ class ModernClustrixWidget:
         original_description = button.description
 
         with self.widgets["output"]:
-            self.widgets["output"].layout.display = "block"
+            self.set_status("busy", "submitting…")
             print("🚀 Testing job submission...")
 
             try:
@@ -1345,10 +1408,12 @@ class ModernClustrixWidget:
                 print("   Cleaning up test environment...")
 
                 print("✅ Job submission test completed successfully")
+                self.set_status("ok", "job submitted")
                 print("   All 4 test jobs executed and cleaned up properly")
 
             except Exception as e:
                 print(f"❌ Job submission test failed: {e}")
+                self.set_status("error", "submission failed")
 
             finally:
                 # Reset button
@@ -1390,7 +1455,6 @@ class ModernClustrixWidget:
             # Set as selected value
             self.widgets["env_vars"].value = env_var_input
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"✅ Added environment variable: {env_var_input}")
                 if env_var_input == "NEW_VAR=value":
                     print("   Note: Edit the combobox value to customize KEY=value")
@@ -1410,11 +1474,9 @@ class ModernClustrixWidget:
                     self.widgets["env_vars"].value = ""
 
                 with self.widgets["output"]:
-                    self.widgets["output"].layout.display = "block"
                     print(f"✅ Removed environment variable: {selected}")
         else:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print("⚠️ No environment variable selected to remove")
 
     def _on_add_module(self, button):
@@ -1433,7 +1495,6 @@ class ModernClustrixWidget:
             # Set as selected value
             self.widgets["modules"].value = module_input
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print(f"✅ Added module: {module_input}")
                 if module_input == "python":
                     print("   Note: Edit the combobox value to customize module name")
@@ -1453,17 +1514,14 @@ class ModernClustrixWidget:
                     self.widgets["modules"].value = ""
 
                 with self.widgets["output"]:
-                    self.widgets["output"].layout.display = "block"
                     print(f"✅ Removed module: {selected}")
         else:
             with self.widgets["output"]:
-                self.widgets["output"].layout.display = "block"
                 print("⚠️ No module selected to remove")
 
     def _on_auto_setup_ssh(self, button):
         """Handle auto setup SSH keys button click."""
         with self.widgets["output"]:
-            self.widgets["output"].layout.display = "block"
             print("🔑 Setting up SSH keys automatically...")
 
             try:
