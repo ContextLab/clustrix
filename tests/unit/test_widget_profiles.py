@@ -332,3 +332,72 @@ class TestTheConfigFilePicker:
         offered = " ".join(widget._discover_config_files())
 
         assert "pre-commit" not in offered
+
+
+class TestApplyTouchesOnlyWhatItOwns:
+    """Apply has been wrong in both directions."""
+
+    UNMANAGED = {
+        "cluster_packages": ["networkx"],
+        "excluded_packages": ["appnope"],
+        "venv_setup_timeout": 1800,
+        "job_poll_interval": 5,
+    }
+
+    def _configured_widget(self):
+        import clustrix
+
+        clustrix.configure(cluster_type="local", **self.UNMANAGED)
+        return ModernClustrixWidget()
+
+    def test_settings_with_no_control_survive(self):
+        """Replacing the config wholesale discarded everything the widget has
+        no field for -- all of it only settable from code."""
+        import clustrix
+
+        widget = self._configured_widget()
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        live = clustrix.get_config()
+        for field, value in self.UNMANAGED.items():
+            assert getattr(live, field) == value, field
+
+    def test_fields_from_a_previous_apply_do_not_linger(self):
+        """Merging non-None values left the old cluster_host behind."""
+        import clustrix
+
+        widget = self._configured_widget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget._update_ui_for_cluster_type()
+        widget.widgets["host"].value = "login.example.edu"
+        widget.widgets["username"].value = "alice"
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert not clustrix.get_config().cluster_host
+        assert not clustrix.get_config().username
+
+    def test_the_managed_list_matches_what_the_widget_actually_sets(self):
+        """The two must not drift: a field collected but not listed would
+        never be reset, and a field listed but not collected would be wiped."""
+        from clustrix.modern_notebook_widget import WIDGET_MANAGED_FIELDS
+
+        widget = ModernClustrixWidget()
+        produced = set()
+        for cluster_type in widget.widgets["cluster_type"].options:
+            widget.widgets["cluster_type"].value = cluster_type
+            widget._update_ui_for_cluster_type()
+            produced |= set(widget._config_data_from_widgets())
+
+        assert produced == set(WIDGET_MANAGED_FIELDS)
+
+    def test_every_managed_field_is_a_real_config_field(self):
+        from dataclasses import fields as dataclass_fields
+
+        from clustrix.modern_notebook_widget import WIDGET_MANAGED_FIELDS
+
+        known = {f.name for f in dataclass_fields(ClusterConfig)}
+        assert set(WIDGET_MANAGED_FIELDS) <= known

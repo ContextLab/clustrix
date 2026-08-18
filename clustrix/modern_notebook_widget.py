@@ -23,13 +23,7 @@ import yaml
 from dataclasses import asdict
 from pathlib import Path
 
-from .config import (
-    ClusterConfig,
-    _config,
-    configure,
-    get_config,
-    get_config_dir,
-)
+from .config import ClusterConfig, configure, get_config, get_config_dir
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
@@ -42,6 +36,41 @@ LIVE_PROFILE_NAME = "Current configuration"
 #: Default profile bundle. Deliberately not clustrix.yml, which is the
 #: library's own config file and a different format.
 DEFAULT_PROFILE_STORE = "profiles.yml"
+
+#: Every ClusterConfig field this widget can set, across all backends. Apply
+#: resets exactly these and leaves the rest of the configuration untouched, so
+#: settings with no control here survive. A test asserts this stays equal to
+#: the union of what _config_data_from_widgets actually produces.
+WIDGET_MANAGED_FIELDS = frozenset(
+    {
+        "cluster_type",
+        "default_cores",
+        "default_memory",
+        "default_time",
+        "cluster_host",
+        "cluster_port",
+        "username",
+        "password",
+        "key_file",
+        "password_env_var",
+        "use_env_password",
+        "remote_work_dir",
+        "k8s_namespace",
+        "k8s_image",
+        "k8s_service_account",
+        "k8s_pull_policy",
+        "hf_namespace",
+        "hf_flavor",
+        "hf_token",
+        "hf_allow_gpu_flavors",
+        "package_manager",
+        "python_executable",
+        "replicate_local_environment",
+        "environment_variables",
+        "module_loads",
+        "pre_execution_commands",
+    }
+)
 
 
 #: The function the "Test job submission" button runs on the cluster. Kept as
@@ -1707,13 +1736,17 @@ class ModernClustrixWidget:
 
                 # And make it the active configuration for @cluster.
                 #
-                # Replace rather than merge. configure() mutates the global
-                # config in place, and skipping None values meant fields from a
-                # previous Apply survived: switching from an SSH profile to a
-                # local one left cluster_host and username pointing at the old
-                # cluster, so the config no longer matched anything on screen.
-                _config.__dict__.update(ClusterConfig().__dict__)
-                configure(**asdict(config))
+                # Reset the fields this widget manages, then apply what is on
+                # screen. Two wrong answers were tried first: merging non-None
+                # values left a previous Apply's cluster_host and username in
+                # place after switching to a local profile, and replacing the
+                # config wholesale discarded settings that have no control here
+                # -- cluster_packages, excluded_packages, poll intervals and
+                # timeouts a user can only set from code.
+                defaults = asdict(ClusterConfig())
+                applied = {field: defaults[field] for field in WIDGET_MANAGED_FIELDS}
+                applied.update(self._config_data_from_widgets())
+                configure(**applied)
 
                 print("✅ Applied configuration")
                 print(f"   Cluster: {config.cluster_type}")
@@ -2109,7 +2142,16 @@ class ModernClustrixWidget:
         return problems
 
     def _get_config_from_widgets(self) -> ClusterConfig:
-        """Extract configuration from current widget values."""
+        """The configuration currently shown, as a ClusterConfig."""
+        return ClusterConfig(**self._config_data_from_widgets())
+
+    def _config_data_from_widgets(self) -> Dict[str, Any]:
+        """The configuration currently shown, as the fields the widget set.
+
+        Apply needs the *keys*, not just the values: a field this widget
+        manages but did not set for the current backend has to be reset, while
+        a field it does not manage at all must be left alone.
+        """
         # Get environment variables from combobox
         env_vars = {}
         if self.widgets["env_vars"].options:
@@ -2197,7 +2239,7 @@ class ModernClustrixWidget:
             }
         )
 
-        return ClusterConfig(**config_data)
+        return config_data
 
     def _load_config_to_widgets(self, config: ClusterConfig) -> None:
         """Show `config` in the controls.
