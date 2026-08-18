@@ -1,0 +1,75 @@
+Error creating flattened function: unexpected character after line continuation character (<string>, line 4)
+Error creating flattened function: unexpected character after line continuation character (<string>, line 4)
+Error creating flattened function: unexpected character after line continuation character (<string>, line 4)
+caller: vpn-two-factor-general-229-128-226.dartmouth.edu (arm64, python 3.12.10)
+
+========================================================================
+slurm: SLURM scheduler (discovery.dartmouth.edu)
+========================================================================
+submitting to discovery.dartmouth.edu ...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_fab7c2f690ab)
+No GPUs detected, using standard VENV2 setup...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_fab7c2f690ab)
+No GPUs detected, using standard VENV2 setup...
+RESULT (62s): {
+  "gpus": "",
+  "host": "s07.hpcc.dartmouth.edu",
+  "machine": "x86_64",
+  "python": "3.12.13",
+  "slurm_job_id": "9219882",
+  "slurm_nodelist": "s07",
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+gpu: SSH + GPU host (tensor01.dartmouth.edu)
+========================================================================
+submitting to tensor01.dartmouth.edu ...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+Detecting GPU capabilities on remote cluster...
+Setting up two-venv environment...
+Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh), using it for both venvs
+Reusing existing conda environments (py312_fab7c2f690ab)
+GPU detected (8 devices), setting up GPU-enabled VENV2...
+RESULT (65s): {
+  "gpus": "NVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB",
+  "host": "tensor01.dartmouth.edu",
+  "machine": "x86_64",
+  "python": "3.12.13",
+  "slurm_job_id": null,
+  "slurm_nodelist": null,
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+hf: HuggingFace Jobs (container)
+========================================================================
+submitting to huggingface-jobs ...
+RESULT (10s): {
+  "gpus": "",
+  "host": "j-contextlab-6a83e58ce55292eada79bec8-avnc3f5x-8c50a-7k464",
+  "machine": "x86_64",
+  "python": "3.12.14",
+  "slurm_job_id": null,
+  "slurm_nodelist": null,
+  "sum": 499500,
+  "system": "Linux"
+}
+
+========================================================================
+SUMMARY
+========================================================================
+slurm  PASSED  s07.hpcc.dartmouth.edu  python 3.12.13  62.1s
+gpu    PASSED  tensor01.dartmouth.edu  python 3.12.13  65.5s
+hf     PASSED  j-contextlab-6a83e58ce55292eada79bec8-avnc3f5x-8c50a-7k464  python 3.12.14  9.7s
