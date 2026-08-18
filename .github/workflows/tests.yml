@@ -136,8 +136,15 @@ jobs:
         
     - name: Install system dependencies
       run: |
-        sudo apt-get update
-        sudo apt-get install -y pandoc
+        # Bounded: an unresponsive Ubuntu mirror makes a bare `apt-get update`
+        # hang until the job's 10-minute cap, which it did on two consecutive
+        # runs while fetching noble-security InRelease. Each fetch now gives up
+        # after 15s and retries three times, so a dead mirror costs seconds.
+        sudo apt-get update \
+          -o Acquire::Retries=3 \
+          -o Acquire::http::Timeout=15 \
+          -o Acquire::https::Timeout=15
+        sudo apt-get install -y --no-install-recommends pandoc
         
     - name: Install dependencies
       run: |
