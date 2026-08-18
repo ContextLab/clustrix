@@ -408,9 +408,16 @@ def setup_two_venv_environment(
         print("Conda available on remote system, using conda for both venvs")
 
     if conda_available:
-        # Use conda for both VENV1 and VENV2 to ensure compatibility
+        # Use conda for both VENV1 and VENV2 to ensure compatibility.
+        #
+        # Both environments are pinned to the *local* Python version. dill and
+        # cloudpickle embed CPython bytecode in the payload, and that bytecode
+        # is not portable across minor versions -- a function pickled under
+        # 3.12 and loaded under 3.9 raises "unknown opcode". Since the function
+        # object is handed from the caller to VENV1 and on to VENV2, every hop
+        # has to agree on the interpreter version.
         compatible_python = "conda"  # Special marker to use conda
-        remote_python_version = "3.9"  # Default to 3.9 via conda
+        remote_python_version = local_python_version
     else:
         # Fall back to system Python search
         compatible_python = None
@@ -468,12 +475,13 @@ def setup_two_venv_environment(
         # Use conda for both VENV1 and VENV2 (preferred for clusters)
         commands.extend(
             [
-                # Create VENV1 using conda with Python 3.9 for serialization compatibility
-                f"conda create -n {conda_env1_name} python=3.9 -y",
+                # Create VENV1 using conda, matching the local Python version
+                # so dill payloads round-trip (see remote_python_version above)
+                f"conda create -n {conda_env1_name} python={remote_python_version} -y",
                 f"conda run -n {conda_env1_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv1'",
                 f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in conda venv1'",
-                # Create VENV2 using conda with Python 3.9 for execution
-                f"conda create -n {conda_env2_name} python=3.9 -y",
+                # Create VENV2 using conda, same version as VENV1 for execution
+                f"conda create -n {conda_env2_name} python={remote_python_version} -y",
                 f"conda run -n {conda_env2_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
             ]
         )
@@ -875,204 +883,265 @@ def generate_two_venv_execution_commands(
     This centralizes the two-venv logic to eliminate code duplication across
     different cluster types (SLURM, SSH, PBS, SGE).
 
+    The three stages hand objects to each other through files on disk. Those
+    handoffs use dill (falling back to cloudpickle, then stdlib pickle) rather
+    than pickle directly: the function being executed is almost always defined
+    in the caller's ``__main__``, and stdlib pickle serializes such functions by
+    qualified name, which cannot be resolved in a fresh remote interpreter. Both
+    venvs get dill and cloudpickle installed by ``setup_two_venv_environment``.
+
     Args:
         remote_job_dir: Remote working directory path
+        conda_env1_name: Conda environment for serialization (VENV1), if any
+        conda_env2_name: Conda environment for execution (VENV2), if any
 
     Returns:
         List of command strings for two-venv execution
     """
-    return [
-        "# Two-venv approach for cross-version compatibility",
-        "# VENV1: Serialization/deserialization with compatible Python",
-        "# VENV2: Function execution with proper environment",
-        "",
-        "# Step 1: Use VENV1 to deserialize function data",
-        (
-            f"# Using conda environment {conda_env1_name}"
-            if conda_env1_name
-            else f"source {remote_job_dir}/venv1_serialization/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env1_name} python -c "'
-            if conda_env1_name
-            else 'python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "try:",
-        "    import dill",
-        "except ImportError:",
-        "    dill = None",
-        "try:",
-        "    import cloudpickle",
-        "except ImportError:",
-        "    cloudpickle = None",
-        "",
-        "print('VENV1 - Deserializing function data')",
-        "print('Python version:', sys.version)",
-        "",
-        "try:",
-        "    with open('function_data.pkl', 'rb') as f:",
-        "        data = pickle.load(f)",
-        "    ",
-        "    # Try to deserialize function",
-        "    func = None",
-        "    try:",
-        "        func = dill.loads(data['function']) if dill else None",
-        "        print('Successfully deserialized function with dill')",
-        "    except Exception as e:",
-        "        print('Dill deserialization failed:', str(e))",
-        "        try:",
-        "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
-        "            print('Successfully deserialized function with cloudpickle')",
-        "        except Exception as e2:",
-        "            print('Cloudpickle deserialization failed:', str(e2))",
-        "            # Try source code fallback",
-        "            func_info = data.get('func_info', {})",
-        "            if func_info.get('source'):",
-        "                print('Using source code fallback')",
-        "                # Remove @cluster decorator from source",
-        "                import textwrap",
-        "                source = func_info['source']",
-        "                lines = source.split('\\n')",
-        "                clean_lines = []",
-        "                for line in lines:",
-        "                    if not line.strip().startswith('@'):",
-        "                        clean_lines.append(line)",
-        "                clean_source = '\\n'.join(clean_lines)",
-        "                clean_source = textwrap.dedent(clean_source)",
-        "                ",
-        "                # Create function from source",
-        "                namespace = {}",
-        "                exec(clean_source, namespace)",
-        "                func = namespace[func_info['name']]",
-        "                print('Successfully created function from source code')",
-        "            else:",
-        "                raise Exception('All deserialization methods failed')",
-        "    ",
-        "    args = pickle.loads(data['args'])",
-        "    kwargs = pickle.loads(data['kwargs'])",
-        "    ",
-        "    # Pass data to VENV2 for execution",
-        "    with open('function_deserialized.pkl', 'wb') as f:",
-        "        if 'clean_source' in locals():",
-        "            # Function was created from source code, pass the source",
-        "            pickle.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
-        "        else:",
-        "            # Function was deserialized from binary, pass the function object",
-        "            pickle.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
-        "    ",
-        "    print('VENV1 - Function data prepared for VENV2')",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV1 - Error during deserialization:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-        "# Step 2: Use VENV2 to execute the function",
-        ("# No deactivation needed for conda run" if conda_env1_name else "deactivate"),
-        (
-            f"# Using conda environment {conda_env2_name}"
-            if conda_env2_name
-            else f"source {remote_job_dir}/venv2_execution/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env2_name} python -c "'
-            if conda_env2_name
-            else f'{remote_job_dir}/venv2_execution/bin/python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "print('VENV2 - Executing function')",
-        "print('Python version:', sys.version)",
-        "",
-        "try:",
-        "    import os",
-        "    if not os.path.exists('function_deserialized.pkl'):",
-        "        raise FileNotFoundError('function_deserialized.pkl not found - VENV1 deserialization may have failed')",
-        "    with open('function_deserialized.pkl', 'rb') as f:",
-        "        exec_data = pickle.load(f)",
-        "    ",
-        "    if 'func' in exec_data:",
-        "        # Function object was passed",
-        "        func = exec_data['func']",
-        "    elif 'source' in exec_data:",
-        "        # Source code was passed, recreate function",
-        "        print('Recreating function from source code in VENV2')",
-        "        namespace = {}",
-        "        exec(exec_data['source'], namespace)",
-        "        func = namespace[exec_data['func_name']]",
-        "    else:",
-        "        raise Exception('No function or source code found')",
-        "    ",
-        "    args = exec_data['args']",
-        "    kwargs = exec_data['kwargs']",
-        "    ",
-        "    # Execute the function",
-        "    print('Executing function with args:', args)",
-        "    result = func(*args, **kwargs)",
-        "    print('Function execution completed successfully')",
-        "    ",
-        "    # Save result for VENV1 to serialize",
-        "    with open('result_raw.pkl', 'wb') as f:",
-        "        pickle.dump(result, f, protocol=4)",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV2 - Error during execution:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-        "# Step 3: Use VENV1 to serialize the result",
-        ("# No deactivation needed for conda run" if conda_env2_name else "deactivate"),
-        (
-            f"# Using conda environment {conda_env1_name}"
-            if conda_env1_name
-            else f"source {remote_job_dir}/venv1_serialization/bin/activate"
-        ),
-        (
-            f'conda run -n {conda_env1_name} python -c "'
-            if conda_env1_name
-            else 'python -c "'
-        ),
-        "import pickle",
-        "import sys",
-        "import traceback",
-        "",
-        "print('VENV1 - Serializing result')",
-        "",
-        "try:",
-        "    import os",
-        "    if not os.path.exists('result_raw.pkl'):",
-        "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
-        "    with open('result_raw.pkl', 'rb') as f:",
-        "        result = pickle.load(f)",
-        "    ",
-        "    print('Result loaded from VENV2:', type(result))",
-        "    ",
-        "    with open('result.pkl', 'wb') as f:",
-        "        pickle.dump(result, f, protocol=4)",
-        "        ",
-        "    print('Result serialized successfully')",
-        "    ",
-        "except Exception as e:",
-        "    print('VENV1 - Error during result serialization:', str(e))",
-        "    traceback.print_exc()",
-        "    with open('error.pkl', 'wb') as f:",
-        "        pickle.dump({'error': str(e), 'traceback': traceback.format_exc()}, f, protocol=4)",
-        "    raise",
-        '"',
-        "",
-    ]
+
+    def _serializer_preamble() -> list:
+        """Lines selecting the richest available serializer as ``_ser``."""
+        return [
+            "import pickle",
+            "try:",
+            "    import dill as _ser",
+            "except ImportError:",
+            "    try:",
+            "        import cloudpickle as _ser",
+            "    except ImportError:",
+            "        _ser = pickle",
+        ]
+
+    def _error_handler(stage: str, message: str) -> list:
+        """Lines recording a stage failure without masking an earlier one.
+
+        Each stage writes its own ``error_<stage>.pkl`` unconditionally, but
+        only claims the shared ``error.pkl`` if no earlier stage already did.
+        Without this, a stage-1 failure is overwritten by the cascade it
+        causes, and the caller is shown the symptom instead of the cause.
+        """
+        return [
+            "except Exception as e:",
+            f"    print('{message}', str(e))",
+            "    traceback.print_exc()",
+            "    import os as _os",
+            "    _payload = {"
+            "'error': str(e), "
+            "'traceback': traceback.format_exc(), "
+            f"'stage': '{stage}'"
+            "}",
+            f"    with open('error_{stage}.pkl', 'wb') as f:",
+            "        pickle.dump(_payload, f, protocol=4)",
+            "    if not _os.path.exists('error.pkl'):",
+            "        with open('error.pkl', 'wb') as f:",
+            "            pickle.dump(_payload, f, protocol=4)",
+            "    raise",
+        ]
+
+    return (
+        [
+            "# Two-venv approach for cross-version compatibility",
+            "# VENV1: Serialization/deserialization with compatible Python",
+            "# VENV2: Function execution with proper environment",
+            "",
+            "# Step 1: Use VENV1 to deserialize function data",
+            (
+                f"# Using conda environment {conda_env1_name}"
+                if conda_env1_name
+                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env1_name} python -c "'
+                if conda_env1_name
+                else 'python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "try:",
+            "    import dill",
+            "except ImportError:",
+            "    dill = None",
+            "try:",
+            "    import cloudpickle",
+            "except ImportError:",
+            "    cloudpickle = None",
+            "",
+            "print('VENV1 - Deserializing function data')",
+            "print('Python version:', sys.version)",
+            "",
+            "try:",
+            "    with open('function_data.pkl', 'rb') as f:",
+            "        data = pickle.load(f)",
+            "    ",
+            "    # Try to deserialize function",
+            "    func = None",
+            "    clean_source = None",
+            "    func_info = data.get('func_info', {})",
+            "    try:",
+            "        func = dill.loads(data['function']) if dill else None",
+            "        print('Successfully deserialized function with dill')",
+            "    except Exception as e:",
+            "        print('Dill deserialization failed:', str(e))",
+            "        try:",
+            "            func = cloudpickle.loads(data['function']) if cloudpickle else None",
+            "            print('Successfully deserialized function with cloudpickle')",
+            "        except Exception as e2:",
+            "            print('Cloudpickle deserialization failed:', str(e2))",
+            "            # Try source code fallback",
+            "            if func_info.get('source'):",
+            "                print('Using source code fallback')",
+            "                # Remove @cluster decorator from source",
+            "                import textwrap",
+            "                source = func_info['source']",
+            "                lines = source.split('\\n')",
+            "                clean_lines = []",
+            "                for line in lines:",
+            "                    if not line.strip().startswith('@'):",
+            "                        clean_lines.append(line)",
+            "                clean_source = '\\n'.join(clean_lines)",
+            "                clean_source = textwrap.dedent(clean_source)",
+            "                ",
+            "                # Create function from source",
+            "                namespace = {}",
+            "                exec(clean_source, namespace)",
+            "                func = namespace[func_info['name']]",
+            "                print('Successfully created function from source code')",
+            "            else:",
+            "                raise Exception('All deserialization methods failed')",
+            "    ",
+            "    args = pickle.loads(data['args'])",
+            "    kwargs = pickle.loads(data['kwargs'])",
+            "    ",
+            "    # Pass data to VENV2 for execution. _ser (dill/cloudpickle) is",
+            "    # required here: stdlib pickle cannot serialize a function that",
+            "    # is not importable by name in this interpreter.",
+            "    with open('function_deserialized.pkl', 'wb') as f:",
+            "        if clean_source is not None:",
+            "            # Function was created from source code, pass the source",
+            "            _ser.dump({'source': clean_source, 'func_name': func_info['name'], 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+            "        else:",
+            "            # Function was deserialized from binary, pass the function object",
+            "            _ser.dump({'func': func, 'args': args, 'kwargs': kwargs}, f, protocol=4)",
+            "    ",
+            "    print('VENV1 - Function data prepared for VENV2 using', _ser.__name__)",
+            "    ",
+        ]
+        + _error_handler("venv1_deserialize", "VENV1 - Error during deserialization:")
+        + [
+            '"',
+            "",
+            "# Step 2: Use VENV2 to execute the function",
+            (
+                "# No deactivation needed for conda run"
+                if conda_env1_name
+                else "deactivate"
+            ),
+            (
+                f"# Using conda environment {conda_env2_name}"
+                if conda_env2_name
+                else f"source {remote_job_dir}/venv2_execution/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env2_name} python -c "'
+                if conda_env2_name
+                else f'{remote_job_dir}/venv2_execution/bin/python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "print('VENV2 - Executing function')",
+            "print('Python version:', sys.version)",
+            "",
+            "try:",
+            "    import os",
+            "    if not os.path.exists('function_deserialized.pkl'):",
+            "        raise FileNotFoundError('function_deserialized.pkl not found - VENV1 deserialization may have failed')",
+            "    with open('function_deserialized.pkl', 'rb') as f:",
+            "        exec_data = _ser.load(f)",
+            "    ",
+            "    if 'func' in exec_data:",
+            "        # Function object was passed",
+            "        func = exec_data['func']",
+            "    elif 'source' in exec_data:",
+            "        # Source code was passed, recreate function",
+            "        print('Recreating function from source code in VENV2')",
+            "        namespace = {}",
+            "        exec(exec_data['source'], namespace)",
+            "        func = namespace[exec_data['func_name']]",
+            "    else:",
+            "        raise Exception('No function or source code found')",
+            "    ",
+            "    args = exec_data['args']",
+            "    kwargs = exec_data['kwargs']",
+            "    ",
+            "    # Execute the function",
+            "    print('Executing function with args:', args)",
+            "    result = func(*args, **kwargs)",
+            "    print('Function execution completed successfully')",
+            "    ",
+            "    # Save result for VENV1 to serialize",
+            "    with open('result_raw.pkl', 'wb') as f:",
+            "        _ser.dump(result, f, protocol=4)",
+            "    ",
+        ]
+        + _error_handler("venv2_execute", "VENV2 - Error during execution:")
+        + [
+            '"',
+            "",
+            "# Step 3: Use VENV1 to serialize the result",
+            (
+                "# No deactivation needed for conda run"
+                if conda_env2_name
+                else "deactivate"
+            ),
+            (
+                f"# Using conda environment {conda_env1_name}"
+                if conda_env1_name
+                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+            ),
+            (
+                f'conda run -n {conda_env1_name} python -c "'
+                if conda_env1_name
+                else 'python -c "'
+            ),
+        ]
+        + _serializer_preamble()
+        + [
+            "import sys",
+            "import traceback",
+            "",
+            "print('VENV1 - Serializing result')",
+            "",
+            "try:",
+            "    import os",
+            "    if not os.path.exists('result_raw.pkl'):",
+            "        raise FileNotFoundError('result_raw.pkl not found - VENV2 execution may have failed')",
+            "    with open('result_raw.pkl', 'rb') as f:",
+            "        result = _ser.load(f)",
+            "    ",
+            "    print('Result loaded from VENV2:', type(result))",
+            "    ",
+            "    with open('result.pkl', 'wb') as f:",
+            "        _ser.dump(result, f, protocol=4)",
+            "        ",
+            "    print('Result serialized successfully')",
+            "    ",
+        ]
+        + _error_handler(
+            "venv1_serialize", "VENV1 - Error during result serialization:"
+        )
+        + [
+            '"',
+            "",
+        ]
+    )
 
 
 def create_job_script(
