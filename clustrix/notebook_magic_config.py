@@ -71,7 +71,7 @@ DEFAULT_CONFIGS = {
         "cluster_port": 22,
         "default_cores": 4,
         "default_memory": "16GB",
-        "remote_work_dir": "/tmp/clustrix",
+        "remote_work_dir": "~/.clustrix/jobs",
         "package_manager": "pip",
     },
     # Cloud Provider Configurations

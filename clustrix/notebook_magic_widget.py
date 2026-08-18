@@ -162,7 +162,7 @@ class EnhancedClusterConfigWidget:
         # Remote work directory
         self.work_dir_field = widgets.Text(
             description="Work Directory:",
-            value="/tmp/clustrix",
+            value="~/.clustrix/jobs",
             placeholder="e.g., /scratch/username/clustrix",
             tooltip="Directory on remote cluster for job files",
             style=style,
@@ -1059,7 +1059,7 @@ class EnhancedClusterConfigWidget:
         self.cores_field.value = config.get("default_cores", 1)
         self.memory_field.value = config.get("default_memory", "16GB")
         self.time_field.value = config.get("default_time", "01:00:00")
-        self.work_dir_field.value = config.get("remote_work_dir", "/tmp/clustrix")
+        self.work_dir_field.value = config.get("remote_work_dir", "~/.clustrix/jobs")
 
         # Connection fields
         self.host_field.value = config.get("cluster_host", "")

@@ -38,7 +38,10 @@ class SchedulerManager:
     ) -> str:
         """Submit job via SLURM."""
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
         self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -159,7 +162,10 @@ class SchedulerManager:
     ) -> str:
         """Submit job via PBS."""
         # Similar to SLURM but with PBS commands
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
         self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -202,7 +208,10 @@ class SchedulerManager:
     ) -> str:
         """Submit job via SGE."""
         # Create remote working directory
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
         self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data
@@ -255,7 +264,10 @@ class SchedulerManager:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via direct SSH using two-venv approach."""
-        remote_job_dir = f"{self.config.remote_work_dir}/job_{int(time.time())}"
+        work_dir = self.connection_manager.resolve_remote_path(
+            self.config.remote_work_dir
+        )
+        remote_job_dir = f"{work_dir}/job_{int(time.time())}"
         self.connection_manager.execute_remote_command(f"mkdir -p {remote_job_dir}")
 
         # Upload function data

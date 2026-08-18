@@ -401,7 +401,77 @@ class SchedulerStatusManager:
         except Exception as e:
             logger.error(f"Could not list job {job_id} directory: {e}")
 
+        # Last resort: ask the scheduler itself what happened. A job that leaves
+        # no result.pkl, no error.pkl and no output files never got far enough to
+        # write them -- typically the working directory was not visible from the
+        # compute node, so the job script died before its first redirect. The
+        # accounting database is the only place that still knows, and reporting
+        # "unknown" instead of its verdict is what makes this failure so
+        # expensive to diagnose.
+        accounting = self._get_scheduler_failure_reason(job_id)
+        if accounting:
+            logger.error(f"Job {job_id} {accounting}")
+            return "failed"
+
         return "unknown"
+
+    # Scheduler states that mean the job is over and did not succeed.
+    _TERMINAL_FAILURE_STATES = (
+        "FAILED",
+        "CANCELLED",
+        "TIMEOUT",
+        "OUT_OF_MEMORY",
+        "NODE_FAIL",
+        "PREEMPTED",
+        "BOOT_FAIL",
+        "DEADLINE",
+    )
+
+    def _get_scheduler_failure_reason(self, job_id: str) -> Optional[str]:
+        """Ask the scheduler's accounting database why a job produced nothing.
+
+        Returns a human-readable explanation, or None if the scheduler has no
+        record of a failure (or cannot be reached).
+        """
+        if self.config.cluster_type != "slurm":
+            return None
+
+        cmd = (
+            f"sacct -j {job_id} --format=State,ExitCode,NodeList,WorkDir "
+            f"--parsable2 --noheader 2>/dev/null | head -1"
+        )
+        try:
+            stdout, _ = self.connection_manager.execute_remote_command(cmd)
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(f"Could not query sacct for job {job_id}: {e}")
+            return None
+
+        line = (stdout or "").strip()
+        if not line:
+            return None
+
+        parts = line.split("|")
+        state = parts[0].strip() if parts else ""
+        exit_code = parts[1].strip() if len(parts) > 1 else "?"
+        nodelist = parts[2].strip() if len(parts) > 2 else "?"
+        workdir = parts[3].strip() if len(parts) > 3 else "?"
+
+        if not any(state.startswith(s) for s in self._TERMINAL_FAILURE_STATES):
+            return None
+
+        detail = (
+            f"failed according to sacct: state={state} exit_code={exit_code} "
+            f"node={nodelist} workdir={workdir}"
+        )
+        if exit_code.startswith("127"):
+            detail += (
+                ". Exit code 127 means the job script could not find a command it "
+                "tried to run. The usual cause is that remote_work_dir points at "
+                "storage the compute node cannot see -- /tmp is node-local on most "
+                "clusters, so an environment built on the login node is absent at "
+                "run time. Set remote_work_dir to a shared filesystem path."
+            )
+        return detail
 
     def _check_pbs_status(self, job_id: str) -> str:
         """Check PBS job status."""

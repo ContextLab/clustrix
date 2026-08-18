@@ -28,6 +28,7 @@ class ConnectionManager:
         self.ssh_client = None
         self.sftp_client = None
         self.k8s_client = None
+        self._remote_home = None  # cache for resolve_remote_path()
 
     def setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
@@ -224,6 +225,33 @@ class ConnectionManager:
             )
         stdin, stdout, stderr = self.ssh_client.exec_command(command)
         return stdout.read().decode(), stderr.read().decode()
+
+    def resolve_remote_path(self, path: str) -> str:
+        """Expand a leading ``~`` against the remote account's home directory.
+
+        Shell commands expand ``~`` themselves, but SFTP does not: it treats
+        ``~/.clustrix/jobs`` as a *relative* directory literally named ``~``.
+        A work directory that is created correctly by ``mkdir -p`` and then
+        uploaded into the wrong place is a confusing failure, so every path
+        derived from ``remote_work_dir`` goes through here first.
+
+        The remote home directory is resolved once and cached per connection.
+        """
+        if not path.startswith("~"):
+            return path
+
+        if self._remote_home is None:
+            stdout, _ = self.execute_remote_command("echo $HOME")
+            home = stdout.strip()
+            if not home:
+                raise RuntimeError(
+                    "Could not determine the remote home directory, so "
+                    f"remote_work_dir={path!r} cannot be resolved. Set "
+                    "remote_work_dir to an absolute path."
+                )
+            self._remote_home = home.rstrip("/")
+
+        return self._remote_home + path[1:]
 
     def upload_file(self, local_path: str, remote_path: str):
         """Upload file to remote cluster."""

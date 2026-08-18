@@ -116,7 +116,10 @@ class ClusterConfig:
     default_queue: Optional[str] = None
 
     # Paths
-    remote_work_dir: str = "/tmp/clustrix"
+    # Home-relative, not /tmp: on SLURM/PBS/SGE the compute node has its own
+    # /tmp, so an environment built on the login node is simply absent at run
+    # time and the job dies with exit 127 before writing any diagnostics.
+    remote_work_dir: str = "~/.clustrix/jobs"
     local_work_dir: Optional[str] = None  # If None, uses current working directory
     local_cache_dir: str = "~/.clustrix/cache"
     conda_env_name: Optional[str] = None
