@@ -274,10 +274,10 @@ class ProfileManager:
 
         # Save based on file extension
         if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "w") as f:
+            with open(filepath_obj, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
         else:  # Default to YAML (.yml, .yaml, or no extension)
-            with open(filepath_obj, "w") as f:
+            with open(filepath_obj, "w", encoding="utf-8") as f:
                 yaml.dump(data, f, default_flow_style=False, indent=2)
 
     def load_from_file(self, filepath: str) -> None:
@@ -292,7 +292,7 @@ class ProfileManager:
         if not filepath_obj.exists():
             raise FileNotFoundError(f"Configuration file not found: {filepath}")
 
-        with open(filepath_obj) as f:
+        with open(filepath_obj, encoding="utf-8") as f:
             if filepath_obj.suffix.lower() == ".json":
                 data = json.load(f)
             else:
@@ -336,10 +336,10 @@ class ProfileManager:
 
         # Save based on file extension
         if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "w") as f:
+            with open(filepath_obj, "w", encoding="utf-8") as f:
                 json.dump(asdict(config), f, indent=2)
         else:  # Default to YAML
-            with open(filepath_obj, "w") as f:
+            with open(filepath_obj, "w", encoding="utf-8") as f:
                 yaml.dump(asdict(config), f, default_flow_style=False, indent=2)
 
     def import_profile(self, filepath: str, profile_name: Optional[str] = None) -> str:
@@ -352,10 +352,10 @@ class ProfileManager:
         # Load configuration
         config_dict: Any
         if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "r") as f:
+            with open(filepath_obj, "r", encoding="utf-8") as f:
                 config_dict = json.load(f)
         else:  # Assume YAML
-            with open(filepath_obj, "r") as f:
+            with open(filepath_obj, "r", encoding="utf-8") as f:
                 config_dict = yaml.safe_load(f)
 
         # Create config object

@@ -1649,7 +1649,7 @@ class ModernClustrixWidget:
             # ceiling let a 1.7MB YAML cost eight seconds of startup.
             if not path.is_file() or path.stat().st_size > 256_000:
                 return False
-            with open(path) as handle:
+            with open(path, encoding="utf-8") as handle:
                 if path.suffix.lower() == ".json":
                     data = json.load(handle)
                 else:

@@ -39,8 +39,12 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install black flake8 mypy pytest
-          pip install -e .
+          # The dev extra, not a hand-listed set: that list installed an
+          # unpinned black -- the drift #110 pinned pyproject against -- and
+          # omitted pytest-timeout while the test step below passes
+          # --timeout=60, so this job failed with "unrecognized arguments"
+          # regardless of the code.
+          pip install -e ".[dev]"
       
       - name: Format check with Black
         run: black --check clustrix/ tests/

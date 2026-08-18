@@ -9,6 +9,8 @@ dropdown that ignores you.
 These drive the real handlers on the real widgets.
 """
 
+import os
+
 import pytest
 
 pytest.importorskip("ipywidgets")
@@ -418,11 +420,10 @@ class TestOpeningTheWidgetIsSafe:
 
         assert ModernClustrixWidget() is not None
 
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="named pipes are POSIX-only")
     def test_a_fifo_named_like_a_config_file(self, tmp_path, monkeypatch):
         """The size check passed and open() then blocked forever, with no
         writer, so the constructor never returned."""
-        import os
-
         os.mkfifo(tmp_path / "pipe.yml")
         monkeypatch.chdir(tmp_path)
 
