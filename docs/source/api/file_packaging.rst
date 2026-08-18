@@ -140,7 +140,7 @@ Function with Local Dependencies
     )
 
     # Check dependency detection
-    print(f"Has local dependencies: {package_info.metadata['has_dependencies']}")
+    print(f"Local functions detected: {package_info.metadata['local_function_count']}")
 
 Filesystem-Intensive Function
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -308,7 +308,7 @@ Package Inspection
             
             print("\nFunction metadata:")
             print(f"  Name: {metadata['function_info']['name']}")
-            print(f"  Has dependencies: {metadata['dependencies']['requires_dependencies']}")
+            print(f"  External dependencies: {metadata['dependencies']['external_dependencies']}")
             print(f"  Filesystem operations: {metadata['dependencies']['requires_cluster_filesystem']}")
             
             # Show detected imports
@@ -403,23 +403,15 @@ Error Handling
 Configuration and Options
 -------------------------
 
-Environment Variables
-~~~~~~~~~~~~~~~~~~~~~~
+Where packages are written
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The packaging system respects several environment variables:
-
-.. code-block:: python
-
-    import os
-
-    # Configure package storage location
-    os.environ['CLUSTRIX_PACKAGE_DIR'] = '/tmp/clustrix_packages'
-    
-    # Configure Python path for remote execution
-    os.environ['CLUSTRIX_REMOTE_PYTHON_PATH'] = '/usr/local/bin/python3'
-    
-    # Enable debug mode for packaging
-    os.environ['CLUSTRIX_DEBUG_PACKAGING'] = '1'
+Packages are written to a fresh ``tempfile.mkdtemp(prefix="clustrix_packaging_")``
+directory. There is no environment variable that redirects this: no
+``CLUSTRIX_PACKAGE_DIR``, ``CLUSTRIX_REMOTE_PYTHON_PATH`` or
+``CLUSTRIX_DEBUG_PACKAGING`` is read anywhere in the codebase. Use
+``package_info.package_path`` to find the archive that was just built, and
+``logging.basicConfig(level=logging.DEBUG)`` to see what the packager is doing.
 
 Package Cleanup
 ~~~~~~~~~~~~~~~
@@ -431,7 +423,11 @@ Package Cleanup
 
     def cleanup_packages():
         """Clean up old packages."""
-        package_pattern = "/tmp/clustrix_package_*.zip"
+        import tempfile
+
+        package_pattern = os.path.join(
+            tempfile.gettempdir(), "clustrix_packaging_*", "clustrix_package_*.zip"
+        )
         old_packages = glob.glob(package_pattern)
         
         for package_path in old_packages:
@@ -470,7 +466,9 @@ The packaging system is automatically used by the @cluster decorator:
 
     from clustrix import cluster
 
-    @cluster(cores=8, cluster_host="cluster.edu")
+    # cluster_host is a configuration setting, not a decorator argument;
+    # set it with clustrix.configure(cluster_host="cluster.edu").
+    @cluster(cores=8)
     def automated_packaging():
         """This function will be automatically packaged and executed remotely."""
         from clustrix import cluster_find, cluster_stat
@@ -505,12 +503,10 @@ Debug Mode
 
 .. code-block:: python
 
-    import os
     import logging
 
     # Enable debug logging
     logging.basicConfig(level=logging.DEBUG)
-    os.environ['CLUSTRIX_DEBUG_PACKAGING'] = '1'
 
     # Package function with detailed logging
     package_info = package_function_for_execution(

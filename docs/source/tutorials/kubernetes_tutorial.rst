@@ -3,27 +3,47 @@ Kubernetes Cluster Tutorial
 
 This tutorial demonstrates how to use Clustrix with Kubernetes clusters for cloud-native distributed computing. Kubernetes provides excellent scalability and resource management for containerized workloads.
 
+.. warning::
+
+   The Kubernetes backend has not been verified against a real cluster. Treat
+   this tutorial as a description of the intended interface, not as a record of
+   something that has been run.
+
+   Two limitations are worth knowing before you start. The notebook widget
+   offers no Kubernetes fields, so ``k8s_*`` settings can only come from a
+   configuration file or ``configure()``. And per-job Kubernetes overrides are
+   not implemented: the executor reads only the configuration-level ``k8s_*``
+   settings and derives pod resource requests and limits from ``cores`` and
+   ``memory``, so ``namespace``, ``image``, ``cpu_limit``, ``memory_limit``,
+   ``restart_policy``, ``backoff_limit`` and ``active_deadline_seconds`` passed
+   to ``@cluster`` are silently ignored.
+
+   Memory is translated for you: ``memory="8GB"`` becomes the Kubernetes
+   quantity ``8Gi``, so clustrix's usual spelling is accepted here.
+
 Prerequisites
-------------
+-------------
 
 1. Access to a Kubernetes cluster (local, cloud, or on-premises)
 2. kubectl configured with cluster access
 3. Clustrix installed with Kubernetes support: ``pip install clustrix[kubernetes]``
 
 Configuration Options
---------------------
+---------------------
 
 **Option 1: Interactive Widget (Recommended for Jupyter)**
 
 For Jupyter notebook users, use the interactive configuration widget:
 
-.. code-block:: python
+Importing ``clustrix`` registers the magic but does not display anything. Run
+``%%remote`` in a cell of its own to open the widget:
 
-   import clustrix  # Auto-loads the magic command
-   
-   # Use the magic command to open the configuration widget
+.. code-block:: ipython3
+
    %%remote
-   # Interactive widget appears with Kubernetes templates and GUI configuration
+
+Selecting ``kubernetes`` shows no dedicated fields, so the ``k8s_*`` settings
+below have to come from a configuration file or ``configure()``.
 
 **Option 2: Programmatic Configuration**
 
@@ -36,15 +56,15 @@ Configure Clustrix programmatically for your Kubernetes cluster:
    configure(
        cluster_type="kubernetes",
        # Note: Kubernetes uses kubectl config, no host/SSH needed
-       namespace="default",  # Optional: specify namespace
-       docker_image="python:3.11-slim"  # Optional: custom image
+       k8s_namespace="default",       # Optional: specify namespace
+       k8s_image="python:3.11-slim",  # Optional: custom image
    )
 
 Kubernetes-specific Features
----------------------------
+----------------------------
 
 Resource Specification
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 Kubernetes uses different resource syntax:
 
@@ -56,8 +76,8 @@ Kubernetes uses different resource syntax:
        cores=2,              # CPU cores (can be fractional: 0.5, 1.5)
        memory="4Gi",         # Memory in Kubernetes format
        time="01:00:00",      # Job timeout
-       namespace="compute",  # Kubernetes namespace
-       image="python:3.11"   # Custom Docker image
+       k8s_namespace="compute",  # Kubernetes namespace
+       k8s_image="python:3.11",  # Custom Docker image
    )
    def k8s_computation():
        """Example computation on Kubernetes."""
@@ -87,10 +107,10 @@ Kubernetes uses different resource syntax:
    print(f"Computation completed in {result['computation_time']:.2f} seconds")
 
 Advanced Configuration
----------------------
+----------------------
 
 Custom Docker Images
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 For complex dependencies, use custom images:
 
@@ -111,11 +131,11 @@ For complex dependencies, use custom images:
    # Then configure Clustrix to use your image
    configure(
        cluster_type="kubernetes",
-       namespace="ml-compute",
-       docker_image="your-registry/clustrix-ml:latest"
+       k8s_namespace="ml-compute",
+       k8s_image="your-registry/clustrix-ml:latest"
    )
    
-   @cluster(cores=4, memory="8Gi", image="your-registry/clustrix-ml:latest")
+   @cluster(cores=4, memory="8Gi")
    def ml_computation():
        """Machine learning computation with custom image."""
        import torch
@@ -157,26 +177,15 @@ For complex dependencies, use custom images:
        }
 
 Resource Limits and Requests
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure resource limits for better cluster utilization:
 
 .. code-block:: python
 
-   @cluster(
-       # Resource requests (guaranteed)
-       cores=1,              # Guaranteed 1 CPU core
-       memory="2Gi",         # Guaranteed 2GB RAM
-       
-       # Resource limits (maximum)
-       cpu_limit=2,          # Can burst up to 2 cores
-       memory_limit="4Gi",   # Maximum 4GB RAM
-       
-       # Additional Kubernetes settings
-       restart_policy="Never",
-       backoff_limit=3,      # Retry failed jobs 3 times
-       active_deadline_seconds=3600  # Kill job after 1 hour
-   )
+   # The executor sets pod resource requests and limits to the same values,
+   # derived from cores and memory. There is no separate limit argument.
+   @cluster(cores=1, memory="2Gi")
    def resource_managed_task():
        """Task with detailed resource management."""
        import psutil
@@ -217,11 +226,11 @@ Kubernetes-Native Examples
 --------------------------
 
 Distributed Data Processing
-~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   @cluster(cores=2, memory="4Gi", namespace="data-processing")
+   @cluster(cores=2, memory="4Gi")
    def process_data_partition(partition_id, total_partitions, data_size=10000):
        """Process a partition of a large dataset."""
        import numpy as np
@@ -269,11 +278,11 @@ Distributed Data Processing
    print(f"Global feature means: {global_feature_means[:5]}")  # Show first 5
 
 Microservices-Style Computing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   @cluster(cores=1, memory="2Gi", namespace="microservices")
+   @cluster(cores=1, memory="2Gi")
    def image_processing_service(image_id, operations):
        """Microservice for image processing."""
        import numpy as np
@@ -342,23 +351,21 @@ Cloud-Native Best Practices
 ---------------------------
 
 Auto-scaling Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
    # Configure for auto-scaling environments
    configure(
        cluster_type="kubernetes",
-       namespace="auto-scale",
+       k8s_namespace="auto-scale",
        
        # Resource settings that work well with auto-scaling
        default_cores=1,        # Start small
        default_memory="2Gi",   # Conservative memory
        
        # Job settings
-       active_deadline_seconds=1800,  # 30 minute timeout
-       backoff_limit=2,               # Limited retries
-       restart_policy="Never"         # Don't restart failed jobs
+       k8s_backoff_limit=2,    # Limited retries
    )
    
    @cluster(cores=0.5, memory="1Gi")  # Fractional cores for efficiency
@@ -385,11 +392,11 @@ Auto-scaling Configuration
        }
 
 Fault Tolerance
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
-   @cluster(cores=2, memory="4Gi", backoff_limit=3)
+   @cluster(cores=2, memory="4Gi")
    def fault_tolerant_computation(data_chunk_id, retry_count=0):
        """Computation with built-in fault tolerance."""
        import random
@@ -448,10 +455,10 @@ Fault Tolerance
    print(f"Successfully processed {len(successful_results)}/{len(chunk_ids)} chunks")
 
 Monitoring and Logging
----------------------
+----------------------
 
 Kubernetes Job Monitoring
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -530,7 +537,7 @@ Complete Kubernetes Example
 ---------------------------
 
 Distributed Machine Learning
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -540,17 +547,16 @@ Distributed Machine Learning
    # Configure for ML workloads
    configure(
        cluster_type="kubernetes",
-       namespace="ml-compute",
-       docker_image="python:3.11-slim",
+       k8s_namespace="ml-compute",
+       k8s_image="python:3.11-slim",
        
        # Default resources for ML tasks
        default_cores=2,
        default_memory="4Gi",
-       active_deadline_seconds=3600,  # 1 hour limit
-       backoff_limit=1                # Single retry
+       k8s_backoff_limit=1            # Single retry
    )
    
-   @cluster(cores=4, memory="8Gi", cpu_limit=6, memory_limit="12Gi")
+   @cluster(cores=4, memory="8Gi")
    def distributed_training_worker(worker_id, total_workers, epochs=100):
        """Distributed training worker for machine learning."""
        import numpy as np

@@ -86,7 +86,11 @@ File Discovery
     csv_files = cluster_find("*.csv", "data/", config)
     
     # Find files with multiple extensions
-    data_files = cluster_find("*.{csv,json,h5}", "datasets/", config)
+    # Patterns are plain shell globs -- brace expansion is not supported,
+    # so match each extension separately.
+    data_files = []
+    for extension in ("csv", "json", "h5"):
+        data_files += cluster_find(f"*.{extension}", "datasets/", config)
 
 File Information
 ~~~~~~~~~~~~~~~~
@@ -125,10 +129,15 @@ Pattern Matching
 
     # Use glob patterns for flexible file matching
     log_files = cluster_glob("*.log", "logs/", config)
-    backup_files = cluster_glob("backup_*.{tar,zip}", "backups/", config)
+    backup_files = (
+        cluster_glob("backup_*.tar", "backups/", config)
+        + cluster_glob("backup_*.zip", "backups/", config)
+    )
     
     # Find all image files
-    images = cluster_glob("*.{png,jpg,jpeg,gif}", "images/", config)
+    images = []
+    for extension in ("png", "jpg", "jpeg", "gif"):
+        images += cluster_glob(f"*.{extension}", "images/", config)
 
 Directory Analysis
 ~~~~~~~~~~~~~~~~~~
@@ -245,7 +254,8 @@ Monitoring and Validation
     @cluster(cores=8)
     def monitored_processing(config):
         """Processing with built-in monitoring."""
-        
+        import time
+
         # Initial state
         initial_usage = cluster_du(".", config)
         print(f"Starting with {initial_usage.total_gb:.1f} GB")
@@ -253,6 +263,9 @@ Monitoring and Validation
         # Find and validate input files
         input_files = cluster_find("*.raw", "input/", config)
         
+        # Anything older than a day is left over from a previous run
+        cutoff_time = time.time() - 24 * 60 * 60
+
         valid_files = []
         for filename in input_files:
             file_info = cluster_stat(filename, config)
@@ -442,7 +455,7 @@ Performance Optimization
             return [f for f in all_files if f.endswith(('.csv', '.json'))]
 
 Integration Examples
--------------------
+--------------------
 
 With Pandas
 ~~~~~~~~~~~

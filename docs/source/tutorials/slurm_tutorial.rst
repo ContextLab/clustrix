@@ -1,31 +1,31 @@
 SLURM Cluster Tutorial
-====================
+======================
 
 This tutorial demonstrates how to use Clustrix with SLURM (Simple Linux Utility for Resource Management) clusters, one of the most common cluster schedulers in high-performance computing.
 
 Prerequisites
-------------
+-------------
 
 1. Access to a SLURM cluster
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
 
 Configuration Options
---------------------
+---------------------
 
 **Option 1: Interactive Widget (Recommended for Jupyter)**
 
 For Jupyter notebook users, use the interactive configuration widget:
 
-.. code-block:: python
+Importing ``clustrix`` registers the magic but does not display anything. Run
+``%%remote`` in a cell of its own to open the widget:
 
-   import clustrix  # Auto-loads the magic command
-   
-   # Use the magic command to open the configuration widget
+.. code-block:: ipython3
+
    %%remote
-   # Interactive widget appears with SLURM templates and GUI configuration
 
-The widget includes pre-built SLURM templates and allows you to save configurations for reuse.
+Select ``slurm`` as the cluster type to reveal the connection fields, and use
+"Save" to keep the configuration for reuse.
 
 **Option 2: Programmatic Configuration**
 
@@ -44,7 +44,7 @@ Configure Clustrix programmatically for your SLURM cluster:
    )
 
 Simple Job Execution
--------------------
+--------------------
 
 Execute a basic function on the SLURM cluster:
 
@@ -70,7 +70,7 @@ Execute a basic function on the SLURM cluster:
    print(f"Pi estimate: {pi_estimate}")
 
 Resource Specification
----------------------
+----------------------
 
 SLURM-specific resource options:
 
@@ -81,9 +81,6 @@ SLURM-specific resource options:
        memory="32GB",         # Memory requirement
        time="04:00:00",       # Wall time (HH:MM:SS)
        partition="compute",   # SLURM partition
-       nodes=1,              # Number of nodes
-       ntasks_per_node=16,   # Tasks per node
-       account="research123"  # SLURM account
    )
    def intensive_computation():
        import numpy as np
@@ -92,11 +89,18 @@ SLURM-specific resource options:
        eigenvalues = np.linalg.eigvals(matrix)
        return len(eigenvalues)
 
+``cores``, ``memory``, ``time``, ``partition`` and ``queue`` are the resource
+arguments the decorator understands. There is no pass-through for arbitrary
+``sbatch`` directives such as ``--nodes``, ``--ntasks-per-node`` or
+``--account``: unrecognised keyword arguments are collected but never written
+into the job script. Put anything else in ``pre_execution_commands`` or in the
+cluster's own defaults.
+
 Advanced Configuration
----------------------
+----------------------
 
 Environment and Module Setup
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure environment modules and variables:
 
@@ -128,7 +132,7 @@ Configure environment modules and variables:
    )
 
 Configuration File
-~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 Create ``~/.clustrix/config.yml``:
 
@@ -142,7 +146,6 @@ Create ``~/.clustrix/config.yml``:
    
    # SLURM-specific settings
    default_partition: "compute"
-   default_account: "research_group"
    
    # Resource defaults
    default_cores: 8
@@ -160,10 +163,10 @@ Create ``~/.clustrix/config.yml``:
      MKL_NUM_THREADS: "8"
 
 Parallel Processing Examples
----------------------------
+----------------------------
 
 Array Jobs with Loop Parallelization
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Process multiple datasets in parallel:
 
@@ -203,7 +206,7 @@ Process multiple datasets in parallel:
    print(f"Processed {len(results)} datasets")
 
 Machine Learning Workflow
-~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Distributed hyperparameter tuning:
 
@@ -262,10 +265,10 @@ Distributed hyperparameter tuning:
    print(f"Best score: {best_result['mean_score']:.4f}")
 
 Job Management
--------------
+--------------
 
 Job Status Monitoring
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -283,12 +286,13 @@ Job Status Monitoring
        time.sleep(300)  # 5 minutes
        return "Task completed"
    
-   # For actual job monitoring, you would need to modify
-   # the executor to return job IDs
    result = long_running_task()
 
+To get a handle back instead of blocking, set ``async_submit=True`` on the
+decorator or in the configuration.
+
 Error Handling
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -315,10 +319,10 @@ Error Handling
        print(f"Caught error from remote execution: {e}")
 
 Best Practices
--------------
+--------------
 
 Resource Estimation
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -352,10 +356,10 @@ Resource Estimation
        pass
 
 Debugging and Troubleshooting
-----------------------------
+-----------------------------
 
 Enable Debug Logging
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -368,7 +372,7 @@ Enable Debug Logging
    configure(cluster_type="slurm", cluster_host="your-cluster")
 
 Common Issues
-~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 **Job Fails with "Permission Denied"**
 
@@ -408,7 +412,7 @@ Increase memory allocation:
        return np.sum(big_array)
 
 Complete Example
----------------
+----------------
 
 Here's a complete scientific computing example:
 

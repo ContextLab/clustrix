@@ -274,7 +274,7 @@ class TestClusterExecutorReal:
         """Create real test configuration."""
         config = ClusterConfig()
         config.cluster_type = "local"
-        config.cleanup_remote_files = True
+        config.cleanup_on_success = True
         return config
     
     def test_connect_real(self, test_config):

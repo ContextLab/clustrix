@@ -33,7 +33,7 @@ For Jupyter notebook integration with interactive widgets:
 
 .. code-block:: bash
 
-   pip install clustrix[notebook]
+   pip install clustrix[widget]
    # or
    pip install clustrix ipywidgets pyyaml
 
@@ -102,13 +102,17 @@ Verify your installation:
 Verify Jupyter Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you installed notebook support, test the magic command in Jupyter:
+If you installed widget support, test the magic command in Jupyter. Importing
+``clustrix`` registers the magic but does not display anything -- the widget
+appears when you run ``%%remote``, in a cell of its own:
 
 .. code-block:: python
 
-   import clustrix
-   # Magic command should be auto-registered
-   
-   # In a Jupyter cell:
+   import clustrix  # registers the magic; displays nothing
+
+.. code-block:: ipython3
+
    %%remote
-   # Interactive widget should appear
+
+Setting ``CLUSTRIX_AUTO_WIDGET=1`` before the import restores the older
+display-on-import behaviour.

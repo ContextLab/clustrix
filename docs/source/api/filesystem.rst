@@ -144,7 +144,12 @@ Pattern Matching
     py_files = cluster_find("*.py", "src/", config)
     
     # Use glob patterns
-    data_files = cluster_glob("data_*.{csv,json}", "input/", config)
+    # Patterns are plain shell globs -- brace expansion is not supported,
+    # so match each extension separately.
+    data_files = (
+        cluster_glob("data_*.csv", "input/", config)
+        + cluster_glob("data_*.json", "input/", config)
+    )
     
     # Count files by type
     total_files = cluster_count_files(".", "*", config)
@@ -165,8 +170,6 @@ Error Handling
 --------------
 
 .. code-block:: python
-
-    from clustrix.filesystem import FileNotFoundError
 
     try:
         file_info = cluster_stat("nonexistent.txt", config)

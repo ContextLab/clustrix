@@ -21,10 +21,12 @@ Features
 - **Simple Decorator Interface**: Just add ``@cluster`` to any function
 - **Advanced Function Packaging**: AST-based dependency analysis replaces pickle limitations
 - **Interactive Jupyter Widget**: ``%%remote`` magic command with GUI configuration manager
-- **Multiple Cluster Support**: SLURM, PBS, SGE, Kubernetes, and SSH  
+- **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working;
+  PBS, SGE and Kubernetes are implemented but untested. See
+  :ref:`supported-cluster-types` before relying on a backend.
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
-- **Native Cost Monitoring**: Built-in cost tracking for AWS, GCP, Azure, and Lambda Cloud
+- **Cost Estimation**: Pricing and cost estimates for AWS, GCP, Azure, and Lambda Cloud
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment  
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
 - **Local Parallelization**: Multi-core execution for development and testing
@@ -61,9 +63,10 @@ Basic Usage
    @clustrix.cluster(cores=8, memory='16GB', time='02:00:00')
    def expensive_computation(data, iterations=1000):
        import numpy as np
+       array = np.asarray(data)
        result = 0
        for i in range(iterations):
-           result += np.sum(data ** 2)
+           result += np.sum(array ** 2)
        return result
    
    # Execute on cluster
@@ -74,73 +77,61 @@ Basic Usage
 Jupyter Notebook Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-For Jupyter notebook users, Clustrix provides an interactive configuration widget:
+Clustrix registers an IPython magic that opens a configuration widget:
 
-.. code-block:: python
-
-   import clustrix  # Auto-loads the magic command and displays widget
-
-.. code-block:: jupyter
+.. code-block:: ipython3
 
    %%remote
-   # Interactive widget appears with:
-   # - Dropdown to select configurations  
-   # - Forms to create/edit cluster setups
-   # - One-click configuration application
-   # - Save/load configurations to files
+
+Importing ``clustrix`` registers the magic but does **not** display the widget.
+A library should not inject UI as a side effect of being imported, so the
+widget is shown on demand: run ``%%remote`` in a cell, or call
+``clustrix.notebook_magic.display_config_widget()``. Setting
+``CLUSTRIX_AUTO_WIDGET=1`` restores the old display-on-import behaviour.
+
+``%%clusterfy`` still works as a deprecated alias and emits a
+``DeprecationWarning``.
 
 Interactive Configuration Widget
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The Clustrix widget provides a comprehensive GUI for managing cluster configurations directly in Jupyter notebooks.
+The widget edits the same settings as ``clustrix.configure()`` and applies them
+to the current session.
 
-**Default View**
+.. image:: _static/widget/02-after-light.jpg
+   :alt: Clustrix widget in JupyterLab, light theme
+   :width: 700px
 
-When you first import clustrix or use the ``%%remote`` magic command, the widget displays with a default "Local Single-core" configuration:
+Its colours resolve through JupyterLab's own theme variables, so it follows the
+notebook theme rather than carrying a second hand-maintained dark stylesheet:
 
-.. image:: _static/img/screenshots/widget_default.png
-   :alt: Default widget view showing Local Single-core configuration
-   :width: 600px
+.. image:: _static/widget/03-after-dark.jpg
+   :alt: The same widget in JupyterLab's dark theme
+   :width: 700px
 
-**Configuration Templates**
+"Show advanced" reveals the package manager, Python executable, environment
+variables, module loads and pre-execution commands:
 
-The dropdown menu includes pre-built templates for various cluster types and cloud providers:
+.. image:: _static/widget/04-advanced-light.jpg
+   :alt: Widget with the Advanced panel expanded
+   :width: 700px
 
-.. image:: _static/img/screenshots/widget_dropdown.png
-   :alt: Configuration dropdown showing available templates
-   :width: 600px
+**What the widget covers**
 
-**HPC Cluster Configuration**
+The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
+``sge``, ``kubernetes`` and ``huggingface``.
 
-For traditional HPC clusters like SLURM, the widget provides all essential configuration fields:
+- ``ssh``, ``slurm``, ``pbs`` and ``sge`` show the connection section: host,
+  port, username, SSH key file, password, remote work directory, an environment
+  variable to read the password from, and an "Auto setup SSH keys" button.
+- ``huggingface`` shows namespace, flavor, token and an "Allow paid GPU
+  flavors" checkbox. GPU flavors bill by the second, so that box has to be
+  ticked before one is accepted.
+- ``kubernetes`` shows **no** dedicated fields. The ``k8s_*`` settings can only
+  be set from a configuration file or ``clustrix.configure()``.
 
-.. image:: _static/img/screenshots/widget_slurm_basic.png
-   :alt: SLURM configuration with basic settings
-   :width: 600px
-
-The advanced settings accordion reveals additional options for modules, environment variables, and custom commands:
-
-.. image:: _static/img/screenshots/widget_slurm_advanced.png
-   :alt: SLURM advanced configuration options
-   :width: 600px
-
-**Cloud Provider Support**
-
-Cloud providers have dynamic field visibility showing only relevant options:
-
-*Google Cloud Platform:*
-
-.. image:: _static/img/screenshots/widget_gcp.png
-   :alt: GCP VM configuration interface
-   :width: 600px
-
-*Lambda Cloud GPU Instances:*
-
-.. image:: _static/img/screenshots/widget_lambda.png
-   :alt: Lambda Cloud with GPU instance dropdown
-   :width: 600px
-
-The widget includes templates for AWS, Google Cloud, Azure, SLURM, Kubernetes, Lambda Cloud, and HuggingFace Spaces.
+There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
+backends are unverified.
 
 Table of Contents
 -----------------
@@ -175,6 +166,13 @@ Table of Contents
    notebooks/ssh_tutorial
    notebooks/basic_usage
 
+.. warning::
+
+   The cloud VM tutorials below (AWS, Azure, GCP, HuggingFace Spaces, Lambda
+   Cloud) describe an execution path that has never been shown to run a job end
+   to end. See :ref:`supported-cluster-types`. The cost monitoring tutorial is
+   unaffected.
+
 .. toctree::
    :maxdepth: 2
    :caption: Cloud Platform Tutorials
@@ -199,52 +197,74 @@ Table of Contents
    api/cost_monitoring
    api/local_executor
 
+.. _supported-cluster-types:
+
 Supported Cluster Types
 -----------------------
 
-**Traditional HPC Schedulers**
+**Execution backends**
 
-+----------------+------------------+----------------------------------+
-| Cluster Type   | Status           | Notes                            |
-+================+==================+==================================+
-| **SLURM**      | ✅ Full Support  | Production ready                 |
-+----------------+------------------+----------------------------------+
-| **PBS/Torque** | ✅ Full Support  | Production ready                 |
-+----------------+------------------+----------------------------------+
-| **SGE**        | ✅ Full Support  | Production ready                 |
-+----------------+------------------+----------------------------------+
-| **SSH**        | ✅ Full Support  | Direct execution                 |
-+----------------+------------------+----------------------------------+
++--------------------+-------------------+--------------------------------------------------+
+| ``cluster_type``   | Status            | Notes                                            |
++====================+===================+==================================================+
+| ``slurm``          | Verified          | A real job ran on ``discovery.dartmouth.edu``    |
+|                    |                   | and returned its result.                         |
++--------------------+-------------------+--------------------------------------------------+
+| ``ssh``            | Verified          | Direct execution, no scheduler. A real job ran   |
+|                    |                   | on an 8-GPU host.                                |
++--------------------+-------------------+--------------------------------------------------+
+| ``huggingface``    | Verified          | HuggingFace Jobs. A real job ran in a container. |
++--------------------+-------------------+--------------------------------------------------+
+| ``local``          | Works             | Local processes; used for development and the    |
+|                    |                   | fast tests.                                      |
++--------------------+-------------------+--------------------------------------------------+
+| ``pbs``            | Untested          | Implemented, but does not use the two-venv path  |
+|                    |                   | and has not been run against real hardware.      |
++--------------------+-------------------+--------------------------------------------------+
+| ``sge``            | Untested          | Same caveat as PBS.                              |
++--------------------+-------------------+--------------------------------------------------+
+| ``kubernetes``     | Untested          | Not verified against a real cluster. Per-job     |
+|                    |                   | overrides are unsupported -- the executor reads  |
+|                    |                   | only configuration-level ``k8s_*`` settings --   |
+|                    |                   | and the widget offers no Kubernetes fields.      |
++--------------------+-------------------+--------------------------------------------------+
 
-**Container Orchestration**
+**Cloud VM backends**
 
-+----------------+------------------+----------------------------------+
-| Platform       | Status           | Notes                            |
-+================+==================+==================================+
-| **Kubernetes** | ✅ Full Support  | Native K8s API with auto-deps    |
-+----------------+------------------+----------------------------------+
-| **AWS EKS**    | ✅ Full Support  | Kubernetes + AWS integration     |
-+----------------+------------------+----------------------------------+
-| **Azure AKS**  | ✅ Full Support  | Kubernetes + Azure integration   |
-+----------------+------------------+----------------------------------+
-| **Google GKE** | ✅ Full Support  | Kubernetes + GCP integration     |
-+----------------+------------------+----------------------------------+
+The ``provider=`` argument to ``@cluster`` (``'aws'``, ``'gcp'``, ``'azure'``,
+``'lambda'``, ``'huggingface'``) routes to the AWS EC2, Azure VM, Google
+Compute Engine and Lambda Cloud backends. **None of them has been shown to run
+a job end to end.** Until recently the path could not have run at all: the
+serializer writes the function under a ``"function"`` key while the remote
+bootstrap read ``"func"``, so every cloud job died with a ``KeyError`` on its
+first line. That was fixed (issue #119), but nothing has since demonstrated a
+completed cloud job, and ``scripts/collect_execution_evidence.py`` does not
+cover these backends. Treat the cloud platform tutorials listed above as a
+description of the intended interface.
 
-**Cloud Computing Platforms**
+Note that ``cluster_type='huggingface'`` (HuggingFace Jobs) is a different
+thing from ``provider='huggingface'`` (the HuggingFace Spaces provider, which
+never satisfied the dispatch interface). Use the former.
 
-+------------------+------------------+----------------------------------+
-| Platform         | Status           | Notes                            |
-+==================+==================+==================================+
-| **AWS EC2**      | ✅ Full Support  | Auto-provisioning + cost monitor |
-+------------------+------------------+----------------------------------+
-| **Azure VMs**    | ✅ Full Support  | Auto-provisioning + cost monitor |
-+------------------+------------------+----------------------------------+
-| **Google Cloud** | ✅ Full Support  | Auto-provisioning + cost monitor |
-+------------------+------------------+----------------------------------+
-| **Lambda Cloud** | ✅ Full Support  | GPU-optimized instances          |
-+------------------+------------------+----------------------------------+
-| **HF Spaces**    | ✅ Full Support  | Hugging Face Spaces integration  |
-+------------------+------------------+----------------------------------+
+The pricing and cost-estimation clients for AWS, GCP, Azure and Lambda Cloud
+are separate code and do work; they query provider pricing APIs and never
+submit a job. See :doc:`api/cost_monitoring`.
+
+**Evidence**
+
+The three "Verified" rows are the backends exercised by
+``scripts/collect_execution_evidence.py``, which submits a genuine job to each
+reachable target, waits for it, and prints what came back. Nothing in it is
+mocked, and a target it cannot reach is reported as skipped rather than as
+passing:
+
+.. code-block:: bash
+
+   python scripts/collect_execution_evidence.py            # all reachable targets
+   python scripts/collect_execution_evidence.py slurm gpu  # a subset
+
+Credentials come from ``~/.clustrix-dev-credentials`` or from the environment
+(``CLUSTRIX_SLURM_PASSWORD``, ``CLUSTRIX_GPU_PASSWORD``, ``HF_TOKEN``).
 
 Links
 -----

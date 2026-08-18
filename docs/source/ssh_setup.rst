@@ -15,19 +15,24 @@ The easiest way to set up SSH access is using Clustrix's automated system:
 Method 1: Interactive Widget (Recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
+Open the widget with the ``%%remote`` magic, in a cell of its own. Importing
+``clustrix`` registers the magic but does not display the widget.
 
-   import clustrix
-   
-   # The widget appears automatically with SSH Key Setup section
-   # 1. Enter your cluster hostname (e.g., cluster.university.edu)
-   # 2. Enter your username  
-   # 3. Enter your password
-   # 4. Click "Setup SSH Keys"
-   # ✅ Done in 15 seconds!
+.. code-block:: ipython3
+
+   %%remote
+
+Then:
+
+1. Choose a remote cluster type (``ssh``, ``slurm``, ``pbs`` or ``sge``) so the
+   connection section appears
+2. Enter your cluster hostname (e.g. ``cluster.university.edu``)
+3. Enter your username
+4. Enter your password
+5. Click "Auto setup SSH keys"
 
 Method 2: Command Line Interface
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -58,7 +63,7 @@ Method 3: Python API
        print("✅ SSH keys setup successfully!")
 
 What the Automation Does
------------------------
+------------------------
 
 The automated SSH setup handles everything for you:
 
@@ -181,7 +186,7 @@ Python Configuration
    )
 
 Configuration File
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~
 
 .. code-block:: yaml
 
@@ -264,7 +269,7 @@ If you need manual setup for special configurations:
    ssh-keygen -t rsa -b 4096 -f ~/.ssh/clustrix_key
 
 2. Deploy Public Key
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: bash
 
@@ -272,7 +277,7 @@ If you need manual setup for special configurations:
    ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.hostname.edu
 
 3. Configure SSH Client
-~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: text
 
@@ -284,7 +289,7 @@ If you need manual setup for special configurations:
        IdentitiesOnly yes
 
 4. Configure Clustrix
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
 
@@ -295,10 +300,10 @@ If you need manual setup for special configurations:
    )
 
 Troubleshooting
---------------
+---------------
 
 Common Issues and Solutions
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 **SSH Key Setup Failed**
 
@@ -346,7 +351,7 @@ Security Best Practices
 -----------------------
 
 Key Management
-~~~~~~~~~~~~
+~~~~~~~~~~~~~~
 
 1. **Use Ed25519 Keys**: Default in automated setup, quantum-resistant
 2. **Regular Rotation**: Use ``force_refresh=True`` periodically  
@@ -354,7 +359,7 @@ Key Management
 4. **Secure Storage**: Keys stored with proper permissions automatically
 
 Network Security
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 1. **SSH Config Aliases**: Hide hostnames, centralize settings
 2. **Connection Timeouts**: Prevent hanging connections
@@ -362,7 +367,7 @@ Network Security
 4. **Jump Hosts**: Supported through SSH config
 
 Monitoring
-~~~~~~~~~
+~~~~~~~~~~
 
 .. code-block:: python
 
@@ -377,7 +382,7 @@ Monitoring
            print(f"Fingerprint: {key_info['fingerprint']}")
 
 Getting Help
------------
+------------
 
 - **Interactive Tutorial**: `SSH Automation Notebook <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
 - **GitHub Issues**: `Report problems <https://github.com/ContextLab/clustrix/issues>`_
