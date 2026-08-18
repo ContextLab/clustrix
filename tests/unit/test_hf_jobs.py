@@ -281,6 +281,48 @@ class TestPayload:
 
 
 class TestAuthenticationErrors:
-    def test_missing_token_says_what_to_set(self):
-        with pytest.raises(RuntimeError, match="hf_token"):
+    def test_missing_token_says_what_to_set(self, monkeypatch, tmp_path):
+        """With no token anywhere, the error must name every way to supply one.
+
+        Isolated from the developer's own credentials: HF_TOKEN is cleared and
+        HOME is redirected, or this passes or fails depending on whether
+        whoever runs it happens to be logged in to HuggingFace.
+        """
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        with pytest.raises(RuntimeError) as excinfo:
             _ = _manager().api
+
+        message = str(excinfo.value)
+        assert "hf_token" in message
+        assert "HF_TOKEN" in message
+        assert "hf auth login" in message
+
+    def test_environment_variable_is_honoured(self, monkeypatch, tmp_path):
+        """The error names HF_TOKEN, so following that advice must work.
+
+        It previously read only the config field, so exporting HF_TOKEN --
+        exactly what the message told you to do -- still failed.
+        """
+        monkeypatch.setenv("HF_TOKEN", "hf_from_the_environment")
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        assert _manager().api is not None
+
+    def test_cli_login_token_is_honoured(self, monkeypatch, tmp_path):
+        """`hf auth login` writes here; clustrix should not ask again."""
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        cache = tmp_path / ".cache" / "huggingface"
+        cache.mkdir(parents=True)
+        (cache / "token").write_text("hf_from_the_cli\n")
+
+        assert _manager().api is not None
+
+    def test_config_field_wins_over_the_environment(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("HF_TOKEN", "hf_from_the_environment")
+        monkeypatch.setenv("HOME", str(tmp_path))
+
+        manager = _manager(hf_token="hf_from_the_config")
+        assert manager.api.token == "hf_from_the_config"

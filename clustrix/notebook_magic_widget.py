@@ -204,7 +204,23 @@ class EnhancedClusterConfigWidget:
         self._setup_change_tracking()
 
     def _update_config_dropdown(self):
-        """Update the configuration dropdown with current config names."""
+        """Update the configuration dropdown with current config names.
+
+        Rebuilding `options` makes ipywidgets re-fire the selection observer,
+        which calls `_load_config_to_widgets` and overwrites whatever the user
+        has typed since the last load. Renaming a configuration therefore
+        discarded every edit made before the rename *and* left the widget
+        showing a different profile. The rebuild is guarded so the observer
+        only responds to a selection the user actually made.
+        """
+        self._rebuilding_dropdown = True
+        try:
+            self._rebuild_config_dropdown()
+        finally:
+            self._rebuilding_dropdown = False
+
+    def _rebuild_config_dropdown(self):
+        """The actual rebuild; always called with the observer suppressed."""
         if not self.configs:
             self.config_dropdown.options = []
             self.config_dropdown.value = None
@@ -1046,6 +1062,29 @@ class EnhancedClusterConfigWidget:
         except Exception:
             pass  # Keep current options
 
+    @staticmethod
+    def _set_choice(field, value):
+        """Select a value in a dropdown, widening the options if need be.
+
+        Every one of these assignments used to be bare `field.value = ...`, so
+        loading a configuration whose region or instance type was not in the
+        hardcoded ten-item list raised
+
+            TraitError: Invalid selection: value not found
+
+        and broke the widget outright. AWS alone has far more than ten regions,
+        so this was reachable with a perfectly ordinary config file.
+
+        The saved configuration is authoritative -- a list baked into the UI
+        should not be able to veto it -- so an unrecognised value is added to
+        the options rather than discarded.
+        """
+        if value in (None, ""):
+            return
+        if value not in field.options:
+            field.options = list(field.options) + [value]
+        field.value = value
+
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
         if config_name not in self.configs:
@@ -1073,18 +1112,21 @@ class EnhancedClusterConfigWidget:
         self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
 
         # AWS fields
-        self.aws_region_field.value = config.get("aws_region", "us-east-1")
-        self.aws_instance_type_field.value = config.get(
-            "aws_instance_type", "t3.medium"
+        self._set_choice(self.aws_region_field, config.get("aws_region", "us-east-1"))
+        self._set_choice(
+            self.aws_instance_type_field, config.get("aws_instance_type", "t3.medium")
         )
-        self.aws_cluster_type_field.value = config.get("aws_cluster_type", "ec2")
+        self._set_choice(
+            self.aws_cluster_type_field, config.get("aws_cluster_type", "ec2")
+        )
         self.aws_access_key_field.value = config.get("aws_access_key_id", "")
         self.aws_secret_key_field.value = config.get("aws_secret_access_key", "")
 
         # Azure fields
-        self.azure_region_field.value = config.get("azure_region", "eastus")
-        self.azure_instance_type_field.value = config.get(
-            "azure_instance_type", "Standard_D2s_v3"
+        self._set_choice(self.azure_region_field, config.get("azure_region", "eastus"))
+        self._set_choice(
+            self.azure_instance_type_field,
+            config.get("azure_instance_type", "Standard_D2s_v3"),
         )
         self.azure_subscription_field.value = config.get("azure_subscription_id", "")
         self.azure_client_id_field.value = config.get("azure_client_id", "")
@@ -1092,9 +1134,9 @@ class EnhancedClusterConfigWidget:
         self.azure_tenant_id_field.value = config.get("azure_tenant_id", "")
 
         # GCP fields
-        self.gcp_region_field.value = config.get("gcp_region", "us-central1")
-        self.gcp_instance_type_field.value = config.get(
-            "gcp_instance_type", "e2-medium"
+        self._set_choice(self.gcp_region_field, config.get("gcp_region", "us-central1"))
+        self._set_choice(
+            self.gcp_instance_type_field, config.get("gcp_instance_type", "e2-medium")
         )
         self.gcp_project_field.value = config.get("gcp_project", "")
         self.gcp_zone_field.value = config.get("gcp_zone", "")
@@ -1102,15 +1144,16 @@ class EnhancedClusterConfigWidget:
 
         # Lambda Cloud fields
         self.lambda_api_key_field.value = config.get("lambda_api_key", "")
-        self.lambda_instance_type_field.value = config.get(
-            "lambda_instance_type", "gpu_1x_a10"
+        self._set_choice(
+            self.lambda_instance_type_field,
+            config.get("lambda_instance_type", "gpu_1x_a10"),
         )
 
         # HuggingFace fields
         self.hf_token_field.value = config.get("hf_token", "")
         self.hf_space_name_field.value = config.get("hf_space_name", "")
-        self.hf_hardware_field.value = config.get("hf_hardware", "cpu-basic")
-        self.hf_sdk_field.value = config.get("hf_sdk", "gradio")
+        self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
+        self._set_choice(self.hf_sdk_field, config.get("hf_sdk", "gradio"))
 
         # Advanced options
         self.package_manager.value = config.get("package_manager", "pip")
@@ -1255,6 +1298,10 @@ class EnhancedClusterConfigWidget:
 
     def _on_config_select(self, change):
         """Handle configuration selection from dropdown."""
+        if getattr(self, "_rebuilding_dropdown", False):
+            # Fired by _update_config_dropdown rebuilding options, not by the
+            # user picking something. Reloading here would discard their edits.
+            return
         config_name = change["new"]
         if config_name:
             self._load_config_to_widgets(config_name)

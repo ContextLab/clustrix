@@ -112,4 +112,5 @@ def load_ipython_extension(ipython):
         ipython.register_magic_function(magics.remote, "cell", "remote")
         # Deprecated alias -- see ClusterfyMagics.clusterfy
         ipython.register_magic_function(magics.clusterfy, "cell", "clusterfy")
-        # Note: No print message since widget displays automatically on import
+        # No print here: the widget is shown by %%remote or by
+        # display_config_widget(), not as a side effect of importing.

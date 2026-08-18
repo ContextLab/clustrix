@@ -37,6 +37,7 @@ import binascii
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 import sys
 import time
@@ -97,6 +98,16 @@ LOG_FETCH_DELAY_SECONDS = 2.0
 #: limit, but large enough for a function plus modest arguments; anything
 #: bigger should be read from a dataset inside the job rather than shipped.
 MAX_PAYLOAD_BYTES = 256 * 1024
+
+
+def _token_from_hf_cli_cache() -> Optional[str]:
+    """The token `hf auth login` writes, if there is one."""
+    try:
+        path = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "token")
+        with open(path) as handle:
+            return handle.read().strip() or None
+    except OSError:
+        return None
 
 
 def _constant_time_equals(candidate: str, expected: str) -> bool:
@@ -175,13 +186,19 @@ class HFJobsManager:
             if not HF_AVAILABLE:
                 raise RuntimeError(
                     "huggingface_hub is not installed. "
-                    'Install it with: pip install "clustrix[huggingface]"'
+                    "Install it with: pip install huggingface_hub"
                 )
-            token = getattr(self.config, "hf_token", None)
+            # The error used to say "or export HF_TOKEN" while reading only the
+            # config field, so following its own advice did not work. Honour
+            # the environment variable it names -- and the one the HuggingFace
+            # CLI itself writes.
+            token = getattr(self.config, "hf_token", None) or os.environ.get("HF_TOKEN")
+            if not token:
+                token = _token_from_hf_cli_cache()
             if not token:
                 raise RuntimeError(
                     "No HuggingFace token configured. Set hf_token in your "
-                    "clustrix config, or export HF_TOKEN."
+                    "clustrix config, export HF_TOKEN, or run `hf auth login`."
                 )
             self._api = HfApi(token=token)
         return self._api
