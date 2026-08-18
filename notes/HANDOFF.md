@@ -1,6 +1,10 @@
 # HANDOFF — start here
 
-**Last updated:** 2026-08-17 · **`master` @ `760432c`** · Read this before anything else in `notes/`.
+**Last updated:** 2026-08-18 · **`master` @ `760432c`** · Read this before anything else in `notes/`.
+
+> **In flight:** PR **#137** on `epic/production-readiness` makes remote execution
+> actually work — 18 use cases correct on five backends, all CI green. Read
+> `session_137_remote_execution.md` first; it supersedes the execution parts below.
 
 ---
 
