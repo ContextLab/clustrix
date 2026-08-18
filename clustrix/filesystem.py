@@ -201,6 +201,12 @@ class ClusterFilesystem:
                 "hostname": self.config.cluster_host,
                 "port": self.config.cluster_port,
                 "username": self.config.username,
+                # Without this paramiko waits on the OS default, which on an
+                # unreachable or non-answering host is minutes. A filesystem
+                # call that cannot connect should say so quickly.
+                "timeout": getattr(self.config, "ssh_connect_timeout", 30),
+                "auth_timeout": getattr(self.config, "ssh_connect_timeout", 30),
+                "banner_timeout": getattr(self.config, "ssh_connect_timeout", 30),
             }
 
             if self.config.key_file:
