@@ -156,11 +156,34 @@ def cluster(
                 "key_file",
                 "terminate_on_completion",
                 "instance_startup_timeout",
+                # Per-job overrides for the API-backed backends. hf_jobs.py
+                # already reads hf_flavor/hf_timeout off job_config and
+                # executor_kubernetes.py reads the k8s_* ones; they were simply
+                # never put there, so the documented
+                # @cluster(k8s_namespace="compute") was silently dropped.
+                "hf_flavor",
+                "hf_timeout",
+                "hf_namespace",
+                "k8s_namespace",
+                "k8s_image",
+                "k8s_service_account",
+                "k8s_pull_policy",
             ]
 
             for param in cloud_params:
                 if param in kwargs:
                     job_config[param] = kwargs[param]
+
+            # A silently ignored option is worse than a rejected one: the job
+            # runs with settings the caller believes they changed.
+            unknown_kwargs = sorted(set(kwargs) - set(cloud_params))
+            if unknown_kwargs:
+                logger.warning(
+                    "@cluster received unrecognised option(s) %s; they have no "
+                    "effect. Recognised extras: %s",
+                    ", ".join(unknown_kwargs),
+                    ", ".join(sorted(cloud_params)),
+                )
 
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
