@@ -69,18 +69,6 @@ class TestCredentials:
 
         self._manager = get_credential_manager()
 
-    def get_aws_credentials(self) -> Optional[Dict[str, str]]:
-        """Get AWS credentials from available sources."""
-        return self._manager.get_aws_credentials()
-
-    def get_azure_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Azure credentials from available sources."""
-        return self._manager.get_azure_credentials()
-
-    def get_gcp_credentials(self) -> Optional[Dict[str, str]]:
-        """Get GCP credentials from available sources."""
-        return self._manager.get_gcp_credentials()
-
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
         """Get SSH credentials from available sources."""
         return self._manager.get_ssh_credentials()
@@ -92,10 +80,6 @@ class TestCredentials:
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
         """Get HuggingFace credentials from available sources."""
         return self._manager.get_huggingface_credentials()
-
-    def get_lambda_cloud_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Lambda Cloud credentials from available sources."""
-        return self._manager.get_lambda_cloud_credentials()
 
     def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
         """Get SSH-GPU cluster credentials from available sources."""
