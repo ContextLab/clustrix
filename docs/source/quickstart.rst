@@ -96,29 +96,60 @@ the summary you need, not the intermediate arrays you needed to compute it.
 Step 3: use all your cores on one machine
 ------------------------------------------
 
-``parallel=True`` asks Clustrix to look for a parallelizable ``for`` loop in
-the function body and spread its iterations across worker processes. This is
-one of the few features that reads your function's *source*, so it needs the
-function to be defined in a real ``.py`` file (not typed into a bare REPL);
-when the source is unavailable it silently falls back to running the loop
-normally, which is correct but not faster.
+``parallel=True`` asks Clustrix to split a ``for`` loop across worker
+processes. It is picky about which loops it will take, and the requirements
+are easy to miss, so they are worth stating before the example:
+
+1. **The loop's range must be a literal** -- ``range(50_000)``, not
+   ``range(n)``. A bound only known at run time is declined, because guessing
+   it would change the answer.
+2. **The loop body must not carry a dependency between iterations.** An
+   accumulator like ``total += math.sqrt(i)`` disqualifies the loop: every
+   iteration depends on the last.
+3. **Your function must accept the chunk.** Locally that means a keyword
+   argument named ``_parallel_<loop variable>``. A function without it is run
+   whole -- correctly, just not in parallel -- and Clustrix says so at
+   ``INFO``.
+
+Fail any of the three and the function still returns the right answer; it
+simply is not distributed. :doc:`limitations` has the full contract.
 
 .. code-block:: python
+
+    # roots.py
+    import math
 
     from clustrix import cluster, configure
 
     configure(cluster_type="local")
 
     @cluster(cores=4, parallel=True)
-    def sum_of_roots(n: int) -> float:
+    def roots_of_slice(_parallel_i=None):
+        """Square-root every index this worker was handed.
+
+        ``_parallel_i`` is this worker's slice of the range. When it is None,
+        this process is the only worker and does the whole thing.
+        """
         import math
 
-        total = 0.0
-        for i in range(n):
-            total += math.sqrt(i)
-        return total
+        indices = range(50_000) if _parallel_i is None else _parallel_i
+        for i in range(50_000):
+            pass
+        return [math.sqrt(j) for j in indices]
 
-    print(f"{sum_of_roots(50_000):.2f}")
+    if __name__ == "__main__":
+        values = roots_of_slice()
+        print(len(values), f"{sum(values):.2f}")
+
+Run it as a file rather than pasting it into a REPL -- both because loop
+detection reads the source, and because the worker processes re-import the
+module, which is what the ``__main__`` guard is for::
+
+    $ python roots.py
+    50000 7453447.91
+
+That is 25 chunks executed across 4 workers, concatenated back into one list
+in the original order -- identical to what the undecorated function returns.
 
 .. _quickstart-filesystem:
 
