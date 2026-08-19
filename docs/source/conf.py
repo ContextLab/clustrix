@@ -32,7 +32,22 @@ extensions = [
 
 # Add theme to HTML path
 import sphinx_wagtail_theme
+
 html_theme_path = [sphinx_wagtail_theme.get_html_theme_path()]
+
+# sphinx_autodoc_typehints resolves annotations across a documented class's
+# whole MRO. ``clustrix.notebook_magic.ClusterfyMagics`` subclasses IPython's
+# ``Magics``, which annotates ``shell: InteractiveShell`` behind a
+# ``TYPE_CHECKING`` guard -- so the name is genuinely absent from
+# ``IPython.core.magic`` at runtime and ``typing.get_type_hints()`` cannot
+# evaluate it. That produces a ``forward_reference`` warning, which is fatal
+# under ``sphinx-build -W``. Bind the name so the reference resolves, rather
+# than adding it to ``suppress_warnings`` -- suppressing the category would
+# also hide the same warning if clustrix's own code ever developed one.
+import IPython.core.magic
+from IPython.core.interactiveshell import InteractiveShell
+
+IPython.core.magic.InteractiveShell = InteractiveShell
 
 templates_path = ["_templates"]
 exclude_patterns = []
