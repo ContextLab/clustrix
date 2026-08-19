@@ -48,8 +48,6 @@ Usage:
 import argparse
 import sys
 
-import boto3
-
 from clustrix.credential_manager import FlexibleCredentialManager
 
 MANAGED_TAG_KEY = "clustrix:managed"
@@ -95,6 +93,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def get_clients(region: str):
     """Build real boto3 clients, failing loudly if no credentials."""
+    # Imported here, not at module scope: --help must work on a machine
+    # with no AWS SDK installed. boto3 is not a clustrix dependency.
+    import boto3
+
     manager = FlexibleCredentialManager()
     creds = manager.ensure_credential("aws")
     if (

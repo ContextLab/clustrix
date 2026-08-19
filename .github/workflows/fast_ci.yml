@@ -197,11 +197,27 @@ jobs:
     steps:
       - name: Check status
         run: |
-          if [ "${{ needs.quick-checks.result }}" != "success" ] || \
-             [ "${{ needs.local-integration.result }}" != "success" ] || \
-             [ "${{ needs.docker-test.result }}" != "success" ]; then
-            echo "❌ CI checks failed"
+          # security-scan is in `needs` above but was missing from this
+          # condition, so a failing security scan still reported "All CI
+          # checks passed". Every job this gate depends on must be checked,
+          # or the gate is decorative.
+          failed=0
+          for job in quick-checks local-integration docker-test security-scan; do
+            case "$job" in
+              quick-checks)      result="${{ needs.quick-checks.result }}" ;;
+              local-integration) result="${{ needs.local-integration.result }}" ;;
+              docker-test)       result="${{ needs.docker-test.result }}" ;;
+              security-scan)     result="${{ needs.security-scan.result }}" ;;
+            esac
+            if [ "$result" != "success" ]; then
+              echo "❌ $job: $result"
+              failed=1
+            else
+              echo "✅ $job: success"
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "CI checks failed"
             exit 1
-          else
-            echo "✅ All CI checks passed"
           fi
+          echo "All CI checks passed"
