@@ -406,13 +406,17 @@ class TestSerializerRequirementIsExplicit:
         # that blocks the imports -- a real interpreter without them.
         blocker = tmp_path / "blocker"
         blocker.mkdir()
+        # find_spec, not find_module: the legacy finder API was removed in
+        # Python 3.12, so a find_module-based blocker is simply ignored there
+        # and the child imports dill perfectly well -- the test then passes
+        # vacuously on <=3.11 and fails on 3.12 for the wrong reason.
         (blocker / "sitecustomize.py").write_text(textwrap.dedent("""
                 import sys
                 class _Block:
-                    def find_module(self, name, path=None):
-                        return self if name in ("dill", "cloudpickle") else None
-                    def load_module(self, name):
-                        raise ImportError(name)
+                    def find_spec(self, name, path=None, target=None):
+                        if name in ("dill", "cloudpickle"):
+                            raise ImportError(name)
+                        return None
                 sys.meta_path.insert(0, _Block())
                 """))
         env = dict(os.environ, CLUSTRIX_RESULT_KEY=KEY, PYTHONPATH=str(blocker))
