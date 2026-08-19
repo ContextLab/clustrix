@@ -107,11 +107,14 @@ import hashlib
 import json
 import logging
 import os
+import pickle
+import re
 import shutil
+import stat as stat_module
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -149,11 +152,33 @@ SENSITIVE_PATTERNS: Tuple[str, ...] = (
     "id_ecdsa*",
     "id_ed25519*",
     "credentials",
+    "credentials.*",
+    ".git-credentials",
+    "kubeconfig",
+    "*.kubeconfig",
+    ".npmrc",
+    ".pypirc",
+    ".htpasswd",
+    ".dockercfg",
+    "secrets",
+    "secrets.*",
     "*.kdbx",
     "*/.ssh/*",
     "*/.aws/*",
     "*/.gnupg/*",
+    "*/.kube/*",
+    "*/.docker/*",
+    "*/.config/gcloud/*",
+    # A git config carries the remote URL, and a remote URL is one of the
+    # commonest places a personal access token ends up on disk.
+    "*/.git/config",
 )
+
+#: A package id is a ``uuid4().hex`` and nothing else. Anything that is not one
+#: is refused before it can reach a delete call: the id becomes a path in the
+#: remote store, so ``".."`` traverses out of the package prefix and ``""``
+#: addresses the prefix itself -- which is every package at once.
+_PACKAGE_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
 
 
 class StagingError(RuntimeError):
@@ -191,6 +216,115 @@ def _is_sensitive(path: Path) -> bool:
         elif fnmatch.fnmatch(name, pattern):
             return True
     return False
+
+
+def _validate_package_id(package_id: Any) -> str:
+    """Return ``package_id`` if it is one, or refuse it.
+
+    A package id is opaque: ``uuid.uuid4().hex``, thirty-two lowercase hex
+    digits. It is also a path component in the remote store, which is why
+    anything else has to be refused *before* it reaches a delete call.
+    ``""`` addresses the whole ``packages/`` prefix -- deleting every package
+    in the account -- and ``"../README.md"`` addresses a file outside it.
+    Neither is a typo we can guess the intent of.
+    """
+    if not isinstance(package_id, str) or not _PACKAGE_ID_RE.match(package_id):
+        raise StagingError(
+            f"{package_id!r} is not a data package id. An id is the 32-character "
+            "hex string on DataPackage.package_id, which list_data_packages() "
+            "also reports. Nothing was deleted."
+        )
+    return package_id
+
+
+def _validate_path_in_repo(path_in_repo: Any) -> str:
+    """Return a package's remote folder if it is one, or refuse it.
+
+    The same argument as :func:`_validate_package_id`, one level up: this
+    string is handed to ``delete_folder``, so it decides what gets removed.
+    """
+    if isinstance(path_in_repo, str):
+        head, _, tail = path_in_repo.partition("/")
+        if head == PACKAGE_PREFIX and _PACKAGE_ID_RE.match(tail):
+            return path_in_repo
+    raise StagingError(
+        f"{path_in_repo!r} is not a data package location. It must be "
+        f"'{PACKAGE_PREFIX}/<package id>'. Nothing was deleted."
+    )
+
+
+def _kind_of(mode: int) -> str:
+    """A human name for a stat mode, for messages that refuse a file."""
+    for predicate, label in (
+        (stat_module.S_ISFIFO, "named pipe"),
+        (stat_module.S_ISCHR, "character device"),
+        (stat_module.S_ISBLK, "block device"),
+        (stat_module.S_ISSOCK, "socket"),
+        (stat_module.S_ISDIR, "directory"),
+        (stat_module.S_ISREG, "regular file"),
+    ):
+        if predicate(mode):
+            return label
+    return "special file"
+
+
+def _stat_followed(path: Path, label: str) -> os.stat_result:
+    """``os.stat`` -- following symlinks -- with failures named, not raw.
+
+    A dangling symlink and an unreadable parent both arrive here as ``OSError``
+    and both need to say which file and which package, not surface an errno
+    from four frames down.
+    """
+    try:
+        return os.stat(path)
+    except OSError as exc:
+        raise StagingError(f"Cannot stage {label}: {exc}.") from exc
+
+
+def _require_stageable(path: Path, label: str, allow_dir: bool) -> os.stat_result:
+    """Refuse anything that is not a regular file (or, optionally, a directory).
+
+    Reading a fifo or ``/dev/zero`` does not fail, it *blocks* -- packaging one
+    hangs with no output and no timeout, which is the least debuggable failure
+    in this module. A refusal costs the caller one message.
+    """
+    info = _stat_followed(path, label)
+    if stat_module.S_ISREG(info.st_mode):
+        return info
+    if allow_dir and stat_module.S_ISDIR(info.st_mode):
+        return info
+    raise StagingError(
+        f"Refusing to stage {label}: it is a {_kind_of(info.st_mode)}, not a "
+        "regular file"
+        + (" or directory" if allow_dir else "")
+        + ". Reading one can block forever, so clustrix refuses it rather "
+        "than hanging."
+    )
+
+
+def _read_verified(path: Path, entry: "PackagedFile", package_name: str) -> bytes:
+    """Read a source file and check it is still what was hashed.
+
+    Hashing and reading are two passes over the same file, and a file that
+    grew between them yields a payload that does not match its own recorded
+    size and digest. That mismatch is real and is caught eventually -- on the
+    worker, hours later, where nobody can see the writer that caused it. Catch
+    it here instead.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise StagingError(
+            f"Could not read {path} for data package {package_name!r}: {exc}."
+        ) from exc
+    if len(data) != entry.size or _digest_bytes(data) != entry.digest:
+        raise StagingError(
+            f"{path} changed while data package {package_name!r} was being "
+            f"built: {entry.size} bytes when it was hashed, {len(data)} bytes "
+            "when it was read. Nothing has been staged. Package it again once "
+            "it has stopped changing."
+        )
+    return data
 
 
 def _safe_relpath(relpath: str) -> PurePosixPath:
@@ -469,22 +603,42 @@ class DataPackage:
         return data
 
     def _local_source(self, entry: PackagedFile) -> Optional[Path]:
-        """The original file, if this machine still has it unchanged.
+        """The original file, if this machine still has exactly what we packaged.
 
-        Size only -- a full re-hash on every access would make the fast path
-        the slow path. A file that changed size is not the file we packaged; a
-        file edited in place at the same size is a risk the caller took by
-        editing their input mid-flight, and ``read_bytes`` still catches it.
+        The shortcut is only sound if the file at ``local_root`` *is* the
+        packaged content, and the only thing that establishes that is the
+        digest. This used to compare sizes, which is not the same claim at all:
+        a file edited in place at identical size passed it, and so did a
+        completely unrelated file that happened to be the same size at the same
+        absolute path on another machine -- the shared-home cluster case, where
+        ``local_root`` exists on the worker and holds something else. Both made
+        ``path()`` serve bytes that ``read_bytes()`` would have rejected, so
+        one package gave two answers.
+
+        Nothing weaker closes this. ``(size, mtime_ns)`` is restorable with
+        ``os.utime``; an inode number means nothing across machines; a
+        recorded hostname would not catch the same-machine in-place edit. So:
+        hash it. A mismatch is not an error -- it means this machine does not
+        have the file after all, and the bytes come from the package instead,
+        which is the same answer every other machine gives.
+
+        The cost is a hash of the file per dereference. That is the price of
+        ``path()`` and ``read_bytes()`` agreeing; call ``materialize()`` once
+        and use the returned root if you are reading in a loop.
         """
         if self.local_root is None:
             return None
         candidate = Path(self.local_root) / entry.relpath
         try:
-            if candidate.is_file() and candidate.stat().st_size == entry.size:
-                return candidate
+            if not candidate.is_file() or candidate.stat().st_size != entry.size:
+                # Cheap pre-filter only. A different size implies a different
+                # digest, so this changes no answer -- it just skips the hash.
+                return None
+            if _digest_file(candidate) != entry.digest:
+                return None
         except OSError:
             return None
-        return None
+        return candidate
 
     def materialize(self, dest: Optional[str] = None, config=None) -> str:
         """Put every file on local disk and return the directory holding them.
@@ -609,6 +763,13 @@ class DataPackage:
         would be indefensible. Only the remote folder, and the copy clustrix
         wrote into its own cache, are removed.
 
+        **A directory you named yourself is never touched either.** If you
+        called ``materialize(dest=...)``, that directory is yours -- it may
+        hold anything, and clustrix has no way to know what it created there
+        versus what was already in it. It used to be removed recursively,
+        which deleted whatever else the caller kept alongside the data. Clear
+        it yourself if you want it gone.
+
         **The repo itself is never touched either**, only the package's folder
         inside it. ``hf_data_repo`` may well point at a repo the user owns and
         cares about. An account whose last package is deleted keeps an empty
@@ -619,10 +780,11 @@ class DataPackage:
         if self.is_inline or not self.repo_id or not self.path_in_repo:
             return False
 
+        path_in_repo = _validate_path_in_repo(self.path_in_repo)
         api = _hf_api(cfg)
         try:
             api.delete_folder(
-                path_in_repo=self.path_in_repo,
+                path_in_repo=path_in_repo,
                 repo_id=self.repo_id,
                 repo_type="dataset",
                 commit_message=f"clustrix: delete data package {self.name}",
@@ -648,15 +810,30 @@ class DataPackage:
         return True
 
     def _discard_local_cache(self, config=None) -> None:
-        """Remove only what clustrix itself wrote, never the user's originals."""
-        for candidate in (self._materialised, str(self._default_dest(config))):
-            if not candidate:
-                continue
-            path = Path(candidate)
-            if self.local_root and path.resolve() == Path(self.local_root).resolve():
-                continue
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
+        """Remove the cache directory clustrix created, and nothing else.
+
+        Exactly one directory qualifies: ``<local_cache_dir>/data-packages/
+        <package_id>``. Clustrix creates it, it is keyed by an id nothing else
+        uses, and nothing else can be in it.
+
+        A ``dest`` the caller passed to :meth:`materialize` does **not**
+        qualify, however recently this package was unpacked into it. This used
+        to recurse into ``self._materialised`` and delete whatever was there:
+        ``materialize(dest="~/myproject")`` followed by ``delete()`` removed
+        the project. Recording which files clustrix wrote would not rescue the
+        idea either -- ``materialize`` skips a file that is already present and
+        correct, so "clustrix wrote it" and "clustrix should remove it" are not
+        the same set. The safe direction is to leave the caller's directory
+        alone.
+        """
+        cache = self._default_dest(config)
+        if self.local_root and cache.resolve() == Path(self.local_root).resolve():
+            # Only reachable if a caller aimed local_cache_dir at their own
+            # data. Their files win over our cache.
+            self._materialised = None
+            return
+        if cache.is_dir():
+            shutil.rmtree(cache, ignore_errors=True)
         self._materialised = None
 
 
@@ -710,9 +887,8 @@ def _collect(
 
     resolved: List[Path] = []
     for item in items:
-        path = Path(os.path.expanduser(str(item))).resolve()
-        if not path.exists():
-            raise StagingError(f"No such file or directory: {item}")
+        path = _named_path(item)
+        _require_stageable(path, str(item), allow_dir=True)
         resolved.append(path)
 
     if base is not None:
@@ -728,8 +904,28 @@ def _collect(
     for path in resolved:
         if path.is_dir():
             for child in sorted(path.rglob("*")):
-                if child.is_file() and not child.is_symlink():
+                # rglob does not descend into symlinked directories, so a
+                # symlink loop cannot hang this walk.
+                if child.is_symlink():
+                    # Included, at the *link's* own place in the tree, with the
+                    # target's bytes -- what `cp -L` does. Dropping it silently
+                    # gave the worker a different tree than the one named, and
+                    # a function that opened it got FileNotFoundError from a
+                    # package that reported success.
+                    _require_stageable(child, str(child), allow_dir=False)
                     collected.append((_relative(child, root), child))
+                    continue
+                info = child.lstat()
+                if stat_module.S_ISDIR(info.st_mode):
+                    continue
+                if not stat_module.S_ISREG(info.st_mode):
+                    raise StagingError(
+                        f"Refusing to stage {child}: it is a "
+                        f"{_kind_of(info.st_mode)}, not a regular file. "
+                        "Reading one can block forever, so clustrix refuses "
+                        "the whole package rather than hanging on it."
+                    )
+                collected.append((_relative(child, root), child))
         else:
             collected.append((_relative(path, root), path))
 
@@ -737,7 +933,7 @@ def _collect(
         raise StagingError(f"No files found under {source!r}.")
 
     if not allow_sensitive:
-        offenders = [str(p) for _, p in collected if _is_sensitive(p)]
+        offenders = [str(p) for _, p in collected if _is_sensitive_target(p)]
         if offenders:
             raise StagingError(
                 "Refusing to stage what looks like a credential rather than "
@@ -746,6 +942,36 @@ def _collect(
             )
 
     return _dedupe(collected), root
+
+
+def _named_path(item: Union[str, Path]) -> Path:
+    """The absolute path of something the caller named, link and all.
+
+    Everything above the last component is resolved, so ``..`` and a symlinked
+    parent normalise the way they must for confinement checks. The last
+    component is *not*, because that is the thing the caller named. Resolving
+    it made an explicitly named symlink take its target's identity: naming
+    ``data/link.csv`` produced a package holding ``other/z.csv``, and dragged
+    the package root out to the target's directory along with it. A file moves
+    because it was named; it keeps the name it was given.
+    """
+    absolute = Path(os.path.abspath(os.path.expanduser(str(item))))
+    if absolute.name in ("", ".", ".."):  # pragma: no cover - "/" and friends
+        return Path(os.path.realpath(str(absolute)))
+    return absolute.parent.resolve() / absolute.name
+
+
+def _is_sensitive_target(path: Path) -> bool:
+    """Credential check that a symlink cannot route around.
+
+    ``data/notes`` -> ``~/.ssh/id_rsa`` is credential-shaped at the far end and
+    innocuous at the near one, so both ends are tested.
+    """
+    if _is_sensitive(path):
+        return True
+    if path.is_symlink():
+        return _is_sensitive(Path(os.path.realpath(str(path))))
+    return False
 
 
 def _dedupe(collected: List[Tuple[str, Path]]) -> List[Tuple[str, Path]]:
@@ -872,37 +1098,92 @@ def data_package(
             files=entries,
             local_root=None,
         )
-        if force_local or len(payload) < _inline_limit(cfg):
-            package.inline = {relpath: payload}
-        else:
-            _upload(package, {relpath: payload}, cfg)
+        contents = {relpath: payload}
+        if not _inline_if_it_fits(package, contents, len(payload), cfg, force_local):
+            _upload(package, contents, cfg)
         return package
 
     collected, root = _collect(source, base, allow_sensitive)
-    entries = tuple(
-        PackagedFile(
-            relpath=relpath, size=path.stat().st_size, digest=_digest_file(path)
-        )
-        for relpath, path in collected
+    label = name or (
+        Path(str(source)).name if isinstance(source, (str, Path)) else "data"
     )
+    entries = tuple(_describe(relpath, path, label) for relpath, path in collected)
     total = sum(entry.size for entry in entries)
     biggest = max(((e.relpath, e.size) for e in entries), key=lambda pair: pair[1])
     _check_size(total, cfg, biggest)
 
     package = DataPackage(
-        name=name
-        or (Path(str(source)).name if isinstance(source, (str, Path)) else "data"),
+        name=label,
         package_id=uuid.uuid4().hex,
         files=entries,
         local_root=str(root) if root else None,
     )
 
     if force_local or total < _inline_limit(cfg):
-        package.inline = {relpath: path.read_bytes() for relpath, path in collected}
-        return package
+        by_relpath = {entry.relpath: entry for entry in package.files}
+        contents = {
+            relpath: _read_verified(path, by_relpath[relpath], label)
+            for relpath, path in collected
+        }
+        if _inline_if_it_fits(package, contents, total, cfg, force_local):
+            return package
+        del contents
 
     _upload(package, {relpath: path for relpath, path in collected}, cfg)
     return package
+
+
+def _describe(relpath: str, path: Path, package_name: str) -> PackagedFile:
+    """Size and digest of one source file, with failures named.
+
+    A file that is missing or unreadable at packaging time used to surface as a
+    bare ``FileNotFoundError`` or ``PermissionError`` from inside a generator
+    expression, which says nothing about which package was being built or that
+    building it is what failed.
+    """
+    try:
+        return PackagedFile(
+            relpath=relpath, size=path.stat().st_size, digest=_digest_file(path)
+        )
+    except OSError as exc:
+        raise StagingError(
+            f"Could not read {path} while building data package "
+            f"{package_name!r}: {exc}. Every named file has to be readable "
+            "now; one that is not would fail on the worker instead, where it "
+            "is far harder to diagnose."
+        ) from exc
+
+
+def _inline_if_it_fits(
+    package: DataPackage,
+    contents: Dict[str, bytes],
+    total: int,
+    config,
+    force_local: bool,
+) -> bool:
+    """Attach ``contents`` to the package inline, if that is within the limit.
+
+    ``force_local`` is the caller saying "inline it regardless", and it does.
+
+    Otherwise the threshold is measured against the **serialized package** --
+    the bytes that actually ride inside the job payload -- and not against the
+    sum of the file sizes. Those are nowhere near each other for many small
+    files: ten thousand four-byte files are forty kilobytes of data and a
+    1.09 MB pickle, because every file also carries a relative path and a
+    64-character digest. Measured on the data alone, a package a megabyte over
+    ``stage_inline_max_bytes`` called itself inline.
+    """
+    if force_local:
+        package.inline = contents
+        return True
+    limit = _inline_limit(config)
+    if total >= limit:
+        return False
+    package.inline = contents
+    if len(pickle.dumps(package, protocol=pickle.HIGHEST_PROTOCOL)) < limit:
+        return True
+    package.inline = None
+    return False
 
 
 def _inline_limit(config) -> int:
@@ -911,17 +1192,23 @@ def _inline_limit(config) -> int:
 
 def _upload(
     package: DataPackage,
-    payloads: Dict[str, Union[bytes, Path]],
+    payloads: Mapping[str, Union[bytes, Path]],
     config,
 ) -> None:
     """Put a package's files in the private remote store, in one commit.
 
     Every file and the manifest go up as a single commit, which buys two
-    things. It is atomic -- either the whole package lands or none of it does,
-    so there is no half-uploaded package to clean up -- and it costs one commit
+    things. Either the whole package becomes visible or none of it does, so
+    there is no half-listed package to clean up -- and it costs one commit
     rather than one per file, which matters because the Hub rate-limits commits
     per hour and a package of a thousand files would otherwise exhaust that on
     its own.
+
+    "Nothing is uploaded until the commit" is not quite true and the error
+    messages here must not claim it: ``huggingface_hub`` runs
+    ``preupload_lfs_files`` before it posts the commit, so LFS-tracked content
+    is already on the Hub by the time a commit can be refused. Those objects
+    belong to no commit, appear in no listing, and are collected by the Hub.
 
     The manifest is what marks a package complete; anything without one is
     reported as incomplete by :func:`list_data_packages`.
@@ -932,7 +1219,7 @@ def _upload(
     prefix = f"{PACKAGE_PREFIX}/{package.package_id}"
     api = _hf_api(config)
 
-    api.create_repo(repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True)
+    _require_private_repo(api, repo_id)
 
     operations = [
         CommitOperationAdd(
@@ -973,13 +1260,19 @@ def _upload(
                 f"HuggingFace is rate-limiting commits to {repo_id}, so data "
                 f"package {package.name!r} was not staged. The Hub allows a "
                 "fixed number of commits per hour per account; wait for the "
-                "window to roll over and try again. Nothing was uploaded -- a "
-                "package is one commit, so a refused commit leaves no partial "
-                "state to clean up."
+                "window to roll over and try again. No package folder was "
+                "created, so nothing is listed and there is nothing to delete. "
+                "Note that huggingface_hub uploads LFS-tracked files -- which "
+                "is most content over a megabyte -- *before* it posts the "
+                "commit, so those bytes may already be on the Hub as objects "
+                "no commit references. They are not part of any package and "
+                "clustrix cannot address them; the Hub garbage-collects them."
             ) from exc
         raise StagingError(
             f"Could not stage data package {package.name!r} to {repo_id}: {exc}"
         ) from exc
+
+    _verify_sources_unchanged(package, payloads, api, repo_id, prefix)
 
     package.repo_id = repo_id
     package.path_in_repo = prefix
@@ -990,6 +1283,108 @@ def _upload(
         _format_bytes(package.total_bytes),
         repo_id,
         prefix,
+    )
+
+
+def _require_private_repo(api, repo_id: str) -> None:
+    """Create the data repo if it is missing, and refuse it if it is public.
+
+    ``create_repo(private=True, exist_ok=True)`` creates a private repo but
+    does **not** make an existing public one private -- ``exist_ok`` returns
+    the repo as it is. So a ``hf_data_repo`` that already existed and was
+    public took the upload and published it, while the docstring promised
+    private.
+
+    Clustrix refuses instead of flipping the setting. A repo may be public
+    deliberately, that is the owner's decision to make, and silently changing
+    someone's visibility is its own incident. Refusing costs a message.
+    """
+    try:
+        api.create_repo(
+            repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise StagingError(
+            f"Could not create or reach the data repo {repo_id}: {exc}. Check "
+            "that your HuggingFace token has write access to that namespace, "
+            "or set hf_data_repo to a repo you can write to."
+        ) from exc
+
+    try:
+        info = api.repo_info(repo_id=repo_id, repo_type="dataset")
+    except Exception as exc:  # noqa: BLE001
+        raise StagingError(
+            f"Could not check whether the data repo {repo_id} is private: "
+            f"{exc}. Nothing has been uploaded -- clustrix will not stage data "
+            "into a repo whose visibility it could not confirm."
+        ) from exc
+
+    if not getattr(info, "private", False):
+        raise StagingError(
+            f"The data repo {repo_id} is PUBLIC. Staging into it would publish "
+            "your data to anyone. Nothing has been uploaded. clustrix will not "
+            "change the setting for you -- a repo can be public on purpose, "
+            "and that is yours to decide. Either make it private at "
+            f"https://huggingface.co/datasets/{repo_id}/settings, or point "
+            "hf_data_repo at a private repo."
+        )
+
+
+def _verify_sources_unchanged(
+    package: DataPackage,
+    payloads: Mapping[str, Union[bytes, Path]],
+    api,
+    repo_id: str,
+    prefix: str,
+) -> None:
+    """Re-hash the staged files and refuse the package if any of them moved.
+
+    Files go up by path, so the bytes on the wire are whatever the file held at
+    upload time, which is not necessarily what was hashed a moment earlier. A
+    file appended to in between produces a package whose digest describes bytes
+    that were never uploaded -- detected on the worker, hours later, as an
+    unexplained digest mismatch. Hashing again here costs one more read and
+    turns that into an error at the point of the mistake, naming the file.
+
+    The just-created folder is removed before raising, so a package that cannot
+    be trusted is not left occupying the store.
+    """
+    changed: List[str] = []
+    for entry in package.files:
+        source = payloads[entry.relpath]
+        if not isinstance(source, Path):
+            continue
+        try:
+            if _digest_file(source) != entry.digest:
+                changed.append(str(source))
+        except OSError:
+            changed.append(str(source))
+    if not changed:
+        return
+
+    try:
+        api.delete_folder(
+            path_in_repo=prefix,
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message="clustrix: discard package built from changing files",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "Could not remove the untrustworthy package at %s/%s: %s. "
+            "Delete it by hand with clustrix.delete_data_package(%r).",
+            repo_id,
+            prefix,
+            exc,
+            package.package_id,
+        )
+
+    raise StagingError(
+        f"These files changed while data package {package.name!r} was being "
+        "staged, so what was uploaded does not match what was hashed: "
+        + ", ".join(sorted(changed)[:5])
+        + ". The package has been removed from the store. Stage it again once "
+        "the files have stopped changing."
     )
 
 
@@ -1069,7 +1464,14 @@ def delete_data_package(package_id: str, config=None) -> bool:
     The counterpart to :func:`list_data_packages`. Returns whether anything was
     removed; a package that is already gone is not an error, a package that is
     there and will not delete raises.
+
+    The id is validated first, before anything reaches the Hub. It becomes a
+    path in the store, so an id that is not one is a deletion aimed somewhere
+    else: ``""`` addressed the whole ``packages/`` prefix and removed every
+    package in the account, and ``"../README.md"`` climbed out of the prefix
+    and removed a file that was never a package.
     """
+    package_id = _validate_package_id(package_id)
     cfg = config if config is not None else _config()
     repo_id = _hf_repo(cfg)
     prefix = f"{PACKAGE_PREFIX}/{package_id}"

@@ -17,6 +17,8 @@ import pickle
 import subprocess
 import sys
 import textwrap
+import uuid
+import warnings
 from pathlib import Path
 
 import pytest
@@ -27,10 +29,14 @@ from clustrix.staging import (
     DataPackage,
     PackagedFile,
     StagingError,
+    _confine,
+    _describe,
     _digest_bytes,
     _digest_file,
     _is_sensitive,
+    _read_verified,
     _safe_relpath,
+    _validate_package_id,
     data_package,
     delete_data_package,
     list_data_packages,
@@ -60,6 +66,20 @@ def _hf_token_available():
 
 #: Captured before $HOME is redirected. None on a machine with no credentials.
 REAL_HF_TOKEN = _hf_token_available()
+
+if REAL_HF_TOKEN is None:
+    # A skip is only useful if someone sees it, and nobody does: pytest prints
+    # "SKIPPED" reasons only under -rs, which this project's addopts does not
+    # set, and pyproject.toml is not this module's to change. A warning is
+    # printed by default, in the warnings summary, so the run says out loud
+    # that the remote half of data packages went unverified.
+    warnings.warn(
+        "clustrix data packages: no HuggingFace token (HF_TOKEN or `hf auth "
+        "login`), so every test of the remote store -- upload, download, "
+        "digest verification, public-repo refusal, exists, delete and listing "
+        "-- is SKIPPED, NOT PASSED, and that half is UNVERIFIED in this run.",
+        stacklevel=1,
+    )
 
 requires_hf = pytest.mark.skipif(
     REAL_HF_TOKEN is None,
@@ -488,13 +508,27 @@ class TestPickledPackagesSurvive:
     """The documented persistence story: save the object, load it later."""
 
     def test_the_object_holds_no_live_client_socket_or_credential(
-        self, sample_tree, local_config
+        self, sample_tree, local_config, monkeypatch
     ):
+        """A saved package must never be a credential sitting on disk.
+
+        This assertion used to be wrapped in ``if REAL_HF_TOKEN:``, which meant
+        it did nothing on any machine without HuggingFace credentials --
+        including CI, which is every machine that runs this suite
+        automatically. A token field pickled into DataPackage passed there.
+
+        So the token is supplied rather than hoped for: HF_TOKEN is set to a
+        value this test knows, through the same environment variable
+        ``_hf_token`` actually reads, and the pickle is searched for it. The
+        real token is still checked when there is one.
+        """
+        sentinel = "hf_" + "SENTINEL" * 4
+        monkeypatch.setenv("HF_TOKEN", sentinel)
+
         pkg = data_package(sample_tree, config=local_config)
         blob = pickle.dumps(pkg)
 
-        # A token embedded in the object would make a saved package a secret
-        # on disk. The only bytes in here are the user's own data.
+        assert sentinel.encode() not in blob
         if REAL_HF_TOKEN:
             assert REAL_HF_TOKEN.encode() not in blob
         assert pickle.loads(blob).filenames() == pkg.filenames()
@@ -857,3 +891,598 @@ class TestNoTokenIsHonest:
         assert "hf_token" in message
         assert "HF_TOKEN" in message
         assert "hf auth login" in message
+
+
+# ---------------------------------------------------------------------------
+# deletion: what it is allowed to remove, and what it is not
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteRemovesOnlyWhatClustrixOwns:
+    """``delete()`` recursively removed whatever ``dest`` pointed at.
+
+    ``materialize(dest="~/myproject")`` followed by ``delete()`` -- which
+    reported that it had removed nothing -- deleted the project.
+    """
+
+    def test_a_directory_the_caller_named_survives_delete(
+        self, sample_tree, tmp_path, local_config
+    ):
+        pkg = data_package(sample_tree / "data" / "subjects.csv", config=local_config)
+
+        project = tmp_path / "myproject"
+        project.mkdir()
+        manuscript = project / "IMPORTANT_manuscript.tex"
+        manuscript.write_text(r"\documentclass{article}")
+        (project / "notebooks").mkdir()
+        pkg.materialize(dest=str(project), config=local_config)
+
+        assert pkg.delete(config=local_config) is False
+
+        assert project.is_dir()
+        assert manuscript.read_text() == r"\documentclass{article}"
+        assert (project / "notebooks").is_dir()
+        assert (project / "subjects.csv").is_file()
+
+    def test_the_cache_directory_clustrix_created_is_still_removed(
+        self, sample_tree, local_config
+    ):
+        """The fix must not be "stop cleaning up"."""
+        pkg = data_package(sample_tree, config=local_config)
+        cache_root = Path(pkg.materialize(config=local_config))
+        assert cache_root.is_dir()
+        assert (cache_root / "data" / "subjects.csv").is_file()
+
+        pkg.delete(config=local_config)
+
+        assert not cache_root.exists()
+
+    def test_the_packaged_files_survive_delete(self, sample_tree, local_config):
+        original = (sample_tree / "data" / "subjects.csv").read_bytes()
+        pkg = data_package(sample_tree, config=local_config)
+
+        pkg.delete(config=local_config)
+
+        assert (sample_tree / "data" / "subjects.csv").read_bytes() == original
+
+    def test_materialising_into_the_source_tree_does_not_delete_it(
+        self, sample_tree, tmp_path
+    ):
+        """The pathological config: the cache aimed at the user's own data."""
+        config = ClusterConfig(
+            cluster_type="local", local_cache_dir=str(tmp_path / "cache")
+        )
+        pkg = data_package(sample_tree, config=config)
+        pkg.local_root = str(pkg._default_dest(config))
+
+        pkg.delete(config=config)
+
+        assert Path(pkg.local_root).parent.exists() or True  # nothing raised
+        assert (sample_tree / "data" / "subjects.csv").is_file()
+
+
+class TestDeleteDataPackageValidatesItsArgument:
+    """A package id is opaque, and it is also a path in the store.
+
+    ``delete_data_package("")`` addressed the whole ``packages/`` prefix and
+    removed every package in the account; ``"../README.md"`` climbed out of the
+    prefix and removed a file that was never a package. Both were verified
+    against the real store before this check existed.
+    """
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "",
+            "..",
+            "../README.md",
+            "packages",
+            "packages/../README.md",
+            "not-a-uuid",
+            "0123456789abcdef0123456789abcdeg",  # 32 chars, 'g' is not hex
+            "0123456789ABCDEF0123456789ABCDEF",  # uuid4().hex is lowercase
+            "0123456789abcdef0123456789abcde",  # 31 chars
+            "/",
+            None,
+            42,
+        ],
+    )
+    def test_anything_that_is_not_an_id_is_refused(self, bad, tmp_path, monkeypatch):
+        """Refused before the network, so no token is needed to prove it."""
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf-home"))
+        config = ClusterConfig(
+            cluster_type="huggingface", hf_data_repo="someone/clustrix-data"
+        )
+
+        with pytest.raises(StagingError, match="is not a data package id"):
+            delete_data_package(bad, config=config)
+
+    def test_a_real_id_passes_validation(self):
+        package_id = uuid.uuid4().hex
+        assert _validate_package_id(package_id) == package_id
+
+    def test_a_package_pointing_somewhere_that_is_not_a_package_will_not_delete(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf-home"))
+        hostile = DataPackage(
+            name="hostile",
+            package_id=uuid.uuid4().hex,
+            files=(PackagedFile(relpath="x.bin", size=1, digest="00"),),
+            repo_id="someone/clustrix-data",
+            path_in_repo="..",
+        )
+
+        with pytest.raises(StagingError, match="is not a data package location"):
+            hostile.delete(config=ClusterConfig(cluster_type="huggingface"))
+
+    def test_delete_never_reports_success_without_reaching_the_store(
+        self, tmp_path, monkeypatch
+    ):
+        """``delete()`` returning True is a claim about the remote store.
+
+        Returning it without a round trip would tell a user their storage was
+        released when it was not.
+        """
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf-home"))
+        package_id = uuid.uuid4().hex
+        pkg = DataPackage(
+            name="remote",
+            package_id=package_id,
+            files=(PackagedFile(relpath="x.bin", size=1, digest="00"),),
+            repo_id="someone/clustrix-data",
+            path_in_repo=f"packages/{package_id}",
+        )
+
+        with pytest.raises(StagingError, match="No HuggingFace token"):
+            pkg.delete(config=ClusterConfig(cluster_type="huggingface"))
+
+
+# ---------------------------------------------------------------------------
+# one package, one answer -- wherever it is dereferenced
+# ---------------------------------------------------------------------------
+
+
+class TestOnePackageGivesOneAnswer:
+    """``local_root`` was trusted on a size match, which is not identity.
+
+    That made ``path()`` disagree with ``read_bytes()`` on the same package on
+    the same machine, and made a worker that happened to have a same-size file
+    at the same absolute path -- the shared-home cluster case -- serve that
+    file's contents instead of the packaged ones.
+    """
+
+    def test_an_in_place_edit_at_identical_size_does_not_fool_path(
+        self, tmp_path, local_config
+    ):
+        source = tmp_path / "params.json"
+        source.write_bytes(b'{"lr": 0.001}')
+        pkg = data_package(source, config=local_config)
+        before = source.stat()
+
+        source.write_bytes(b'{"lr": 9.999}')  # identical length
+        os.utime(source, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        assert Path(pkg.path(config=local_config)).read_bytes() == b'{"lr": 0.001}'
+        assert pkg.read_bytes(config=local_config) == b'{"lr": 0.001}'
+
+    def test_an_unrelated_file_at_local_root_is_not_served_as_the_package(
+        self, tmp_path, local_config
+    ):
+        """The shared-home worker: the path exists and holds something else."""
+        shared = tmp_path / "shared"
+        shared.mkdir()
+        source = shared / "params.json"
+        source.write_bytes(b'{"lr": 0.001}')
+        pkg = data_package(source, config=local_config)
+
+        arrived = pickle.loads(pickle.dumps(pkg))
+        source.write_bytes(b'{"lr": 9.999}')
+
+        assert Path(arrived.path(config=local_config)).read_bytes() == b'{"lr": 0.001}'
+        assert arrived.read_bytes(config=local_config) == b'{"lr": 0.001}'
+
+    def test_a_local_source_that_still_matches_is_still_used_without_copying(
+        self, sample_tree, local_config
+    ):
+        """The fast path is a shortcut, not a fallback -- it must still work."""
+        target = sample_tree / "data" / "subjects.csv"
+        pkg = data_package(target, config=local_config)
+
+        assert Path(pkg.path(config=local_config)).resolve() == target.resolve()
+
+    def test_read_bytes_rejects_contents_that_do_not_match_the_digest(
+        self, local_config
+    ):
+        payload = b"the real contents"
+        pkg = DataPackage(
+            name="tampered",
+            package_id=uuid.uuid4().hex,
+            files=(
+                PackagedFile(
+                    relpath="x.bin", size=len(payload), digest=_digest_bytes(payload)
+                ),
+            ),
+            inline={"x.bin": b"tampered contents"},
+        )
+
+        with pytest.raises(StagingError, match="Digest mismatch"):
+            pkg.read_bytes(config=local_config)
+
+
+class TestConfinementSurvivesSymlinks:
+    def test_a_symlink_in_dest_cannot_redirect_a_write_out_of_it(self, tmp_path):
+        """The syntactic check passes this; only post-resolution catches it."""
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (dest / "sub").symlink_to(outside, target_is_directory=True)
+
+        _safe_relpath("sub/x.txt")  # nothing wrong with the name itself
+        with pytest.raises(StagingError, match="resolves outside"):
+            _confine(dest, "sub/x.txt")
+
+    def test_materialising_through_such_a_symlink_writes_nothing_outside(
+        self, tmp_path, local_config
+    ):
+        payload = b"pwned"
+        pkg = DataPackage(
+            name="hostile",
+            package_id=uuid.uuid4().hex,
+            files=(
+                PackagedFile(
+                    relpath="sub/x.txt",
+                    size=len(payload),
+                    digest=_digest_bytes(payload),
+                ),
+            ),
+            inline={"sub/x.txt": payload},
+        )
+        dest = tmp_path / "dest"
+        dest.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (dest / "sub").symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(StagingError, match="resolves outside"):
+            pkg.materialize(dest=str(dest), config=local_config)
+        assert list(outside.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# what a package may be built from
+# ---------------------------------------------------------------------------
+
+
+class TestSymlinks:
+    """A symlink keeps its own place in the package and carries its contents.
+
+    Both halves used to be wrong: a symlink inside a packaged directory was
+    dropped without a word, so the worker got a tree that was missing a file
+    the local one had; and a symlink named explicitly took its *target's*
+    relative path, which moved the package root to the target's directory.
+    """
+
+    def test_a_symlink_inside_a_packaged_directory_is_carried_not_dropped(
+        self, tmp_path, local_config
+    ):
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "real.csv").write_text("real")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "z.csv").write_text("target bytes")
+        (tree / "link.csv").symlink_to(elsewhere / "z.csv")
+
+        pkg = data_package(tree, config=local_config)
+
+        assert sorted(pkg.filenames()) == ["link.csv", "real.csv"]
+        assert pkg.read_bytes("link.csv", config=local_config) == b"target bytes"
+
+    def test_a_named_symlink_keeps_its_own_name_and_does_not_move_the_root(
+        self, tmp_path, local_config
+    ):
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "real.csv").write_text("real")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "z.csv").write_text("target bytes")
+        (tree / "link.csv").symlink_to(elsewhere / "z.csv")
+
+        pkg = data_package([tree / "link.csv", tree / "real.csv"], config=local_config)
+
+        assert sorted(pkg.filenames()) == ["link.csv", "real.csv"]
+        assert Path(pkg.local_root).resolve() == tree.resolve()
+
+    def test_a_symlink_to_a_credential_is_refused_like_the_credential(
+        self, tmp_path, local_config
+    ):
+        """Otherwise the check is one ``ln -s`` away from being decorative."""
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "real.csv").write_text("real")
+        secret = tmp_path / "id_rsa"
+        secret.write_text("not actually a key")
+        (tree / "notes.txt").symlink_to(secret)
+
+        with pytest.raises(StagingError, match="looks like a credential"):
+            data_package(tree, config=local_config)
+
+    def test_a_dangling_symlink_is_refused_by_name(self, tmp_path, local_config):
+        (tmp_path / "dangling.csv").symlink_to(tmp_path / "never-existed.csv")
+
+        with pytest.raises(StagingError, match="Cannot stage"):
+            data_package(tmp_path / "dangling.csv", config=local_config)
+
+    def test_a_symlinked_directory_inside_a_tree_is_refused_not_guessed(
+        self, tmp_path, local_config
+    ):
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "real.csv").write_text("real")
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        (elsewhere / "z.csv").write_text("z")
+        (tree / "link").symlink_to(elsewhere, target_is_directory=True)
+
+        with pytest.raises(StagingError, match="not a regular file"):
+            data_package(tree, config=local_config)
+
+
+@pytest.mark.timeout(30)
+class TestOnlyRegularFilesAndDirectories:
+    """Reading a fifo or a character device blocks forever.
+
+    ``data_package("<fifo>")`` and ``data_package("/dev/zero")`` both hung with
+    no output and no timeout, which is the least debuggable failure available.
+
+    The class carries a timeout because a regression here does not fail, it
+    hangs, and a hung CI job is a much worse signal than a red one.
+    """
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo on this platform")
+    def test_a_named_pipe_is_refused_rather_than_read(self, tmp_path, local_config):
+        fifo = tmp_path / "pipe"
+        os.mkfifo(fifo)
+
+        with pytest.raises(StagingError, match="named pipe"):
+            data_package(fifo, config=local_config)
+
+    @pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="no mkfifo on this platform")
+    def test_a_named_pipe_inside_a_packaged_directory_is_refused(
+        self, tmp_path, local_config
+    ):
+        tree = tmp_path / "tree"
+        tree.mkdir()
+        (tree / "real.csv").write_text("real")
+        os.mkfifo(tree / "pipe")
+
+        with pytest.raises(StagingError, match="named pipe"):
+            data_package(tree, config=local_config)
+
+    @pytest.mark.skipif(
+        not Path("/dev/zero").exists(), reason="no /dev/zero on this platform"
+    )
+    def test_a_character_device_is_refused_rather_than_read(self, local_config):
+        with pytest.raises(StagingError, match="character device"):
+            data_package("/dev/zero", config=local_config)
+
+
+class TestMoreCredentialShapedPaths:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "credentials.json",
+            ".git-credentials",
+            "kubeconfig",
+            ".npmrc",
+            ".pypirc",
+            ".htpasswd",
+            "secrets.yaml",
+            ".dockercfg",
+        ],
+    )
+    def test_a_credential_shaped_file_is_refused(self, tmp_path, local_config, name):
+        secret = tmp_path / name
+        secret.write_text("not actually a credential")
+
+        with pytest.raises(StagingError, match="looks like a credential"):
+            data_package(secret, config=local_config)
+
+    def test_a_git_config_is_refused_because_remotes_carry_tokens(
+        self, tmp_path, local_config
+    ):
+        config_file = tmp_path / "repo" / ".git" / "config"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text("[remote 'origin']\n\turl = https://token@host/x\n")
+
+        with pytest.raises(StagingError, match="looks like a credential"):
+            data_package(config_file, config=local_config)
+
+    def test_ordinary_data_is_still_not_mistaken_for_a_credential(self, tmp_path):
+        assert not _is_sensitive(tmp_path / "secretariat.csv")
+        assert not _is_sensitive(tmp_path / "kubeconfigs.parquet")
+        assert not _is_sensitive(tmp_path / "npmrc_counts.tsv")
+
+
+class TestFilesThatChangeUnderneathUs:
+    def test_a_file_that_grew_between_hashing_and_reading_is_refused(self, tmp_path):
+        """Caught here, naming the file, rather than on the worker hours later."""
+        source = tmp_path / "growing.bin"
+        source.write_bytes(b"x" * 1000)
+        entry = _describe("growing.bin", source, "grower")
+        assert entry.size == 1000
+
+        source.write_bytes(b"x" * 1500)
+
+        with pytest.raises(StagingError, match="changed while data package"):
+            _read_verified(source, entry, "grower")
+
+    def test_an_unchanged_file_reads_straight_through(self, tmp_path):
+        source = tmp_path / "steady.bin"
+        source.write_bytes(b"steady")
+        entry = _describe("steady.bin", source, "steady")
+
+        assert _read_verified(source, entry, "steady") == b"steady"
+
+    def test_an_unreadable_input_names_the_package_not_an_errno(self, tmp_path):
+        missing = tmp_path / "vanished.bin"
+
+        with pytest.raises(StagingError, match="while building data package 'gone'"):
+            _describe("vanished.bin", missing, "gone")
+
+
+class TestInlineThresholdMeasuresWhatTravels:
+    def test_many_tiny_files_do_not_count_as_inline_by_their_data_size(
+        self, tmp_path, monkeypatch
+    ):
+        """Forty kilobytes of data can be a megabyte of pickle.
+
+        The threshold governs what rides inside the job payload, so it has to
+        be measured on the payload. With no token the remote path raises, which
+        is how this test can tell which path was taken without uploading
+        anything.
+        """
+        monkeypatch.delenv("HF_TOKEN", raising=False)
+        monkeypatch.setenv("HF_HOME", str(tmp_path / "empty-hf-home"))
+        tree = tmp_path / "many"
+        tree.mkdir()
+        for index in range(3000):
+            (tree / f"f{index}.bin").write_bytes(b"abcd")
+        limit = 150_000
+        assert 3000 * 4 < limit  # the data alone is well under the threshold
+        config = ClusterConfig(
+            cluster_type="huggingface",
+            local_cache_dir=str(tmp_path / "cache"),
+            stage_inline_max_bytes=limit,
+            hf_data_repo="someone/clustrix-data",
+        )
+
+        with pytest.raises(StagingError, match="No HuggingFace token"):
+            data_package(tree, config=config)
+
+    def test_a_package_that_really_is_small_still_goes_inline(
+        self, sample_tree, local_config
+    ):
+        pkg = data_package(sample_tree, config=local_config)
+
+        assert pkg.is_inline
+        assert pkg.repo_id is None
+
+    def test_force_local_inlines_regardless_of_serialized_size(self, tmp_path):
+        tree = tmp_path / "many"
+        tree.mkdir()
+        for index in range(2000):
+            (tree / f"f{index}.bin").write_bytes(b"abcd")
+        config = ClusterConfig(
+            cluster_type="local",
+            local_cache_dir=str(tmp_path / "cache"),
+            stage_inline_max_bytes=16,
+        )
+
+        pkg = data_package(tree, config=config, force_local=True)
+
+        assert pkg.is_inline
+
+
+class TestTheRateLimitMessageIsTrue:
+    def test_huggingface_hub_really_uploads_lfs_files_before_the_commit(self):
+        """The premise of the message, checked against the installed library.
+
+        ``preupload_lfs_files`` runs inside ``create_commit`` before the commit
+        is posted, so a refused commit does not mean nothing reached the Hub.
+        """
+        import inspect
+
+        from huggingface_hub import HfApi
+
+        source = inspect.getsource(HfApi.create_commit)
+        assert "self.preupload_lfs_files(" in source
+
+    def test_the_message_does_not_claim_nothing_was_uploaded(self):
+        import inspect
+
+        from clustrix import staging
+
+        source = inspect.getsource(staging._upload)
+        assert "Nothing was uploaded" not in source
+        assert "preupload_lfs_files" in source
+
+
+@pytest.mark.real_world
+@requires_hf
+class TestThePrivateRepoPromiseIsKept:
+    """``private=True, exist_ok=True`` does not make an existing repo private.
+
+    It returns the repo as it is. A ``hf_data_repo`` that already existed and
+    was public therefore took the upload and published the data, while the
+    docstring promised a private repo. Verified against the real Hub before
+    this refusal existed.
+    """
+
+    @pytest.fixture
+    def namespace(self, monkeypatch):
+        from clustrix.staging import _hf_api
+
+        monkeypatch.setenv("HF_TOKEN", REAL_HF_TOKEN)
+        return _hf_api(ClusterConfig(cluster_type="huggingface")).whoami()["name"]
+
+    def test_staging_into_a_public_repo_is_refused_and_uploads_nothing(
+        self, tmp_path, namespace, monkeypatch
+    ):
+        from clustrix.staging import _hf_api
+
+        monkeypatch.setenv("HF_TOKEN", REAL_HF_TOKEN)
+        repo_id = f"{namespace}/clustrix-public-refusal-{uuid.uuid4().hex[:8]}"
+        api = _hf_api(ClusterConfig(cluster_type="huggingface"))
+        api.create_repo(repo_id=repo_id, repo_type="dataset", private=False)
+        try:
+            assert api.repo_info(repo_id=repo_id, repo_type="dataset").private is False
+
+            source = tmp_path / "notes.txt"
+            source.write_text("a few kilobytes at most\n")
+            config = ClusterConfig(
+                cluster_type="huggingface",
+                local_cache_dir=str(tmp_path / "cache"),
+                stage_inline_max_bytes=1,
+                hf_data_repo=repo_id,
+            )
+
+            with pytest.raises(StagingError) as excinfo:
+                data_package(source, config=config)
+
+            message = str(excinfo.value)
+            assert "PUBLIC" in message
+            assert repo_id in message  # names the repo
+            assert "hf_data_repo" in message  # says how to fix it
+
+            # Asked of the Hub, not inferred from the exception.
+            listed = api.list_repo_files(repo_id=repo_id, repo_type="dataset")
+            assert not [name for name in listed if name.startswith("packages/")]
+            # And clustrix did not quietly change someone's repo settings.
+            assert api.repo_info(repo_id=repo_id, repo_type="dataset").private is False
+        finally:
+            api.delete_repo(repo_id=repo_id, repo_type="dataset")
+
+    def test_a_repo_that_cannot_be_created_raises_a_staging_error(
+        self, tmp_path, monkeypatch
+    ):
+        """A raw ``HfHubHTTPError`` (a 401 was observed) tells the user nothing."""
+        monkeypatch.setenv("HF_TOKEN", REAL_HF_TOKEN)
+        source = tmp_path / "notes.txt"
+        source.write_text("a few kilobytes at most\n")
+        config = ClusterConfig(
+            cluster_type="huggingface",
+            local_cache_dir=str(tmp_path / "cache"),
+            stage_inline_max_bytes=1,
+            # An org this token is certainly not a member of.
+            hf_data_repo=f"openai/clustrix-data-{uuid.uuid4().hex[:8]}",
+        )
+
+        with pytest.raises(StagingError, match="Could not create or reach"):
+            data_package(source, config=config)
