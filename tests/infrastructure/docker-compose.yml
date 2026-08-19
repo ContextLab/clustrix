@@ -4,22 +4,6 @@
 version: '3.8'
 
 services:
-  # Local Kubernetes using Kind (Kubernetes in Docker)
-  kind-control-plane:
-    image: kindest/node:v1.27.3
-    container_name: clustrix-test-k8s
-    privileged: true
-    ports:
-      - "6443:6443"  # Kubernetes API
-      - "30000-32767:30000-32767"  # NodePort range
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - kind-data:/var/lib/containerd
-    environment:
-      - KUBECONFIG=/etc/kubernetes/admin.conf
-    networks:
-      - clustrix-test
-
   # MinIO for S3-compatible storage testing
   minio:
     image: minio/minio:latest
@@ -114,7 +98,6 @@ services:
       - clustrix-test
 
 volumes:
-  kind-data:
   minio-data:
   postgres-data:
   redis-data:
