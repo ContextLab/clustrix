@@ -25,7 +25,7 @@ try:
     IPYTHON_AVAILABLE = True
 except ImportError:
     IPYTHON_AVAILABLE = False
-    from .notebook_magic_mocks import display, HTML, widgets
+    from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import configure, get_config_dir
 

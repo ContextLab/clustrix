@@ -85,51 +85,15 @@ class SchedulerStatusManager:
         """
 
         if self.config.cluster_type == "slurm":
-            # Use robust checking only if we have a real SSH connection (not unit tests)
-            try:
-                from unittest.mock import Mock
-
-                is_mock = (
-                    isinstance(self.connection_manager.ssh_client, Mock)
-                    if hasattr(self.connection_manager, "ssh_client")
-                    and self.connection_manager.ssh_client
-                    else False
-                )
-            except ImportError:
-                is_mock = False
-
-            if (
-                hasattr(self.connection_manager, "ssh_client")
-                and self.connection_manager.ssh_client
-                and not is_mock
-            ):
-                return self._check_slurm_job_status_robust(job_id, active_jobs)
-            else:
-                # Fallback to original logic for unit tests
-                cmd = f"squeue -j {job_id} -h -o %T"
-                try:
-                    stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-                    if not stdout.strip():
-                        # Job not in queue, check if result exists
-                        if job_id in active_jobs:
-                            job_info = active_jobs[job_id]
-                            result_exists = self.connection_manager.remote_file_exists(
-                                f"{job_info['remote_dir']}/result.pkl"
-                            )
-                            return "completed" if result_exists else "failed"
-                        else:
-                            # Job not tracked, assume completed
-                            return "completed"
-                    else:
-                        slurm_status = stdout.strip()
-                        if slurm_status in ["COMPLETED"]:
-                            return "completed"
-                        elif slurm_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                            return "failed"
-                        else:
-                            return "running"
-                except Exception:
-                    return "unknown"
+            if self.connection_manager.ssh_client is None:
+                # No live SSH connection: we cannot query the scheduler, so
+                # we genuinely do not know the job's status. (Querying
+                # anyway would just raise "SSH client not connected" inside
+                # execute_remote_command and get swallowed a few frames
+                # down -- reporting "unknown" here directly is the honest,
+                # immediate version of that same outcome.)
+                return "unknown"
+            return self._check_slurm_job_status_robust(job_id, active_jobs)
 
         elif self.config.cluster_type == "pbs":
             cmd = f"qstat -f {job_id}"
