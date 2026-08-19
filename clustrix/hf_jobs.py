@@ -148,6 +148,12 @@ def _bootstrap_source() -> str:
     """
     return (
         "import base64,hashlib,hmac,os,subprocess,sys\n"
+        # pop, not [] , and before pip runs: the key is the only thing that
+        # distinguishes a real result block from one printed by anything else
+        # in this container. Whatever can read it can emit a validly tagged
+        # forgery, so it leaves the environment before any third-party code
+        # -- including a package's own install hooks -- gets to run.
+        "k=os.environ.pop('CLUSTRIX_HMAC_KEY').encode()\n"
         # The base image carries nothing but Python. Everything the function
         # imports has to be installed here, so CLUSTRIX_PACKAGES names what
         # config.cluster_packages asked for -- the same field the SSH and SLURM
@@ -156,7 +162,6 @@ def _bootstrap_source() -> str:
         "subprocess.run([sys.executable,'-m','pip','install','-q']+_pkgs,check=True)\n"
         "import cloudpickle\n"
         "import dill\n"
-        "k=os.environ['CLUSTRIX_HMAC_KEY'].encode()\n"
         "def emit(begin,end,obj):\n"
         "    b=dill.dumps(obj)\n"
         "    print(begin)\n"
@@ -171,7 +176,9 @@ def _bootstrap_source() -> str:
         "    from huggingface_hub import hf_hub_download\n"
         "    _f=hf_hub_download(repo_id=os.environ['CLUSTRIX_PAYLOAD_REPO'],\n"
         "        filename=os.environ['CLUSTRIX_PAYLOAD_FILE'],repo_type='dataset',\n"
-        "        token=os.environ['CLUSTRIX_HF_TOKEN'])\n"
+        # Popped for the same reason: an account token must not still be in
+        # the environment when third-party code starts running.
+        "        token=os.environ.pop('CLUSTRIX_HF_TOKEN'))\n"
         "    _enc=open(_f).read()\n"
         "p=dill.loads(base64.b64decode(_enc))\n"
         "try:\n"
@@ -527,44 +534,70 @@ class HFJobsManager:
         function is free to print anything it likes, including a line that
         happens to equal one of these markers, and that must not be able to
         truncate or hijack the real block.
+
+        Selection is by *verification*, not by position. Taking the first
+        block that appeared meant a function that printed a decoy -- four
+        lines, no key needed -- decided what the caller read, and at best
+        turned a successful job into "integrity check failed". Every block is
+        considered and the last one whose tag verifies wins: the bootstrap
+        emits the genuine block after the function has returned, so the last
+        authentic block is the real one.
         """
-        collecting = False
-        tag = None
-        chunks: List[str] = []
+        blocks: List[List[str]] = []
+        current: Optional[List[str]] = None
         for line in lines:
             line = line.strip()
-            if not collecting:
+            if current is None:
                 if line == begin:
-                    collecting = True
+                    current = []
                 continue
             if line == end:
-                break
+                blocks.append(current)
+                current = None
+                continue
             if line:
-                if tag is None:
-                    tag = line
-                else:
-                    chunks.append(line)
-        if tag is None or not chunks:
+                current.append(line)
+        if current:
+            # A block whose end marker has not been flushed yet still gets a
+            # look: that is what a truncated tail looks like, and reporting it
+            # as truncated is what makes _wait_for_result read the logs again.
+            blocks.append(current)
+        if not blocks:
             return _MISSING
 
-        try:
-            raw = base64.b64decode("".join(chunks), validate=True)
-        except (ValueError, binascii.Error) as e:
+        decode_error: Optional[Exception] = None
+        verified: Optional[bytes] = None
+        for block in blocks:
+            if len(block) < 2:
+                continue
+            tag, chunks = block[0], block[1:]
+            try:
+                raw = base64.b64decode("".join(chunks), validate=True)
+            except (ValueError, binascii.Error) as e:
+                decode_error = e
+                continue
+            expected = hmac.new(hmac_key.encode(), raw, hashlib.sha256).hexdigest()
+            if _constant_time_equals(tag, expected):
+                verified = raw
+
+        if verified is not None:
+            return dill.loads(verified)
+
+        if decode_error is not None:
             # Truncated or interleaved logs, not an attack. Saying "integrity
             # check failed" here would send someone hunting a forgery that
             # never happened.
             raise RuntimeError(
                 "HuggingFace Job result could not be decoded; the log stream "
-                f"appears truncated or interleaved ({e}). Re-run the job."
-            ) from e
+                f"appears truncated or interleaved ({decode_error}). Re-run "
+                "the job."
+            ) from decode_error
 
-        expected = hmac.new(hmac_key.encode(), raw, hashlib.sha256).hexdigest()
-        if not _constant_time_equals(tag, expected):
-            raise RuntimeError(
-                "HuggingFace Job result failed its integrity check: the HMAC "
-                "does not match the per-job key. Refusing to deserialize it."
-            )
-        return dill.loads(raw)
+        raise RuntimeError(
+            "HuggingFace Job result failed its integrity check: no block in "
+            "the log carries an HMAC matching the per-job key. Refusing to "
+            "deserialize it."
+        )
 
     def wait_for_result(self, job_id: str) -> Any:
         """Block until the job finishes, then return its result.

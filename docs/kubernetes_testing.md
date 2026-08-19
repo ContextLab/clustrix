@@ -237,7 +237,9 @@ Each test follows this pattern:
 1. **Setup**: Create `ClusterConfig` with Kubernetes parameters
 2. **Submit**: Submit Python function as Kubernetes Job
 3. **Monitor**: Track job status through Kubernetes API
-4. **Retrieve**: Parse results from pod logs (`CLUSTRIX_RESULT:` markers)
+4. **Retrieve**: Read the signed result from the pod log
+   (`CLUSTRIX_RESULT_B64:` / `CLUSTRIX_RESULT_HMAC:` markers) and verify
+   its HMAC against the job's `CLUSTRIX_RESULT_KEY` before deserializing
 5. **Cleanup**: Delete job and associated resources
 6. **Verify**: Assert expected outcomes
 

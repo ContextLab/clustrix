@@ -502,7 +502,32 @@ class LoopAnalyzer:
             if isinstance(child, ast.Global):
                 return False
 
-        # More sophisticated analysis would be needed for production use
+        # Criterion 2 ("no shared mutable state") was documented but never
+        # actually checked: a body that reads/mutates an outer accumulator
+        # (`total += i`) or a shared container (`results.append(x)`) passed
+        # every earlier check and came back is_parallelizable=True. Reuse
+        # loop_analysis.DependencyAnalyzer -- the same real dependency
+        # analysis clustrix/decorator.py relies on for its own
+        # parallelization decision -- instead of duplicating that logic
+        # here with a second, weaker implementation. Aliased on import: this
+        # module already defines its own unrelated `DependencyAnalyzer`
+        # (import/file/filesystem-call analysis) and the two must not be
+        # confused for one another.
+        from .loop_analysis import DependencyAnalyzer as LoopDependencyAnalyzer
+
+        variable = node.target.id if isinstance(node.target, ast.Name) else None
+        dep_analyzer = LoopDependencyAnalyzer()
+        dep_analyzer.loop_var = variable
+        for stmt in node.body:
+            dep_analyzer.visit(stmt)
+
+        if dep_analyzer.has_loop_carried_dependencies():
+            return False
+
+        external_reads = dep_analyzer.reads - ({variable} if variable else set())
+        if external_reads:
+            return False
+
         return True
 
     def _find_loop_dependencies(self, node: ast.For) -> List[str]:

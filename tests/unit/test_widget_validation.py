@@ -25,8 +25,8 @@ def _widget(cluster_type="slurm", **values):
         "cpus": 8,
         "ram": "32GB",
         "time": "02:00:00",
-        "host": "discovery.dartmouth.edu",
-        "username": "f002d6b",
+        "host": "hpc.example.edu",
+        "username": "testuser",
         "port": 22,
     }
     if cluster_type == "huggingface":

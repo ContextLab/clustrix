@@ -5,12 +5,15 @@ HPC scheduler jobs (SLURM, PBS, SGE).
 """
 
 import os
+import shlex
 import time
 import tempfile
 import dill
 
 import logging
 from typing import Dict, Any, Optional
+
+from .utils import verify_signed_payload
 
 logger = logging.getLogger(__name__)
 
@@ -85,51 +88,15 @@ class SchedulerStatusManager:
         """
 
         if self.config.cluster_type == "slurm":
-            # Use robust checking only if we have a real SSH connection (not unit tests)
-            try:
-                from unittest.mock import Mock
-
-                is_mock = (
-                    isinstance(self.connection_manager.ssh_client, Mock)
-                    if hasattr(self.connection_manager, "ssh_client")
-                    and self.connection_manager.ssh_client
-                    else False
-                )
-            except ImportError:
-                is_mock = False
-
-            if (
-                hasattr(self.connection_manager, "ssh_client")
-                and self.connection_manager.ssh_client
-                and not is_mock
-            ):
-                return self._check_slurm_job_status_robust(job_id, active_jobs)
-            else:
-                # Fallback to original logic for unit tests
-                cmd = f"squeue -j {job_id} -h -o %T"
-                try:
-                    stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-                    if not stdout.strip():
-                        # Job not in queue, check if result exists
-                        if job_id in active_jobs:
-                            job_info = active_jobs[job_id]
-                            result_exists = self.connection_manager.remote_file_exists(
-                                f"{job_info['remote_dir']}/result.pkl"
-                            )
-                            return "completed" if result_exists else "failed"
-                        else:
-                            # Job not tracked, assume completed
-                            return "completed"
-                    else:
-                        slurm_status = stdout.strip()
-                        if slurm_status in ["COMPLETED"]:
-                            return "completed"
-                        elif slurm_status in ["FAILED", "CANCELLED", "TIMEOUT"]:
-                            return "failed"
-                        else:
-                            return "running"
-                except Exception:
-                    return "unknown"
+            if self.connection_manager.ssh_client is None:
+                # No live SSH connection: we cannot query the scheduler, so
+                # we genuinely do not know the job's status. (Querying
+                # anyway would just raise "SSH client not connected" inside
+                # execute_remote_command and get swallowed a few frames
+                # down -- reporting "unknown" here directly is the honest,
+                # immediate version of that same outcome.)
+                return "unknown"
+            return self._check_slurm_job_status_robust(job_id, active_jobs)
 
         elif self.config.cluster_type == "pbs":
             cmd = f"qstat -f {job_id}"
@@ -574,6 +541,51 @@ class SchedulerStatusManager:
         except Exception:
             return "unknown"
 
+    def _authenticated_error_payload(
+        self, job_id: str, job_info: Dict[str, Any]
+    ) -> Optional[bytes]:
+        """Return the bytes of ``error.pkl``, or None if the job wrote none.
+
+        ``result.pkl`` was verified before ``dill.loads`` and ``error.pkl``
+        was not, which made failing the job a complete bypass of the check: a
+        hostile or compromised cluster only had to exit non-zero and leave a
+        pickle whose ``__reduce__`` calls ``os.system``, and it ran on the
+        submitting machine. Both files are deserialized here, so both clear
+        the same bar and are signed with the same per-job key.
+
+        Raises:
+            PayloadAuthenticationError: the payload exists but is unsigned,
+                badly signed, or has no key to check against. Callers must
+                let this out rather than falling back to text logs -- the
+                whole point is that the user is told.
+        """
+        remote_dir = job_info["remote_dir"]
+        error_pkl_path = f"{remote_dir}/error.pkl"
+        if not self.connection_manager.remote_file_exists(error_pkl_path):
+            return None
+
+        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as handle:
+            local_error_path = handle.name
+        try:
+            self.connection_manager.download_file(error_pkl_path, local_error_path)
+            with open(local_error_path, "rb") as handle:
+                payload = handle.read()
+        finally:
+            if os.path.exists(local_error_path):
+                os.unlink(local_error_path)
+
+        key = job_info.get("result_key")
+        tag = ""
+        if key:
+            quoted = shlex.quote(f"{remote_dir}/error.pkl.hmac")
+            stdout, _ = self.connection_manager.execute_remote_command(
+                f"cat {quoted} 2>/dev/null"
+            )
+            tag = stdout or ""
+
+        verify_signed_payload(payload, tag, key, f"Job {job_id} error report")
+        return payload
+
     def get_error_log(self, job_id: str, active_jobs: Dict[str, Any]) -> str:
         """
         Retrieve comprehensive error information from a failed job using multiple fallback mechanisms.
@@ -636,21 +648,18 @@ class SchedulerStatusManager:
 
         remote_dir = job_info["remote_dir"]
 
-        # First, try to get pickled error data
-        error_pkl_path = f"{remote_dir}/error.pkl"
-        if self.connection_manager.remote_file_exists(error_pkl_path):
+        # First, try to get pickled error data. Authentication happens outside
+        # the try: a failed check is not "error.pkl could not be read", it is
+        # a refusal, and swallowing it into the text-log fallback would hide
+        # exactly the forgery the check exists to catch.
+        payload = self._authenticated_error_payload(job_id, job_info)
+        if payload is not None:
             try:
-                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-                    local_error_path = f.name
-
-                self.connection_manager.download_file(error_pkl_path, local_error_path)
-
-                with open(local_error_path, "rb") as f:
-                    # dill: matches how the stages write it, and keeps
-                    # a custom exception class bound to the caller's own.
-                    error_data = dill.load(f)
-
-                os.unlink(local_error_path)
+                # dill: matches how the stages write it, and keeps
+                # a custom exception class bound to the caller's own. Safe to
+                # deserialize only because the bytes just verified against the
+                # per-job key.
+                error_data = dill.loads(payload)
 
                 # Handle different error data formats
                 if isinstance(error_data, dict):
@@ -660,16 +669,23 @@ class SchedulerStatusManager:
                 else:
                     return str(error_data)
             except Exception:
-                # If error.pkl exists but can't be read, continue to text logs
-                pass
+                # Authenticated but unreadable -- a truncated transfer, or a
+                # class this interpreter lacks. Fall through to the text logs.
+                logger.warning(
+                    "Job %s error.pkl verified but could not be deserialized; "
+                    "falling back to text logs.",
+                    job_id,
+                )
 
         # Fallback to text error files
         error_files = ["job.err", "slurm-*.out", "job.e*"]
 
         for error_file in error_files:
             try:
+                # remote_dir is quoted (it comes from config.remote_work_dir);
+                # error_file stays outside the quotes because it is a glob.
                 stdout, _ = self.connection_manager.execute_remote_command(
-                    f"cat {remote_dir}/{error_file} 2>/dev/null"
+                    f"cat {shlex.quote(remote_dir)}/{error_file} 2>/dev/null"
                 )
                 if stdout.strip():
                     return stdout
@@ -738,22 +754,16 @@ class SchedulerStatusManager:
         if not job_info:
             return None
 
-        remote_dir = job_info["remote_dir"]
-        error_pkl_path = f"{remote_dir}/error.pkl"
-
-        if self.connection_manager.remote_file_exists(error_pkl_path):
+        # Authentication is outside the try for the same reason as in
+        # get_error_log: a refusal must reach the user, not be turned into
+        # "no exception could be extracted".
+        payload = self._authenticated_error_payload(job_id, job_info)
+        if payload is not None:
             try:
-                with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-                    local_error_path = f.name
-
-                self.connection_manager.download_file(error_pkl_path, local_error_path)
-
-                with open(local_error_path, "rb") as f:
-                    # dill: matches how the stages write it, and keeps
-                    # a custom exception class bound to the caller's own.
-                    error_data = dill.load(f)
-
-                os.unlink(local_error_path)
+                # dill: matches how the stages write it, and keeps
+                # a custom exception class bound to the caller's own. Safe to
+                # deserialize only because the bytes just verified.
+                error_data = dill.loads(payload)
 
                 # Return the exception object if it is one
                 if isinstance(error_data, Exception):
@@ -769,7 +779,11 @@ class SchedulerStatusManager:
                         return RuntimeError(error_data["error"])
 
             except Exception:
-                # If we can't extract the exception, return None
-                pass
+                # Authenticated but unreadable; the caller falls back to the
+                # text error log.
+                logger.warning(
+                    "Job %s error.pkl verified but could not be deserialized.",
+                    job_id,
+                )
 
         return None

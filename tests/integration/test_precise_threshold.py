@@ -10,15 +10,15 @@ from tests.real_world import credentials
 
 def test_level2_complexity():
     """Test level 2 complexity."""
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         environment_variables={"CUDA_VISIBLE_DEVICES": "0"},
@@ -87,15 +87,15 @@ def test_level2_complexity():
 
 def test_level4_complexity():
     """Test level 4 complexity."""
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         environment_variables={"CUDA_VISIBLE_DEVICES": "0"},
@@ -303,16 +303,16 @@ def test_level4_complexity():
 
 
 def test_slurm_complexity():
-    """Test complexity on SLURM cluster (ndoli)."""
-    load_config("ndoli_config.yml")
+    """Test complexity on SLURM cluster (slurm_cluster)."""
+    load_config("slurm_cluster_config.yml")
 
-    ndoli_creds = credentials.get_ndoli_credentials()
-    if not ndoli_creds:
-        print("No ndoli credentials available")
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+    if not slurm_cluster_creds:
+        print("No slurm_cluster credentials available")
         return False
 
     configure(
-        password=ndoli_creds.get("password"),
+        password=slurm_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
     )

@@ -134,7 +134,12 @@ class TestClusterDecoratorReal:
             import time as time_module
             import math
 
-            start = time_module.time()
+            # perf_counter, not time(): the wall clock on Windows ticks in
+            # ~15.6 ms steps, so a computation this short measures as exactly
+            # 0.0 there and the elapsed-time assertion below has nothing to
+            # see. perf_counter is the high-resolution monotonic clock on
+            # every platform.
+            start = time_module.perf_counter()
 
             # Simulate complex computation
             results = []
@@ -142,7 +147,7 @@ class TestClusterDecoratorReal:
                 value = sum(math.sqrt(j) for j in range(1, data_size + 1))
                 results.append(value)
 
-            computation_time = time_module.time() - start
+            computation_time = time_module.perf_counter() - start
 
             return {
                 "iterations": iterations,
@@ -254,14 +259,17 @@ class TestClusterDecoratorReal:
         # Submit async job
         job_result = slow_computation(10)
 
-        # For async, should return a job handle/future
-        # The actual implementation may vary, but we test the concept
-        if hasattr(job_result, "result"):
-            # If it's a future-like object
-            final_result = job_result.result(timeout=5)
-        else:
-            # If async is not fully implemented, may return direct result
-            final_result = job_result
+        # async_submit=True returns an AsyncJobResult handle (clustrix.
+        # async_executor_simple.AsyncJobResult), never the direct value: its
+        # API is get_result()/get_status()/is_complete(), not a `.result`
+        # future-like attribute, so the old `hasattr(job_result, "result")`
+        # check was always False and fell through to treating the handle
+        # itself as the answer.
+        from clustrix.async_executor_simple import AsyncJobResult
+
+        assert isinstance(job_result, AsyncJobResult)
+        final_result = job_result.get_result(timeout=5)
+        assert job_result.get_status() == "completed"
 
         # Validate result
         assert final_result["input"] == 10

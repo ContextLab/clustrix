@@ -4,7 +4,7 @@
 # Run this with AWS CLI configured with admin credentials
 
 USER_NAME="Clustrix"
-ACCOUNT_ID="229182852735"
+ACCOUNT_ID="123456789012"  # placeholder -- replace with your account ID, or read it from `aws sts get-caller-identity`
 
 echo "======================================================"
 echo "AWS IAM Permission Setup for Clustrix EKS Provisioning"
@@ -124,6 +124,6 @@ aws iam list-attached-user-policies --user-name $USER_NAME \
 echo ""
 echo "======================================================"
 echo "Next steps:"
-echo "1. Test permissions: python test_aws_preflight.py"
-echo "2. If successful, provision cluster: python test_aws_eks_real.py"
+echo "1. Test permissions: python tests/integration/test_aws_preflight.py"
+echo "2. If successful, provision cluster: python tests/integration/test_aws_eks_real.py"
 echo "======================================================"

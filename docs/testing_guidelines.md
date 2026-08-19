@@ -11,17 +11,32 @@
 
 ## Testing Philosophy
 
-### The NO MOCKS Principle
+### The Mocking Policy
 
-All Clustrix tests follow a strict **NO MOCKS** policy. This means:
+Clustrix does **not** follow a strict "no mocks ever" rule -- 42 of the
+project's 215 `test_*.py` modules use `unittest.mock`, and pretending
+otherwise would just make this document wrong. The actual policy:
 
-- ✅ **Real Infrastructure**: Tests use actual clusters, containers, and services
-- ✅ **Real Computations**: Tests perform genuine data processing and analysis
-- ✅ **Real Failures**: Tests validate actual error conditions and recovery
-- ❌ **No Mock Objects**: No `@patch`, `Mock()`, or `MagicMock()`
-- ❌ **No Simulations**: No artificial responses or fake services
+1. **Real first, always.** A capability may not be marked working until it
+   has been exercised against the real thing -- a real cluster, a real API,
+   a real file on disk, a real socket. A test that has only ever passed
+   against a mock is evidence of nothing.
+2. **Mocks are a cost-control measure, never a correctness argument.** Once
+   a real call has verified the contract, a mocked test using the *same*
+   call syntax may stand in for it in CI to avoid per-run API fees and
+   credential requirements. Re-verify against the real service when the
+   contract could have changed.
+3. **A mock may never be a fallback.** If real functionality is
+   unavailable, the test must fail or raise. Silently substituting a mock
+   turns a broken feature into a green test.
+4. **Production code must never know it is being tested.** No
+   `isinstance(x, Mock)`, no test-only branches, no importable module of
+   fake widgets.
+5. **Never weaken a test to make it pass.** If a test fails, fix the code.
+   If the test itself asserts wrong behaviour, say so explicitly and
+   rewrite the assertion -- do not quietly relax it.
 
-### Why No Mocks?
+### Why Real Tests Come First
 
 1. **Catch Real Issues**: Mocks hide serialization problems, network issues, and integration failures
 2. **Validate User Experience**: Tests mirror exactly how users interact with Clustrix
@@ -197,13 +212,28 @@ Every test must include:
 
 Use pytest markers to categorize tests:
 
+`--strict-markers` is enabled, so an unregistered marker is a hard collection
+error, not a warning. These are the markers that actually exist — the full list
+is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
+
 ```python
-@pytest.mark.real_world  # Requires real infrastructure
-@pytest.mark.slow        # Takes >10 seconds
-@pytest.mark.integration # Tests multiple components
-@pytest.mark.kubernetes  # Requires Kubernetes
-@pytest.mark.ssh        # Requires SSH server
+@pytest.mark.real_world        # opens real SSH/cloud connections
+@pytest.mark.slow              # takes a long time
+@pytest.mark.unit              # a unit test
+@pytest.mark.integration       # exercises several components together
+@pytest.mark.expensive         # provisions billable resources
+@pytest.mark.cluster_network # needs the configured cluster network
+@pytest.mark.performance       # a benchmark
 ```
+
+`real_world` is applied automatically to everything under `tests/real_world/`
+by that directory's `conftest.py`, so you do not need to add it by hand — and
+more importantly, forgetting it cannot silently expose a live-network test to
+the ordinary run.
+
+To add a marker, register it in `pyproject.toml` first. This document
+previously listed `kubernetes`, `ssh` and `flaky`; none were registered and no
+test used them, so following it produced a collection error.
 
 ## Running Tests
 
@@ -454,13 +484,16 @@ pytest --cache-clear
 
 #### 5. Flaky Tests
 
-```python
-# Add retries for flaky tests
-@pytest.mark.flaky(reruns=3, reruns_delay=2)
-def test_network_dependent():
-    pass
+`@pytest.mark.flaky` needs the `pytest-rerunfailures` plugin, which this
+project does not depend on — the marker is unavailable and unregistered.
 
-# Or handle in test
+Prefer removing the flakiness. Where a test genuinely depends on something
+external, gate it on that thing being present rather than retrying until it
+passes: a test that succeeds on the third attempt is telling you something
+real about the code.
+
+```python
+# Handle it in the test
 for attempt in range(3):
     try:
         result = flaky_operation()
@@ -486,7 +519,7 @@ for attempt in range(3):
 
 When contributing new tests:
 
-1. **Follow the NO MOCKS principle**
+1. **Follow the mocking policy** (real first; mocks only stand in for an already-verified real call, never as a fallback)
 2. **Use the test template structure**
 3. **Add appropriate markers**
 4. **Include docstrings**
@@ -497,7 +530,7 @@ When contributing new tests:
 
 ### Checklist for New Tests
 
-- [ ] No mock objects or patches used
+- [ ] Any mock stands in for a call already verified against the real thing (not a fallback)
 - [ ] Tests real infrastructure or local execution
 - [ ] Meaningful computation performed
 - [ ] Results validated for correctness

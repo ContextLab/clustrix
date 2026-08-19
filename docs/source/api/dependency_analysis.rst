@@ -1,10 +1,14 @@
 Dependency Analysis
 ===================
 
-.. automodule:: clustrix.dependency_analysis
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. currentmodule:: clustrix.dependency_analysis
+
+Every member of this module is documented explicitly below (grouped by
+purpose), following the same pattern used in :doc:`cost_monitoring`. A
+blanket ``automodule:: :members:`` is deliberately not used here: this
+project's global ``autodoc_default_options`` sets ``members: True``, so an
+``automodule`` directive combined with the explicit per-member directives
+below would document every class and function twice.
 
 Overview
 --------
@@ -259,7 +263,7 @@ File Reference Detection
 
     def file_operations_function():
         import json
-        from clustrix import cluster_stat
+        from clustrix import cluster_exists, cluster_stat
         
         # Direct file operations
         with open("config.json", "r") as f:
@@ -288,24 +292,29 @@ File Reference Detection
 Error Handling
 --------------
 
-.. code-block:: python
+Analysis is source-based (``inspect.getsource`` under the hood), so it can
+only ever fail one way: no retrievable source. Two things trigger that --
+a built-in with no Python source at all, and (the same
+:ref:`REPL limitation <repl-limitation>` that affects ``@cluster`` itself)
+a function whose source text isn't available to ``inspect``, which in
+practice means anything not defined in a real ``.py`` file:
 
-    def problematic_function():
-        # This will fail analysis
-        return len([1, 2, 3])
+.. code-block:: python
 
     try:
         deps = analyze_function_dependencies(len)  # Built-in function
     except ValueError as e:
         print(f"Analysis failed: {e}")
 
-    # Function with no dependencies
-    def simple_function():
-        return 42
-
-    deps = analyze_function_dependencies(simple_function)
-    assert len(deps.imports) == 0
-    assert len(deps.local_function_calls) == 0
+    # Function with no dependencies, defined in a real .py file, analyzes
+    # cleanly with empty import/call lists:
+    #
+    #   def simple_function():
+    #       return 42
+    #
+    #   deps = analyze_function_dependencies(simple_function)
+    #   assert deps.imports == []
+    #   assert deps.local_function_calls == []
 
 Best Practices
 --------------

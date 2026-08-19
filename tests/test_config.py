@@ -96,7 +96,11 @@ class TestConfigFileOperations:
             environment_variables={"TEST_VAR": "value"},
             module_loads=["python/3.9", "cuda/11.2"],
         )
-        save_config(str(config_path))
+        # environment_variables is treated as a secret-bearing field (users
+        # commonly stuff API keys/tokens into it) and is omitted from saved
+        # config files by default -- see test_config_file_permissions.py.
+        # This test wants a full round trip, so opt in explicitly.
+        save_config(str(config_path), include_secrets=True)
 
         # Reset and load
         configure(cluster_type="ssh")  # Change to verify load works

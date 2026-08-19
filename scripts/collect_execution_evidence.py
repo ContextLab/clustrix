@@ -17,8 +17,11 @@ Usage::
 
 Credentials come from ~/.clustrix-dev-credentials (see notes/), or from the
 environment: CLUSTRIX_SLURM_PASSWORD, CLUSTRIX_GPU_PASSWORD, HF_TOKEN.
-The Dartmouth hosts are split-DNS internal names, so they need the VPN; if
-they do not resolve, that is what a skip means.
+Cluster hosts are never hardcoded; the SLURM and SSH+GPU targets read their
+hostname from CLUSTRIX_TEST_SLURM_HOST and CLUSTRIX_TEST_SSH_HOST (plus a
+shared CLUSTRIX_TEST_USERNAME). Some hosts are split-DNS internal names, so
+they need a VPN; if a host variable is unset or the host does not resolve,
+that is what a skip means.
 """
 
 import argparse
@@ -128,19 +131,34 @@ def probe(n: int) -> Dict[str, Any]:
 # -- targets -----------------------------------------------------------------
 
 
+def _test_username() -> str:
+    username = os.environ.get("CLUSTRIX_TEST_USERNAME")
+    if not username:
+        raise RuntimeError("CLUSTRIX_TEST_USERNAME is not set")
+    return username
+
+
 def configure_slurm() -> str:
-    host = "discovery.dartmouth.edu"
+    host = os.environ.get("CLUSTRIX_TEST_SLURM_HOST")
+    if not host:
+        raise RuntimeError(
+            "CLUSTRIX_TEST_SLURM_HOST is not set; export it to a reachable SLURM host"
+        )
     if not host_resolves(host):
-        raise RuntimeError(f"{host} does not resolve (Dartmouth VPN required)")
+        raise RuntimeError(f"{host} does not resolve (check VPN/network access)")
+    username = _test_username()
     password = slurm_password()
     if not password:
         raise RuntimeError("no SLURM password available")
+    remote_work_dir = os.environ.get(
+        "CLUSTRIX_TEST_SLURM_REMOTE_DIR", "~/clustrix_evidence"
+    )
     configure(
         cluster_type="slurm",
         cluster_host=host,
-        username="f002d6b",
+        username=username,
         password=password,
-        remote_work_dir="/dartfs-hpc/rc/home/b/f002d6b/clustrix_evidence",
+        remote_work_dir=remote_work_dir,
         job_poll_interval=10,
         venv_setup_timeout=1800,
         auto_parallel=False,
@@ -152,17 +170,22 @@ def configure_slurm() -> str:
 
 
 def configure_gpu() -> str:
-    host = "tensor01.dartmouth.edu"
+    host = os.environ.get("CLUSTRIX_TEST_SSH_HOST")
+    if not host:
+        raise RuntimeError(
+            "CLUSTRIX_TEST_SSH_HOST is not set; export it to a reachable SSH+GPU host"
+        )
     if not host_resolves(host):
-        raise RuntimeError(f"{host} does not resolve (Dartmouth VPN required)")
-    key = Path.home() / ".ssh" / "id_ed25519_clustrix_f002d6b_test_tensor01_gpu"
+        raise RuntimeError(f"{host} does not resolve (check VPN/network access)")
+    username = _test_username()
+    key = Path.home() / ".ssh" / f"id_ed25519_clustrix_{username}_test_gpu"
     password = gpu_password()
     if not key.exists() and not password:
         raise RuntimeError("no SSH key or password available for the GPU host")
     configure(
         cluster_type="ssh",
         cluster_host=host,
-        username="f002d6b",
+        username=username,
         key_file=str(key) if key.exists() else None,
         password=None if key.exists() else password,
         remote_work_dir="~/.clustrix/evidence",
@@ -189,8 +212,8 @@ def configure_hf() -> str:
 
 
 TARGETS = {
-    "slurm": ("SLURM scheduler (discovery.dartmouth.edu)", configure_slurm),
-    "gpu": ("SSH + GPU host (tensor01.dartmouth.edu)", configure_gpu),
+    "slurm": ("SLURM scheduler ($CLUSTRIX_TEST_SLURM_HOST)", configure_slurm),
+    "gpu": ("SSH + GPU host ($CLUSTRIX_TEST_SSH_HOST)", configure_gpu),
     "hf": ("HuggingFace Jobs (container)", configure_hf),
 }
 

@@ -1,12 +1,46 @@
+.. _installation:
+
 Installation
 ============
 
-Clustrix can be installed using pip or conda, with optional dependencies for specific cluster types.
+.. warning::
+
+   **The version on PyPI is behind this documentation.** ``pip install
+   clustrix`` currently installs **0.1.1**; these pages document **0.2.0**.
+
+   That gap is not cosmetic. 0.1.1 predates fixes for two defects that
+   matter:
+
+   - ``@cluster`` could return a fabricated string instead of your result
+     when a function's source could not be read.
+   - Results fetched from a remote host were unpickled without
+     authentication, which is a remote-to-local code execution path.
+
+   Until 0.2.0 is published, install from the repository::
+
+       pip install "git+https://github.com/ContextLab/clustrix.git@master"
+
+   Everything below describes 0.2.0. If you installed from PyPI, check what
+   you actually have with ``python -c "import clustrix;
+   print(clustrix.__version__)"``.
+
+Clustrix is a pure-Python package. The base install pulls in everything the
+verified backends need -- SSH (``paramiko``), serialization (``cloudpickle``,
+``dill``), the CLI (``click``) and the Hugging Face Jobs client
+(``huggingface_hub``). Everything else is an optional extra.
+
+Requirements
+------------
+
+- **Python 3.10 or newer** (``requires-python = ">=3.10"``).
+- For remote backends: SSH access to the target machine, and the scheduler's
+  own client tools (``sbatch``/``squeue``, ``qsub``, ...) present *on that
+  machine*. Nothing scheduler-specific is needed locally.
+- For ``cluster_type="huggingface"``: a Hugging Face token with permission to
+  write jobs in the namespace you target.
 
 Basic Installation
 ------------------
-
-Install Clustrix using pip:
 
 .. code-block:: bash
 
@@ -15,7 +49,7 @@ Install Clustrix using pip:
 Development Installation
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-For development or to get the latest features:
+For the latest source, or to work on Clustrix itself:
 
 .. code-block:: bash
 
@@ -23,81 +57,105 @@ For development or to get the latest features:
    cd clustrix
    pip install -e ".[dev]"
 
+The ``dev`` extra installs the test suite's dependencies (pytest, numpy,
+pandas, ipywidgets) plus the quality tools CI enforces: ``black``, ``flake8``
+and ``mypy``.
+
 Optional Dependencies
-~~~~~~~~~~~~~~~~~~~~~
+---------------------
 
 Jupyter Notebook Support
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-For Jupyter notebook integration with interactive widgets:
+For the interactive configuration widget and the ``%%remote`` magic:
 
 .. code-block:: bash
 
-   pip install clustrix[widget]
+   pip install "clustrix[widget]"
    # or
-   pip install clustrix ipywidgets pyyaml
+   pip install clustrix ipywidgets jupyter ipython
 
-This enables the ``%%remote`` magic command for interactive configuration.
+Importing ``clustrix`` registers the magic but deliberately displays nothing.
+Run ``%%remote`` in a cell to show the widget.
 
 Kubernetes Support
 ~~~~~~~~~~~~~~~~~~
 
-For Kubernetes cluster support:
+.. code-block:: bash
+
+   pip install "clustrix[kubernetes]"
+
+.. warning::
+
+   The Kubernetes backend is implemented but has never been verified against
+   a real cluster. See :ref:`supported-cluster-types`.
+
+Cloud Provider Support
+~~~~~~~~~~~~~~~~~~~~~~
+
+These extras install each provider's SDK. They are what the **pricing and
+cost-estimation** clients use, and those do work -- they query provider
+pricing APIs and never submit a job.
 
 .. code-block:: bash
 
-   pip install clustrix[kubernetes]
-   # or
-   pip install clustrix kubernetes
+   pip install "clustrix[aws]"     # boto3 + kubernetes
+   pip install "clustrix[gcp]"     # google-cloud-* + kubernetes
+   pip install "clustrix[azure]"   # azure-* + kubernetes
+   pip install "clustrix[cloud]"   # all three
 
-Documentation and Tutorials
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. warning::
 
-To build documentation locally:
+   Installing these does **not** give you a working cloud execution backend.
+   No AWS, GCP, Azure or Lambda Cloud job has been shown to run end to end.
+   See :ref:`supported-cluster-types`.
+
+Documentation
+~~~~~~~~~~~~~
+
+To build this documentation locally:
 
 .. code-block:: bash
 
-   pip install clustrix[docs]
+   pip install "clustrix[docs]"
    cd docs
    make html
 
-All Optional Dependencies
-~~~~~~~~~~~~~~~~~~~~~~~~~
+The rendered site lands in ``docs/build/html``.
 
-Install everything:
+Everything
+~~~~~~~~~~
 
 .. code-block:: bash
 
-   pip install clustrix[all]
-
-Requirements
-~~~~~~~~~~~~
-
-- Python 3.8 or higher
-- SSH access to target clusters (for remote execution)
-- Appropriate cluster scheduler tools (SLURM, PBS, SGE) on target systems
+   pip install "clustrix[all]"
 
 Verification
-~~~~~~~~~~~~
+------------
 
-Verify your installation:
+This runs entirely on your own machine -- no cluster, no credentials:
 
 .. code-block:: python
 
    import clustrix
    print(clustrix.__version__)
-   
-   # Test local execution
+
    from clustrix import cluster, configure
-   
-   configure(cluster_host=None)  # Local execution
-   
+
+   configure(cluster_type="local")  # run in the calling process
+
    @cluster(cores=2)
    def test_function():
        return "Clustrix is working!"
-   
+
    result = test_function()
    print(result)  # Should print: "Clustrix is working!"
+
+Check the CLI at the same time:
+
+.. code-block:: bash
+
+   clustrix config   # prints the current settings
 
 Verify Jupyter Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -116,3 +174,10 @@ appears when you run ``%%remote``, in a cell of its own:
 
 Setting ``CLUSTRIX_AUTO_WIDGET=1`` before the import restores the older
 display-on-import behaviour.
+
+Next
+----
+
+- :doc:`quickstart` -- a working result in five minutes.
+- :doc:`introduction` -- what Clustrix is for, and when to reach for
+  something else.

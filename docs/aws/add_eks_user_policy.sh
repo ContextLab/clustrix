@@ -70,6 +70,6 @@ fi
 echo ""
 echo "========================================"
 echo "Next steps:"
-echo "1. Test with: python test_aws_preflight.py"
-echo "2. If successful, provision with: python test_aws_eks_real.py"
+echo "1. Test with: python tests/integration/test_aws_preflight.py"
+echo "2. If successful, provision with: python tests/integration/test_aws_eks_real.py"
 echo "========================================"

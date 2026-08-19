@@ -1,4 +1,5 @@
 import json
+import re
 import yaml
 import os
 from pathlib import Path
@@ -17,7 +18,13 @@ class ClusterConfig:
     key_file: Optional[str] = None
 
     # Cluster settings
-    cluster_type: str = "slurm"  # slurm, pbs, sge, kubernetes, ssh
+    # One of SUPPORTED_CLUSTER_TYPES (defined below the class, since a
+    # dataclass body cannot reference a name it also defines). Every place
+    # that offers a choice of backend -- the CLI, the notebook widget --
+    # must read that tuple rather than keeping its own copy: the CLI was
+    # missing "huggingface" entirely, so a working backend could not be
+    # selected from the command line at all.
+    cluster_type: str = "slurm"
     cluster_host: Optional[str] = None
     cluster_port: int = 22
 
@@ -137,11 +144,16 @@ class ClusterConfig:
 
     # Execution preferences
     auto_parallel: bool = True
-    auto_gpu_parallel: bool = (
-        True  # Automatically parallelize across GPUs when available
-    )
+    # NO EFFECT. Both were read only by the client-side GPU parallelization
+    # path, which was deleted because it never called the decorated function:
+    # it ran a hardcoded torch program per GPU and returned the traces of
+    # random matrices as the user's result. They are kept so that existing
+    # clustrix.yml files and configure(...) calls keep loading, and are listed
+    # under "Settings that currently have no effect" in the configuration docs.
+    # Parallelize across GPUs inside your own function instead.
+    auto_gpu_parallel: bool = True
     max_parallel_jobs: int = 100
-    max_gpu_parallel_jobs: int = 8  # Maximum parallel jobs per GPU
+    max_gpu_parallel_jobs: int = 8
     job_poll_interval: int = 30
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False
@@ -163,6 +175,13 @@ class ClusterConfig:
     cache_credentials: bool = True  # Cache credentials in memory
     credential_cache_ttl: int = 300  # Credential cache TTL in seconds (5 minutes)
     ssh_port: int = 22  # SSH port (for consistency with cluster_port)
+    # Controls what clustrix does when a remote host's SSH key is not already
+    # in your known_hosts files. "reject" (default, secure) refuses the
+    # connection and tells you the exact ssh-keyscan command to add it.
+    # "auto_add" opts into trusting unknown host keys automatically -- this
+    # is insecure (vulnerable to machine-in-the-middle attacks) and must be
+    # chosen deliberately; it is never the default. See clustrix.ssh_security.
+    ssh_host_key_policy: str = "reject"
 
     # Advanced settings
     environment_variables: Optional[Dict[str, str]] = None
@@ -201,6 +220,29 @@ class ClusterConfig:
     # Runtime venv information (set during execution)
     venv_info: Optional[dict] = None  # Information about created virtual environments
 
+    def __repr__(self) -> str:
+        """Render the config with credentials masked.
+
+        The dataclass-generated ``__repr__`` printed every field verbatim, so
+        a password or API token landed in any traceback, log line or notebook
+        cell that displayed a config. ``save_to_file`` already refused to
+        write these in plaintext; showing them on screen instead was not much
+        better. Masked rather than omitted, so it stays obvious that a value
+        is set.
+        """
+        parts = []
+        for field_def in fields(self):
+            value = getattr(self, field_def.name)
+            if field_def.name in SECRET_FIELDS and value is not None:
+                value = "***"
+            elif field_def.name in SECRET_BEARING_MAPPINGS and isinstance(value, dict):
+                value = {
+                    k: ("***" if k not in _redact_secret_entries(value) else v)
+                    for k, v in value.items()
+                }
+            parts.append(f"{field_def.name}={value!r}")
+        return f"{type(self).__name__}({', '.join(parts)})"
+
     def __post_init__(self):
         if self.environment_variables is None:
             self.environment_variables = {}
@@ -214,6 +256,13 @@ class ClusterConfig:
             self.excluded_packages = []
         if self.venv_post_install_commands is None:
             self.venv_post_install_commands = []
+
+        if self.ssh_host_key_policy not in ("reject", "auto_add"):
+            raise ValueError(
+                f"Invalid ssh_host_key_policy={self.ssh_host_key_policy!r}. "
+                f"Valid values are 'reject' (default, secure) or 'auto_add' "
+                f"(insecure, trusts unknown host keys automatically)."
+            )
 
         # Auto-install cloud provider dependencies if needed
         self._ensure_cloud_dependencies()
@@ -239,16 +288,32 @@ class ClusterConfig:
             return os.environ.get(self.password_env_var)
         return None
 
-    def save_to_file(self, config_path: str) -> None:
-        """Save this configuration instance to a file."""
+    def save_to_file(self, config_path: str, include_secrets: bool = False) -> None:
+        """Save this configuration instance to a file.
+
+        The file is created with 0600 permissions (owner read/write only)
+        from the moment it exists -- the mode is set before any content is
+        written, and re-applied even when overwriting a file that already
+        exists with looser permissions, so there is never a window where a
+        config file containing credentials is world- or group-readable.
+
+        Secret-bearing fields (passwords, tokens, API keys, etc. -- see
+        ``SECRET_FIELDS``) are omitted by default, since a saved config file
+        is easy to accidentally commit, back up, or share. Pass
+        ``include_secrets=True`` to write them anyway, e.g. for a config
+        file you deliberately keep out of version control.
+        """
         config_path_obj = Path(config_path)
         config_data = asdict(self)
+        if not include_secrets:
+            for key in SECRET_FIELDS:
+                config_data.pop(key, None)
+            for key in SECRET_BEARING_MAPPINGS:
+                value = config_data.get(key)
+                if isinstance(value, dict):
+                    config_data[key] = _redact_secret_entries(value)
 
-        with open(config_path_obj, "w") as f:
-            if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
-                yaml.dump(config_data, f, default_flow_style=False)
-            else:
-                json.dump(config_data, f, indent=2)
+        _write_config_file_securely(config_path_obj, config_data)
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
@@ -264,6 +329,102 @@ class ClusterConfig:
                 config_data = json.load(f)
 
         return cls(**config_data)
+
+
+# Fields treated as secret-bearing when saving configuration to disk. Derived
+# from field *names* rather than hand-listed, so a newly added credential
+# field (a new cloud provider's API key, say) is covered automatically
+# instead of silently leaking in plaintext until someone remembers to add it
+# here. Same approach as scripts/verify_cluster_usecases.py's redaction.
+#: Every backend ``ClusterExecutor`` can actually dispatch. This is the one
+#: place the set is written down; the CLI's ``click.Choice`` and the notebook
+#: widget's dropdown both read it. Offering a type the executor cannot run is
+#: worse than not offering it, and omitting one it can run hides a feature.
+SUPPORTED_CLUSTER_TYPES = (
+    "local",
+    "ssh",
+    "slurm",
+    "pbs",
+    "sge",
+    "kubernetes",
+    "huggingface",
+)
+
+
+_SECRET_FIELD_PATTERN = re.compile(
+    r"secret|token|password|api_key|access_key|_key$|client_id|tenant_id"
+    r"|subscription_id",
+    re.IGNORECASE,
+)
+
+# Two kinds of name match the pattern above without holding a secret: a
+# boolean flag (``use_env_password``) and a field that holds the *name* of
+# an environment variable rather than its value (``password_env_var``).
+# Dropping those breaks the auth-fallback configuration round trip while
+# protecting nothing.
+_NOT_ACTUALLY_SECRET = re.compile(r"^use_|_env_var$", re.IGNORECASE)
+
+
+def _is_secret_field(field_name: str, field_type: object) -> bool:
+    if _NOT_ACTUALLY_SECRET.search(field_name):
+        return False
+    return bool(_SECRET_FIELD_PATTERN.search(field_name))
+
+
+SECRET_FIELDS = {
+    f.name for f in fields(ClusterConfig) if _is_secret_field(f.name, f.type)
+}
+
+#: Fields holding a mapping whose *values* may be secrets even though the
+#: field name is innocuous. ``environment_variables`` commonly carries both
+#: ``OMP_NUM_THREADS`` and ``AWS_SECRET_ACCESS_KEY``; dropping the whole
+#: mapping would lose ordinary settings users expect to persist, so the
+#: individual entries are filtered by the same name test instead.
+SECRET_BEARING_MAPPINGS = frozenset({"environment_variables"})
+
+
+def _redact_secret_entries(mapping: dict) -> dict:
+    """Drop the entries of ``mapping`` whose *key* names a secret."""
+    return {
+        k: v
+        for k, v in mapping.items()
+        if not _SECRET_FIELD_PATTERN.search(str(k))
+        or _NOT_ACTUALLY_SECRET.search(str(k))
+    }
+
+
+def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> None:
+    """Write ``config_data`` to ``config_path_obj`` with 0600 permissions.
+
+    The mode is applied via os.open()'s mode argument (so a newly created
+    file never exists at the default, wider permissions even momentarily)
+    and re-applied with fchmod() before writing (so overwriting a
+    pre-existing, more permissive file is also tightened) -- in both cases
+    before any content is written, never after.
+
+    POSIX permission bits are a POSIX concept. On Windows there is no
+    ``os.fchmod`` before Python 3.13, and even where ``chmod`` exists it only
+    toggles the read-only attribute rather than restricting who may read the
+    file, so the 0600 hardening step is skipped there and the file inherits
+    the directory's ACL. See ``docs/source/limitations.rst`` for what that
+    means for Windows users who save credentials to a config file.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(str(config_path_obj), flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        handle = os.fdopen(fd, "w")
+    except BaseException:
+        # Nothing owns the descriptor yet, so it would otherwise leak; on
+        # Windows a leaked handle also makes the file undeletable.
+        os.close(fd)
+        raise
+    with handle as f:
+        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
+            yaml.dump(config_data, f, default_flow_style=False)
+        else:
+            json.dump(config_data, f, indent=2)
 
 
 # Global configuration instance
@@ -354,21 +515,19 @@ def load_config(config_path: str) -> None:
     _config = ClusterConfig(**config_data)
 
 
-def save_config(config_path: str) -> None:
+def save_config(config_path: str, include_secrets: bool = False) -> None:
     """
     Save current configuration to a file.
 
+    See :meth:`ClusterConfig.save_to_file` for the 0600-permissions and
+    secret-redaction behavior this delegates to.
+
     Args:
         config_path: Path where to save configuration
+        include_secrets: Write secret-bearing fields (passwords, tokens,
+            API keys, etc.) in plaintext. Default False.
     """
-    config_path_obj = Path(config_path)
-    config_data = asdict(_config)
-
-    with open(config_path_obj, "w") as f:
-        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
-            yaml.dump(config_data, f, default_flow_style=False)
-        else:
-            json.dump(config_data, f, indent=2)
+    _config.save_to_file(config_path, include_secrets=include_secrets)
 
 
 CONFIG_DIR_ENV_VAR = "CLUSTRIX_CONFIG_DIR"
@@ -398,11 +557,23 @@ def get_config() -> ClusterConfig:
 # Try to load configuration from default locations
 def _load_default_config():
     """Load configuration from default locations."""
-    config_dir = get_config_dir()
-    default_paths = [
-        config_dir / "config.yml",
-        config_dir / "config.yaml",
-        config_dir / "config.json",
+    default_paths = []
+    try:
+        config_dir = get_config_dir()
+    except RuntimeError:
+        # Path.home() raises when the home directory cannot be determined --
+        # e.g. a Windows service account or a scrubbed environment with no
+        # USERPROFILE. Discovering a user config file is best effort, so this
+        # must not make ``import clustrix`` fail; the working-directory
+        # candidates below are still searched.
+        pass
+    else:
+        default_paths += [
+            config_dir / "config.yml",
+            config_dir / "config.yaml",
+            config_dir / "config.json",
+        ]
+    default_paths += [
         Path.cwd() / "clustrix.yml",
         Path.cwd() / "clustrix.yaml",
         Path.cwd() / "clustrix.json",

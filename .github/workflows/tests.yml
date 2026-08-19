@@ -13,8 +13,21 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 15 minutes was set when this job ran only tests/unit -- about 350 tests.
+    # It now runs the whole non-billable suite, ~1790 tests (issue #113).
+    # Linux finishes in ~10 minutes and macOS in ~14; Windows reached 96% and
+    # was cancelled mid-run, because process-spawning tests (the serialization
+    # round-trips each start a fresh interpreter) are markedly slower there.
+    # This is a bound on a genuinely longer job, not a relaxed check: every
+    # test still has to pass, and pytest's own --timeout=120 still bounds any
+    # individual test that wedges.
+    timeout-minutes: 30
     strategy:
+      # Show every platform's failures in one run. With the default
+      # fail-fast, one job failing cancelled the other six, so a
+      # Python-3.12-only problem looked like a total outage and hid whatever
+      # the other combinations would have reported.
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         # 3.8 and 3.9 were never actually supported: click, requests,
@@ -33,7 +46,7 @@ jobs:
     - uses: actions/checkout@v4
 
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
 
@@ -47,16 +60,25 @@ jobs:
     - name: Lint with black
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
-        black --check clustrix/ tests/
+        black --check clustrix/ tests/ scripts/
 
+    # No --exit-zero and no inline --extend-ignore: the flags made this step
+    # incapable of failing, and the inline list was a second, divergent copy
+    # of the project's lint policy. .flake8 is the single source of truth.
     - name: Lint with flake8
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
-        flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824 --exit-zero
+        flake8 clustrix/ tests/ scripts/
 
     - name: Test with pytest
       run: |
-        pytest tests/unit/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json -m "not real_world"
+        # Runs the whole non-billable suite, not just tests/unit/ (issue
+        # #113). tests/real_world/conftest.py auto-applies the real_world
+        # marker to everything under that directory, so -m "not real_world"
+        # alone would already exclude it -- the --ignore is kept anyway as a
+        # second, independent guard. tests/integration/ provisions real
+        # billable AWS resources (#109) and must never run in ordinary CI.
+        pytest tests/ -v --cov=clustrix --cov-report=xml --cov-report=html --cov-report=term-missing --cov-report=json -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
 
     - name: Update coverage badge
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11' && github.ref == 'refs/heads/master'
@@ -100,7 +122,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         
@@ -112,7 +134,7 @@ jobs:
     - name: Run integration tests
       run: |
         # Run only local integration tests that don't require external resources
-        pytest tests/ -k "integration and local and not (gpu or aws or azure or gcp or ssh or slurm or pbs or sge)" -v -x -m "not real_world" || true
+        pytest tests/ -k "integration and local and not (gpu or aws or azure or gcp or ssh or slurm or pbs or sge)" -v -x -m "not real_world"
         
     - name: Test example scripts
       run: |
@@ -137,21 +159,36 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Set up Python 3.11
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.11'
         
     - name: Install system dependencies
       run: |
-        # Bounded: an unresponsive Ubuntu mirror makes a bare `apt-get update`
-        # hang until the job's 10-minute cap, which it did on two consecutive
-        # runs while fetching noble-security InRelease. Each fetch now gives up
-        # after 15s and retries three times, so a dead mirror costs seconds.
-        sudo apt-get update \
-          -o Acquire::Retries=3 \
-          -o Acquire::http::Timeout=15 \
-          -o Acquire::https::Timeout=15
-        sudo apt-get install -y --no-install-recommends pandoc
+        # pandoc is required: nbsphinx renders 30 notebook pages with it, so
+        # dropping it would silently lose them from the built docs.
+        #
+        # The Acquire::*::Timeout options below are not sufficient on their
+        # own -- this job burned its whole 10-minute cap on
+        # "Get:5 noble-security InRelease" despite them, twice. So try the
+        # install against the runner image's existing package lists first,
+        # and only refresh them if that fails, under a hard wall-clock bound
+        # that apt cannot ignore.
+        #
+        # `|| ...` here does not hide a failure: if pandoc is still missing
+        # afterwards the verification below exits non-zero and the job fails.
+        sudo apt-get install -y --no-install-recommends pandoc || {
+          echo "pandoc not in the cached lists; refreshing (bounded)"
+          sudo timeout 120 apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 || \
+            echo "apt-get update did not finish in 120s; trying the install anyway"
+          sudo apt-get install -y --no-install-recommends pandoc
+        }
+        # Fail loudly and immediately if pandoc is still absent, rather than
+        # letting sphinx produce notebook-less documentation that looks fine.
+        pandoc --version | head -1
         
     - name: Install dependencies
       run: |

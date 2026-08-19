@@ -1,21 +1,174 @@
 import ast
+import collections
+import hashlib
+import hmac
 import logging
 import contextlib
 import os
 import re
+import shlex
 import threading
 import sys
 import pickle
 import inspect
 import importlib
+import json
+import functools
 import subprocess
-from typing import Any, Callable, Dict, List, Optional
+from importlib import metadata as importlib_metadata
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
 from .config import ClusterConfig
 
 logger = logging.getLogger(__name__)
+
+
+class PayloadAuthenticationError(RuntimeError):
+    """A file fetched from a job directory did not verify against its key.
+
+    Distinct from every other RuntimeError in the collection paths because it
+    must never be swallowed by a broad ``except Exception``: the whole point
+    of the check is that the caller is told, loudly, that something it was
+    about to unpickle is not what the job wrote.
+    """
+
+
+def verify_signed_payload(
+    payload: bytes, tag: Optional[str], key: Optional[str], what: str
+) -> None:
+    """Refuse ``payload`` unless its HMAC matches the per-job key.
+
+    The one implementation behind every check in clustrix. ``result.pkl`` and
+    ``error.pkl`` are both deserialized with dill, and dill.loads executes
+    code, so both have to clear the same bar -- a job that merely *fails* must
+    not be a cheaper way onto the submitting machine than a job that succeeds.
+
+    Args:
+        payload: The exact bytes that would be handed to the deserializer.
+        tag: The hex digest that came back with them, if any.
+        key: The per-job signing key recorded at submission, if any.
+        what: Human-readable identification used in the error messages.
+
+    Raises:
+        PayloadAuthenticationError: if the key is missing, the tag is missing,
+            or the tag does not match. Every one of those is a refusal: an
+            unverifiable payload is indistinguishable from a forged one.
+    """
+    if not key:
+        raise PayloadAuthenticationError(
+            f"No result-signing key is recorded for {what}, so what it "
+            "produced cannot be authenticated. Refusing to deserialize it: "
+            "loading a pickle executes code. Re-run the job from this "
+            "process, which records a key at submission."
+        )
+
+    tag = (tag or "").strip()
+    if not tag:
+        raise PayloadAuthenticationError(
+            f"{what} produced a payload with no signature. Refusing to "
+            "deserialize it: loading a pickle executes code, and an unsigned "
+            "payload cannot be told apart from a file someone else wrote "
+            "into the job directory."
+        )
+
+    expected = hmac.new(key.encode(), payload, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(tag, expected):
+        raise PayloadAuthenticationError(
+            f"{what} payload failed its integrity check. Refusing to " "deserialize it."
+        )
+
+
+#: Characters a value may contain if it is going to be pasted into a generated
+#: job script *without* quoting -- scheduler directives and ``module load``
+#: lines, which stop meaning what they mean the moment quotes appear in them.
+#: Anything outside this set is shell (or directive) syntax, so it is refused
+#: rather than mangled.
+_SHELL_SAFE_FRAGMENT = re.compile(r"^[A-Za-z0-9._:/=+,@%-]+$")
+
+#: A POSIX shell variable name. ``export`` needs the name unquoted, so the
+#: name itself can only be validated.
+_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def validate_shell_fragment(config_key: str, value: Any) -> str:
+    """Refuse a config value that cannot be safely pasted in unquoted.
+
+    Used only where quoting would break the feature: a ``module load`` line,
+    a ``#SBATCH``/``#PBS``/``#$`` directive body, the name in ``export
+    NAME=...``. Everywhere else the value is quoted with ``shlex.quote``
+    instead, which needs no allowlist.
+
+    Args:
+        config_key: The configuration field being checked, named in the error
+            so the user knows which setting to fix.
+        value: The value itself.
+
+    Returns:
+        The value as a string, when it is safe.
+
+    Raises:
+        ValueError: naming ``config_key`` and the offending value.
+    """
+    text = str(value)
+    if not _SHELL_SAFE_FRAGMENT.match(text):
+        raise ValueError(
+            f"clustrix config {config_key}={text!r} cannot be used: it is "
+            "written into a generated job script at a place that must stay "
+            "unquoted (a scheduler directive or a module-load line), so a "
+            "shell metacharacter there would run as a command. Allowed "
+            "characters are letters, digits and . _ : / = + , @ % -"
+        )
+    return text
+
+
+def validate_env_var_name(name: str) -> str:
+    """Refuse an environment variable name that is not a shell identifier.
+
+    ``export FOO=bar; touch /tmp/pwn=1`` is a valid dict key and an injection.
+    The value beside it is quoted, but the name cannot be.
+    """
+    if not _ENV_VAR_NAME.match(str(name)):
+        raise ValueError(
+            f"clustrix config environment_variables has an invalid name "
+            f"{name!r}. A shell variable name must start with a letter or "
+            "underscore and contain only letters, digits and underscores."
+        )
+    return str(name)
+
+
+def _evaluate_literal_range(range_expression: str):
+    """Evaluate a ``range(...)`` expression, but only from literal arguments.
+
+    The previous implementation called ``eval()`` on text sliced out of the
+    user's source, with a comment admitting it was dangerous. It also could not
+    tell "this range is range(0, 10)" from "I could not work this out", because
+    failure fell through to a hardcoded ``range(10)``.
+
+    Returns the range when every argument is a literal integer, and ``None``
+    when the expression depends on anything only known at run time (a variable,
+    ``len(data)``, an attribute). ``None`` means "do not parallelize", never
+    "assume ten".
+    """
+    tree = ast.parse(range_expression, mode="eval")
+    call = tree.body
+    if not isinstance(call, ast.Call):
+        return None
+    if not isinstance(call.func, ast.Name) or call.func.id != "range":
+        return None
+    if call.keywords:
+        return None
+
+    bounds = []
+    for argument in call.args:
+        value = ast.literal_eval(argument)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        bounds.append(value)
+    if not 1 <= len(bounds) <= 3:
+        return None
+    return range(*bounds)
 
 
 def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
@@ -73,23 +226,31 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
             # In practice, you'd want more sophisticated analysis
             loop = visitor.loops[0]
             if loop["type"] == "for" and "range(" in loop["iterable"]:
-                # Try to extract range information
+                # The range has to be known exactly, because it decides how the
+                # work is split. Guessing it silently changes the answer: the
+                # previous fallback here substituted range(10), so a loop over
+                # range(1000) whose bounds could not be read was chunked as ten
+                # iterations and the caller got a tenth of the work back with no
+                # error. If the range cannot be determined, refuse to
+                # parallelize -- running the loop whole is always correct.
+                range_str = loop["iterable"]
+                start = range_str.find("range(")
+                end = range_str.find(")", start)
+                if start == -1 or end == -1:
+                    return None
+                range_part = range_str[start : end + 1]
                 try:
-                    # This is a simplified extraction
-                    range_str = loop["iterable"]
-                    if "range(" in range_str:
-                        range_part = range_str[
-                            range_str.find("range(") : range_str.find(
-                                ")", range_str.find("range(")
-                            )
-                            + 1
-                        ]
-                        range_obj = eval(
-                            range_part
-                        )  # Dangerous in practice, needs safer evaluation
-                        loop["range"] = range_obj
+                    range_obj = _evaluate_literal_range(range_part)
                 except Exception:
-                    loop["range"] = range(10)  # Default fallback
+                    logger.info(
+                        "Not parallelizing this loop: its range %r could not be "
+                        "evaluated without running the function.",
+                        range_part,
+                    )
+                    return None
+                if range_obj is None:
+                    return None
+                loop["range"] = range_obj
 
                 return loop
 
@@ -133,9 +294,17 @@ def _is_local_module(module: Any) -> bool:
     installed on the worker too, because the execution environment mirrors the
     local one. Anything else -- a sibling file, a package in the working tree --
     exists only on this machine and has to travel with the function.
+
+    A PEP 420 namespace package has no ``__file__`` at all; its location is in
+    ``__path__``. Reading only ``__file__`` classified every namespace package
+    as installed, so ``nspkg`` was left out of the payload and its children
+    were never even looked at -- the worker died on ``import nspkg``.
     """
     name = getattr(module, "__name__", "")
     path = getattr(module, "__file__", None)
+    if not path:
+        entries = list(getattr(module, "__path__", None) or [])
+        path = entries[0] if entries else None
     # __main__ is already serialized by value. clustrix is the machinery
     # running the job, not part of the user's function; embedding a checkout of
     # it would bloat every payload for nothing.
@@ -177,20 +346,56 @@ def _installed_roots() -> tuple:
 _INSTALLED_ROOTS = _installed_roots()
 
 
-#: Ceiling on the object graph walked when looking for project-local modules.
-#: Generous for real code; a backstop against a pathological argument.
-_MAX_WALK_NODES = 20000
+#: Hard ceiling on the object graph walked when looking for project-local
+#: modules. This is a memory backstop, not a work budget: the walk either
+#: finishes or the submission is refused. A walk that stopped early and let
+#: submission continue shipped a payload the worker could not load, announced
+#: only by a log line the user never saw.
+_MAX_WALK_NODES = 2_000_000
 
 #: Values that can never carry a module reference, so never worth enqueueing.
 _SCALAR_TYPES = (bool, int, float, complex, str, bytes, bytearray, type(None))
+
+#: Builtin containers walked through rather than followed by type. Any other
+#: container -- including a project-local subclass of one of these -- must have
+#: its class embedded, or the worker cannot rebuild the instance.
+_BUILTIN_CONTAINERS = (tuple, list, set, frozenset, dict)
+
+
+class WalkTooLargeError(RuntimeError):
+    """The argument graph was too large to check for project-local modules."""
 
 
 def _is_scalar(value: Any) -> bool:
     return type(value) in _SCALAR_TYPES
 
 
-def _referenced_local_modules(obj: Any) -> List[Any]:
-    """Project-local modules `obj` reaches, directly or through other locals.
+def _attribute_values(current: Any) -> List[Any]:
+    """Values held on an instance, through ``__dict__`` and through ``__slots__``.
+
+    An object's attributes are the commonest way a project-local class reaches
+    the payload -- a config or wrapper object holding a project-local instance.
+    Following only ``type(current)`` missed every one of them, and the worker
+    failed on ``import`` of a package the user never passed directly.
+    """
+    values: List[Any] = []
+    instance_dict = getattr(current, "__dict__", None)
+    if isinstance(instance_dict, dict):
+        values.extend(instance_dict.values())
+    for klass in type(current).__mro__:
+        slots = klass.__dict__.get("__slots__")
+        if isinstance(slots, str):
+            slots = (slots,)
+        for slot in slots or ():
+            try:
+                values.append(getattr(current, slot))
+            except AttributeError:
+                pass
+    return values
+
+
+def _walk_referenced_modules(obj: Any) -> Tuple[Dict[str, Any], Set[str]]:
+    """Modules `obj` reaches, split into project-local and installed.
 
     A function that calls `mypkg.helpers.clean` serializes that call by
     *reference* -- dill and cloudpickle both store importable objects as
@@ -198,8 +403,18 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
     fails with ModuleNotFoundError. Naming those modules lets cloudpickle embed
     them instead. Parent packages come along because `mypkg.helpers` cannot be
     rebuilt without `mypkg`.
+
+    The installed half is returned too, because a payload can just as easily
+    reach into a package that IS installed here but cannot be installed on the
+    cluster (an editable checkout, a private VCS URL). That is refused at
+    submit time rather than discovered on the worker.
+
+    Raises:
+        WalkTooLargeError: if the graph exceeds ``_MAX_WALK_NODES``. Truncating
+            silently is what shipped unloadable payloads.
     """
     found: Dict[str, Any] = {}
+    installed: Set[str] = set()
     seen: set = set()
     queue = [obj]
     budget = _MAX_WALK_NODES
@@ -212,16 +427,14 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
 
         budget -= 1
         if budget < 0:
-            # A pathological structure must not stall submission. Whatever was
-            # found so far is still embedded; anything missed fails loudly on
-            # the worker rather than silently here.
-            logger.warning(
-                "Stopped scanning for project-local modules after %d objects; "
-                "found %s.",
-                _MAX_WALK_NODES,
-                sorted(found) or "none",
+            raise WalkTooLargeError(
+                f"Gave up checking the arguments for project-local code after "
+                f"{_MAX_WALK_NODES} objects. clustrix cannot tell whether this "
+                "payload needs modules that do not exist on the cluster, and "
+                "will not submit a job that may fail on import. Pass the bulk "
+                "of this data through a file on shared storage instead of as "
+                "an argument."
             )
-            break
 
         # Only functions carry a real __globals__ dict. Reading the attribute
         # off a class yields the member descriptor from `types.FunctionType`,
@@ -247,28 +460,47 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
             module_name = getattr(current, "__name__", None)
         elif inspect.isfunction(current) or inspect.isclass(current):
             module_name = getattr(current, "__module__", None)
-        elif not isinstance(current, (tuple, list, set, frozenset, dict)):
+        elif type(current) not in _BUILTIN_CONTAINERS:
             # An argument is usually an instance, not a class. Its class is
-            # what has to travel, so follow the type.
+            # what has to travel, so follow the type. `isinstance` was wrong
+            # here: a project-local class subclassing dict, list or tuple is a
+            # container AND needs embedding, and testing isinstance skipped it.
+            # For a local NamedTuple that failure was silent -- the instance
+            # arrived as a plain tuple-alike with none of its methods.
             module_name = getattr(type(current), "__module__", None)
             queue.append(type(current))
+            queue.extend(v for v in _attribute_values(current) if not _is_scalar(v))
+            if isinstance(current, functools.partial):
+                # partial keeps its target in a slot of the C type, invisible
+                # to both __dict__ and __mro__ __slots__.
+                queue.append(current.func)
+                queue.extend(v for v in current.args if not _is_scalar(v))
+                queue.extend(
+                    v for v in (current.keywords or {}).values() if not _is_scalar(v)
+                )
+            elif inspect.ismethod(current):
+                queue.append(current.__func__)
+                queue.append(current.__self__)
 
         if module_name:
             module = sys.modules.get(module_name)
-            if module is not None and _is_local_module(module):
-                # Register the whole chain: mypkg.helpers needs mypkg.
-                parts = module_name.split(".")
-                for depth in range(1, len(parts) + 1):
-                    name = ".".join(parts[:depth])
-                    parent = sys.modules.get(name)
-                    if (
-                        parent is not None
-                        and name not in found
-                        and _is_local_module(parent)
-                    ):
-                        found[name] = parent
-                if namespace is None:
-                    namespace = vars(module)
+            if module is not None:
+                if _is_local_module(module):
+                    # Register the whole chain: mypkg.helpers needs mypkg.
+                    parts = module_name.split(".")
+                    for depth in range(1, len(parts) + 1):
+                        name = ".".join(parts[:depth])
+                        parent = sys.modules.get(name)
+                        if (
+                            parent is not None
+                            and name not in found
+                            and _is_local_module(parent)
+                        ):
+                            found[name] = parent
+                    if namespace is None:
+                        namespace = vars(module)
+                else:
+                    installed.add(module_name.split(".")[0])
 
         # Arguments arrive wrapped in the args tuple and kwargs dict, so the
         # instances that matter are one or more containers deep. Scalars are
@@ -287,7 +519,12 @@ def _referenced_local_modules(obj: Any) -> List[Any]:
                 elif inspect.ismodule(value) and _is_local_module(value):
                     queue.append(value)
 
-    return list(found.values())
+    return found, installed
+
+
+def _referenced_local_modules(obj: Any) -> List[Any]:
+    """Project-local modules `obj` reaches; see :func:`_walk_referenced_modules`."""
+    return list(_walk_referenced_modules(obj)[0].values())
 
 
 #: cloudpickle's by-value registry is process-global, so registering around a
@@ -350,6 +587,111 @@ def _pickled_by_value(modules: List[Any]):
                     cloudpickle.unregister_pickle_by_value(module)
 
 
+def _unpicklable_location(
+    obj: Any, description: str, seen: Optional[Set[int]] = None, depth: int = 0
+) -> Optional[str]:
+    """Name the object that cloudpickle cannot serialize, and say where it is.
+
+    The old message asserted that the offender was "held at module level" and
+    told the user to move it inside a function. When the offender was in a
+    CLOSURE the user had already done exactly that, and the advice was
+    nonsense. Worse, the message named every project-local module in the
+    payload -- including the caller's own driver module -- so one unpicklable
+    module-level object made every ``@cluster`` call in the project look
+    broken. This walks to the actual culprit instead.
+
+    Returns:
+        A description of where the offending object lives, or None if nothing
+        narrower than `description` could be pinned down.
+    """
+    if depth > 12:
+        return None
+    if seen is None:
+        seen = set()
+    if id(obj) in seen:
+        return None
+    seen.add(id(obj))
+
+    children: List[Tuple[str, Any]] = []
+    if inspect.isfunction(obj):
+        where = f"{obj.__name__}() in module {obj.__module__}"
+        for name, cell in zip(obj.__code__.co_freevars, obj.__closure__ or ()):
+            try:
+                children.append(
+                    (f"closure variable {name!r} of {where}", cell.cell_contents)
+                )
+            except ValueError:
+                pass
+        for name in obj.__code__.co_names:
+            if name in obj.__globals__:
+                children.append(
+                    (
+                        f"module-level name {name!r} used by {where}",
+                        obj.__globals__[name],
+                    )
+                )
+    elif inspect.ismodule(obj):
+        for name, value in list(vars(obj).items()):
+            children.append((f"module-level name {name!r} in {obj.__name__}", value))
+    elif inspect.isclass(obj):
+        for name, value in list(vars(obj).items()):
+            children.append((f"class attribute {obj.__name__}.{name}", value))
+    elif isinstance(obj, dict):
+        for key, value in list(obj.items()):
+            children.append((f"{description} -> key {key!r}", value))
+    elif isinstance(obj, (list, tuple, set, frozenset)):
+        for index, value in enumerate(obj):
+            children.append((f"{description} -> item {index}", value))
+    else:
+        instance_dict = getattr(obj, "__dict__", None)
+        if isinstance(instance_dict, dict):
+            for name, value in list(instance_dict.items()):
+                children.append(
+                    (
+                        f"attribute {name!r} of a {type(obj).__name__} in {description}",
+                        value,
+                    )
+                )
+
+    for child_description, child in children:
+        if _is_scalar(child) or inspect.ismodule(child):
+            continue
+        try:
+            cloudpickle.dumps(child, protocol=4)
+        except Exception:
+            narrower = _unpicklable_location(child, child_description, seen, depth + 1)
+            if narrower:
+                return narrower
+            kind = f"{type(child).__module__}.{type(child).__name__}"
+            return f"the {child_description}, which holds a {kind}"
+    return None
+
+
+def _refuse_unreproducible_packages(installed_modules: Set[str]) -> None:
+    """Refuse a payload that reaches into a package the cluster cannot install.
+
+    An editable checkout or a private VCS install has a version, but pinning
+    it would install some unrelated package of the same name -- or nothing at
+    all. Shipping the job anyway means waiting for the scheduler only to get a
+    ModuleNotFoundError, so say it here, naming the package.
+    """
+    if not installed_modules:
+        return
+    owners = unreproducible_module_owners()
+    offenders = sorted(owners[name] for name in installed_modules if name in owners)
+    if not offenders:
+        return
+    listed = "; ".join(offenders)
+    raise RuntimeError(
+        "This function uses package(s) that cannot be installed on the "
+        f"cluster: {listed}. clustrix mirrors your environment with "
+        "`pip install name==version`, which for these would install something "
+        "other than what you are running. Publish the package, vendor the code "
+        "into your project directory so clustrix can send it by value, or list "
+        "it in `excluded_packages` if the remote job genuinely does not need it."
+    )
+
+
 def _dumps_by_value(obj: Any) -> bytes:
     """Serialize `obj` so a fresh interpreter can rebuild it without imports.
 
@@ -359,11 +701,11 @@ def _dumps_by_value(obj: Any) -> bytes:
     """
     # Modules from the user's own project do not exist on the worker, so
     # anything reaching into them must be embedded rather than imported.
-    local_modules = []
-    try:
-        local_modules = _referenced_local_modules(obj)
-    except Exception:
-        pass
+    # A failure to walk is not swallowed: not knowing what a payload needs is
+    # not the same as knowing it needs nothing.
+    local_modules_map, installed_modules = _walk_referenced_modules(obj)
+    local_modules = list(local_modules_map.values())
+    _refuse_unreproducible_packages(installed_modules)
     if local_modules:
         # No silent degradation here. Falling back to a by-reference payload
         # would produce exactly the ModuleNotFoundError this branch exists to
@@ -371,18 +713,31 @@ def _dumps_by_value(obj: Any) -> bytes:
         # can plainly see on their own disk.
         try:
             with _pickled_by_value(local_modules):
-                return cloudpickle.dumps(obj, protocol=4)
-        except Exception as e:
+                try:
+                    return cloudpickle.dumps(obj, protocol=4)
+                except Exception as exc:
+                    where = _unpicklable_location(obj, "the submitted payload")
+                    raise RuntimeError(
+                        "Cannot serialize this job: "
+                        + (
+                            f"{where} cannot be pickled ({exc})."
+                            if where
+                            else f"something it reaches cannot be pickled ({exc})."
+                        )
+                        + " Locks, open files, sockets and database handles cannot "
+                        "cross to a worker. Create it where it is used instead of "
+                        "capturing it, or install the package on the cluster so "
+                        "the worker imports it rather than receiving a copy."
+                    ) from exc
+        except RuntimeError:
+            raise
+        except Exception as exc:
             names = ", ".join(
                 sorted(getattr(m, "__name__", "?") for m in local_modules)
             )
             raise RuntimeError(
-                f"Cannot send your local module(s) [{names}] to the cluster: {e}. "
-                "Something reachable from them cannot be serialized -- a lock, "
-                "an open file, a database handle or similar held at module "
-                "level. Move it inside a function, or install the package so "
-                "the worker imports it instead of receiving a copy."
-            ) from e
+                f"Cannot send your local module(s) [{names}] to the cluster: {exc}."
+            ) from exc
 
     try:
         return dill.dumps(obj, protocol=4, recurse=True)
@@ -413,8 +768,6 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     # Get current environment info
     requirements = get_environment_requirements()
-    # Get environment info (not used here but needed for compatibility)
-    _ = get_environment_info()  # For compatibility with tests
 
     # Try to get function source code for better cross-Python compatibility
     func_source = None
@@ -465,7 +818,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     }
 
 
-def deserialize_function(func_data: bytes) -> tuple:
+def deserialize_function(func_data: Union[bytes, Dict[str, Any]]) -> tuple:
     """
     Deserialize function data back to function, args, and kwargs.
 
@@ -495,68 +848,239 @@ def deserialize_function(func_data: bytes) -> tuple:
         raise ValueError("Invalid function data format")
 
 
-def _freeze_commands() -> List[List[str]]:
-    """Freeze commands to try, richest first, for the local environment.
+#: Distributions that are never mirrored onto the worker. clustrix is the
+#: machinery that runs the job, not part of the user's environment: the worker
+#: gets its serialization dependencies explicitly, and a checkout of clustrix
+#: pinned to a local editable path would fail to install anyway.
+_NEVER_REPLICATED = frozenset({"clustrix"})
 
-    Which one applies depends on how the environment was built:
+#: Packages the worker cannot run without, whatever the local environment says.
+_ESSENTIAL_PACKAGES = ("cloudpickle", "dill")
 
-    * **uv** manages its own resolution, and ``uv pip freeze`` reports what it
-      installed into the active environment;
-    * **conda** environments are covered by pip's freeze, because
-      ``pip list --format=freeze`` reports conda-installed distributions too --
-      unlike ``pip freeze``, which omits them;
-    * plain **pip** environments are the same command.
 
-    Ordering matters only in that the first command to produce output wins.
+def _canonical_package_name(name: str) -> str:
+    """PEP 503 normalised form, so ``zope.interface`` and ``zope-interface`` match."""
+    return re.sub(r"[-_.]+", "-", name).strip().lower()
+
+
+def _source_checkout_path(dist: Any) -> Optional[str]:
+    """Where this distribution's source tree is, if it is only a checkout.
+
+    ``setup.py develop`` and older editable installs leave a bare ``.egg-info``
+    inside the project directory and nothing in site-packages, so there is no
+    ``direct_url.json`` to give the game away. A ``.dist-info`` in an unusual
+    prefix is a perfectly ordinary install and is NOT this; the tell is the
+    ``PKG-INFO`` that only egg-info metadata carries, combined with a location
+    outside every installed root.
     """
-    commands = []
-    if os.environ.get("UV_PROJECT_ENVIRONMENT") or is_uv_available():
-        commands.append(["uv", "pip", "freeze", "--python", sys.executable])
-    commands.append([sys.executable, "-m", "pip", "list", "--format=freeze"])
-    return commands
+    try:
+        if dist.read_text("PKG-INFO") is None:
+            return None
+        location = os.path.realpath(str(dist.locate_file("")))
+    except Exception:  # pragma: no cover - metadata with no locatable path
+        return None
+    rooted = location.rstrip(os.sep) + os.sep
+    if any(rooted.startswith(root) for root in _INSTALLED_ROOTS):
+        return None
+    return location
+
+
+def _unreproducible_reason(
+    direct_url: Optional[Dict[str, Any]], source_checkout: Optional[str]
+) -> Optional[str]:
+    """Why this distribution cannot be reinstalled on another host, or None.
+
+    A ``name @ file:///...work`` line is NOT such a case: conda records the
+    build directory it compiled from, but the built artifact went into
+    site-packages like any other wheel and ``name==version`` reinstalls it.
+    Dropping those -- a third of a conda environment -- is what made
+    ``import astropy`` fail on the worker.
+
+    The genuinely unreproducible ones are those whose content lives somewhere
+    the cluster cannot reach: an editable install pointing at a working tree on
+    this laptop, a VCS checkout that may need credentials, or a bare
+    ``.egg-info`` sitting in a source tree. Their version exists, but pinning
+    it would install some unrelated package of the same name off an index.
+    """
+    if direct_url:
+        url = direct_url.get("url") or "an unrecorded location"
+        vcs_info = direct_url.get("vcs_info")
+        if isinstance(vcs_info, dict):
+            return f"installed from a {vcs_info.get('vcs', 'VCS')} checkout of {url}"
+        dir_info = direct_url.get("dir_info")
+        if isinstance(dir_info, dict) and dir_info.get("editable"):
+            return f"installed in editable mode from {url}"
+    if source_checkout is not None:
+        return f"only present as a source checkout at {source_checkout}"
+    return None
+
+
+#: Scanning installed metadata costs a few hundred milliseconds, and a single
+#: submission asks for it several times (once for the requirement set, once per
+#: serialized payload to check for uninstallable packages). Keyed on sys.path,
+#: because sys.path is what decides which distributions are visible: any change
+#: that could change the answer changes the key.
+_DISTRIBUTION_CACHE: (
+    "collections.OrderedDict[Tuple[str, ...], Dict[str, Dict[str, Any]]]"
+) = collections.OrderedDict()
+_DISTRIBUTION_CACHE_SIZE = 8
+
+
+def _distribution_records() -> Dict[str, Dict[str, Any]]:
+    """Every distribution importable from this interpreter, keyed canonically.
+
+    Read straight from installed metadata rather than from a freeze
+    subprocess. ``pip list --format=freeze`` and ``uv pip freeze`` disagree
+    about the same environment -- uv renders every conda-built distribution as
+    ``name @ file:///...`` and every editable as ``-e file:///...``, pip
+    renders both as ``name==version`` -- so which command happened to be on
+    PATH changed both the requirement set and the environment cache key for a
+    machine whose environment had not changed at all. The metadata is the same
+    for both, so this is the same answer every time.
+
+    One name can be found twice -- a site-packages ``.dist-info`` for an
+    editable install plus the ``.egg-info`` in the source tree it points at.
+    The unreproducible reading of a name wins, so an editable install cannot
+    be laundered into a plain pin by whichever copy is enumerated last.
+
+    Returns:
+        Canonical name -> ``{"name", "version", "reason", "dist"}``, where
+        ``reason`` is None for anything a plain ``pip install name==version``
+        recreates.
+    """
+    cache_key = tuple(sys.path)
+    cached = _DISTRIBUTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
+    records: Dict[str, Dict[str, Any]] = {}
+    for dist in importlib_metadata.distributions():
+        try:
+            name = dist.metadata["Name"]
+            version = dist.version
+        except Exception:  # pragma: no cover - a broken .dist-info on disk
+            continue
+        if not name or not version:
+            continue
+        direct_url: Optional[Dict[str, Any]] = None
+        try:
+            raw = dist.read_text("direct_url.json")
+        except Exception:  # pragma: no cover - unreadable metadata file
+            raw = None
+        if raw:
+            try:
+                parsed = json.loads(raw)
+            except ValueError:
+                parsed = None
+            if isinstance(parsed, dict):
+                direct_url = parsed
+        record = {
+            "name": name,
+            "version": version,
+            "reason": _unreproducible_reason(direct_url, _source_checkout_path(dist)),
+            "dist": dist,
+        }
+        canonical = _canonical_package_name(name)
+        previous = records.get(canonical)
+        if previous is not None and previous["reason"] and not record["reason"]:
+            continue
+        records[canonical] = record
+
+    _DISTRIBUTION_CACHE[cache_key] = records
+    while len(_DISTRIBUTION_CACHE) > _DISTRIBUTION_CACHE_SIZE:
+        _DISTRIBUTION_CACHE.popitem(last=False)
+    return records
 
 
 def get_environment_requirements() -> Dict[str, str]:
     """Get current Python environment requirements.
 
     Returns a name -> version map of everything installed locally, so the
-    remote execution environment can be rebuilt to match. Entries pip reports
-    without a plain ``==`` pin -- editable installs, local paths, VCS and
-    direct URL references -- are skipped: they name a location on this machine
-    that does not exist on the cluster.
+    remote execution environment can be rebuilt to match. Distributions that
+    cannot be reinstalled elsewhere -- editable installs of a local working
+    tree, VCS checkouts -- are not pinned here, because pinning their version
+    would install some unrelated package of the same name off an index. They
+    are reported by :func:`get_unreproducible_requirements` instead, and
+    refused loudly at submit time if the job actually needs one.
     """
-
-    requirements = {}
-
-    for command in _freeze_commands():
-        try:
-            result = subprocess.run(command, capture_output=True, text=True)
-        except (OSError, subprocess.SubprocessError):
+    requirements: Dict[str, str] = {}
+    for canonical, record in _distribution_records().items():
+        if canonical in _NEVER_REPLICATED:
             continue
-        if result.returncode != 0:
+        if record["reason"]:
             continue
-        for line in result.stdout.strip().split("\n"):
-            line = line.strip()
-            if not line or line.startswith(("-e", "#")) or "@" in line:
-                continue
-            if "==" in line:
-                package, version = line.split("==", 1)
-                requirements[package.strip()] = version.strip()
-        if requirements:
-            break
+        requirements[record["name"]] = record["version"]
 
-    # Always include essential packages
-    essential_packages = ["cloudpickle", "dill"]
-    for pkg in essential_packages:
+    for pkg in _ESSENTIAL_PACKAGES:
         if pkg not in requirements:
             try:
                 mod = importlib.import_module(pkg)
-                if hasattr(mod, "__version__"):
-                    requirements[pkg] = mod.__version__
             except ImportError:
-                pass
+                continue
+            version = getattr(mod, "__version__", None)
+            if version:
+                requirements[pkg] = version
 
     return requirements
+
+
+def get_unreproducible_requirements() -> Dict[str, str]:
+    """Installed distributions that no ``pip install`` on the cluster can recreate.
+
+    Returns:
+        Distribution name -> plain-English reason, for editable and VCS
+        installs. clustrix itself is omitted: the worker never installs it.
+    """
+    unreproducible: Dict[str, str] = {}
+    for canonical, record in _distribution_records().items():
+        if canonical in _NEVER_REPLICATED:
+            continue
+        if record["reason"]:
+            unreproducible[record["name"]] = record["reason"]
+    return unreproducible
+
+
+def _distribution_import_names(dist: Any) -> List[str]:
+    """Top-level module names a distribution provides."""
+    names: Set[str] = set()
+    try:
+        text = dist.read_text("top_level.txt")
+    except Exception:  # pragma: no cover - unreadable metadata file
+        text = None
+    if text:
+        names.update(line.strip() for line in text.splitlines() if line.strip())
+    if not names:
+        try:
+            files = dist.files or []
+        except Exception:  # pragma: no cover - metadata without a file list
+            files = []
+        for entry in files:
+            head = str(entry).replace("\\", "/").split("/")[0]
+            if head.endswith(".py"):
+                head = head[:-3]
+            if head and not head.endswith((".dist-info", ".egg-info")):
+                names.add(head)
+    return sorted(n for n in names if n.isidentifier())
+
+
+def unreproducible_module_owners() -> Dict[str, str]:
+    """Import name -> reason, for modules whose distribution cannot be reinstalled.
+
+    Used to refuse a submission that reaches into such a package rather than
+    letting the worker die on ``import``. Only the handful of unreproducible
+    distributions are indexed, so this stays cheap.
+    """
+    owners: Dict[str, str] = {}
+    for canonical, record in _distribution_records().items():
+        if canonical in _NEVER_REPLICATED:
+            continue
+        reason = record["reason"]
+        if not reason:
+            continue
+        label = f"{record['name']} ({reason})"
+        for import_name in _distribution_import_names(record["dist"]):
+            owners[import_name] = label
+    return owners
 
 
 def get_environment_info() -> str:
@@ -655,7 +1179,8 @@ def setup_environment(
 
         setup_commands = [
             f"mkdir -p {work_dir}/conda_envs",
-            f"conda create -p {env_path} python={config.python_executable.replace('python', '3.11')} -y",
+            f"conda create -p {shlex.quote(env_path)} "
+            f"python={validate_shell_fragment('python_executable', config.python_executable).replace('python', '3.11')} -y",
         ]
 
         # Install requirements with conda
@@ -672,19 +1197,19 @@ dependencies:
 
             setup_commands.extend(
                 [
-                    f"echo '{env_content}' > {env_file}",
-                    f"conda env update -p {env_path} -f {env_file}",
+                    f"echo {shlex.quote(env_content)} > {shlex.quote(env_file)}",
+                    f"conda env update -p {shlex.quote(env_path)} -f {shlex.quote(env_file)}",
                 ]
             )
 
-        return f"conda run -p {env_path} python"
+        return f"conda run -p {shlex.quote(env_path)} python"
 
     else:
         # Create virtual environment (for pip/uv)
         venv_path = f"{work_dir}/venv"
 
         setup_commands = [
-            f"python -m venv {venv_path}",
+            f"python -m venv {shlex.quote(venv_path)}",
             f"source {venv_path}/bin/activate",
         ]
 
@@ -698,8 +1223,8 @@ dependencies:
             # This would need to be written to remote file
             setup_commands.extend(
                 [
-                    f"echo '{req_content}' > {req_file}",
-                    f"{venv_path}/bin/{pkg_manager} install -r {req_file}",
+                    f"echo {shlex.quote(req_content)} > {shlex.quote(req_file)}",
+                    f"{shlex.quote(venv_path)}/bin/{pkg_manager} install -r {shlex.quote(req_file)}",
                 ]
             )
 
@@ -750,8 +1275,50 @@ def _environment_key(
     return f"py{python_version.replace('.', '')}_{digest}"
 
 
+#: Dropped into a conda environment only after every setup command in it
+#: succeeded. Presence of the environment NAME proves nothing: a run whose
+#: package installs failed left a named but half-built environment behind, and
+#: every later job with the same requirements "reused" it and skipped setup.
+_ENV_READY_MARKER = ".clustrix_ready"
+
+
+def _parse_conda_env_paths(listing: str) -> Dict[str, str]:
+    """Map environment name -> prefix path from ``conda env list`` output."""
+    paths: Dict[str, str] = {}
+    for line in listing.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        fields = line.split()
+        if len(fields) < 2:
+            continue
+        prefix = fields[-1]
+        if not prefix.startswith("/"):
+            continue
+        paths[fields[0]] = prefix
+    return paths
+
+
+def _conda_env_marker_path(prefix: str) -> str:
+    """Where the readiness marker lives inside a conda environment prefix."""
+    return f"{prefix.rstrip('/')}/{_ENV_READY_MARKER}"
+
+
+def _conda_env_ready_commands(env_names: List[str]) -> List[str]:
+    """Commands that stamp each environment as fully built.
+
+    Appended last, so the ``&&`` chain only reaches them when every create and
+    every install before them succeeded.
+    """
+    stamp = (
+        "import os, sys; "
+        f"open(os.path.join(sys.prefix, {_ENV_READY_MARKER!r}), 'w').close()"
+    )
+    return [f'conda run -n {name} python -c "{stamp}"' for name in env_names]
+
+
 def _conda_envs_exist(ssh_client, conda_setup_prefix: str, *env_names: str) -> bool:
-    """True when every named conda environment is already present remotely."""
+    """True when every named conda environment exists AND finished building."""
     prefix = f"{conda_setup_prefix} && " if conda_setup_prefix else ""
     try:
         stdin, stdout, stderr = ssh_client.exec_command(
@@ -761,12 +1328,65 @@ def _conda_envs_exist(ssh_client, conda_setup_prefix: str, *env_names: str) -> b
     except Exception as e:  # pragma: no cover - defensive
         logger.debug(f"Could not list conda environments: {e}")
         return False
-    existing = {
-        line.split()[0]
-        for line in listing.splitlines()
-        if line.strip() and not line.startswith("#")
-    }
-    return all(name in existing for name in env_names)
+    existing = _parse_conda_env_paths(listing)
+    for name in env_names:
+        env_prefix = existing.get(name)
+        if not env_prefix:
+            return False
+        marker = _conda_env_marker_path(env_prefix)
+        try:
+            stdin, stdout, stderr = ssh_client.exec_command(
+                f"test -f {shlex.quote(marker)}"
+            )
+            if stdout.channel.recv_exit_status() != 0:
+                logger.debug(
+                    "Conda environment %s exists but was never finished; rebuilding.",
+                    name,
+                )
+                return False
+        except Exception as e:  # pragma: no cover - defensive
+            logger.debug(f"Could not check readiness of {name}: {e}")
+            return False
+    return True
+
+
+def _select_remote_python(
+    probed: List[Tuple[str, str]], local_version: str
+) -> Tuple[str, str]:
+    """Choose a remote interpreter whose minor version matches this one.
+
+    dill and cloudpickle embed CPython bytecode in the payload, and that
+    bytecode does not load across minor versions -- a 3.9 worker handed a 3.12
+    payload dies on "unknown opcode", which names nothing the user can act on.
+    The old code took the first remote interpreter that was merely >= 3.6 and
+    never compared it to the local one.
+
+    Args:
+        probed: ``(command, "major.minor")`` pairs actually found remotely, in
+            preference order.
+        local_version: ``"major.minor"`` of the submitting interpreter.
+
+    Returns:
+        The matching ``(command, version)``.
+
+    Raises:
+        RuntimeError: when no remote interpreter matches.
+    """
+    for command, version in probed:
+        if version == local_version:
+            return command, version
+    if probed:
+        found = ", ".join(sorted({version for _, version in probed}))
+        raise RuntimeError(
+            f"The remote system has Python {found}, but this session runs "
+            f"Python {local_version}. Serialized functions carry CPython "
+            "bytecode, which cannot be loaded by a different minor version, so "
+            f"the cluster needs a Python {local_version} interpreter -- or "
+            "conda, which clustrix will use to create one."
+        )
+    raise RuntimeError(
+        "No Python 3 interpreter found on the remote system. Consider installing conda."
+    )
 
 
 def _write_remote_text(ssh_client, remote_path: str, content: str) -> None:
@@ -891,6 +1511,7 @@ def setup_two_venv_environment(
             "python",
         ]
 
+        probed: List[Tuple[str, str]] = []
         for python_cmd in venv1_candidates:
             test_cmd = (
                 f"{python_cmd} -c 'import sys; print(sys.version_info[:2])' 2>/dev/null"
@@ -902,20 +1523,18 @@ def setup_two_venv_environment(
                 try:
                     version_str = version_output.split("(")[1].split(")")[0]
                     major, minor = map(int, version_str.split(", ")[:2])
-
-                    if major == 3 and minor >= 6:
-                        venv1_python = python_cmd
-                        remote_python_version = f"{major}.{minor}"
-                        break
                 except Exception:
                     continue
+                if major == 3:
+                    probed.append((python_cmd, f"{major}.{minor}"))
+                    if f"{major}.{minor}" == local_python_version:
+                        break
 
+        # Not "any Python 3 will do": the payload's bytecode is version-locked.
+        venv1_python, remote_python_version = _select_remote_python(
+            probed, local_python_version
+        )
         compatible_python = venv1_python
-
-        if not compatible_python:
-            raise RuntimeError(
-                "No compatible Python version found on remote system. Consider installing conda."
-            )
 
     # Environment names.
     #
@@ -936,7 +1555,7 @@ def setup_two_venv_environment(
     conda_env1_name = f"clustrix_venv1_{env_key}"
     conda_env2_name = f"clustrix_venv2_{env_key}"
 
-    commands = [f"cd {work_dir}"]
+    commands = [f"cd {shlex.quote(work_dir)}"]
     if conda_setup_prefix:
         # Every `conda ...` below runs in a fresh non-login shell, so conda.sh
         # has to be sourced first. The generated job script does the same.
@@ -968,11 +1587,13 @@ def setup_two_venv_environment(
             [
                 # Create VENV1 using conda, matching the local Python version
                 # so dill payloads round-trip (see remote_python_version above)
-                f"conda create -n {conda_env1_name} python={remote_python_version} -y",
+                f"conda create -n {shlex.quote(conda_env1_name)} "
+                f"python={shlex.quote(remote_python_version)} -y",
                 f"conda run -n {conda_env1_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv1'",
-                f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in conda venv1'",
+                f"conda run -n {conda_env1_name} pip install dill cloudpickle --timeout=30",
                 # Create VENV2 using conda, same version as VENV1 for execution
-                f"conda create -n {conda_env2_name} python={remote_python_version} -y",
+                f"conda create -n {shlex.quote(conda_env2_name)} "
+                f"python={shlex.quote(remote_python_version)} -y",
                 f"conda run -n {conda_env2_name} pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for conda venv2'",
             ]
         )
@@ -981,14 +1602,14 @@ def setup_two_venv_environment(
         commands.extend(
             [
                 # Create VENV1 (serialization environment)
-                f"{compatible_python} -m venv {venv1_path}",
-                f"source {venv1_path}/bin/activate",
+                f"{compatible_python} -m venv {shlex.quote(venv1_path)}",
+                f"source {shlex.quote(venv1_path)}/bin/activate",
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv1'",
-                "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages in venv1'",
+                "pip install dill cloudpickle --timeout=30",
                 "deactivate",
                 # Create VENV2 using regular venv
-                f"{compatible_python} -m venv {venv2_path}",
-                f"source {venv2_path}/bin/activate",
+                f"{compatible_python} -m venv {shlex.quote(venv2_path)}",
+                f"source {shlex.quote(venv2_path)}/bin/activate",
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
                 "deactivate",
             ]
@@ -1000,22 +1621,23 @@ def setup_two_venv_environment(
         if compatible_python == "conda":
             if pkg in requirements:
                 commands.append(
-                    f"conda run -n {conda_env2_name} pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in conda venv2'"
+                    f"conda run -n {conda_env2_name} pip install "
+                    f"{shlex.quote(f'{pkg}=={requirements[pkg]}')} --timeout=30"
                 )
             else:
                 commands.append(
-                    f"conda run -n {conda_env2_name} pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in conda venv2'"
+                    f"conda run -n {conda_env2_name} pip install "
+                    f"{shlex.quote(pkg)} --timeout=30"
                 )
         else:
-            commands.append(f"source {venv2_path}/bin/activate")
+            commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
             if pkg in requirements:
                 commands.append(
-                    f"pip install {pkg}=={requirements[pkg]} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
+                    f"pip install {shlex.quote(f'{pkg}=={requirements[pkg]}')} "
+                    f"--timeout=30"
                 )
             else:
-                commands.append(
-                    f"pip install {pkg} --timeout=30 || echo 'Failed to install {pkg} in venv2'"
-                )
+                commands.append(f"pip install {shlex.quote(pkg)} --timeout=30")
             commands.append("deactivate")
 
     # Rebuild the local environment on the worker.
@@ -1058,11 +1680,11 @@ def setup_two_venv_environment(
             # environment does not match the local one, and the function will
             # fail later with a less obvious error. Name it now. `excluded_packages`
             # is the documented way to drop one deliberately.
-            install = f"pip install -r {requirements_path} --timeout=300"
+            install = f"pip install -r {shlex.quote(requirements_path)} --timeout=300"
             if compatible_python == "conda":
                 commands.append(f"conda run -n {conda_env2_name} {install}")
             else:
-                commands.append(f"source {venv2_path}/bin/activate")
+                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
                 commands.append(install)
                 commands.append("deactivate")
 
@@ -1074,12 +1696,13 @@ def setup_two_venv_environment(
                 # Simple package name or package==version
                 if compatible_python == "conda":
                     commands.append(
-                        f"conda run -n {conda_env2_name} pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
+                        f"conda run -n {conda_env2_name} pip install "
+                        f"{shlex.quote(package_spec)} --timeout=300"
                     )
                 else:
-                    commands.append(f"source {venv2_path}/bin/activate")
+                    commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
                     commands.append(
-                        f"pip install {package_spec} --timeout=300 || echo 'Failed to install cluster package: {package_spec}'"
+                        f"pip install {shlex.quote(package_spec)} --timeout=300"
                     )
                     commands.append("deactivate")
             elif isinstance(package_spec, dict):
@@ -1091,14 +1714,17 @@ def setup_two_venv_environment(
                 if pkg_name:
                     if compatible_python == "conda":
                         install_cmd = (
-                            f"conda run -n {conda_env2_name} pip install {pkg_name}"
+                            f"conda run -n {conda_env2_name} pip install "
+                            f"{shlex.quote(pkg_name)}"
                         )
                     else:
-                        commands.append(f"source {venv2_path}/bin/activate")
-                        install_cmd = f"pip install {pkg_name}"
+                        commands.append(
+                            f"source {shlex.quote(venv2_path)}/bin/activate"
+                        )
+                        install_cmd = f"pip install {shlex.quote(pkg_name)}"
                     if pip_args:
                         install_cmd += f" {pip_args}"
-                    install_cmd += f" --timeout={timeout} || echo 'Failed to install cluster package: {pkg_name}'"
+                    install_cmd += f" --timeout={timeout}"
                     commands.append(install_cmd)
                     if compatible_python != "conda":
                         commands.append("deactivate")
@@ -1112,13 +1738,19 @@ def setup_two_venv_environment(
         for cmd in config.venv_post_install_commands:
             if compatible_python == "conda":
                 # Run post-install commands in conda environment
-                commands.append(
-                    f"conda run -n {conda_env2_name} {cmd} || echo 'Post-install command failed: {cmd}'"
-                )
+                commands.append(f"conda run -n {conda_env2_name} {cmd}")
             else:
-                commands.append(f"source {venv2_path}/bin/activate")
-                commands.append(f"{cmd} || echo 'Post-install command failed: {cmd}'")
+                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                commands.append(f"{cmd}")
                 commands.append("deactivate")
+
+    # Mark the environments complete. This is the LAST link in the `&&` chain,
+    # so it is only reached when every create and every install succeeded --
+    # which is what makes the reuse check above safe. Without it, a run whose
+    # installs failed left correctly-named but half-empty environments that
+    # every later job with the same requirements silently reused.
+    if compatible_python == "conda":
+        commands.extend(_conda_env_ready_commands([conda_env1_name, conda_env2_name]))
 
     # Execute setup commands
     full_command = " && ".join(commands)
@@ -1236,17 +1868,24 @@ def setup_python_compatible_environment(
         compat_venv_path = f"{work_dir}/compat_venv"
 
         commands = [
-            f"cd {work_dir}",
-            f"{compatible_python} -m venv {compat_venv_path}",
-            f"source {compat_venv_path}/bin/activate",
+            f"cd {shlex.quote(work_dir)}",
+            f"{compatible_python} -m venv {shlex.quote(compat_venv_path)}",
+            f"source {shlex.quote(compat_venv_path)}/bin/activate",
         ]
 
         # Install only essential packages for function execution
         # Skip complex requirements to avoid timeout issues
         commands.extend(
             [
+                # pip's own version is not part of the replicated environment,
+                # so failing to upgrade it is genuinely non-fatal.
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed, continuing...'",
-                "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages, using built-in pickle'",
+                # dill and cloudpickle are not optional: the generated worker
+                # refuses to fall back to stdlib pickle, because pickle
+                # serializes a function by qualified name and cannot resolve it
+                # in a fresh interpreter. Swallowing this failure only moved the
+                # error to a later, far more confusing point.
+                "pip install dill cloudpickle --timeout=30",
             ]
         )
 
@@ -1347,9 +1986,10 @@ def setup_remote_environment(
         env_path = f"{work_dir}/conda_envs/{env_name}"
 
         commands = [
-            f"cd {work_dir}",
+            f"cd {shlex.quote(work_dir)}",
             "mkdir -p conda_envs",
-            f"conda create -p {env_path} python={config.python_executable.replace('python', '3.11')} -y",
+            f"conda create -p {shlex.quote(env_path)} "
+            f"python={validate_shell_fragment('python_executable', config.python_executable).replace('python', '3.11')} -y",
         ]
 
         if requirements:
@@ -1368,38 +2008,29 @@ dependencies:
                 f.write(env_content)
             sftp.close()
 
-            commands.append(f"conda env update -p {env_path} -f environment.yml")
+            commands.append(
+                f"conda env update -p {shlex.quote(env_path)} -f environment.yml"
+            )
 
     else:
         # Create virtual environment (for pip/uv)
-        commands = [f"cd {work_dir}"]
+        commands = [f"cd {shlex.quote(work_dir)}"]
 
-        # Add module loads if specified in config
-        if config.module_loads:
-            for module in config.module_loads:
-                commands.append(f"module load {module}")
-
-        # Add environment variables if specified in config
-        if config.environment_variables:
-            for var, value in config.environment_variables.items():
-                commands.append(f"export {var}={value}")
-
-        # Add pre-execution commands if specified in config
-        if config.pre_execution_commands:
-            for cmd in config.pre_execution_commands:
-                commands.append(cmd)
+        # Module loads, environment variables and pre-execution commands, with
+        # the same quote-or-validate treatment the job scripts get.
+        commands.extend(environment_setup_lines(config))
 
         # Now create the virtual environment. `python_executable` defaults to
         # "python", which does not exist on most modern systems -- Python 3
         # installs ship `python3`, and `python` is only present where someone
-        # added a compatibility symlink. tensor01 is one of the many hosts
+        # added a compatibility symlink. Plenty of real hosts are
         # where it is absent, so `python -m venv venv` failed, the venv was
         # never created, and the job script then died on
         # `source venv/bin/activate` with "python: command not found".
         python_cmd = resolve_remote_python(ssh_client, config)
         commands.extend(
             [
-                f"{python_cmd} -m venv venv",
+                f"{shlex.quote(python_cmd)} -m venv venv",
                 "source venv/bin/activate",
             ]
         )
@@ -1415,7 +2046,7 @@ dependencies:
         # CPython bytecode and a mismatched pair is its own class of failure;
         # an unpinned install is the fallback, not the default.
         pinned = [
-            f"{pkg}=={version}"
+            shlex.quote(f"{pkg}=={version}")
             for pkg, version in (requirements or {}).items()
             if pkg.lower() in ("dill", "cloudpickle")
         ]
@@ -1443,11 +2074,47 @@ def result_key_export_line(remote_job_dir: str) -> str:
 
     Read from a 0600 file in the job directory rather than baked into job.sh,
     which is world-readable on some shared filesystems.
+
+    The path is quoted: it is an ordinary shell word, and it comes from
+    ``config.remote_work_dir``, so an unquoted ``$(...)`` in that setting ran
+    as a command inside the very line meant to protect the key.
     """
-    return (
-        f"export CLUSTRIX_RESULT_KEY=$(cat {remote_job_dir}/.clustrix_result_key "
-        f"2>/dev/null || true)"
-    )
+    key_file = shlex.quote(f"{remote_job_dir}/.clustrix_result_key")
+    return f"export CLUSTRIX_RESULT_KEY=$(cat {key_file} 2>/dev/null || true)"
+
+
+def environment_setup_lines(config) -> list:
+    """The module-load / export / pre-execution lines every generator emits.
+
+    Four script generators and ``setup_remote_environment`` each carried their
+    own copy, so a fix to one missed the rest. This is also the single place
+    where the quote-or-validate decision for these three settings lives:
+
+    * ``module_loads`` entries stay unquoted: ``module`` is a shell function
+      and the module name is its bare argument, so quoting would change what
+      is loaded. They are validated against a strict allowlist instead, and a
+      metacharacter is refused by name.
+    * ``environment_variables`` names cannot be quoted -- ``export NAME=``
+      needs the bare name -- so they are validated as shell identifiers. The
+      values beside them are quoted, which also makes a value containing a
+      space work for the first time.
+    * ``pre_execution_commands`` are shell commands by definition; quoting or
+      restricting them would delete the feature, so they pass through. A user
+      who writes a command there is asking for it to run.
+    """
+    lines: list = []
+    for module in getattr(config, "module_loads", None) or []:
+        if not str(module).strip():
+            # The widget's textarea yields blank lines; `module load ` is not
+            # an error worth refusing a job over.
+            continue
+        name = validate_shell_fragment("module_loads", str(module).strip())
+        lines.append(f"module load {name}")
+    for var, value in (getattr(config, "environment_variables", None) or {}).items():
+        lines.append(f"export {validate_env_var_name(var)}={shlex.quote(str(value))}")
+    for cmd in getattr(config, "pre_execution_commands", None) or []:
+        lines.append(cmd)
+    return lines
 
 
 def conda_activation_lines(config) -> list:
@@ -1490,10 +2157,25 @@ def generate_two_venv_execution_commands(
     Returns:
         List of command strings for two-venv execution
     """
+    # Every use below is an ordinary shell word, so quoting is the right
+    # treatment: `source <dir>/...` and `<dir>/.../python -c "` both keep
+    # working with the directory quoted, and a `$(...)` in remote_work_dir
+    # stops being a command. Two of these sites also *open* a double-quoted
+    # `python -c "` string, where an unquoted `"` broke straight out into the
+    # shell.
+    quoted_dir = shlex.quote(remote_job_dir)
+    env1 = shlex.quote(conda_env1_name) if conda_env1_name else None
+    env2 = shlex.quote(conda_env2_name) if conda_env2_name else None
 
     def _serializer_preamble() -> list:
-        """Lines selecting the richest available serializer as ``_ser``."""
-        return [
+        """Lines binding ``_ser`` to dill, or failing with a reason.
+
+        Falling back to stdlib pickle here was not a degradation, it was a
+        different bug: every payload these stages exchange is written by dill,
+        and pickle cannot read dill's bytes. The job then died somewhere in
+        the unpickler naming neither the missing package nor the real cause.
+        """
+        return key_capture_lines() + [
             "import pickle",
             "try:",
             "    import dill as _ser",
@@ -1501,7 +2183,12 @@ def generate_two_venv_execution_commands(
             "    try:",
             "        import cloudpickle as _ser",
             "    except ImportError:",
-            "        _ser = pickle",
+            "        raise RuntimeError(",
+            "            'clustrix needs dill (or at least cloudpickle) in this '",
+            "            'environment: the function, its arguments and its result '",
+            "            'are exchanged as dill bytes, which stdlib pickle cannot '",
+            "            'read. Install it on the cluster (pip install dill) and '",
+            "            're-submit.')",
         ]
 
     def _error_handler(stage: str, message: str) -> list:
@@ -1511,33 +2198,42 @@ def generate_two_venv_execution_commands(
         only claims the shared ``error.pkl`` if no earlier stage already did.
         Without this, a stage-1 failure is overwritten by the cascade it
         causes, and the caller is shown the symptom instead of the cause.
+
+        ``error.pkl`` is signed exactly like ``result.pkl``: the caller
+        deserializes it with dill, so an unsigned one would make "make the
+        job fail" a way to hand the submitting machine arbitrary code.
         """
-        return [
-            "except Exception as e:",
-            f"    print('{message}', str(e))",
-            "    traceback.print_exc()",
-            "    import os as _os",
-            "    _payload = {"
-            "'error': str(e), "
-            "'traceback': traceback.format_exc(), "
-            f"'stage': '{stage}'"
-            "}",
-            # Ship the exception OBJECT too, so the caller can catch the type
-            # the function actually raised instead of a generic RuntimeError.
-            # _ser (dill) handles exception classes defined in the caller's
-            # __main__; an exception that refuses to serialize at all must not
-            # take the error report down with it.
-            "    try:",
-            "        _blob = _ser.dumps(dict(_payload, exception=e), protocol=4)",
-            "    except Exception:",
-            "        _blob = pickle.dumps(_payload, protocol=4)",
-            f"    with open('error_{stage}.pkl', 'wb') as f:",
-            "        f.write(_blob)",
-            "    if not _os.path.exists('error.pkl'):",
-            "        with open('error.pkl', 'wb') as f:",
-            "            f.write(_blob)",
-            "    raise",
-        ]
+        return (
+            [
+                "except Exception as e:",
+                f"    print('{message}', str(e))",
+                "    traceback.print_exc()",
+                "    import os as _os",
+                "    _payload = {"
+                "'error': str(e), "
+                "'traceback': traceback.format_exc(), "
+                f"'stage': '{stage}'"
+                "}",
+                # Ship the exception OBJECT too, so the caller can catch the type
+                # the function actually raised instead of a generic RuntimeError.
+                # _ser (dill) handles exception classes defined in the caller's
+                # __main__; an exception that refuses to serialize at all must not
+                # take the error report down with it.
+                "    try:",
+                "        _blob = _ser.dumps(dict(_payload, exception=e), protocol=4)",
+                "    except Exception:",
+                "        _blob = pickle.dumps(_payload, protocol=4)",
+                f"    with open('error_{stage}.pkl', 'wb') as f:",
+                "        f.write(_blob)",
+                "    if not _os.path.exists('error.pkl'):",
+                "        with open('error.pkl', 'wb') as f:",
+                "            f.write(_blob)",
+            ]
+            + payload_signing_lines("_blob", "error.pkl", indent="        ")
+            + [
+                "    raise",
+            ]
+        )
 
     return (
         [
@@ -1549,13 +2245,9 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+                else f"source {quoted_dir}/venv1_serialization/bin/activate"
             ),
-            (
-                f'conda run -n {conda_env1_name} python -c "'
-                if conda_env1_name
-                else 'python -c "'
-            ),
+            (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
         + _serializer_preamble()
         + [
@@ -1646,12 +2338,12 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env2_name}"
                 if conda_env2_name
-                else f"source {remote_job_dir}/venv2_execution/bin/activate"
+                else f"source {quoted_dir}/venv2_execution/bin/activate"
             ),
             (
-                f'conda run -n {conda_env2_name} python -c "'
+                f'conda run -n {env2} python -c "'
                 if conda_env2_name
-                else f'{remote_job_dir}/venv2_execution/bin/python -c "'
+                else f'{quoted_dir}/venv2_execution/bin/python -c "'
             ),
         ]
         + _serializer_preamble()
@@ -1707,13 +2399,9 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f"source {remote_job_dir}/venv1_serialization/bin/activate"
+                else f"source {quoted_dir}/venv1_serialization/bin/activate"
             ),
-            (
-                f'conda run -n {conda_env1_name} python -c "'
-                if conda_env1_name
-                else 'python -c "'
-            ),
+            (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
         + _serializer_preamble()
         + [
@@ -1738,14 +2426,9 @@ def generate_two_venv_execution_commands(
             "    # Tag the result so the caller can tell it apart from anything",
             "    # else that may have been written into this directory. Loading a",
             "    # pickle executes code, so the caller must not do it on trust.",
-            "    import hashlib as _hashlib",
-            "    import hmac as _hmac",
-            "    _key = os.environ.get('CLUSTRIX_RESULT_KEY', '')",
-            "    if _key:",
-            "        _tag = _hmac.new(_key.encode(), _payload_bytes, "
-            "_hashlib.sha256).hexdigest()",
-            "        with open('result.pkl.hmac', 'w') as f:",
-            "            f.write(_tag)",
+        ]
+        + payload_signing_lines("_payload_bytes", "result.pkl")
+        + [
             "    ",
             "    print('Result serialized successfully')",
             "    ",
@@ -1870,7 +2553,48 @@ def create_job_script(
         raise ValueError(f"Unsupported cluster type: {cluster_type}")
 
 
-def result_signing_lines(indent: str = "    ") -> list:
+def key_capture_lines(indent: str = "") -> list:
+    """Take CLUSTRIX_RESULT_KEY out of the environment, keeping its value.
+
+    The key is the whole basis on which the caller believes a result came
+    from this job, so anything that can read it can forge one -- and the
+    user's function, plus every dependency it imports, runs in this same
+    process. Nothing needs the variable after this point: the signing lines
+    below use the captured value, so the environment the function inherits no
+    longer carries the secret.
+    """
+    return [
+        f"{indent}import os as _os",
+        f"{indent}_CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')",
+    ]
+
+
+def payload_signing_lines(payload_var: str, target: str, indent: str = "    ") -> list:
+    """Python lines writing ``<target>.hmac`` beside a payload the caller reads.
+
+    The single place any remote stage tags a file. ``result.pkl`` had one and
+    ``error.pkl`` had none, which made "make the job fail" a complete bypass
+    of the check: both files end up in ``dill.loads`` on the submitting
+    machine, so both must be signed with the per-job key.
+
+    Args:
+        payload_var: Name of the Python variable holding the exact bytes that
+            were written -- the tag has to cover those, not a re-serialization.
+        target: File name that was written, e.g. ``result.pkl``.
+        indent: Leading whitespace for the emitted lines.
+    """
+    return [
+        f"{indent}import hashlib as _hashlib",
+        f"{indent}import hmac as _hmac",
+        f"{indent}if _CLUSTRIX_KEY:",
+        f"{indent}    _tag = _hmac.new(_CLUSTRIX_KEY.encode(), {payload_var}, "
+        "_hashlib.sha256).hexdigest()",
+        f"{indent}    with open('{target}.hmac', 'w') as _sigf:",
+        f"{indent}        _sigf.write(_tag)",
+    ]
+
+
+def result_signing_lines(indent: str = "    ", serializer: str = "pickle") -> list:
     """Python lines that write result.pkl together with its HMAC.
 
     Both execution branches must emit this. The single-venv branch did not,
@@ -1878,21 +2602,20 @@ def result_signing_lines(indent: str = "    ") -> list:
     fell back to it (use_two_venv=False, or any two-venv setup failure or
     timeout) produced a result the caller then refused as unsigned. A degraded
     but working path became a hard failure.
+
+    Args:
+        indent: Leading whitespace for the emitted lines.
+        serializer: Name of the module-or-alias in scope on the worker that
+            writes the bytes. The caller loads ``result.pkl`` with dill, so a
+            worker that has dill should write it with dill: the cloud script
+            passes its ``_ser`` alias here, where it previously used stdlib
+            ``pickle.dump`` under a comment claiming otherwise.
     """
     return [
-        f"{indent}_payload_bytes = pickle.dumps(result, protocol=4)",
+        f"{indent}_payload_bytes = {serializer}.dumps(result, protocol=4)",
         f"{indent}with open('result.pkl', 'wb') as f:",
         f"{indent}    f.write(_payload_bytes)",
-        f"{indent}import hashlib as _hashlib",
-        f"{indent}import hmac as _hmac",
-        f"{indent}import os as _os",
-        f"{indent}_key = _os.environ.get('CLUSTRIX_RESULT_KEY', '')",
-        f"{indent}if _key:",
-        f"{indent}    _tag = _hmac.new(_key.encode(), _payload_bytes, "
-        "_hashlib.sha256).hexdigest()",
-        f"{indent}    with open('result.pkl.hmac', 'w') as f:",
-        f"{indent}        f.write(_tag)",
-    ]
+    ] + payload_signing_lines("_payload_bytes", "result.pkl", indent)
 
 
 def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
@@ -1906,12 +2629,17 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
     """
     script_lines: list = []
     # Add execution commands
-    python_cmd = config.python_executable if config.python_executable else "python"
+    # `python_executable` is a single command word (config default "python"),
+    # so quoting is the right treatment -- it survives a path with a space and
+    # neutralises anything else.
+    python_cmd = shlex.quote(config.python_executable or "python")
+    # `cd` takes an ordinary shell word, so the job directory is quoted here.
+    quoted_dir = shlex.quote(remote_job_dir)
 
     # Check if we have two-venv setup
     if hasattr(config, "venv_info") and config.venv_info:
         # Use the centralized two-venv approach for cross-version compatibility
-        script_lines.append(f"cd {remote_job_dir}")
+        script_lines.append(f"cd {quoted_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
         script_lines.append(result_key_export_line(remote_job_dir))
@@ -1926,9 +2654,12 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
         script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(
             [
-                f"cd {remote_job_dir}",
+                f"cd {quoted_dir}",
                 "source venv/bin/activate",
                 f'{python_cmd} -c "',
+            ]
+            + key_capture_lines()
+            + [
                 "import pickle",
                 "import sys",
                 "import traceback",
@@ -1946,15 +2677,30 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
                 "    with open('function_data.pkl', 'rb') as f:",
                 "        data = pickle.load(f)",
                 "    ",
-                "    # Try dill first, then cloudpickle",
-                "    try:",
-                "        func = dill.loads(data['function']) if dill else None",
-                "    except:",
-                "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
+                # dill (or at least cloudpickle) is a hard requirement of this
+                # environment, not a nicety. The submitting side writes the
+                # function, args and kwargs with _dumps_by_value(), which is
+                # dill first; stdlib pickle cannot read dill's bytes, so the
+                # old `dill or cloudpickle or pickle` fallback did not degrade
+                # gracefully -- it produced an unrelated error deep in the
+                # unpickler, or a silent `func = None` followed by
+                # "'NoneType' object is not callable". Say so instead.
+                "    if dill is None and cloudpickle is None:",
+                "        raise RuntimeError(",
+                "            'clustrix needs dill (or at least cloudpickle) in the job '",
+                "            'environment: this function and its arguments were '",
+                "            'serialized with dill, and stdlib pickle cannot read those '",
+                "            'bytes. Install it on the cluster (pip install dill) and '",
+                "            're-submit.')",
                 "    ",
                 "    # dill, not stdlib pickle: args may carry classes defined",
                 "    # in the caller's __main__, which pickle stores only by name.",
-                "    _argser = dill or cloudpickle or pickle",
+                "    _argser = dill or cloudpickle",
+                "    try:",
+                "        func = _argser.loads(data['function'])",
+                "    except Exception:",
+                "        func = cloudpickle.loads(data['function']) if cloudpickle else None",
+                "    ",
                 "    args = _argser.loads(data['args'])",
                 "    kwargs = _argser.loads(data['kwargs'])",
                 "    ",
@@ -1975,6 +2721,12 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
                 "        _blob = pickle.dumps(_payload, protocol=4)",
                 "    with open('error.pkl', 'wb') as f:",
                 "        f.write(_blob)",
+            ]
+            # error.pkl is deserialized by the caller with dill, exactly like
+            # result.pkl, so it gets the same tag. Without it a job only had
+            # to fail to get its bytes unpickled unchecked.
+            + payload_signing_lines("_blob", "error.pkl")
+            + [
                 "    raise",
                 '"',
             ]
@@ -1988,31 +2740,29 @@ def _create_slurm_script(
 ) -> str:
     """Create SLURM job script."""
 
+    # #SBATCH lines are read by SLURM itself, not by a shell, so a quoted
+    # value would land in the partition name or the output path verbatim.
+    # They are validated instead, and anything carrying shell syntax is
+    # refused by config key -- `--partition=gpu --wrap='touch /tmp/pwn'` was
+    # otherwise a working command injection into the submitted job.
+    job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
     script_lines = [
         "#!/bin/bash",
         "#SBATCH --job-name=clustrix",
-        f"#SBATCH --output={remote_job_dir}/slurm-%j.out",
-        f"#SBATCH --error={remote_job_dir}/slurm-%j.err",
-        f"#SBATCH --cpus-per-task={job_config['cores']}",
-        f"#SBATCH --mem={normalize_memory(job_config['memory'], 'slurm')}",
-        f"#SBATCH --time={job_config['time']}",
+        f"#SBATCH --output={job_dir}/slurm-%j.out",
+        f"#SBATCH --error={job_dir}/slurm-%j.err",
+        f"#SBATCH --cpus-per-task={validate_shell_fragment('cores', job_config['cores'])}",
+        f"#SBATCH --mem="
+        f"{validate_shell_fragment('memory', normalize_memory(job_config['memory'], 'slurm'))}",
+        f"#SBATCH --time={validate_shell_fragment('time', job_config['time'])}",
     ]
 
     if job_config.get("partition"):
-        script_lines.append(f"#SBATCH --partition={job_config['partition']}")
+        partition = validate_shell_fragment("partition", job_config["partition"])
+        script_lines.append(f"#SBATCH --partition={partition}")
 
     # Add environment setup
-    if config.module_loads:
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
-
-    if config.environment_variables:
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-
-    if config.pre_execution_commands:
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
+    script_lines.extend(environment_setup_lines(config))
 
     script_lines.extend(job_execution_lines(remote_job_dir, config))
 
@@ -2024,29 +2774,26 @@ def _create_pbs_script(
 ) -> str:
     """Create PBS job script."""
 
+    # As for SLURM: #PBS directives are parsed by the scheduler, so these are
+    # validated rather than quoted.
+    job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
     script_lines = [
         "#!/bin/bash",
         "#PBS -N clustrix",
-        f"#PBS -o {remote_job_dir}/job.out",
-        f"#PBS -e {remote_job_dir}/job.err",
-        f"#PBS -l nodes=1:ppn={job_config['cores']}",
-        f"#PBS -l mem={normalize_memory(job_config['memory'], 'pbs')}",
-        f"#PBS -l walltime={job_config['time']}",
+        f"#PBS -o {job_dir}/job.out",
+        f"#PBS -e {job_dir}/job.err",
+        f"#PBS -l nodes=1:ppn={validate_shell_fragment('cores', job_config['cores'])}",
+        f"#PBS -l mem="
+        f"{validate_shell_fragment('memory', normalize_memory(job_config['memory'], 'pbs'))}",
+        f"#PBS -l walltime={validate_shell_fragment('time', job_config['time'])}",
     ]
 
     if job_config.get("queue"):
-        script_lines.append(f"#PBS -q {job_config['queue']}")
+        queue = validate_shell_fragment("queue", job_config["queue"])
+        script_lines.append(f"#PBS -q {queue}")
 
     # Add environment setup
-    if config.module_loads:
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
-    if config.environment_variables:
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-    if config.pre_execution_commands:
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
+    script_lines.extend(environment_setup_lines(config))
 
     script_lines.extend(job_execution_lines(remote_job_dir, config))
 
@@ -2058,28 +2805,24 @@ def _create_sge_script(
 ) -> str:
     """Create SGE job script."""
 
+    # As for SLURM: #$ directives are parsed by the scheduler, so these are
+    # validated rather than quoted.
+    job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
     script_lines = [
         "#!/bin/bash",
         "#$ -N clustrix",
-        f"#$ -o {remote_job_dir}/job.out",
-        f"#$ -e {remote_job_dir}/job.err",
-        f"#$ -pe smp {job_config['cores']}",
-        f"#$ -l h_vmem={normalize_memory(job_config['memory'], 'sge')}",
-        f"#$ -l h_rt={job_config['time']}",
+        f"#$ -o {job_dir}/job.out",
+        f"#$ -e {job_dir}/job.err",
+        f"#$ -pe smp {validate_shell_fragment('cores', job_config['cores'])}",
+        f"#$ -l h_vmem="
+        f"{validate_shell_fragment('memory', normalize_memory(job_config['memory'], 'sge'))}",
+        f"#$ -l h_rt={validate_shell_fragment('time', job_config['time'])}",
         "#$ -cwd",
         "",
     ]
 
     # Add environment setup
-    if config.module_loads:
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
-    if config.environment_variables:
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-    if config.pre_execution_commands:
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
+    script_lines.extend(environment_setup_lines(config))
 
     script_lines.extend(job_execution_lines(remote_job_dir, config))
 
@@ -2091,30 +2834,19 @@ def _create_ssh_script(
 ) -> str:
     """Create simple execution script for SSH."""
 
-    # Start with base script structure
+    # Start with base script structure. `cd` takes a shell word, so the
+    # directory is quoted here rather than validated.
     script_lines = [
         "#!/bin/bash",
-        f"cd {remote_job_dir}",
+        f"cd {shlex.quote(remote_job_dir)}",
         "",
     ]
 
     # Add environment setup (module loads, environment variables, pre-execution commands)
-    if config.module_loads:
-        script_lines.append("# Load required modules")
-        for module in config.module_loads:
-            script_lines.append(f"module load {module}")
-        script_lines.append("")
-
-    if config.environment_variables:
-        script_lines.append("# Set environment variables")
-        for var, value in config.environment_variables.items():
-            script_lines.append(f"export {var}={value}")
-        script_lines.append("")
-
-    if config.pre_execution_commands:
-        script_lines.append("# Execute pre-execution commands")
-        for cmd in config.pre_execution_commands:
-            script_lines.append(cmd)
+    setup_lines = environment_setup_lines(config)
+    if setup_lines:
+        script_lines.append("# Environment setup")
+        script_lines.extend(setup_lines)
         script_lines.append("")
 
     # Check if we have two-venv setup
@@ -2339,7 +3071,7 @@ def setup_gpu_enabled_venv2(
                     f"{install_cmd} || echo 'Failed to install {gpu_pkg} via conda'"
                 )
             else:
-                commands.append(f"source {venv2_path}/bin/activate")
+                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
                 install_cmd = f"pip install {install_info['pip']} --timeout=600"
                 commands.append(
                     f"{install_cmd} || echo 'Failed to install {gpu_pkg} via pip'"
@@ -2376,7 +3108,7 @@ def setup_gpu_enabled_venv2(
                         f"{install_cmd} || echo 'Failed to install {cuda_pkg} via conda'"
                     )
                 else:
-                    commands.append(f"source {venv2_path}/bin/activate")
+                    commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
                     install_cmd = f"pip install {cuda_pkg} --timeout=300"
                     commands.append(
                         f"{install_cmd} || echo 'Failed to install {cuda_pkg} via pip'"

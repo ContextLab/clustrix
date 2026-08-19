@@ -97,7 +97,10 @@ BaseCostMonitor
    - ``estimate_cost()``: Estimate costs for given usage
    - ``get_pricing_info()``: Get current pricing information
    - ``start_monitoring()``: Begin cost monitoring session
-   - ``stop_monitoring()``: End monitoring and generate report
+   - ``stop_monitoring()``: End monitoring and generate report. It prices the
+     elapsed wall-clock time with a hardcoded ``estimate_cost("default", ...)``
+     -- it takes no instance type and there is no way to give it one, so the
+     cost it reports is always the provider's placeholder "default" rate.
 
 Decorators and Utilities
 ------------------------
@@ -112,11 +115,21 @@ cost_tracking_decorator
    **Parameters:**
 
    - ``provider``: Cloud provider name ('aws', 'gcp', 'azure', 'lambda')
-   - ``instance_type``: Instance type for cost estimation
+   - ``instance_type``: Recorded, but **not** used to price the run. The
+     wrapper calls ``monitor.stop_monitoring()``, which prices the elapsed
+     time with a hardcoded ``estimate_cost("default", ...)``, so the cost in
+     ``result['cost_report']`` is always the provider's placeholder "default"
+     rate regardless of what you pass here. The value you passed is echoed
+     back unchanged as ``result['instance_type']``, and it is the only place
+     it appears. To price a specific instance type, call
+     ``get_cost_monitor(provider).estimate_cost(instance_type, hours)``
+     yourself.
 
    **Example:**
 
    .. code-block:: python
+
+      from clustrix import cost_tracking_decorator, cluster
 
       @cost_tracking_decorator('aws', 'p3.2xlarge')
       @cluster(cores=8, memory='60GB')
@@ -150,6 +163,8 @@ get_cost_monitor
 
    .. code-block:: python
 
+      from clustrix import get_cost_monitor
+
       monitor = get_cost_monitor('gcp')
       cost_estimate = monitor.estimate_cost('n2-standard-4', 2.0)
 
@@ -173,17 +188,29 @@ generate_cost_report
 
 .. autofunction:: generate_cost_report
 
-   Generate a cost report for the current session.
+   Build a cost report from the monitor's *current* resource usage.
+
+   The real signature is ``generate_cost_report(provider, instance_type="default")``.
+   There is no ``duration_seconds`` parameter and no duration override: the
+   function hardcodes ``monitor.estimate_cost(instance_type, 1.0)``, so the
+   ``cost_estimate`` it returns is always a **one-hour quote** for
+   ``instance_type``, not the cost of however long your session has been
+   running. It also does not stop or reset monitoring. For a figure based on
+   elapsed time, call ``monitor.stop_monitoring()`` instead -- but see the
+   caveat under ``cost_tracking_decorator`` about which instance type that
+   prices.
 
    **Parameters:**
 
    - ``provider``: Cloud provider name
-   - ``instance_type``: Instance type for cost estimation
-   - ``duration_seconds``: Optional duration override
+   - ``instance_type``: Instance type to price for one hour (default:
+     ``"default"``, the placeholder rate)
 
    **Returns:**
 
-   - ``dict``: Cost report with usage and estimates
+   - ``dict``: ``timestamp``, ``provider``, ``resource_usage``,
+     ``cost_estimate`` and ``recommendations``; or ``None`` if the provider is
+     not supported.
 
 get_pricing_info
 ~~~~~~~~~~~~~~~~
@@ -327,9 +354,12 @@ Manual Session Monitoring
    # Run your workload
    # ... your code here ...
    
-   # Generate report
+   # Generate report. Despite the name, this is not the cost of the session
+   # so far: generate_cost_report hardcodes a 1.0-hour estimate, so the figure
+   # below is a one-hour quote for Standard_NC6s_v3. The resource_usage in the
+   # same report *is* current.
    report = generate_cost_report('azure', 'Standard_NC6s_v3')
-   print(f"Session cost: ${report['cost_estimate']['estimated_cost']:.2f}")
+   print(f"One-hour quote: ${report['cost_estimate']['estimated_cost']:.2f}")
 
 Cost Optimization
 ~~~~~~~~~~~~~~~~~
@@ -379,12 +409,26 @@ The cost monitoring system includes robust error handling:
        print("Provider not supported")
 
    # An unrecognised instance type does not raise either. It is priced at a
-   # placeholder "default" rate, and says so in pricing_warning. Always read
-   # that field before treating an estimate as a real number.
+   # placeholder "default" rate, and says so in pricing_warning.
    monitor = get_cost_monitor('aws')
    cost_estimate = monitor.estimate_cost('invalid_instance', 1.0)
    if cost_estimate.pricing_warning:
        print(f"Estimate is not reliable: {cost_estimate.pricing_warning}")
+
+   # pricing_warning is NOT a complete guard, and pricing_source is not
+   # trustworthy either. For a *recognised* instance type, the provider
+   # monitor calls the pricing client, and the pricing client falls back to
+   # its own hardcoded table internally when the live API is unavailable. The
+   # monitor only sees "a number came back", so it labels the record
+   # pricing_source="api" and leaves pricing_warning=None -- even though the
+   # figure came from the same stale table. Verified on a machine with no AWS
+   # credentials: estimate_cost('p3.2xlarge', 1.0) returns hourly_rate 3.06,
+   # pricing_source 'api', pricing_warning None, while the logger emits
+   # "Using hardcoded pricing for p3.2xlarge (last updated: 2025-01-01)".
+   # The only reliable signal that fallback pricing was used is that log
+   # record, so enable logging if the distinction matters:
+   import logging
+   logging.getLogger('clustrix.pricing_clients.base').setLevel(logging.WARNING)
 
 Best Practices
 --------------
@@ -398,8 +442,13 @@ Best Practices
 Notes
 -----
 
-- Cost estimates are based on current public pricing and may vary
+- Cost estimates fall back to a hardcoded price table when a live pricing API
+  is unavailable. That table is a snapshot, not live pricing: the AWS, Azure
+  and GCP tables in ``clustrix/pricing_clients/*_pricing.py`` are dated
+  ``2025-01-01`` and the Lambda Cloud one ``2025-01-08``
+  (``_hardcoded_pricing_date``). Treat every figure as an order-of-magnitude
+  guide, not a quote.
 - Resource utilization requires appropriate permissions on the target system
-- GPU monitoring requires nvidia-sml on the target system
+- GPU monitoring requires ``nvidia-smi`` on the target system
 - Some cloud providers may have rate limits on pricing API calls
 - Spot/preemptible instance availability and pricing can change frequently

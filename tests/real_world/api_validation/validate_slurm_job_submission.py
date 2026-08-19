@@ -22,6 +22,8 @@ from clustrix.secure_credentials import ValidationCredentials
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
 
+from tests.real_world.credential_manager import require_test_remote_work_dir
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -75,7 +77,7 @@ def test_slurm_job_submission():
         username=username,
         password=password,
         # Use your home directory instead of /tmp
-        remote_work_dir=f"/dartfs-hpc/rc/home/b/{username}/clustrix",
+        remote_work_dir=f"{require_test_remote_work_dir()}/clustrix",
         default_cores=2,
         default_memory="4GB",
         default_time="00:10:00",  # 10 minutes for test
@@ -303,7 +305,7 @@ def test_slurm_advanced_features():
         cluster_host=hostname,
         username=username,
         password=password,
-        remote_work_dir=f"/dartfs-hpc/rc/home/b/{username}/clustrix",
+        remote_work_dir=f"{require_test_remote_work_dir()}/clustrix",
         default_cores=4,
         default_memory="8GB",
         default_time="00:10:00",

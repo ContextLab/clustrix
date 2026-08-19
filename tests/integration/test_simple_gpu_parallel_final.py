@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Final test to verify automatic GPU parallelization is working on tensor01.
+Final test to verify automatic GPU parallelization is working on gpu_cluster.
 Uses simplified approach that should avoid complexity threshold issues.
 """
 
@@ -12,15 +12,15 @@ from tests.real_world import credentials
 def test_simple_gpu_parallel_final():
     """Test GPU parallelization with extremely simple function that should work."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("❌ No credentials available")
         return False
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,  # Enable GPU parallelization
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     success = test_simple_gpu_parallel_final()
     if success:
         print(f"\n🎉 FINAL VERIFICATION: GPU PARALLELIZATION WORKING!")
-        print("✅ All 8 GPUs detected on tensor01")
+        print("✅ All 8 GPUs detected on gpu_cluster")
         print("✅ Automatic GPU parallelization functional")
         print("✅ Function flattening integrated")
         print("✅ Client-side approach successful")

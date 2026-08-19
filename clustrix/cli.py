@@ -1,7 +1,14 @@
 import click
 import getpass
 
-from .config import configure, load_config, save_config, get_config, ClusterConfig
+from .config import (
+    configure,
+    load_config,
+    save_config,
+    get_config,
+    ClusterConfig,
+    SUPPORTED_CLUSTER_TYPES,
+)
 from .executor import ClusterExecutor
 from .ssh_utils import setup_ssh_keys, detect_working_ssh_key
 from .cli_credentials import (
@@ -23,7 +30,7 @@ def cli():
 @cli.command()
 @click.option(
     "--cluster-type",
-    type=click.Choice(["slurm", "pbs", "sge", "kubernetes", "ssh", "local"]),
+    type=click.Choice(list(SUPPORTED_CLUSTER_TYPES)),
     help="Type of cluster scheduler",
 )
 @click.option("--cluster-host", help="Cluster hostname")

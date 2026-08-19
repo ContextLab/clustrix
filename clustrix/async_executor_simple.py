@@ -243,6 +243,18 @@ class SimpleAsyncClusterExecutor:
         logger.info("Shutting down async executor")
         self._thread_pool.shutdown(wait=wait)
 
+    # Context-manager support. Every instance owns a ThreadPoolExecutor, and
+    # nothing called shutdown() -- clustrix/decorator.py built a fresh one on
+    # every async submission and dropped it, so a long-running session
+    # accumulated four worker threads per call. `with` makes the lifetime
+    # explicit for callers who can bound it; the decorator, which cannot
+    # (the work outlives the call), reuses one shared instance instead.
+    def __enter__(self) -> "SimpleAsyncClusterExecutor":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.shutdown()
+
 
 # Backward compatibility alias
 AsyncClusterExecutor = SimpleAsyncClusterExecutor

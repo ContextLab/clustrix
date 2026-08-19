@@ -446,10 +446,17 @@ budget_plan = create_monthly_budget_plan()
 
 Set up automated cost monitoring and alerts.
 
+> **Note:** an earlier version of this example also tracked *performance*
+> health (API error rate, response time, cache hit rate) via
+> `clustrix.pricing_clients.performance_monitor.get_global_performance_monitor()`
+> and `clustrix.pricing_clients.resilience.get_global_health_checker()`. Both
+> modules have been removed from the codebase as unused code, so that part of
+> the example is gone too -- there is no replacement for performance
+> monitoring built into Clustrix. What remains below is the *cost* alerting,
+> which only ever depended on the still-real `AWSCostMonitor.estimate_cost()`.
+
 ```python
 from clustrix.cost_providers.aws import AWSCostMonitor
-from clustrix.pricing_clients.performance_monitor import get_global_performance_monitor
-from clustrix.pricing_clients.resilience import get_global_health_checker
 import smtplib
 from email.mime.text import MIMEText
 from datetime import datetime, timedelta
@@ -463,21 +470,12 @@ class CostAlertingSystem:
             'aws': AWSCostMonitor(use_pricing_api=True)
         }
         self.email_config = email_config
-        self.performance_monitor = get_global_performance_monitor()
-        self.health_checker = get_global_health_checker()
-        
+
         # Alert thresholds
         self.cost_thresholds = {
             'daily_limit': 50.0,      # $50/day
             'monthly_limit': 1000.0,  # $1000/month
             'hourly_spike': 10.0      # $10/hour spike
-        }
-        
-        # Performance thresholds
-        self.performance_thresholds = {
-            'error_rate': 0.05,       # 5% error rate
-            'response_time': 30.0,    # 30 seconds
-            'cache_hit_rate': 0.70    # 70% cache hit rate
         }
     
     def check_cost_thresholds(self, workloads):
@@ -540,56 +538,15 @@ class CostAlertingSystem:
                 })
         
         return alerts
-    
-    def check_performance_health(self):
-        """Check system performance and health."""
-        alerts = []
-        
-        # Get performance summary
-        summary = self.performance_monitor.get_performance_summary(hours=1)
-        
-        # Check error rate
-        if summary.get('error_rate', 0) > self.performance_thresholds['error_rate']:
-            alerts.append({
-                'type': 'high_error_rate',
-                'error_rate': summary['error_rate'],
-                'threshold': self.performance_thresholds['error_rate'],
-                'severity': 'warning'
-            })
-        
-        # Check response time
-        avg_response_time = summary.get('average_response_time', 0)
-        if avg_response_time > self.performance_thresholds['response_time']:
-            alerts.append({
-                'type': 'slow_response_time',
-                'response_time': avg_response_time,
-                'threshold': self.performance_thresholds['response_time'],
-                'severity': 'warning'
-            })
-        
-        # Check cache hit rate
-        cache_hit_rate = summary.get('cache_hit_rate', 1.0)
-        if cache_hit_rate < self.performance_thresholds['cache_hit_rate']:
-            alerts.append({
-                'type': 'low_cache_hit_rate',
-                'cache_hit_rate': cache_hit_rate,
-                'threshold': self.performance_thresholds['cache_hit_rate'],
-                'severity': 'info'
-            })
-        
-        # Check overall health
-        overall_health = self.health_checker.get_overall_health()
-        if overall_health['overall_status'] != 'healthy':
-            alerts.append({
-                'type': 'system_unhealthy',
-                'healthy_services': overall_health['healthy_services'],
-                'total_services': overall_health['total_services'],
-                'health_percentage': overall_health['health_percentage'],
-                'severity': 'critical' if overall_health['healthy_services'] == 0 else 'warning'
-            })
-        
-        return alerts
-    
+
+    # A `check_performance_health` method used to live here, built on top of
+    # `get_global_performance_monitor()` and `get_global_health_checker()`.
+    # Both came from modules that have since been removed from the codebase
+    # (`clustrix.pricing_clients.performance_monitor` and `.resilience`), and
+    # there is no replacement -- Clustrix does not track API error rate,
+    # response time, or cache hit rate anymore. If you need this, you would
+    # have to instrument it yourself around calls to the pricing clients.
+
     def send_alert_email(self, alerts):
         """Send alert email if configured."""
         if not self.email_config or not alerts:
@@ -657,14 +614,9 @@ Summary: {len(alerts)} total alerts
         """Run complete monitoring check."""
         print(f"Running cost monitoring check at {datetime.now()}")
         
-        # Check costs
-        cost_alerts = self.check_cost_thresholds(workloads)
-        
-        # Check performance  
-        performance_alerts = self.check_performance_health()
-        
-        # Combine alerts
-        all_alerts = cost_alerts + performance_alerts
+        # Check costs (the only kind of alert this class still generates --
+        # see the note above `send_alert_email` for what was removed)
+        all_alerts = self.check_cost_thresholds(workloads)
         
         # Log alerts
         if all_alerts:
@@ -741,40 +693,56 @@ alerts = setup_cost_monitoring()
 
 ### Custom Pricing Sources
 
-Add custom pricing sources or override existing ones:
+Add custom pricing sources or override existing ones. `BasePricingClient` is
+an `ABC` with **three** abstract methods, not two -- a subclass that skips
+`_fetch_pricing_from_api` cannot be instantiated (`TypeError: Can't
+instantiate abstract class ... with abstract method _fetch_pricing_from_api`,
+verified against the real class):
 
 ```python
+from typing import Any, Dict, Optional
 from clustrix.pricing_clients.base import BasePricingClient
 
 class CustomPricingClient(BasePricingClient):
     """Custom pricing client for internal pricing data."""
-    
+
     def __init__(self):
         self.custom_prices = {
             't3.micro': 0.0104,
             't3.small': 0.0208,
             't3.medium': 0.0416
         }
-    
-    def authenticate(self, **credentials):
-        return True
-    
+
     def get_instance_pricing(self, instance_type, region, **kwargs):
         return self.custom_prices.get(instance_type)
-    
+
     def get_all_pricing(self, region, **kwargs):
         return self.custom_prices.copy()
+
+    def _fetch_pricing_from_api(
+        self, instance_type: Optional[str], region: str, **kwargs
+    ) -> Optional[Dict[str, Any]]:
+        # This example has no live API of its own -- it only ever serves
+        # the hardcoded dict above, so there's nothing to fetch.
+        return None
 
 # Use custom pricing client
 custom_client = CustomPricingClient()
 price = custom_client.get_instance_pricing("t3.small", "us-east-1")
+print(price)
 ```
+
+(`authenticate` was dropped from this example too -- it isn't part of
+`BasePricingClient`'s contract; see [Authentication (Lambda Cloud
+only)](PRICING_API_REFERENCE.md#common-error-patterns) in the API reference
+if your custom client needs it.)
 
 ### Integration with CI/CD
 
 Add cost estimation to your CI/CD pipeline:
 
 ```python
+# cluster-required: reads deployment_config.json supplied by your own CI pipeline
 # cost_check.py - CI/CD cost validation script
 import sys
 import json

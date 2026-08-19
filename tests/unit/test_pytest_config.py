@@ -38,11 +38,17 @@ SHADOWING_CONFIG_NAMES = ("pytest.ini", ".pytest.ini")
 
 # Markers this project defines and relies on. Registration is what makes
 # ``-m <marker>`` a usable selector and what lets --strict-markers catch typos.
+#
+# ``cluster_network`` is registered by ``tests/conftest.py`` as well as
+# pyproject.toml, because the suite that uses it (tests/real_world) is
+# routinely excluded from a run and its own conftest is then never loaded.
+# Either registration site satisfies the check below, which reads the live
+# config.
 REQUIRED_MARKERS = (
     "real_world",
     "expensive",
     "integration",
-    "dartmouth_network",
+    "cluster_network",
     "performance",
     "slow",
     "unit",
@@ -92,7 +98,8 @@ def test_project_markers_are_registered(pytestconfig):
     assert not missing, (
         f"markers {missing} are not registered. Unregistered markers are not "
         f"usable as -m selectors and become hard errors under --strict-markers "
-        f"(see #130). Declare them in {EXPECTED_CONFIG_NAME}."
+        f"(see #130). Declare them in {EXPECTED_CONFIG_NAME} or, for markers "
+        f"scoped to one suite, via addinivalue_line in tests/conftest.py."
     )
 
 

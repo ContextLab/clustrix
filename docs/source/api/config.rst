@@ -17,7 +17,7 @@ Programmatic Configuration
 .. code-block:: python
 
    import clustrix
-   
+
    clustrix.configure(
        cluster_type='slurm',
        cluster_host='cluster.example.com',
@@ -26,6 +26,17 @@ Programmatic Configuration
        default_cores=8,
        default_memory='16GB'
    )
+
+``ClusterConfig`` itself is also importable directly from the package root
+(``from clustrix import ClusterConfig``), not just from ``clustrix.config``,
+for building a config object explicitly instead of mutating the global one
+through ``configure()``:
+
+.. code-block:: python
+
+   from clustrix import ClusterConfig
+
+   config = ClusterConfig(cluster_type='local', default_cores=4)
 
 Configuration File
 ~~~~~~~~~~~~~~~~~~
@@ -61,9 +72,59 @@ Create a ``clustrix.yml`` file:
 Environment Variables
 ~~~~~~~~~~~~~~~~~~~~~
 
-Clustrix reads two environment variables. Individual settings are *not*
-configurable this way -- there is no ``CLUSTRIX_CLUSTER_TYPE`` or
-``CLUSTRIX_CLUSTER_HOST``; use a configuration file or ``configure()``.
+There is no general ``CLUSTRIX_<FIELD>`` layer: no ``CLUSTRIX_CLUSTER_TYPE``
+or ``CLUSTRIX_CLUSTER_HOST`` is read anywhere, so ordinary settings come from
+a configuration file or ``configure()``. Two ``CLUSTRIX_`` variables are read
+unconditionally, described below. Beyond those, three separate mechanisms
+read further variables, and each is narrower than it looks:
+
+**Connecting over SSH without a password or key file configured.** When an
+SSH-family cluster (``ssh``, ``slurm``, ``pbs``, ``sge``) has neither
+``password`` nor ``key_file`` set, ``ClusterExecutor.setup_ssh_connection``
+calls ``FlexibleCredentialManager.ensure_credential("ssh")``
+(``clustrix/executor_connections.py``). That call first loads
+``~/.clustrix/.env`` (directory overridable via ``CLUSTRIX_CONFIG_DIR``) with
+``python-dotenv``, which -- as a side effect of loading the *whole file* --
+puts every variable defined there into the process environment, not only the
+SSH-related ones. It then reads, via ``clustrix/credential_manager.py``:
+
+- ``SSH_HOST``, ``SSH_USERNAME``, ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``,
+  ``SSH_PORT``
+- ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``
+- ``AZURE_SUBSCRIPTION_ID``, ``AZURE_TENANT_ID``, ``AZURE_CLIENT_ID``,
+  ``AZURE_CLIENT_SECRET``
+- ``GCP_PROJECT_ID``, ``GOOGLE_APPLICATION_CREDENTIALS``,
+  ``GCP_SERVICE_ACCOUNT_JSON``
+- ``KUBECONFIG``, ``K8S_NAMESPACE``, ``K8S_CONTEXT``
+- ``HF_TOKEN``, ``HF_USERNAME``
+- ``LAMBDA_CLOUD_API_KEY``, ``LAMBDA_CLOUD_ENDPOINT``
+
+The non-SSH entries above are loaded into the process environment by this
+call too, because loading ``.env`` loads the whole file regardless of which
+provider was asked for -- but only the ``SSH_*`` variables can affect *this*
+connection; the rest only matter if something else later reads them.
+
+**The optional SSH-key-setup helper.** ``setup_ssh_keys_with_fallback()``
+(exported from ``clustrix``; not called automatically by ``@cluster`` or
+``ClusterExecutor``) reads, via ``clustrix/auth_fallbacks.py``:
+
+- ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
+  ``<HOST>_PASSWORD`` (``<HOST>`` is the cluster hostname, upper-cased with
+  ``.`` replaced by ``_``)
+- ``CLUSTRIX_DEFAULT_PASSWORD``
+- ``CLUSTER_PASSWORD``
+
+**Feature-specific variables**, read independently of the two mechanisms
+above:
+
+- ``HF_TOKEN`` -- the HuggingFace backend falls back to it when ``hf_token``
+  is unset (``clustrix/hf_jobs.py``).
+- ``HF_HOME`` -- if the token is still unset, the token written by
+  ``hf auth login`` is read from ``$HF_HOME/token``, falling back to
+  ``~/.cache/huggingface/token``.
+- the variable *named by* ``password_env_var`` -- read for the SSH password
+  when ``use_env_password`` is ``True``. The name is configurable, so there is
+  no fixed variable to document here; see ``ClusterConfig.get_env_password``.
 
 ``CLUSTRIX_CONFIG_DIR``
    Overrides the directory clustrix reads and writes user configuration in,
@@ -93,13 +154,29 @@ Authentication
 Cluster Settings
 ~~~~~~~~~~~~~~~~
 
-- ``cluster_type``: Type of cluster (``local``, ``ssh``, ``slurm``, ``pbs``, ``sge``, ``kubernetes``, ``huggingface``)
-- ``cluster_host``: Hostname of cluster head node. Not used by ``huggingface``,
-  which submits over an HTTP API and has no host.
+- ``cluster_type``: Type of cluster. The full, authoritative set is
+  ``clustrix.config.SUPPORTED_CLUSTER_TYPES`` -- ``local``, ``ssh``,
+  ``slurm``, ``pbs``, ``sge``, ``kubernetes``, ``huggingface``. Both the CLI
+  and the notebook widget read this same tuple for their cluster-type
+  choices, so it is never possible for one of them to offer a backend the
+  other (or ``ClusterExecutor``) cannot actually run.
+- ``cluster_type="local"`` runs the function on the submitting machine via
+  ``LocalJobManager`` (see :doc:`local_executor`) instead of talking to a
+  scheduler at all -- there is no host, no SSH connection, and
+  ``submit_job``/``wait_for_result`` execute synchronously.
+- ``cluster_host``: Hostname of cluster head node. Not used by ``local``
+  (nothing to connect to) or ``huggingface``, which submits over an HTTP
+  API and has no host.
 - ``cluster_port``: SSH port (default: 22)
 - ``ssh_connect_timeout``: Seconds paramiko waits to establish a connection
   (default: 30). The OS default is minutes, which turns an unreachable host
   into a hang rather than an error.
+- ``ssh_host_key_policy``: What to do when a remote host's SSH key is not
+  already in your known_hosts files. ``"reject"`` (default) refuses the
+  connection and reports the exact ``ssh-keyscan`` command to add it.
+  ``"auto_add"`` trusts unknown host keys automatically -- insecure
+  (vulnerable to machine-in-the-middle attacks) and never the default; it
+  has to be chosen deliberately. See ``clustrix.ssh_security``.
 
 Paths
 ~~~~~
@@ -111,7 +188,10 @@ Paths
   before writing any diagnostics. A home directory or a shared scratch path
   both work; ``/tmp`` does not.
 - ``local_work_dir``: Local working directory (default: current directory)
-- ``local_cache_dir``: Local cache directory (default: ``~/.clustrix/cache``)
+- ``local_cache_dir``: Accepted and stored (default: ``~/.clustrix/cache``),
+  but nothing in clustrix reads it -- setting it has no effect. It is listed
+  here only so that a configuration file containing it is not mistaken for a
+  file that does something.
 - ``conda_env_name``: Conda environment to activate on the cluster
 - ``venv_setup_timeout``: Seconds allowed for remote virtualenv creation
   (default: 300)
@@ -121,7 +201,12 @@ HuggingFace Jobs
 
 Used when ``cluster_type='huggingface'``:
 
-- ``hf_token``: HuggingFace token. Required, and must be set explicitly --
+- ``hf_token``: HuggingFace token. A token is required, but this field is not
+  the only place it can come from: if it is unset, clustrix falls back to the
+  ``HF_TOKEN`` environment variable, and then to the token ``hf auth login``
+  writes (``$HF_HOME/token``, or ``~/.cache/huggingface/token``). Only when
+  all three are absent does job submission fail, with a message naming all
+  three options.
 - ``hf_namespace``: Account the job is billed to. Personal accounts are often
   not on a plan that can run jobs, so this is usually an organization. Falls
   back to ``hf_username``.
@@ -149,3 +234,33 @@ Execution Preferences
 - ``max_parallel_jobs``: Maximum number of parallel jobs
 - ``prefer_local_parallel``: Prefer local over remote parallel execution
 - ``cleanup_on_success``: Clean up remote files after successful execution
+
+Credential Handling
+~~~~~~~~~~~~~~~~~~~
+
+``ClusterConfig`` treats a fixed set of fields -- ``clustrix.config.SECRET_FIELDS``
+-- as credentials: anything whose name matches ``password``, ``token``,
+``api_key``, ``*_key``, ``client_id``, ``tenant_id``, ``subscription_id``, or
+similar (a handful of innocuous look-alikes, like ``use_env_password`` and
+``password_env_var``, are explicitly excluded). This is computed once from
+the dataclass's own field names rather than hand-maintained, so a newly
+added credential field (a new cloud provider's API key, say) is covered
+automatically instead of silently leaking in plaintext until someone
+remembers to add it to a list.
+
+Two things read that set:
+
+- ``repr(config)`` masks every secret field as ``'***'`` rather than
+  printing it verbatim, so a config object landing in a traceback, log
+  line, or notebook cell display does not leak a password or token.
+  ``environment_variables`` is masked entry-by-entry, since it commonly
+  carries both ordinary settings (``OMP_NUM_THREADS``) and real secrets
+  (``AWS_SECRET_ACCESS_KEY``).
+- ``config.save_to_file(path)`` omits secret-bearing fields entirely by
+  default, since a saved config file is easy to accidentally commit, back
+  up, or share; pass ``include_secrets=True`` to write them anyway (for a
+  config file you deliberately keep out of version control). The file is
+  created with ``0600`` permissions from the moment it exists -- before any
+  content is written, and re-applied even when overwriting a file that
+  already had looser permissions -- so there is never a window where a
+  config file containing credentials is world- or group-readable.

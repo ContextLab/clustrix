@@ -24,7 +24,7 @@ Despite having all required IAM policies attached, the Clustrix user cannot perf
 The issue is NOT with IAM policies. The denial is happening at a higher level:
 
 ### 1. AWS Organizations Service Control Policy (Most Likely)
-Your AWS account (229182852735) may be part of an AWS Organization with SCPs that:
+Your AWS account may be part of an AWS Organization with SCPs that:
 - Block EKS service access
 - Restrict certain regions
 - Limit service usage to specific roles/users

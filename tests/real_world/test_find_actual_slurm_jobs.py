@@ -1,5 +1,5 @@
 """
-Find and check actual SLURM jobs running on ndoli.
+Find and check actual SLURM jobs running on slurm_cluster.
 """
 
 import pytest
@@ -9,23 +9,23 @@ from tests.real_world import credentials
 
 @pytest.mark.real_world
 def test_find_actual_slurm_jobs():
-    """Find and check actual SLURM jobs on ndoli."""
-    ndoli_creds = credentials.get_ndoli_credentials()
-    if not ndoli_creds:
-        pytest.skip("No ndoli credentials available")
+    """Find and check actual SLURM jobs on slurm_cluster."""
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+    if not slurm_cluster_creds:
+        pytest.skip("No slurm_cluster credentials available")
 
     # Connect via SSH
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     ssh_client.connect(
-        hostname=ndoli_creds["host"],
-        username=ndoli_creds["username"],
-        password=ndoli_creds.get("password"),
+        hostname=slurm_cluster_creds["host"],
+        username=slurm_cluster_creds["username"],
+        password=slurm_cluster_creds.get("password"),
         port=22,
     )
 
-    print("Finding actual SLURM jobs on ndoli...")
+    print("Finding actual SLURM jobs on slurm_cluster...")
 
     # Check all clustrix directories
     stdin, stdout, stderr = ssh_client.exec_command(
@@ -37,8 +37,8 @@ def test_find_actual_slurm_jobs():
     # Check the most promising directories for job subdirectories
     potential_dirs = [
         "/tmp/clustrix_slurm_working",
-        "/tmp/clustrix_ndoli_ssh_331ab7a0",
-        "/tmp/clustrix_ndoli_ssh_5a76d868",
+        "/tmp/clustrix_slurm_cluster_ssh_331ab7a0",
+        "/tmp/clustrix_slurm_cluster_ssh_5a76d868",
     ]
 
     for base_dir in potential_dirs:

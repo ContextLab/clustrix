@@ -26,12 +26,12 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-quick-${{ hashFiles('**/requirements.txt') }}
@@ -47,14 +47,15 @@ jobs:
           pip install -e ".[dev]"
       
       - name: Format check with Black
-        run: black --check clustrix/ tests/
+        # Same scope as tests.yml's black step. They covered different
+        # directories, so a file could pass one gate and fail the other.
+        run: black --check clustrix/ tests/ scripts/
       
       - name: Lint with Flake8
         run: flake8 clustrix/ --count --select=E9,F63,F7,F82 --show-source --statistics
       
       - name: Type check with MyPy
         run: mypy clustrix/ --ignore-missing-imports
-        continue-on-error: true  # Don't fail on type errors yet
       
       - name: Run quick unit tests
         run: |
@@ -74,7 +75,7 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Set up Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
       
@@ -198,11 +199,27 @@ jobs:
     steps:
       - name: Check status
         run: |
-          if [ "${{ needs.quick-checks.result }}" != "success" ] || \
-             [ "${{ needs.local-integration.result }}" != "success" ] || \
-             [ "${{ needs.docker-test.result }}" != "success" ]; then
-            echo "❌ CI checks failed"
+          # security-scan is in `needs` above but was missing from this
+          # condition, so a failing security scan still reported "All CI
+          # checks passed". Every job this gate depends on must be checked,
+          # or the gate is decorative.
+          failed=0
+          for job in quick-checks local-integration docker-test security-scan; do
+            case "$job" in
+              quick-checks)      result="${{ needs.quick-checks.result }}" ;;
+              local-integration) result="${{ needs.local-integration.result }}" ;;
+              docker-test)       result="${{ needs.docker-test.result }}" ;;
+              security-scan)     result="${{ needs.security-scan.result }}" ;;
+            esac
+            if [ "$result" != "success" ]; then
+              echo "❌ $job: $result"
+              failed=1
+            else
+              echo "✅ $job: success"
+            fi
+          done
+          if [ "$failed" -ne 0 ]; then
+            echo "CI checks failed"
             exit 1
-          else
-            echo "✅ All CI checks passed"
           fi
+          echo "All CI checks passed"

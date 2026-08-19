@@ -10,8 +10,8 @@ echo "Hostname: $(hostname)"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
 
 # Work in accessible directory
-cd /dartfs-hpc/rc/home/b/f002d6b/clustrix
-export CLUSTRIX_ORIGINAL_CWD=/dartfs-hpc/rc/home/b/f002d6b/clustrix
+cd ${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix
+export CLUSTRIX_ORIGINAL_CWD=${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix
 
 echo "1. Loading Python module:"
 module load python

@@ -25,7 +25,7 @@ The real cluster job testing system provides:
 ### Supporting Infrastructure
 
 - `tests/real_world/cluster_job_validator.py` - Job monitoring and validation framework
-- `scripts/run_cluster_job_tests.py` - Comprehensive test runner
+- `tests/real_world/cluster_validation/run_cluster_job_tests.py` - Comprehensive test runner (invoke as `python -m tests.real_world.cluster_validation.run_cluster_job_tests`; moved here in #76, and its own `sys.path` setup only resolves correctly when run as a module from the repo root)
 - `tests/real_world/credential_manager.py` - Secure credential management
 
 ## Test Categories
@@ -66,7 +66,7 @@ These tests are resource-intensive and run longer:
 
 3. **Verify cluster access:**
    ```bash
-   python scripts/run_cluster_job_tests.py --check-only
+   python -m tests.real_world.cluster_validation.run_cluster_job_tests --check-only
    ```
 
 ### Running Tests
@@ -75,26 +75,26 @@ These tests are resource-intensive and run longer:
 
 ```bash
 # Run basic tests on all available clusters
-python scripts/run_cluster_job_tests.py --cluster all --tests basic
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests basic
 
 # Run all tests (including expensive ones)
-python scripts/run_cluster_job_tests.py --cluster all --tests all
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests all
 
 # Run with custom timeout
-python scripts/run_cluster_job_tests.py --cluster all --tests basic --timeout 600
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests basic --timeout 600
 ```
 
 #### Test Specific Cluster Types
 
 ```bash
 # Test only SLURM
-python scripts/run_cluster_job_tests.py --cluster slurm
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster slurm
 
 # Test only Kubernetes
-python scripts/run_cluster_job_tests.py --cluster kubernetes
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster kubernetes
 
 # Test only SSH
-python scripts/run_cluster_job_tests.py --cluster ssh
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ssh
 ```
 
 #### Using pytest Directly
@@ -286,7 +286,7 @@ The test runner generates comprehensive reports:
 
 ```bash
 # Run tests with custom output file
-python scripts/run_cluster_job_tests.py --output my_test_results.json
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --output my_test_results.json
 ```
 
 ### Report Contents
@@ -343,12 +343,12 @@ python scripts/run_cluster_job_tests.py --output my_test_results.json
 
 1. **Check cluster connectivity:**
    ```bash
-   python scripts/run_cluster_job_tests.py --check-only
+   python -m tests.real_world.cluster_validation.run_cluster_job_tests --check-only
    ```
 
 2. **Verify credentials:**
    ```bash
-   python scripts/test_real_world_credentials.py
+   python scripts/run_real_world_tests.py --check-creds
    ```
 
 3. **Check cluster queue:**
@@ -367,12 +367,12 @@ python scripts/run_cluster_job_tests.py --output my_test_results.json
 
 1. **Increase timeout:**
    ```bash
-   python scripts/run_cluster_job_tests.py --timeout 600
+   python -m tests.real_world.cluster_validation.run_cluster_job_tests --timeout 600
    ```
 
 2. **Run basic tests only:**
    ```bash
-   python scripts/run_cluster_job_tests.py --tests basic
+   python -m tests.real_world.cluster_validation.run_cluster_job_tests --tests basic
    ```
 
 3. **Check cluster load:**
@@ -413,7 +413,7 @@ pytest tests/real_world/test_slurm_job_submission_real.py -v -s
 
 # Enable debug logging
 export CLUSTRIX_DEBUG=1
-python scripts/run_cluster_job_tests.py --cluster slurm
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster slurm
 ```
 
 ## Best Practices
@@ -494,7 +494,7 @@ jobs:
         CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
         LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
       run: |
-        python scripts/run_cluster_job_tests.py --cluster ${{ inputs.cluster_type }}
+        python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ${{ inputs.cluster_type }}
     
     - name: Upload test results
       uses: actions/upload-artifact@v4

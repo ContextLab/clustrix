@@ -20,8 +20,13 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 - **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working; PBS, SGE and Kubernetes are implemented but untested (see [Supported Cluster Types](#supported-cluster-types))
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Loop Parallelization**: Automatically distributes loops across cluster nodes
-- **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
+- **Loop Parallelization**: distributes a loop across nodes when its body has no
+  dependencies between iterations. The analysis is conservative and declines
+  most real loops — see [Limitations](https://clustrix.readthedocs.io/en/latest/limitations.html)
+- **Flexible Configuration**: config files, `configure()`, or the interactive
+  widget. Note there is no general "override any field from the environment"
+  mechanism — only `CLUSTRIX_CONFIG_DIR` and the password variable named by
+  `password_env_var`
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
 Read [Supported Cluster Types](#supported-cluster-types) before relying on a
@@ -32,13 +37,26 @@ parts do.
 
 ### Installation
 
+> **⚠️ PyPI is behind this README.** `pip install clustrix` installs **0.1.1**;
+> this document describes **0.2.0**. 0.1.1 predates the fixes for two real
+> defects: `@cluster` could return a fabricated string instead of your result,
+> and remote results were unpickled without authentication (a remote-to-local
+> code execution path). Until 0.2.0 is published, install from the repository.
+
 ```bash
-pip install clustrix
+pip install "git+https://github.com/ContextLab/clustrix.git@master"
+```
+
+Check what you actually have:
+
+```bash
+python -c "import clustrix; print(clustrix.__version__)"
 ```
 
 ### Basic Configuration
 
 ```python
+# cluster-required: needs a configured cluster to execute
 import clustrix
 
 # Configure your cluster
@@ -54,6 +72,7 @@ clustrix.configure(
 ### Using the Decorator
 
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import cluster
 
 @cluster(cores=8, memory='16GB', time='02:00:00')
@@ -116,9 +135,9 @@ The cluster type dropdown offers `local`, `ssh`, `slurm`, `pbs`, `sge`,
 - `huggingface` shows namespace, flavor, token, and an "Allow paid GPU flavors"
   checkbox. GPU flavors bill by the second, so that box has to be ticked before
   one is accepted.
-- `kubernetes` shows a Kubernetes section with namespace, image, service account and image pull policy.
-  (`k8s_namespace`, `k8s_image` and the rest) can only be set from a config file
-  or `clustrix.configure()`.
+- `kubernetes` shows a Kubernetes section: namespace, image, service account and
+  image pull policy. The remaining `k8s_*` settings (node count, region,
+  provider, auto-provisioning) are config-file or `clustrix.configure()` only.
 
 There are no AWS, GCP, Azure or Lambda Cloud entries: those backends are
 unverified (see [Cloud Providers](#cloud-providers)).
@@ -219,6 +238,7 @@ clustrix ssh-setup --host cluster.university.edu --user your_username --alias my
 
 #### Method 3: Python API
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import setup_ssh_keys_with_fallback
 from clustrix.config import ClusterConfig
 
@@ -268,6 +288,7 @@ ssh your_netid@cluster.university.edu
 Clustrix provides unified filesystem operations that work seamlessly across local and remote clusters:
 
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists, cluster_glob
 from clustrix.config import ClusterConfig
 
@@ -300,7 +321,9 @@ def process_datasets(config):
     data_files = cluster_glob("*.csv", "input/", config)
     
     results = []
-    for filename in data_files:  # Loop gets parallelized automatically
+    # Runs sequentially on the cluster node -- auto-parallelization needs a
+    # literal range() and a function that accepts the chunk keywords.
+    for filename in data_files:
         # Check file size before processing
         file_info = cluster_stat(filename, config)
         if file_info.size > 100_000_000:  # Large files
@@ -355,6 +378,7 @@ hardcoded table and says so on stderr.
 ### Custom Resource Requirements
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(
     cores=16,
     memory='32GB',
@@ -370,6 +394,7 @@ def train_model(data, epochs=100):
 ### Manual Parallelization Control
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(parallel=False)  # Disable automatic loop parallelization
 def sequential_computation(data):
     result = []
@@ -380,7 +405,9 @@ def sequential_computation(data):
 @cluster(parallel=True)   # Enable automatic loop parallelization
 def parallel_computation(data):
     results = []
-    for item in data:  # This loop will be automatically distributed
+    # Sequential. `data` is not a literal range() and this function takes
+    # no chunk keyword, so auto-parallelization declines it.
+    for item in data:
         results.append(expensive_operation(item))
     return results
 ```
@@ -388,6 +415,7 @@ def parallel_computation(data):
 ### Different Cluster Types
 
 ```python
+# cluster-required: needs a configured cluster to execute
 # SLURM cluster
 clustrix.configure(cluster_type='slurm', cluster_host='slurm.example.com')
 
@@ -412,6 +440,7 @@ needs no cluster reservation, no VPN and no institutional SSH credentials,
 which is why the integration tests use it.
 
 ```python
+# cluster-required: needs a configured cluster to execute
 import clustrix
 from clustrix import cluster
 
@@ -521,7 +550,9 @@ clustrix credentials --help
 
 ### Important Notes
 
-**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) cannot be serialized for remote execution because their source code is not available. This affects:
+**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) lose the *source-based* features — automatic loop parallelization and complexity analysis — because those parse the function's source with `ast` and `inspect.getsource()` cannot recover it.
+
+Serialization itself does **not** need the source. `clustrix.utils.serialize_function` / `deserialize_function` work from the code object and round-trip such a function correctly, so it still runs remotely and returns the right answer. This affects:
 - Interactive Python sessions (`python` command)
 - Some notebook environments that don't preserve function source
 
@@ -531,30 +562,40 @@ clustrix credentials --help
 - IPython environments
 - Any environment where `inspect.getsource()` can access the function source code
 
-```python
-# ❌ This won't work in interactive Python REPL
+```pycon
+# In the interactive REPL this still runs and returns the right answer, but no
+# loop parallelization is applied, because that
+# need the source.
 >>> @cluster(cores=2)
 ... def my_function(x):
 ...     return x * 2
->>> my_function(5)  # Error: source code not available
+>>> my_function(5)  # -> 10, executed remotely, analysed features skipped
+10
+```
 
-# ✅ This works in .py files and notebooks
+In a `.py` file or a notebook you get everything, including the source-based
+features:
+
+```python
+# cluster-required: needs a configured cluster to execute
+from clustrix import cluster
+
 @cluster(cores=2)
 def my_function(x):
     return x * 2
 
-result = my_function(5)  # Works correctly
+result = my_function(5)
 ```
 
 ## Supported Cluster Types
 
 | `cluster_type` | Status |
 |-|-|
-| `slurm` | Verified. A real job ran on `discovery.dartmouth.edu` and returned its result. |
+| `slurm` | Verified. A real job ran on a production SLURM cluster and returned its result. |
 | `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
 | `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
 | `local` | Runs in local processes. Used for development and the fast tests. |
-| `pbs` | Implemented, **not verified**. PBS and SGE do not use the two-venv setup path and have not been run against real hardware. |
+| `pbs` | Implemented, **not verified**. All four of SLURM/PBS/SGE/SSH now share one environment-setup path, so PBS builds the same two-venv environment SLURM does -- but no PBS job has been run against a real scheduler. |
 | `sge` | Implemented, **not verified**. Same caveat as PBS. |
 | AWS / GCP / Azure / Lambda VM backends | **Unverified.** No cloud job has been shown to run end to end. See [Cloud Providers](#cloud-providers). |
 
@@ -598,7 +639,7 @@ clustrix/
 │   └── infrastructure/  # Test infrastructure setup
 ├── docs/                # Documentation and tutorials
 │   ├── source/          # Sphinx documentation source
-│   ├── notebooks/       # Tutorial notebooks
+│   │   └── notebooks/   # Tutorial notebooks
 │   └── *.md             # Various documentation files
 ├── scripts/             # Utility scripts for development
 │   ├── check_quality.py               # Code quality validation
@@ -623,7 +664,10 @@ clustrix/
 
 Clustrix automatically handles dependency management by:
 
-- Capturing your current Python environment with `pip freeze`
+- Capturing your current Python environment by reading installed package
+  metadata directly (`importlib.metadata`), not by shelling out to `pip freeze`
+  -- the freeze output renders conda-built packages as unusable local paths,
+  which silently dropped a third of the environment
 - Creating virtual environments on cluster nodes
 - Installing exact package versions to match your local environment
 - Supporting conda environments for complex scientific software stacks
@@ -631,22 +675,29 @@ Clustrix automatically handles dependency management by:
 ## Error Handling and Monitoring
 
 ```python
+# cluster-required: needs a real submitted job to monitor
+import clustrix
 from clustrix import ClusterExecutor
 
-# Monitor job status
 executor = ClusterExecutor(clustrix.get_config())
-job_id = "12345"
+
+# job_id is what submit_job() returned for a job you actually submitted.
 status = executor.get_job_status(job_id)
 
-# Cancel jobs if needed
+# Cancel it if needed.
 executor.cancel_job(job_id)
 ```
+
+Results are HMAC-verified before they are deserialized, so a job whose result
+cannot be authenticated raises rather than returning a value -- see
+[the execution model](https://clustrix.readthedocs.io/en/latest/execution_model.html).
 
 ## Examples
 
 ### Machine Learning Training
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=8, memory='32GB', time='12:00:00', partition='gpu')
 def train_neural_network(training_data, model_config):
     import tensorflow as tf
@@ -668,11 +719,15 @@ weights = train_neural_network(my_data, {'epochs': 50})
 ### Scientific Computing
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=16, memory='64GB')
 def monte_carlo_simulation(n_samples=1000000):
     import numpy as np
     
-    # This loop will be automatically parallelized
+    # NOTE: this loop is NOT auto-parallelized. range(n_samples) is not a
+    # literal range, and this function does not accept the chunk keywords,
+    # so clustrix runs it whole on one node. That is still useful -- the
+    # node has 16 cores and 64GB -- but the parallelism is yours to write.
     results = []
     for i in range(n_samples):
         x, y = np.random.random(2)
@@ -690,6 +745,7 @@ pi_value = monte_carlo_simulation(10000000)
 ### Data Processing Pipeline
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=8, memory='16GB')
 def process_large_dataset(file_path, chunk_size=10000):
     import pandas as pd
@@ -716,8 +772,12 @@ command. `scripts/collect_execution_evidence.py` is that command, and
 The existing test suite does not meet that goal yet. It is being worked
 towards, and the README should not be read as saying it has been reached:
 
-- 42 of 197 test modules (21%) still use `unittest.mock`. Migrating
-  them is in progress; the claim that this project uses zero mocks was not true.
+- 42 of 215 test modules (20%) still use `unittest.mock`. (Count: files
+  named `test_*.py` under `tests/`, via
+  `find tests -name "test_*.py" | wc -l` and
+  `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`.)
+  Migrating them is in progress; the claim that this project uses zero
+  mocks was not true.
 - The main CI workflow runs `tests/unit/` plus a local-only slice of the
   integration tests. The SSH, scheduler and cloud tests need credentials CI
   does not have.
@@ -813,7 +873,6 @@ For more detailed information on specific topics, see the organized documentatio
 - **[AWS EKS Troubleshooting](docs/aws/AWS_EKS_TROUBLESHOOTING.md)** - Common AWS access issues
 
 ### GPU Computing
-- **[GPU Parallelization Design](docs/gpu/GPU_PARALLELIZATION_DESIGN.md)** - Comprehensive GPU parallelization guide
 - **[GPU Detection Fix](docs/gpu/GPU_DETECTION_FIX.md)** - GPU detection troubleshooting
 
 ### Technical Design

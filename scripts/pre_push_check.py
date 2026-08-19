@@ -57,12 +57,16 @@ def main():
         print(f"🔍 Pre-push quality checks (attempt {attempt}/{max_attempts})...")
 
         checks = [
-            ("black clustrix/ tests/", "Black formatting"),  # Format, don't just check
             (
-                "flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore="
-                "E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824",
-                "Flake8 linting",
-            ),
+                "black clustrix/ tests/ scripts/",
+                "Black formatting",
+            ),  # Format, don't just check
+            # No inline flags. These duplicated .flake8's policy with a
+            # different, drifted list and skipped scripts/ entirely, so this
+            # gate could pass while CI -- which runs `flake8 clustrix/ tests/
+            # scripts/` against .flake8 -- failed. A gate that disagrees with
+            # the thing it is gating is worse than no gate.
+            ("flake8 clustrix/ tests/ scripts/", "Flake8 linting"),
             ("mypy clustrix/", "MyPy type checking"),
             # Must mirror what GitHub Actions actually runs (see
             # .github/workflows/tests.yml), or this script cannot deliver on
@@ -76,7 +80,10 @@ def main():
             # the 388 in tests/real_world/, which open live SSH and cloud
             # connections. Real-world tests are run deliberately through
             # scripts/run_real_world_tests.py, not from this gate.
-            ('pytest tests/unit/ -m "not real_world"', "Tests"),
+            (
+                'pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration',
+                "Tests",
+            ),
         ]
 
         all_passed = True

@@ -241,17 +241,54 @@ def func_with_break():
         assert len(loops) == 1
         assert not loops[0]["is_parallelizable"]  # Has break statement
 
-        # Simple loop without breaks
+        # Simple loop without breaks, and without reading anything but its
+        # own loop variable (no shared state, no calls to other names)
         source_simple = """
 def func_simple():
     for i in range(10):
-        print(i)
+        x = i * 2
 """
         tree = ast.parse(source_simple)
         loops = self.analyzer.analyze_loops(tree)
 
         assert len(loops) == 1
         assert loops[0]["is_parallelizable"]  # Simple loop
+
+    def test_loop_calling_named_function_is_conservatively_flagged(self):
+        """`print(i)` reads the name `print` (the Call node's own `func`
+        child, not just its arguments), which _is_loop_parallelizable can't
+        distinguish from reading a real shared variable. This is the same
+        conservative-but-safe behaviour as clustrix.loop_analysis's
+        DependencyAnalyzer, which LoopAnalyzer now reuses: it can reject a
+        loop that would actually have been fine, but it will not approve
+        one that turns out to mutate shared state. See #106."""
+        source = """
+def func_with_call():
+    for i in range(10):
+        print(i)
+"""
+        tree = ast.parse(source)
+        loops = self.analyzer.analyze_loops(tree)
+
+        assert len(loops) == 1
+        assert not loops[0]["is_parallelizable"]
+
+    def test_loop_with_reduction_accumulator_is_not_parallelizable(self):
+        """`total += i` reads and writes `total` across iterations -- a real
+        loop-carried dependency that the previous break/continue/global-only
+        heuristic did not check for at all (despite claiming to check for
+        "shared mutable state")."""
+        source = """
+def func_with_accumulator():
+    total = 0
+    for i in range(10):
+        total += i
+"""
+        tree = ast.parse(source)
+        loops = self.analyzer.analyze_loops(tree)
+
+        assert len(loops) == 1
+        assert not loops[0]["is_parallelizable"]
 
 
 class TestConvenienceFunctions:

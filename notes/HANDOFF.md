@@ -78,7 +78,7 @@ Gotchas that will cost you time:
 - **`tomllib` needs Python ≥3.11.** Default interpreter here is 3.9; use
   `/opt/homebrew/bin/python3.12`.
 - **Pass `-o addopts=`** when comparing collection counts across changes.
-- **`tests/real_world/conftest.py:223`** calls `is_dartmouth_network()` at
+- **`tests/real_world/conftest.py:223`** calls `can_reach_configured_cluster()` at
   collection time — live DNS plus a `ping`. If collection hangs off-network,
   that is why. Tracked as #117.
 - **CI's `black` is pinned to 25.1.0.** Do not "upgrade" it (see #110).

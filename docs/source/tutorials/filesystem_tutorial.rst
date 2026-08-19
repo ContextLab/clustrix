@@ -17,24 +17,90 @@ Key Benefits
 - **Data-Driven Workflows**: Enable processing based on actual file contents and metadata
 - **Seamless Integration**: Works perfectly with the ``@cluster`` decorator
 
+What Actually Happens Behind the Scenes
+-----------------------------------------
+
+Every function below (``cluster_ls``, ``cluster_stat``, ...) builds a fresh
+``ClusterFilesystem`` from the ``config`` you pass, runs one operation on
+it, and lets it go. What that operation does depends entirely on
+``config.cluster_type``:
+
+- **``cluster_type="local"``**: a plain ``os``/``glob`` call against
+  ``config.local_work_dir`` (or the current directory). No network
+  involved, nothing to connect or disconnect.
+- **Anything else (SLURM, PBS, SGE, SSH, Kubernetes)**: an operation over
+  SFTP. The SSH connection is opened lazily, on the *first* call that needs
+  one -- not when you construct the config -- and it applies
+  ``config.ssh_host_key_policy`` (``"reject"`` by default; see
+  :doc:`../api/config`) and the connect/auth/banner timeouts so an
+  unreachable host fails within ``config.ssh_connect_timeout`` seconds
+  rather than hanging.
+
+**Because each convenience function builds its own new** ``ClusterFilesystem``,
+calling several of them in a row -- ``cluster_ls(...)`` then
+``cluster_stat(...)`` then ``cluster_exists(...)`` -- opens and closes a
+*separate* SSH connection per call, not one connection reused across all
+three. For a tight loop against a remote cluster, construct
+``clustrix.filesystem.ClusterFilesystem`` once and call its methods
+directly to reuse a single connection:
+
+.. code-block:: python
+
+    from clustrix.filesystem import ClusterFilesystem
+    from clustrix.config import ClusterConfig
+
+    # Shown here against a local config, but the same construct-once,
+    # call-many-times shape is what avoids repeated SSH connections
+    # against a remote one.
+    config = ClusterConfig(cluster_type="local", local_work_dir=".")
+
+    fs = ClusterFilesystem(config)  # no connection to open for "local"
+    names = fs.ls(".")
+    for name in names[:5]:
+        info = fs.stat(name)  # same fs instance, same (here: no-op) connection
+
+**Paths** passed to any of these functions are resolved against
+``config.local_work_dir`` (local) or ``config.remote_work_dir`` (remote)
+unless already absolute.
+
+**Auto-detection when you're already on the cluster.** If this process's
+own hostname matches ``config.cluster_host`` *and* ``config.remote_work_dir``
+is actually visible on the local filesystem (e.g. your code is running on
+the login node itself, or on a compute node sharing NFS/Lustre with it),
+``ClusterFilesystem`` switches to local operations automatically and logs
+that it did so -- so filesystem calls made from code that is *already*
+running on the cluster don't SSH back to the machine they're running on.
+
 Getting Started
 ---------------
 
 Basic Setup
 ~~~~~~~~~~~
 
+Every example below through "Directory Analysis" uses the same ``config``,
+defined once here and reused across the rest of this page (each is a real,
+executed call -- against local files, so no cluster is needed to follow
+along):
+
 .. code-block:: python
 
-    from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists
+    from clustrix import (
+        cluster_ls, cluster_find, cluster_stat, cluster_exists,
+        cluster_isdir, cluster_isfile, cluster_glob, cluster_du,
+        cluster_count_files,
+    )
     from clustrix.config import ClusterConfig
 
-    # Local configuration
-    local_config = ClusterConfig(
+    # Local configuration -- every call below runs directly against this
+    # checkout's own files, no cluster required.
+    config = ClusterConfig(
         cluster_type="local",
-        local_work_dir="./data"  # Local directory to work in
+        local_work_dir="."
     )
 
-    # Remote cluster configuration
+    # Remote cluster configuration -- shown for comparison; connecting to
+    # it needs a real, reachable host (see the cluster-required examples
+    # in :doc:`../api/filesystem`).
     remote_config = ClusterConfig(
         cluster_type="slurm",
         cluster_host="cluster.example.edu",
@@ -112,7 +178,10 @@ File Information
 .. code-block:: python
 
     # Get detailed file information
-    file_info = cluster_stat("large_dataset.h5", config)
+    with open("example_dataset.txt", "w") as f:
+        f.write("sample data\n" * 1000)
+
+    file_info = cluster_stat("example_dataset.txt", config)
     print(f"File: {file_info.size:,} bytes")
     print(f"Modified: {file_info.modified_datetime}")
     print(f"Is directory: {file_info.is_dir}")
@@ -159,10 +228,11 @@ Directory Analysis
 .. code-block:: python
 
     # Get directory usage information
-    usage = cluster_du("datasets/", config)
+    usage = cluster_du("clustrix/", config)
     print(f"Total size: {usage.total_gb:.2f} GB")
     print(f"File count: {usage.file_count:,}")
-    print(f"Average file size: {usage.total_mb/usage.file_count:.1f} MB")
+    if usage.file_count > 0:
+        print(f"Average file size: {usage.total_mb/usage.file_count:.1f} MB")
     
     # Count specific file types
     total_files = cluster_count_files(".", "*", config)
@@ -191,7 +261,8 @@ Automatic Dataset Processing
         print(f"Found {len(csv_files)} CSV files to process")
         
         results = []
-        for filename in csv_files:  # This loop gets parallelized automatically!
+        # Sequential -- see the auto-parallelization contract in limitations.
+        for filename in csv_files:
             # Get file info to make processing decisions
             file_info = cluster_stat(filename, config)
             

@@ -1,10 +1,14 @@
 File Packaging System
 =====================
 
-.. automodule:: clustrix.file_packaging
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. currentmodule:: clustrix.file_packaging
+
+Every member of this module is documented explicitly below (grouped by
+purpose), following the same pattern used in :doc:`cost_monitoring`. A
+blanket ``automodule:: :members:`` is deliberately not used here: this
+project's global ``autodoc_default_options`` sets ``members: True``, so an
+``automodule`` directive combined with the explicit per-member directives
+below would document every class and function twice.
 
 Overview
 --------
@@ -406,7 +410,7 @@ Configuration and Options
 Where packages are written
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Packages are written to a fresh ``tempfile.mkdtemp(prefix="clustrix_packaging_")``
+Packages are written to a fresh ``tempfile.mkdtemp(prefix="clustrix_packages_")``
 directory. There is no environment variable that redirects this: no
 ``CLUSTRIX_PACKAGE_DIR``, ``CLUSTRIX_REMOTE_PYTHON_PATH`` or
 ``CLUSTRIX_DEBUG_PACKAGING`` is read anywhere in the codebase. Use
@@ -426,7 +430,7 @@ Package Cleanup
         import tempfile
 
         package_pattern = os.path.join(
-            tempfile.gettempdir(), "clustrix_packaging_*", "clustrix_package_*.zip"
+            tempfile.gettempdir(), "clustrix_packages_*", "clustrix_package_*.zip"
         )
         old_packages = glob.glob(package_pattern)
         
@@ -464,10 +468,14 @@ The packaging system is automatically used by the @cluster decorator:
 
 .. code-block:: python
 
-    from clustrix import cluster
+    from clustrix import cluster, configure
 
     # cluster_host is a configuration setting, not a decorator argument;
-    # set it with clustrix.configure(cluster_host="cluster.edu").
+    # set it with clustrix.configure(cluster_host="cluster.edu"). Explicit
+    # and self-contained here so this example runs locally regardless of
+    # whatever configuration was active before it.
+    configure(cluster_type="local", cluster_host=None)
+
     @cluster(cores=8)
     def automated_packaging():
         """This function will be automatically packaged and executed remotely."""
@@ -476,7 +484,8 @@ The packaging system is automatically used by the @cluster decorator:
         data_files = cluster_find("*.csv", "data/")
         
         total_size = 0
-        for filename in data_files:  # This loop gets parallelized automatically
+        # Sequential -- see the auto-parallelization contract in limitations.
+        for filename in data_files:
             file_info = cluster_stat(filename)
             total_size += file_info.size
         
@@ -504,9 +513,16 @@ Debug Mode
 .. code-block:: python
 
     import logging
+    from clustrix.file_packaging import package_function_for_execution
+    from clustrix.config import ClusterConfig
 
     # Enable debug logging
     logging.basicConfig(level=logging.DEBUG)
+
+    def your_function():
+        return 42
+
+    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.edu")
 
     # Package function with detailed logging
     package_info = package_function_for_execution(

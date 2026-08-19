@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 import paramiko
 
 from .config import ClusterConfig
+from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -135,8 +136,8 @@ class ClusterFilesystem:
             # about the FILESYSTEM, not about names. The previous test asked
             # whether the two hostnames looked related -- substring matches
             # plus "same institution domain" -- so a laptop on the VPN, whose
-            # hostname was vpn-two-factor-general-229-128-226.dartmouth.edu,
-            # was judged to be discovery.dartmouth.edu. Clustrix then looked
+            # hostname was a VPN-assigned name in the same domain as the
+            # cluster, it was judged to BE the cluster. Clustrix then looked
             # for the job's result file on the laptop, found an empty
             # directory, and reported the job's status as unknown.
             #
@@ -194,7 +195,7 @@ class ClusterFilesystem:
         """Get or create SSH client connection."""
         if self._ssh_client is None:
             self._ssh_client = paramiko.SSHClient()
-            self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(self._ssh_client, self.config)
 
             # Connect based on authentication method
             connect_kwargs: Dict[str, Any] = {

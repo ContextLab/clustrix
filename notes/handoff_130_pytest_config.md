@@ -139,7 +139,7 @@ handle directory traversal regardless.
 
 ```
 real_world          224 uses
-dartmouth_network    11 uses   4 files   <- NOT in pyproject
+cluster_network    11 uses   4 files   <- NOT in pyproject
 slow                  6 uses
 expensive             5 uses   5 files   <- NOT in pyproject
 performance           4 uses   4 files   <- NOT in pyproject
@@ -210,14 +210,14 @@ pytest tests/unit/ -o addopts= -q | tail -1
 ```
 
 ### Step 3 — reconcile the markers
-Add to pyproject's `markers`: `expensive`, `dartmouth_network`, `performance`.
+Add to pyproject's `markers`: `expensive`, `cluster_network`, `performance`.
 Decide on `cleanup` (`test_kubernetes_performance_benchmarks.py:1038`) — either declare
 it or delete the marker. It has one use and no meaning today; deleting is likely right,
 but check with the author first.
 
 Verify:
 ```bash
-pytest --markers | grep -cE '^@pytest.mark.(real_world|slow|unit|integration|expensive|dartmouth_network|performance):'   # -> 7
+pytest --markers | grep -cE '^@pytest.mark.(real_world|slow|unit|integration|expensive|cluster_network|performance):'   # -> 7
 ```
 
 ### Step 4 — enable `--strict-markers` LAST
@@ -256,7 +256,7 @@ def test_project_markers_are_registered(pytestconfig):
         "real_world",
         "expensive",
         "integration",
-        "dartmouth_network",
+        "cluster_network",
         "performance",
         "slow",
     ):
@@ -269,8 +269,8 @@ to work rather than assumed:
 
 | state | `pytestconfig.inipath` | project markers in `getini("markers")` |
 |-|-|-|
-| today (broken) | `/Users/jmanning/clustrix/pytest.ini` | absent — only plugin markers |
-| after Step 2 | `/Users/jmanning/clustrix/pyproject.toml` | `real_world`, `slow`, `unit`, `integration` present |
+| today (broken) | `/home/you/clustrix/pytest.ini` | absent — only plugin markers |
+| after Step 2 | `/home/you/clustrix/pyproject.toml` | `real_world`, `slow`, `unit`, `integration` present |
 
 So `test_pytest_reads_the_intended_config` fails today and passes after the fix — write
 it first and watch it fail, per the project's TDD rule.
@@ -321,6 +321,6 @@ body and recoverable via `git show master~N:pytest.ini`.
    unbounded pin is what turned CI red before, and 26.5.1 reformats 19 unrelated files.
 5. **Do not enable `--strict-markers` before Step 3.** There are 4 undeclared markers in
    use; strict mode turns each into a hard collection error immediately.
-6. **`tests/real_world/conftest.py:223` calls `is_dartmouth_network()` at collection
+6. **`tests/real_world/conftest.py:223` calls `can_reach_configured_cluster()` at collection
    time** — live DNS plus a `ping` subprocess. If collection suddenly gets slow or hangs
    off-network, that is why. Tracked separately on #117; do not fix it here.

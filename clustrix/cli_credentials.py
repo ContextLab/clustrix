@@ -19,6 +19,7 @@ except ImportError:
     HAS_CLICK = False
 
 from .credential_manager import FlexibleCredentialManager, get_credential_manager
+from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -388,7 +389,10 @@ def _validate_ssh_credentials_real(credentials: Dict[str, str]) -> bool:
         import paramiko
 
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # No ClusterConfig exists yet at this stage of credential setup, so
+        # this always uses the strict default: unknown host keys are
+        # rejected with an actionable error rather than trusted silently.
+        configure_host_key_policy(ssh, None)
 
         # Prepare connection parameters with proper types
         hostname = credentials["SSH_HOST"]
@@ -625,14 +629,14 @@ def _write_credentials_to_env_file(env_file: Path, credentials: Dict[str, str]) 
         # Read existing content to preserve comments and structure
         existing_content = ""
         if env_file.exists():
-            existing_content = env_file.read_text()
+            existing_content = env_file.read_text(encoding="utf-8")
 
         # Merge new credentials with existing content
         updated_content = _merge_env_content(existing_content, credentials)
 
         # Write with atomic operation
         temp_file = env_file.with_suffix(".tmp")
-        temp_file.write_text(updated_content)
+        temp_file.write_text(updated_content, encoding="utf-8")
         temp_file.chmod(0o600)  # Secure permissions
 
         # Atomic replacement

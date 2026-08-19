@@ -16,7 +16,7 @@ try:
     IPYTHON_AVAILABLE = True
 except ImportError:
     IPYTHON_AVAILABLE = False
-    from .notebook_magic_mocks import (
+    from .notebook_magic_fallback import (
         Magics,
         magics_class,
         cell_magic,

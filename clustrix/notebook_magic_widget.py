@@ -25,7 +25,7 @@ try:
     IPYTHON_AVAILABLE = True
 except ImportError:
     IPYTHON_AVAILABLE = False
-    from .notebook_magic_mocks import display, HTML, widgets
+    from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import configure, get_config_dir
 
@@ -1597,8 +1597,10 @@ class EnhancedClusterConfigWidget:
         try:
             import paramiko
 
+            from .ssh_security import configure_host_key_policy
+
             ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(ssh_client, config)
 
             # Connection parameters
             connect_params = {

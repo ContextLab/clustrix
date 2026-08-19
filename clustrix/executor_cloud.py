@@ -6,6 +6,9 @@ provisioning, SSH-based execution, and cleanup for various cloud providers
 """
 
 import os
+import secrets
+import shlex
+import stat
 import time
 import tempfile
 import logging
@@ -18,10 +21,25 @@ import paramiko
 import cloudpickle
 import dill
 
+from .ssh_security import configure_host_key_policy
+from .utils import key_capture_lines, result_signing_lines, verify_signed_payload
+
 if TYPE_CHECKING:
     from .cloud_providers.base import CloudProvider
 
 logger = logging.getLogger(__name__)
+
+# What a cloud provider must implement before clustrix can run a job on it.
+# `create_instance` is deliberately not on the CloudProvider ABC -- only
+# LambdaCloudProvider provisions single instances -- so the gap is checked
+# here, at submit time, instead of surfacing as a NotImplementedError from
+# inside a background thread once the caller has already been told the job
+# was accepted (#119).
+REQUIRED_PROVIDER_METHODS = (
+    "create_instance",
+    "get_cluster_status",
+    "get_cluster_config",
+)
 
 
 class CloudJobManager:
@@ -55,6 +73,7 @@ class CloudJobManager:
 
         # Get provider instance
         cloud_provider = self._get_cloud_provider_instance(provider, job_config)
+        self._check_provider_can_run_jobs(provider, cloud_provider)
 
         # Store job info for tracking
         self.active_jobs[job_id] = {
@@ -82,6 +101,40 @@ class CloudJobManager:
         thread.start()
 
         return job_id
+
+    def _check_provider_can_run_jobs(self, provider: str, cloud_provider) -> None:
+        """Refuse a job the provider has no way of running.
+
+        Raises:
+            NotImplementedError: if the provider cannot provision instances
+            RuntimeError: if the provider was never authenticated
+        """
+        if cloud_provider is None:
+            raise NotImplementedError(
+                f"No cloud provider implementation was built for '{provider}'."
+            )
+
+        missing = [
+            name
+            for name in REQUIRED_PROVIDER_METHODS
+            if not callable(getattr(cloud_provider, name, None))
+        ]
+        if missing:
+            raise NotImplementedError(
+                f"The '{provider}' cloud provider cannot run clustrix jobs: "
+                f"{type(cloud_provider).__name__} does not implement "
+                f"{', '.join(missing)}. Of the built-in providers only "
+                "'lambda' provisions instances for job execution; for the "
+                "others, provision the machine yourself and use cluster_type "
+                "'ssh', or use cluster_type 'kubernetes'."
+            )
+
+        if not cloud_provider.is_authenticated():
+            raise RuntimeError(
+                f"The '{provider}' cloud provider is not authenticated, so no "
+                "instance can be provisioned for this job. Supply its "
+                "credentials in the clustrix config or in the job config."
+            )
 
     def _get_cloud_provider_instance(
         self, provider: str, job_config: Dict[str, Any]
@@ -218,22 +271,16 @@ class CloudJobManager:
         """Create cloud instance for job execution."""
         instance_name = f"clustrix-{job_id}"
 
-        # Provider-specific instance creation
-        if hasattr(cloud_provider, "create_instance"):
-            instance_type = job_config.get(
-                "instance_type", "gpu_1x_a10"
-            )  # Default for Lambda
-            region = job_config.get("region", "us-east-1")
+        # The provider was checked for create_instance at submit time, so
+        # there is no "does it support this?" branch to take here.
+        instance_type = job_config.get(
+            "instance_type", "gpu_1x_a10"
+        )  # Default for Lambda
+        region = job_config.get("region", "us-east-1")
 
-            instance_info = cloud_provider.create_instance(
-                instance_name=instance_name, instance_type=instance_type, region=region
-            )
-
-            return instance_info
-        else:
-            raise NotImplementedError(
-                "Cloud provider does not support instance creation"
-            )
+        return cloud_provider.create_instance(
+            instance_name=instance_name, instance_type=instance_type, region=region
+        )
 
     def _wait_for_instance_ready(
         self,
@@ -250,29 +297,41 @@ class CloudJobManager:
         elapsed = 0
 
         while elapsed < max_wait_time:
+            # Only the status poll is retried. An instance that has reached a
+            # terminal state, or one that is up but whose connection details
+            # cannot be read, is not going to improve -- and both of those
+            # raises used to be caught by this loop's own except clause and
+            # retried until the timeout, so the real reason arrived five
+            # minutes late wearing a "not ready" message.
             try:
                 status_info = cloud_provider.get_cluster_status(instance_id)
-                if status_info.get("status") == "active":
-                    # Instance is ready, get SSH configuration
-                    cluster_config = cloud_provider.get_cluster_config(instance_id)
-
-                    return {
-                        "host": cluster_config["cluster_host"],
-                        "username": cluster_config.get("username", "ubuntu"),
-                        "port": cluster_config.get("cluster_port", 22),
-                        "key_file": job_config.get("key_file", "~/.ssh/id_rsa"),
-                    }
-
-                elif status_info.get("status") in ["failed", "terminated"]:
-                    raise RuntimeError(
-                        f"Instance {instance_id} failed to start: {status_info.get('status')}"
-                    )
-
             except Exception as e:
                 if elapsed + check_interval >= max_wait_time:
                     raise RuntimeError(
-                        f"Instance {instance_id} not ready within {max_wait_time}s: {e}"
-                    )
+                        f"Instance {instance_id} not ready within "
+                        f"{max_wait_time}s: {e}"
+                    ) from e
+                logger.warning(
+                    f"Could not read the status of instance {instance_id}, "
+                    f"retrying: {e}"
+                )
+                status_info = {}
+
+            status = status_info.get("status")
+
+            if status == "active":
+                # Instance is ready, get SSH configuration
+                cluster_config = cloud_provider.get_cluster_config(instance_id)
+
+                return {
+                    "host": cluster_config["cluster_host"],
+                    "username": cluster_config.get("username", "ubuntu"),
+                    "port": cluster_config.get("cluster_port", 22),
+                    "key_file": job_config.get("key_file", "~/.ssh/id_rsa"),
+                }
+
+            if status in ("failed", "terminated"):
+                raise RuntimeError(f"Instance {instance_id} failed to start: {status}")
 
             time.sleep(check_interval)
             elapsed += check_interval
@@ -291,7 +350,10 @@ class CloudJobManager:
         """Execute job on cloud instance via SSH."""
         # Create temporary SSH client for cloud instance
         ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # The last host-key site in the package that had not been routed
+        # through ssh_security: a cloud instance's key was trusted on sight,
+        # which is a machine-in-the-middle away from someone else's job.
+        configure_host_key_policy(ssh_client, self.config)
 
         try:
             # Connect to cloud instance
@@ -306,9 +368,18 @@ class CloudJobManager:
             # Create SFTP client
             sftp_client = ssh_client.open_sftp()
 
-            # Create remote work directory
+            # Create remote work directory 0700 and drop a per-job signing
+            # key inside it, exactly as the scheduler backends do. The result
+            # this instance produces is deserialized with dill on the
+            # submitting machine, and dill.loads executes code, so it has to
+            # be authenticated -- this path had no key and no check at all.
             remote_work_dir = f"/tmp/clustrix_cloud_{job_id}"
-            sftp_client.mkdir(remote_work_dir)
+            sftp_client.mkdir(remote_work_dir, mode=0o700)
+            result_key = secrets.token_hex(32)
+            key_path = f"{remote_work_dir}/.clustrix_result_key"
+            with sftp_client.open(key_path, "w") as key_handle:
+                key_handle.write(result_key)
+            sftp_client.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
 
             # Upload function data
             with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
@@ -335,9 +406,14 @@ class CloudJobManager:
             finally:
                 os.unlink(temp_script_path)
 
-            # Execute job
+            # Execute job. The key is read from the 0600 file rather than
+            # passed on the command line, which any user on the box can read
+            # out of /proc.
+            quoted_dir = shlex.quote(remote_work_dir)
             stdin, stdout, stderr = ssh_client.exec_command(
-                f"cd {remote_work_dir} && python execute_job.py"
+                f"cd {quoted_dir} && "
+                f"export CLUSTRIX_RESULT_KEY=$(cat {shlex.quote(key_path)}) && "
+                "python execute_job.py"
             )
 
             # Wait for completion
@@ -355,12 +431,25 @@ class CloudJobManager:
             try:
                 sftp_client.get(result_path, temp_result_path)
                 with open(temp_result_path, "rb") as f:
-                    # dill: the worker wrote this with dill, and stdlib
-                    # pickle would rebuild __main__ classes instead of reusing
-                    # the caller's.
-                    result = dill.load(f)
+                    payload = f.read()
             finally:
                 os.unlink(temp_result_path)
+
+            try:
+                with sftp_client.open(f"{result_path}.hmac") as tag_handle:
+                    tag = tag_handle.read().decode()
+            except IOError:
+                # Absent signature: verify_signed_payload refuses on an empty
+                # tag, which is what an unsigned result has to mean.
+                tag = ""
+
+            verify_signed_payload(payload, tag, result_key, f"Cloud job {job_id}")
+            # dill: the worker writes this with dill (see
+            # _create_cloud_execution_script), and stdlib pickle would rebuild
+            # __main__ classes instead of reusing the caller's. Safe to
+            # deserialize only because the bytes just verified against the
+            # per-job key.
+            result = dill.loads(payload)
 
             return result
 
@@ -376,6 +465,18 @@ class CloudJobManager:
         self, remote_work_dir: str, job_config: Dict[str, Any]
     ) -> str:
         """Create Python execution script for cloud instance."""
+        # The one signing implementation, shared with the SSH/SLURM job
+        # scripts; `_ser` is the dill alias this script already binds.
+        signing = "\n".join(result_signing_lines(indent=" " * 8, serializer="_ser"))
+        # Capture the signing key and drop it from the environment before the
+        # user's function -- and anything it imports -- gets to run.
+        capture = "\n".join(key_capture_lines())
+        # The job directory is interpolated into *Python source*, so it needs
+        # Python-literal quoting, not bare quotes: repr() escapes an embedded
+        # quote (which would otherwise close the literal and let the rest of
+        # the value run as code) and any backslash.
+        func_data_literal = repr(f"{remote_work_dir}/func_data.pkl")
+        error_literal = repr(f"{remote_work_dir}/error.pkl")
         return f"""#!/usr/bin/env python3
 import sys
 import os
@@ -383,10 +484,12 @@ import pickle
 import cloudpickle
 import traceback
 
+{capture}
+
 def main():
     try:
         # Load function data
-        with open('{remote_work_dir}/func_data.pkl', 'rb') as f:
+        with open({func_data_literal}, 'rb') as f:
             func_data = cloudpickle.load(f)
 
         # Unpack what serialize_function() actually produced. It stores the
@@ -409,9 +512,11 @@ def main():
 
         result = func(*args, **kwargs)
 
-        # Save result
-        with open('{remote_work_dir}/result.pkl', 'wb') as f:
-            pickle.dump(result, f)
+        # Save result, signed with the per-job key. Written with _ser (dill),
+        # which is what the caller reads it back with -- it used to be written
+        # with stdlib pickle under a comment claiming dill, and with no
+        # signature at all.
+{signing}
 
         print("Job completed successfully")
 
@@ -420,7 +525,7 @@ def main():
         traceback.print_exc()
 
         # Save error
-        with open('{remote_work_dir}/error.pkl', 'wb') as f:
+        with open({error_literal}, 'wb') as f:
             pickle.dump({{'error': str(e), 'traceback': traceback.format_exc()}}, f)
 
         sys.exit(1)

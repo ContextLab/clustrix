@@ -23,7 +23,7 @@ I've created a comprehensive technical design document for implementing the enha
 
 ### 4. **Continuous Validation**
 - Every feature validated on real clusters from day one
-- Test clusters: tensor01.dartmouth.edu (simple SSH) and ndoli.dartmouth.edu (Kerberos)
+- Test clusters: gpu.example.edu (simple SSH) and hpc2.example.edu (Kerberos)
 - Validation framework included in implementation
 
 ## Implementation Plan

@@ -14,6 +14,7 @@ from typing import Optional, Tuple, List, Dict, Any
 import paramiko
 from clustrix.config import ClusterConfig
 from clustrix.auth_fallbacks import setup_auth_with_fallback
+from clustrix.ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -86,19 +87,26 @@ def find_ssh_keys() -> List[str]:
 
 
 def detect_working_ssh_key(
-    hostname: str, username: str, port: int = 22
+    hostname: str,
+    username: str,
+    port: int = 22,
+    config: Optional[ClusterConfig] = None,
 ) -> Optional[str]:
     """Check if any existing SSH key already works for this host."""
-    return detect_existing_ssh_key(hostname, username, port)
+    return detect_existing_ssh_key(hostname, username, port, config=config)
 
 
 def validate_ssh_key(
-    hostname: str, username: str, key_path: str, port: int = 22
+    hostname: str,
+    username: str,
+    key_path: str,
+    port: int = 22,
+    config: Optional[ClusterConfig] = None,
 ) -> bool:
     """Verify that a specific SSH key enables passwordless authentication."""
     try:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Try to connect with this specific key
         client.connect(
@@ -124,7 +132,10 @@ def validate_ssh_key(
 
 
 def detect_existing_ssh_key(
-    hostname: str, username: str, port: int = 22
+    hostname: str,
+    username: str,
+    port: int = 22,
+    config: Optional[ClusterConfig] = None,
 ) -> Optional[str]:
     """
     Check if SSH keys already work for the given host.
@@ -133,6 +144,8 @@ def detect_existing_ssh_key(
         hostname: Target hostname
         username: SSH username
         port: SSH port (default 22)
+        config: Optional ClusterConfig, consulted for ssh_host_key_policy.
+            Defaults to strict host key verification when omitted.
 
     Returns:
         Path to working SSH key, or None if no key works
@@ -143,7 +156,7 @@ def detect_existing_ssh_key(
         try:
             # Test SSH connection with this key
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client, config)
 
             # Try to connect with this key
             client.connect(
@@ -271,10 +284,17 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
 
 
 def deploy_ssh_key(
-    hostname: str, username: str, password: str, public_key_path: str, port: int = 22
+    hostname: str,
+    username: str,
+    password: str,
+    public_key_path: str,
+    port: int = 22,
+    config: Optional[ClusterConfig] = None,
 ) -> bool:
     """Deploy public key to remote authorized_keys using password auth."""
-    return deploy_public_key(hostname, username, public_key_path, port, password)
+    return deploy_public_key(
+        hostname, username, public_key_path, port, password, config=config
+    )
 
 
 def deploy_public_key(
@@ -283,6 +303,7 @@ def deploy_public_key(
     public_key_path: str,
     port: int = 22,
     password: Optional[str] = None,
+    config: Optional[ClusterConfig] = None,
 ) -> bool:
     """
     Deploy public key to remote host's authorized_keys.
@@ -293,6 +314,8 @@ def deploy_public_key(
         public_key_path: Path to public key file
         port: SSH port (default 22)
         password: Password for initial authentication (if needed)
+        config: Optional ClusterConfig, consulted for ssh_host_key_policy.
+            Defaults to strict host key verification when omitted.
 
     Returns:
         True if deployment successful, False otherwise
@@ -345,7 +368,7 @@ def deploy_public_key(
     # Fallback: Manual deployment using paramiko
     try:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Connect with password or existing key
         if password:
@@ -517,7 +540,9 @@ def setup_ssh_keys(
         # Step 1: Check if SSH keys already work (unless force_refresh)
         existing_key = None
         if not force_refresh:
-            existing_key = detect_existing_ssh_key(hostname, username, port)
+            existing_key = detect_existing_ssh_key(
+                hostname, username, port, config=config
+            )
             if existing_key:
                 logger.info(f"Found working SSH key for {hostname}: {existing_key}")
                 result.update(
@@ -581,7 +606,7 @@ def setup_ssh_keys(
         try:
             public_key_path = f"{key_path}.pub"
             success = deploy_public_key(
-                hostname, username, public_key_path, port, password
+                hostname, username, public_key_path, port, password, config=config
             )
             if success:
                 result["key_deployed"] = True
@@ -613,7 +638,7 @@ def setup_ssh_keys(
         retry_delay = 2
 
         for attempt in range(max_retries):
-            test_key = detect_existing_ssh_key(hostname, username, port)
+            test_key = detect_existing_ssh_key(hostname, username, port, config=config)
             if test_key == key_path:
                 result["connection_tested"] = True
                 logger.info("SSH key connection test successful")

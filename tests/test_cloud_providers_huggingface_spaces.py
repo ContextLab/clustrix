@@ -5,6 +5,21 @@ from datetime import datetime, timezone
 from clustrix.cloud_providers.huggingface_spaces import HuggingFaceSpacesProvider
 
 
+def _http_response(status_code: int = 400):
+    """A real requests.Response for constructing HfHubHTTPError.
+
+    huggingface_hub made ``response`` a required keyword-only argument, so
+    ``HfHubHTTPError("msg")`` raises TypeError on current releases while
+    working on older ones. Passing a real Response is correct on both, and
+    is what the library itself does.
+    """
+    import requests
+
+    response = requests.Response()
+    response.status_code = status_code
+    return response
+
+
 class TestHuggingFaceSpacesProvider:
     """Test HuggingFace Spaces provider functionality."""
 
@@ -102,7 +117,9 @@ class TestHuggingFaceSpacesProvider:
 
         mock_api = Mock()
         mock_hf_api_class.return_value = mock_api
-        mock_api.whoami.side_effect = HfHubHTTPError("Invalid token")
+        mock_api.whoami.side_effect = HfHubHTTPError(
+            "Invalid token", response=_http_response()
+        )
 
         result = provider.authenticate(token="test_token", username="test_user")
 
@@ -266,7 +283,7 @@ class TestHuggingFaceSpacesProvider:
         from clustrix.cloud_providers.huggingface_spaces import HfHubHTTPError
 
         authenticated_provider.api.create_repo.side_effect = HfHubHTTPError(
-            "Space already exists"
+            "Space already exists", response=_http_response()
         )
 
         with pytest.raises(HfHubHTTPError):
@@ -314,7 +331,7 @@ class TestHuggingFaceSpacesProvider:
         from clustrix.cloud_providers.huggingface_spaces import HfHubHTTPError
 
         authenticated_provider.api.delete_repo.side_effect = HfHubHTTPError(
-            "Space not found"
+            "Space not found", response=_http_response()
         )
 
         result = authenticated_provider.delete_cluster("test_user/test-space")
@@ -369,7 +386,7 @@ class TestHuggingFaceSpacesProvider:
         from clustrix.cloud_providers.huggingface_spaces import HfHubHTTPError
 
         authenticated_provider.api.space_info.side_effect = HfHubHTTPError(
-            "404 Space not found"
+            "404 Space not found", response=_http_response()
         )
 
         result = authenticated_provider.get_cluster_status("test_user/nonexistent")
@@ -388,7 +405,7 @@ class TestHuggingFaceSpacesProvider:
         from clustrix.cloud_providers.huggingface_spaces import HfHubHTTPError
 
         authenticated_provider.api.space_info.side_effect = HfHubHTTPError(
-            "500 Server error"
+            "500 Server error", response=_http_response()
         )
 
         with pytest.raises(HfHubHTTPError):
@@ -482,7 +499,9 @@ class TestHuggingFaceSpacesProvider:
         """Test cluster listing with HuggingFace Hub error."""
         from clustrix.cloud_providers.huggingface_spaces import HfHubHTTPError
 
-        authenticated_provider.api.list_spaces.side_effect = HfHubHTTPError("API error")
+        authenticated_provider.api.list_spaces.side_effect = HfHubHTTPError(
+            "API error", response=_http_response()
+        )
 
         result = authenticated_provider.list_clusters()
 

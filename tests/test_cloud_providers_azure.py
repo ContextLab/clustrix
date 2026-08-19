@@ -756,9 +756,10 @@ class TestAzureProvider:
             Exception("IP not found")
         )
 
-        result = authenticated_provider.get_cluster_config("test-vm", cluster_type="vm")
-
-        assert result["cluster_host"] == ""
+        # A VM whose public IP cannot be read has no host to connect to.
+        # This used to return cluster_host "" (see #119).
+        with pytest.raises(RuntimeError, match="no readable public IP"):
+            authenticated_provider.get_cluster_config("test-vm", cluster_type="vm")
 
     def test_get_cluster_config_vm_exception(self, authenticated_provider):
         """Test VM cluster config with exception."""
@@ -766,13 +767,10 @@ class TestAzureProvider:
             Exception("VM not found")
         )
 
-        result = authenticated_provider.get_cluster_config("test-vm", cluster_type="vm")
-
-        # Should return basic config
-        assert result["name"] == "Azure VM - test-vm"
-        assert result["cluster_type"] == "ssh"
-        assert result["cluster_host"] == "placeholder.azure.com"
-        assert result["provider"] == "azure"
+        # This used to return cluster_host "placeholder.azure.com", which
+        # clustrix then tried to SSH into (see #119).
+        with pytest.raises(RuntimeError, match="Could not determine"):
+            authenticated_provider.get_cluster_config("test-vm", cluster_type="vm")
 
     def test_get_cluster_config_aks(self, authenticated_provider):
         """Test AKS cluster config retrieval."""
@@ -1072,6 +1070,6 @@ class TestAzureProviderEdgeCases:
         mock_public_ip.ip_address = None  # No IP address
         provider.network_client.public_ip_addresses.get.return_value = mock_public_ip
 
-        result = provider.get_cluster_config("test-vm", cluster_type="vm")
-
-        assert result["cluster_host"] == ""
+        # A public IP resource with no address assigned is not a host.
+        with pytest.raises(RuntimeError, match="no address"):
+            provider.get_cluster_config("test-vm", cluster_type="vm")

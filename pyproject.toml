@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clustrix"
-version = "0.1.1"
+version = "0.2.0"
 authors = [
     {name = "Contextual Dynamics Laboratory", email = "contextualdynamics@gmail.com"},
 ]
@@ -35,7 +35,9 @@ keywords = ["distributed-computing", "cluster", "slurm", "kubernetes", "parallel
 dependencies = [
     "paramiko>=2.7.0",
     "pyyaml>=5.4.0", 
-    "cloudpickle>=2.0.0",
+    "cloudpickle>=3.0.0",  # 2.x cannot ship a by-value package that
+    # defines a typing.NamedTuple when the module object itself is in
+    # the function's globals (KeyError '__module__' on load)
     "dill>=0.3.4",
     "click>=8.0.0",
     "requests>=2.25.0",
@@ -67,7 +69,11 @@ aws = [
 ]
 azure = [
     "azure-identity>=1.12.0",
-    "azure-mgmt-containerservice>=20.0.0", 
+    "azure-mgmt-containerservice>=20.0.0",
+    "azure-mgmt-compute>=30.0.0",
+    "azure-mgmt-resource>=23.0.0,<26.0.0",
+    "azure-mgmt-network>=25.0.0",
+    "azure-mgmt-authorization>=4.0.0",
     "kubernetes>=20.13.0",
 ]
 gcp = [
@@ -80,8 +86,12 @@ cloud = [
     "boto3>=1.26.0",
     "azure-identity>=1.12.0",
     "azure-mgmt-containerservice>=20.0.0",
+    "azure-mgmt-compute>=30.0.0",
+    "azure-mgmt-resource>=23.0.0,<26.0.0",
+    "azure-mgmt-network>=25.0.0",
+    "azure-mgmt-authorization>=4.0.0",
     "google-cloud-container>=2.15.0",
-    "google-cloud-resource-manager>=1.14.0", 
+    "google-cloud-resource-manager>=1.14.0",
     "google-auth>=2.15.0",
     "kubernetes>=20.13.0",
 ]
@@ -93,6 +103,9 @@ dev = [
     # them those modules raise ModuleNotFoundError during collection (see #130).
     "numpy>=1.19",
     "pandas>=1.1",
+    "scikit-learn>=1.0",  # tests/test_decorator_real.py trains a real model;
+    # it passed locally only because a developer environment happened to
+    # have sklearn, and failed in CI where nothing declared it
     "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
     # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8", 
@@ -121,7 +134,7 @@ test = [
     "azure-identity>=1.12.0",
     "azure-mgmt-compute>=30.0.0",
     "azure-mgmt-containerservice>=20.0.0",
-    "azure-mgmt-resource>=23.0.0",
+    "azure-mgmt-resource>=23.0.0,<26.0.0",
     "azure-mgmt-network>=25.0.0", 
     "google-cloud-compute>=1.11.0",
     "google-cloud-container>=2.15.0",
@@ -144,9 +157,13 @@ all = [
     "ipython>=7.0",
     # Cloud provider dependencies
     "kubernetes>=20.13.0",
-    "boto3>=1.26.0", 
+    "boto3>=1.26.0",
     "azure-identity>=1.12.0",
     "azure-mgmt-containerservice>=20.0.0",
+    "azure-mgmt-compute>=30.0.0",
+    "azure-mgmt-resource>=23.0.0,<26.0.0",
+    "azure-mgmt-network>=25.0.0",
+    "azure-mgmt-authorization>=4.0.0",
     "google-cloud-container>=2.15.0",
     "google-cloud-resource-manager>=1.14.0",
     "google-auth>=2.15.0",
@@ -234,7 +251,6 @@ markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
     "expensive: marks tests that provision billable resources (applied automatically to tests/integration; see #109)",
-    "dartmouth_network: marks tests that require access to the Dartmouth campus network",
     "performance: marks performance benchmark tests",
 ]
 # Carried over from the deleted pytest.ini, where it never took effect. These

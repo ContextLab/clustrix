@@ -11,16 +11,16 @@ from tests.real_world import credentials
 def test_client_side_gpu_parallelization():
     """Test client-side GPU parallelization approach."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     # Configure with automatic GPU parallelization enabled
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,

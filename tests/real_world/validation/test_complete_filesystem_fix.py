@@ -51,7 +51,7 @@ def test_complete_filesystem_operations(config):
 
     # Test 3: Shared directory access
     shared_access_tests = {}
-    test_paths = ["/dartfs-hpc/rc/home/b/f002d6b", "/tmp", "."]
+    test_paths = [os.environ.get("CLUSTRIX_TEST_SLURM_REMOTE_DIR", "/tmp"), "/tmp", "."]
 
     for path in test_paths:
         try:

@@ -22,21 +22,21 @@ from clustrix.config import (
 import clustrix.config as config_module
 
 
+@pytest.fixture
+def temp_config_dir():
+    """Create temporary directory for config files.
+
+    Module-level (not class-scoped) so both TestClusterConfigReal and
+    TestConfigurationWorkflows can use it -- it used to live only inside
+    TestClusterConfigReal, which meant tests in TestConfigurationWorkflows
+    that request it hit "fixture 'temp_config_dir' not found" (Issue #114).
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        yield Path(tmpdir)
+
+
 class TestClusterConfigReal:
     """Test ClusterConfig with real configurations."""
-
-    @pytest.fixture
-    def temp_config_dir(self):
-        """Create temporary directory for config files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield Path(tmpdir)
-
-    @pytest.fixture
-    def reset_config(self):
-        """Reset global configuration after test."""
-        original = config_module._config
-        yield
-        config_module._config = original
 
     def test_default_initialization_real(self):
         """
@@ -57,11 +57,15 @@ class TestClusterConfigReal:
         assert config.default_cores == 4
         assert config.default_memory == "8GB"
         assert config.default_time == "01:00:00"
-        assert config.partition is None
+        # "partition" was never a ClusterConfig field; the real name is
+        # "default_partition" (Issue #114).
+        assert config.default_partition is None
         assert config.auto_parallel is True
         assert config.max_parallel_jobs == 100
         assert config.cleanup_on_success is True
-        assert config.cleanup_on_failure is False
+        # "cleanup_on_failure" has never existed on ClusterConfig (`git log
+        # -S` finds no commit introducing it) -- only "cleanup_on_success"
+        # does. Not asserted (Issue #114).
 
         # Mutable defaults
         assert config.environment_variables == {}
@@ -77,14 +81,17 @@ class TestClusterConfigReal:
         - Configuration validation
         - Real-world settings
         """
+        # "namespace" was never a ClusterConfig field -- the real Kubernetes
+        # namespace field is "k8s_namespace". "gpu" is a per-job @cluster
+        # decorator kwarg, not a ClusterConfig field, so it is not passed
+        # here (Issue #114).
         config = ClusterConfig(
             cluster_type="kubernetes",
             cluster_host="k8s.example.com",
             username="k8s-user",
-            namespace="ml-workloads",
+            k8s_namespace="ml-workloads",
             default_cores=16,
             default_memory="64GB",
-            gpu=2,
             environment_variables={
                 "CUDA_VISIBLE_DEVICES": "0,1",
                 "TF_GPU_MEMORY_GROWTH": "true",
@@ -96,8 +103,7 @@ class TestClusterConfigReal:
         )
 
         assert config.cluster_type == "kubernetes"
-        assert config.namespace == "ml-workloads"
-        assert config.gpu == 2
+        assert config.k8s_namespace == "ml-workloads"
         assert config.environment_variables["CUDA_VISIBLE_DEVICES"] == "0,1"
         assert "cuda/11.8" in config.module_loads
         assert config.auto_provision_k8s is True
@@ -122,7 +128,7 @@ class TestClusterConfigReal:
             default_cores=32,
             default_memory="128GB",
             default_time="24:00:00",
-            partition="gpu",
+            default_partition="gpu",  # "partition" is not a real field name
             environment_variables={
                 "PROJECT_DIR": "/projects/ml",
                 "SCRATCH_DIR": "/scratch/researcher",
@@ -171,15 +177,15 @@ class TestClusterConfigReal:
         config_file = temp_config_dir / "cluster_config.json"
 
         # Configure
+        # "namespace" is not a real field (the real one is "k8s_namespace").
+        # "node_selector"/"tolerations" are not ClusterConfig fields at all --
+        # there is no passthrough for arbitrary Kubernetes Job-spec fields
+        # like node selectors or tolerations (Issue #114).
         configure(
             cluster_type="kubernetes",
-            namespace="production",
+            k8s_namespace="production",
             default_cores=8,
             default_memory="32Gi",
-            node_selector={"workload": "ml", "gpu": "true"},
-            tolerations=[
-                {"key": "nvidia.com/gpu", "operator": "Exists", "effect": "NoSchedule"}
-            ],
         )
 
         # Save as JSON
@@ -201,9 +207,8 @@ class TestClusterConfigReal:
             loaded_data = json.load(f)
 
         assert loaded_data["cluster_type"] == "kubernetes"
-        assert loaded_data["namespace"] == "production"
+        assert loaded_data["k8s_namespace"] == "production"
         assert loaded_data["default_memory"] == "32Gi"
-        assert loaded_data["node_selector"]["workload"] == "ml"
 
     def test_environment_variable_configuration(self, reset_config):
         """
@@ -259,9 +264,24 @@ class TestClusterConfigReal:
         Test configuration precedence order.
 
         This demonstrates:
-        - Default < File < Environment < Runtime
+        - Default < File < Runtime
         - Real precedence handling
         - Configuration merging
+
+        NOTE: ClusterConfig/configure()/load_config() have no mechanism that
+        reads CLUSTRIX_<FIELD> environment variables to override config
+        values -- the only environment variable config.py itself consults is
+        CLUSTRIX_CONFIG_DIR (which controls *where* config files are found,
+        not values inside them). The original version of this test set
+        CLUSTRIX_DEFAULT_CORES expecting load_config()/configure() to pick
+        it up automatically; that never happened in the real implementation.
+        (test_environment_variable_configuration, elsewhere in this file,
+        has to hand-apply env vars via setattr() with a comment admitting
+        it is simulating "what would happen in a real init" -- i.e. this
+        layer is documented in CLAUDE.md's "Configuration Priority" section
+        but not actually wired up; see the Issue #114 report.) This test
+        now only exercises the precedence that is real: Default < File <
+        Runtime.
         """
         config_file = temp_config_dir / "base_config.yml"
 
@@ -275,28 +295,20 @@ class TestClusterConfigReal:
         with open(config_file, "w") as f:
             yaml.dump(base_config, f)
 
-        # 2. Set environment variable (higher precedence)
-        os.environ["CLUSTRIX_DEFAULT_CORES"] = "8"
+        # 2. Load file configuration
+        load_config(str(config_file))
 
-        try:
-            # 3. Load file configuration
-            load_config(str(config_file))
+        # 3. Runtime configuration (highest precedence)
+        configure(default_memory="16GB", default_partition="gpu", default_cores=8)
 
-            # 4. Runtime configuration (highest precedence)
-            configure(default_memory="16GB", partition="gpu")
+        config = get_config()
 
-            config = get_config()
-
-            # Verify precedence
-            assert config.cluster_type == "slurm"  # From file
-            assert config.cluster_host == "base.cluster.com"  # From file
-            assert config.default_cores == 8  # From environment (would override file)
-            assert config.default_memory == "16GB"  # From runtime
-            assert config.partition == "gpu"  # From runtime
-
-        finally:
-            if "CLUSTRIX_DEFAULT_CORES" in os.environ:
-                del os.environ["CLUSTRIX_DEFAULT_CORES"]
+        # Verify precedence
+        assert config.cluster_type == "slurm"  # From file
+        assert config.cluster_host == "base.cluster.com"  # From file
+        assert config.default_cores == 8  # From runtime, overriding file's 4
+        assert config.default_memory == "16GB"  # From runtime
+        assert config.default_partition == "gpu"  # From runtime
 
     def test_multi_cluster_configuration(self, temp_config_dir, reset_config):
         """
@@ -308,6 +320,8 @@ class TestClusterConfigReal:
         - Real multi-cluster workflows
         """
         # Create multiple configuration files
+        # "namespace" and "partition" are not real field names; the real
+        # ones are "k8s_namespace" and "default_partition" (Issue #114).
         configs = {
             "dev": {
                 "cluster_type": "local",
@@ -316,7 +330,7 @@ class TestClusterConfigReal:
             },
             "test": {
                 "cluster_type": "kubernetes",
-                "namespace": "testing",
+                "k8s_namespace": "testing",
                 "default_cores": 4,
                 "default_memory": "8Gi",
             },
@@ -326,7 +340,7 @@ class TestClusterConfigReal:
                 "username": "prod_user",
                 "default_cores": 32,
                 "default_memory": "128GB",
-                "partition": "production",
+                "default_partition": "production",
             },
         }
 
@@ -345,10 +359,10 @@ class TestClusterConfigReal:
             assert current.cluster_type == expected["cluster_type"]
             assert current.default_cores == expected["default_cores"]
 
-            if "namespace" in expected:
-                assert current.namespace == expected["namespace"]
-            if "partition" in expected:
-                assert current.partition == expected["partition"]
+            if "k8s_namespace" in expected:
+                assert current.k8s_namespace == expected["k8s_namespace"]
+            if "default_partition" in expected:
+                assert current.default_partition == expected["default_partition"]
 
     @pytest.mark.real_world
     def test_kubernetes_configuration_real(self, reset_config):
@@ -359,27 +373,30 @@ class TestClusterConfigReal:
         - K8s-specific settings
         - Auto-provisioning configuration
         - Real K8s parameters
+
+        NOTE: this test originally asserted a much larger surface of K8s
+        fields (k8s_project_id, k8s_zone, k8s_gpu_type, k8s_gpu_count,
+        k8s_preemptible, k8s_autoscaling, k8s_min_nodes, k8s_max_nodes,
+        namespace, service_account, image_pull_secrets, node_selector) that
+        are not, and never were, fields on ClusterConfig (confirmed via
+        `git log -S` -- e.g. node_selector/tolerations have no history at
+        all). Kubernetes Job-spec passthroughs (node_selector, tolerations,
+        image_pull_secrets) and GPU/autoscaling knobs are a genuine gap in
+        ClusterConfig, not a test bug; see Issue #114 report. This test now
+        only exercises fields that genuinely exist.
         """
         configure(
             cluster_type="kubernetes",
             auto_provision_k8s=True,
             k8s_provider="gcp",
-            k8s_project_id="my-gcp-project",
+            gcp_project_id="my-gcp-project",
             k8s_region="us-central1",
-            k8s_zone="us-central1-a",
+            gcp_zone="us-central1-a",
             k8s_cluster_name="ml-cluster",
             k8s_node_count=3,
             k8s_node_type="n1-standard-8",
-            k8s_gpu_type="nvidia-tesla-t4",
-            k8s_gpu_count=1,
-            k8s_preemptible=True,
-            k8s_autoscaling=True,
-            k8s_min_nodes=1,
-            k8s_max_nodes=10,
-            namespace="ml-workloads",
-            service_account="ml-service-account",
-            image_pull_secrets=["gcr-secret"],
-            node_selector={"cloud.google.com/gke-nodepool": "gpu-pool"},
+            k8s_namespace="ml-workloads",
+            k8s_service_account="ml-service-account",
         )
 
         config = get_config()
@@ -388,12 +405,12 @@ class TestClusterConfigReal:
         assert config.cluster_type == "kubernetes"
         assert config.auto_provision_k8s is True
         assert config.k8s_provider == "gcp"
+        assert config.gcp_project_id == "my-gcp-project"
         assert config.k8s_cluster_name == "ml-cluster"
-        assert config.k8s_gpu_type == "nvidia-tesla-t4"
-        assert config.k8s_autoscaling is True
-        assert config.k8s_max_nodes == 10
-        assert config.namespace == "ml-workloads"
-        assert config.node_selector["cloud.google.com/gke-nodepool"] == "gpu-pool"
+        assert config.k8s_node_count == 3
+        assert config.k8s_node_type == "n1-standard-8"
+        assert config.k8s_namespace == "ml-workloads"
+        assert config.k8s_service_account == "ml-service-account"
 
     def test_validation_and_error_handling(self, reset_config):
         """
@@ -442,18 +459,21 @@ class TestConfigurationWorkflows:
         # Step 1: User creates configuration file
         config_file = temp_config_dir / "my_cluster.yml"
 
+        # "private_key_path" is not a real field (the real one is
+        # "key_file"). "partition" is not a real field (the real one is
+        # "default_partition"). "account"/"qos" are not ClusterConfig
+        # fields at all -- SLURM --account/--qos passthrough is a genuine
+        # gap, not a test bug; see Issue #114 report. (Issue #114)
         my_config = {
             "cluster_type": "slurm",
             "cluster_host": "hpc.myuniversity.edu",
             "username": "researcher",
-            "private_key_path": "~/.ssh/cluster_key",
+            "key_file": "~/.ssh/cluster_key",
             "remote_work_dir": "/scratch/researcher/clustrix",
             "default_cores": 16,
             "default_memory": "64GB",
             "default_time": "12:00:00",
-            "partition": "compute",
-            "account": "research_project",
-            "qos": "normal",
+            "default_partition": "compute",
             "environment_variables": {
                 "PROJECT_HOME": "/projects/ml_research",
                 "DATA_DIR": "/datasets/public",
@@ -473,7 +493,10 @@ class TestConfigurationWorkflows:
         load_config(str(config_file))
 
         # Step 3: User can override specific settings
-        configure(default_cores=32, gpu=2)  # Override for this session  # Request GPUs
+        # "gpu" is not a ClusterConfig field (it's a per-job @cluster
+        # decorator kwarg, exercised below), so it is not passed to
+        # configure() here (Issue #114).
+        configure(default_cores=32)  # Override for this session
 
         # Step 4: User defines computation
         @cluster(cores=32, memory="128GB", time="24:00:00", gpu=2)
@@ -511,8 +534,10 @@ class TestConfigurationWorkflows:
         assert train_large_model._cluster_config["gpu"] == 2
 
         # Step 5: Verify configuration
+        # "gpu" is not a ClusterConfig field (see above), so it is not
+        # asserted on current_config here -- it was already verified on the
+        # decorator's _cluster_config above.
         current_config = get_config()
         assert current_config.cluster_type == "slurm"
         assert current_config.cluster_host == "hpc.myuniversity.edu"
         assert current_config.default_cores == 32  # Overridden value
-        assert current_config.gpu == 2  # Added GPU requirement

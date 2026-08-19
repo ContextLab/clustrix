@@ -1,11 +1,15 @@
 """Real cluster validation utilities for enhanced authentication."""
 
+import logging
 import os
 import time
 from typing import Dict, Optional
 import paramiko
 
 from .config import ClusterConfig
+from .ssh_security import configure_host_key_policy
+
+logger = logging.getLogger(__name__)
 
 
 def validate_cluster_auth(
@@ -26,7 +30,7 @@ def validate_cluster_auth(
     try:
         # Try to establish SSH connection
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Try password auth if provided
         if password and config.cluster_host:
@@ -81,7 +85,7 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
 
     try:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Try SSH key auth
         if config.cluster_host:
@@ -176,21 +180,38 @@ def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
     return results
 
 
-# Test cluster configurations for validation
-TEST_CLUSTERS = [
-    {
-        "name": "tensor01",
-        "host": "tensor01.dartmouth.edu",
-        "type": "ssh",
-        "description": "Simple SSH cluster for basic testing",
-    },
-    {
-        "name": "ndoli",
-        "host": "ndoli.dartmouth.edu",
-        "type": "slurm",
-        "description": "SLURM cluster (requires special authentication)",
-    },
-]
+#: Clusters this validation pass should try, read from the environment.
+#:
+#: These were hardcoded to a particular institution's hostnames, which meant
+#: the shipped package named someone's real infrastructure and was useless to
+#: anyone else. Set CLUSTRIX_VALIDATION_SSH_HOST and/or
+#: CLUSTRIX_VALIDATION_SLURM_HOST to point it at your own; with neither set,
+#: validation reports that it has nothing to check rather than trying to
+#: connect to hosts you do not own.
+def _validation_clusters():
+    """Build the validation target list from the environment."""
+    clusters = []
+    ssh_host = os.environ.get("CLUSTRIX_VALIDATION_SSH_HOST")
+    if ssh_host:
+        clusters.append(
+            {
+                "name": os.environ.get("CLUSTRIX_VALIDATION_SSH_NAME", ssh_host),
+                "host": ssh_host,
+                "type": "ssh",
+                "description": "SSH cluster for basic validation",
+            }
+        )
+    slurm_host = os.environ.get("CLUSTRIX_VALIDATION_SLURM_HOST")
+    if slurm_host:
+        clusters.append(
+            {
+                "name": os.environ.get("CLUSTRIX_VALIDATION_SLURM_NAME", slurm_host),
+                "host": slurm_host,
+                "type": "slurm",
+                "description": "SLURM cluster for scheduler validation",
+            }
+        )
+    return clusters
 
 
 def validate_on_test_clusters(username: Optional[str] = None) -> None:
@@ -207,7 +228,15 @@ def validate_on_test_clusters(username: Optional[str] = None) -> None:
     print("🏗️  CLUSTRIX AUTHENTICATION VALIDATION SUITE")
     print("=" * 80)
 
-    for cluster_info in TEST_CLUSTERS:
+    validation_clusters = _validation_clusters()
+    if not validation_clusters:
+        logger.warning(
+            "No validation clusters configured. Set "
+            "CLUSTRIX_VALIDATION_SSH_HOST and/or "
+            "CLUSTRIX_VALIDATION_SLURM_HOST to run this against your own "
+            "cluster; nothing will be checked otherwise."
+        )
+    for cluster_info in validation_clusters:
         print(f"\n🧪 Testing cluster: {cluster_info['name']}")
         print(f"   Host: {cluster_info['host']}")
         print(f"   Type: {cluster_info['type']}")

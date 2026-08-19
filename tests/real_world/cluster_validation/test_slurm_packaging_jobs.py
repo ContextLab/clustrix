@@ -21,6 +21,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
 from clustrix.secure_credentials import ValidationCredentials
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_remote_work_dir,
+    require_test_username,
+)
 import paramiko
 
 
@@ -29,17 +34,18 @@ class SlurmPackagingValidator:
 
     def __init__(self):
         self.val_creds = ValidationCredentials()
+        remote_work_dir = require_test_remote_work_dir()
         self.slurm_config = ClusterConfig(
             cluster_type="slurm",
-            cluster_host="ndoli.dartmouth.edu",
-            username="f002d6b",
-            remote_work_dir="/dartfs-hpc/rc/home/b/f002d6b/clustrix",
+            cluster_host=require_test_host("slurm"),
+            username=require_test_username(),
+            remote_work_dir=f"{remote_work_dir}/clustrix",
             module_loads=["python"],
             environment_variables={"OMP_NUM_THREADS": "1"},
         )
 
         self.ssh_client = None
-        self.remote_test_dir = "/dartfs-hpc/rc/home/b/f002d6b/clustrix/packaging_tests"
+        self.remote_test_dir = f"{remote_work_dir}/clustrix/packaging_tests"
         self.job_ids = []
 
     def setup_ssh_connection(self):

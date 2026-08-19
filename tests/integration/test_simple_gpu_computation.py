@@ -38,15 +38,15 @@ def test_simple_gpu_computation():
     print("🧪 Testing simple GPU computation...")
 
     # Load config and credentials
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
     creds = TestCredentials()
-    tensor01_creds = creds.get_tensor01_credentials()
+    gpu_cluster_creds = creds.get_gpu_cluster_credentials()
 
     configure(
         cluster_type="ssh",
-        cluster_host=tensor01_creds["host"],
-        username=tensor01_creds["username"],
-        password=tensor01_creds["password"],
+        cluster_host=gpu_cluster_creds["host"],
+        username=gpu_cluster_creds["username"],
+        password=gpu_cluster_creds["password"],
         cleanup_on_success=False,
         use_two_venv=True,
         venv_setup_timeout=600,
@@ -80,15 +80,15 @@ def test_medium_complexity_gpu():
     """Test GPU computation with medium complexity."""
     print("\n🧪 Testing medium complexity GPU computation...")
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
     creds = TestCredentials()
-    tensor01_creds = creds.get_tensor01_credentials()
+    gpu_cluster_creds = creds.get_gpu_cluster_credentials()
 
     configure(
         cluster_type="ssh",
-        cluster_host=tensor01_creds["host"],
-        username=tensor01_creds["username"],
-        password=tensor01_creds["password"],
+        cluster_host=gpu_cluster_creds["host"],
+        username=gpu_cluster_creds["username"],
+        password=gpu_cluster_creds["password"],
         cleanup_on_success=False,
         use_two_venv=True,
         venv_setup_timeout=600,

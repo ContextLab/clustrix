@@ -143,7 +143,7 @@ class DotEnvCredentialSource(CredentialSource):
     def _load_env_manual(self):
         """Manually load .env file if python-dotenv is not available."""
         try:
-            with open(self.env_file_path, "r") as f:
+            with open(self.env_file_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith("#") and "=" in line:
@@ -336,7 +336,10 @@ class FlexibleCredentialManager:
 
         try:
             # Write template with secure permissions
-            self.env_file.write_text(template)
+            # Explicit UTF-8: the template contains non-ASCII characters,
+            # and the default locale encoding on Windows (cp1252) cannot
+            # encode them -- which left a zero-byte .env behind.
+            self.env_file.write_text(template, encoding="utf-8")
             self.env_file.chmod(0o600)  # Owner read/write only
 
         except Exception as e:

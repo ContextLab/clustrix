@@ -60,10 +60,12 @@ Widget Interface
 - **Output**: where the test buttons and errors report.
 
 The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
-``sge``, ``kubernetes`` and ``huggingface``. Selecting ``kubernetes`` shows no
-dedicated fields: the ``k8s_*`` settings can only be set from a configuration
-file or ``clustrix.configure()``. There are no AWS, GCP, Azure or Lambda Cloud
-entries, because those execution backends are unverified.
+``sge``, ``kubernetes`` and ``huggingface``. Selecting ``kubernetes`` shows a
+Kubernetes section: namespace, image, service account and image pull policy.
+The remaining ``k8s_*`` settings (node count, region, provider,
+auto-provisioning) are configuration-file or ``clustrix.configure()`` only.
+There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
+backends are unverified.
 
 "Apply" calls :func:`clustrix.configure` with the widget's values, so
 subsequent ``@cluster`` functions use them.
@@ -97,7 +99,14 @@ Legacy widget
    Several of its templates name cluster types (``aws``, ``azure``, ``gcp``,
    ``lambda_cloud``, ``huggingface_spaces``) that the executor cannot dispatch.
 
-.. autodata:: DEFAULT_CONFIGS
+.. Documented from the module that defines it, not from the one that
+   re-exports it: autodoc only picks up the ``#:`` comment at the definition
+   site, so pointing at ``clustrix.notebook_magic`` made it fall back to
+   ``dict.__doc__`` -- whose own ``**kwargs`` and indented body are not valid
+   RST and produced four build warnings.
+
+.. autodata:: clustrix.notebook_magic_config.DEFAULT_CONFIGS
+   :no-value:
 
    Legacy configuration templates, keyed by display name
    (``'Local Single-core'``, ``'University SLURM Cluster'``, ...). Entries hold

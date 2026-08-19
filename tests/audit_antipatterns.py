@@ -10,6 +10,17 @@ import json
 from pathlib import Path
 from typing import Dict, List, Set
 
+#: Derived from this file's location, not hardcoded: the previous absolute
+#: path baked one developer's home directory into the repository and broke
+#: the script for everyone else.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+TESTS_DIR = REPO_ROOT / "tests"
+
+#: Generated report. Gitignored (see tests/.gitignore): it is an artefact of
+#: running this script, it goes stale the moment a test file moves, and a
+#: committed copy is just a second source of truth for the same question.
+OUTPUT_FILE = TESTS_DIR / "audit_results.json"
+
 
 class TestAuditAnalyzer(ast.NodeVisitor):
     """Analyze test files for anti-patterns."""
@@ -128,7 +139,7 @@ def audit_test_file(filepath: Path) -> Dict:
         good_pattern_count = sum(len(v) for v in analyzer.good_patterns.values())
 
         return {
-            "file": str(filepath.relative_to(Path("/Users/jmanning/clustrix"))),
+            "file": str(filepath.relative_to(REPO_ROOT)),
             "anti_patterns": analyzer.anti_patterns,
             "good_patterns": analyzer.good_patterns,
             "anti_pattern_count": anti_pattern_count,
@@ -142,7 +153,7 @@ def audit_test_file(filepath: Path) -> Dict:
         }
     except Exception as e:
         return {
-            "file": str(filepath.relative_to(Path("/Users/jmanning/clustrix"))),
+            "file": str(filepath.relative_to(REPO_ROOT)),
             "error": str(e),
             "needs_refactoring": True,
             "priority": "medium",
@@ -151,7 +162,7 @@ def audit_test_file(filepath: Path) -> Dict:
 
 def audit_all_tests():
     """Audit all test files in the tests directory."""
-    test_dir = Path("/Users/jmanning/clustrix/tests")
+    test_dir = TESTS_DIR
     results = []
 
     # Find all Python test files
@@ -214,7 +225,7 @@ if __name__ == "__main__":
     audit_results = audit_all_tests()
 
     # Save detailed results
-    output_file = Path("/Users/jmanning/clustrix/tests/audit_results.json")
+    output_file = OUTPUT_FILE
     with open(output_file, "w") as f:
         json.dump(audit_results, f, indent=2)
 

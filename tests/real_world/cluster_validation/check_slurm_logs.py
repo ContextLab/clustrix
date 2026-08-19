@@ -11,6 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
+from tests.real_world.credential_manager import require_test_remote_work_dir
+
 
 def check_slurm_logs():
     """Check SLURM logs for the failed job."""
@@ -37,7 +39,7 @@ def check_slurm_logs():
         ssh.connect(hostname, username=username, password=password)
         print(f"✅ Connected to {hostname}")
 
-        work_dir = f"/dartfs-hpc/rc/home/b/{username}/clustrix"
+        work_dir = f"{require_test_remote_work_dir()}/clustrix"
 
         # List recent job directories
         print(f"\n📁 Checking job directories in {work_dir}")

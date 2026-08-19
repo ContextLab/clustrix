@@ -35,7 +35,7 @@ class TestRealSSHJobExecution:
             password=ssh_creds.get("password"),
             key_file=ssh_creds.get("private_key_path"),
             remote_work_dir=f"/tmp/clustrix_ssh_test_{uuid.uuid4().hex[:8]}",
-            python_executable="python3",  # Use python3 on tensor01
+            python_executable="python3",  # Use python3 on gpu_cluster
             cleanup_on_success=False,  # Don't cleanup so we can inspect files
             job_poll_interval=5,  # Poll every 5 seconds instead of 30
         )

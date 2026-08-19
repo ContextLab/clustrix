@@ -4,6 +4,7 @@ Check code quality metrics and display results.
 """
 
 import subprocess
+import sys
 import json
 from pathlib import Path
 
@@ -11,7 +12,29 @@ from pathlib import Path
 def check_tests():
     """Run tests and return pass/fail status."""
     print("🧪 Running tests...")
-    result = subprocess.run(["pytest", "tests/", "-q"], capture_output=True, text=True)
+    # Was `pytest tests/ -q`, which collects 2200 tests -- including the ~400
+    # under tests/real_world/ that open live SSH and cloud connections. This is
+    # the check CLAUDE.md and README recommend before committing, so it must
+    # not be the thing that dials out. Same selector CI uses.
+    #
+    # Invoked through sys.executable so it is this interpreter's pytest, not
+    # whatever happens to be first on PATH -- the same defect that made this
+    # script report another environment's results (see pre_push_check.py).
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "tests/",
+            "-q",
+            "-m",
+            "not real_world",
+            "--ignore=tests/real_world",
+            "--ignore=tests/integration",
+        ],
+        capture_output=True,
+        text=True,
+    )
     passed = result.returncode == 0
     if passed:
         # Extract test counts from output

@@ -6,7 +6,7 @@ We welcome contributions to Clustrix! This document provides guidelines for cont
 
 ### Prerequisites
 
-- Python 3.8 or higher
+- Python 3.10 or higher (`requires-python = ">=3.10"`)
 - Git
 
 ### Setting Up Development Environment
@@ -56,7 +56,8 @@ Before submitting any code, please ensure it meets our quality standards:
 
 ### Testing
 
-We maintain comprehensive test coverage. When contributing:
+No trustworthy coverage figure has been measured for this project (see
+`README.md`'s Testing Philosophy section). When contributing:
 
 - **Write tests** for all new functionality
 - **Update existing tests** when modifying behavior
@@ -246,7 +247,11 @@ def example_function(param1: str, param2: int = 10) -> bool:
 ### Testing Guidelines
 
 - **Test both success and failure cases**
-- **Use mocks** for external dependencies (SSH, file system)
+- **Verify against the real thing first.** A capability is not working until
+  it has been exercised against a real cluster, a real API, a real file. A
+  mock may stand in afterwards to keep CI free and fast, but never as a
+  fallback when the real thing is unavailable -- then the test must fail.
+  Production code must never detect that it is under test. See CLAUDE.md.
 - **Test edge cases** and boundary conditions
 - **Keep tests independent** - no shared state between tests
 - **Use descriptive test names** that explain what is being tested

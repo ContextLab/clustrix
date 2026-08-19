@@ -9,6 +9,7 @@ import os
 from clustrix.config import ClusterConfig, get_config, configure
 from clustrix.utils import (
     get_environment_requirements,
+    get_unreproducible_requirements,
     get_environment_info,
     is_uv_available,
     get_package_manager_command,
@@ -19,56 +20,44 @@ from clustrix.utils import (
 class TestEnhancedDependencyHandling:
     """Test enhanced dependency handling with pip list --format=freeze."""
 
-    @patch("subprocess.run")
-    def test_get_environment_requirements_pip_list_format(self, mock_run):
-        """Test using pip list --format=freeze for dependency capture."""
-        # Mock successful pip list --format=freeze output
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = """numpy==1.21.0
-pandas==1.3.0
-scipy==1.7.0
-matplotlib==3.4.2
-requests==2.25.1
-"""
-        mock_run.return_value = mock_result
+    def test_get_environment_requirements_covers_the_whole_environment(self):
+        """Dependency capture must account for every installed distribution.
+
+        Real environment, real metadata. The previous version of this test fed
+        a hand-written `pip list` transcript through a mocked subprocess, so it
+        could not see that the command actually run on a machine with uv
+        installed produces a different -- and much shorter -- answer.
+        """
+        from clustrix.utils import _distribution_records
+
+        records = _distribution_records()
+        assert records, "no distributions found in this interpreter"
 
         requirements = get_environment_requirements()
+        unreproducible = get_unreproducible_requirements()
 
-        # Verify pip list --format=freeze was called
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
-        assert "pip" in call_args
-        assert "list" in call_args
-        assert "--format=freeze" in call_args
+        for canonical, record in records.items():
+            if canonical == "clustrix":
+                continue
+            name = record["name"]
+            if record["reason"]:
+                assert name in unreproducible
+                assert name not in requirements
+            else:
+                assert requirements.get(name) == record["version"]
 
-        # Verify requirements were parsed correctly
-        assert requirements["numpy"] == "1.21.0"
-        assert requirements["pandas"] == "1.3.0"
-        assert requirements["scipy"] == "1.7.0"
-        assert requirements["matplotlib"] == "3.4.2"
-        assert requirements["requests"] == "2.25.1"
-
-    @patch("subprocess.run")
-    def test_get_environment_requirements_conda_packages(self, mock_run):
-        """Test capturing conda-installed packages."""
-        # Mock output that includes conda-installed packages
-        mock_result = Mock()
-        mock_result.returncode = 0
-        mock_result.stdout = """numpy==1.21.0
-pandas==1.3.0
-mkl==2021.3.0
-intel-openmp==2021.3.0
-conda==4.10.3
-"""
-        mock_run.return_value = mock_result
-
+    def test_get_environment_requirements_conda_packages(self):
+        """conda-installed distributions must be captured like any other."""
         requirements = get_environment_requirements()
-
-        # Verify conda packages are captured
-        assert requirements["mkl"] == "2021.3.0"
-        assert requirements["intel-openmp"] == "2021.3.0"
-        assert requirements["conda"] == "4.10.3"
+        conda_installed = [
+            name
+            for name in ("mkl", "conda", "intel-openmp", "numpy")
+            if name in requirements
+        ]
+        if not conda_installed:
+            pytest.skip("no conda-managed packages installed in this environment")
+        for name in conda_installed:
+            assert requirements[name]
 
     @patch("subprocess.run")
     def test_get_environment_requirements_editable_packages_excluded(self, mock_run):

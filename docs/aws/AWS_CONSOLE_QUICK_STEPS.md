@@ -58,7 +58,7 @@ AWSCloudFormationFullAccess
 
 Now test that it worked:
 ```bash
-python test_aws_preflight.py
+python tests/integration/test_aws_preflight.py
 ```
 
 You should see:

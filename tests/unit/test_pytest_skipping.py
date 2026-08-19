@@ -1,28 +1,28 @@
 #!/usr/bin/env python3
 """
-Test pytest automatic skipping for Dartmouth network tests.
+Test pytest automatic skipping for private-cluster tests.
 """
 
 import pytest
 
 
-# This should be skipped when not on Dartmouth network
-@pytest.mark.dartmouth_network
-def test_dartmouth_marker():
-    """Test that gets skipped when not on Dartmouth network."""
-    print("✅ This test runs because we're on Dartmouth network")
+# This should be skipped when no configured cluster is reachable
+@pytest.mark.cluster_network
+def test_cluster_network_marker():
+    """Test that gets skipped when no configured cluster is reachable."""
+    print("✅ This test runs because a configured cluster is reachable")
     assert True
 
 
-def test_tensor01_in_name():
-    """Test with tensor01 in name - should be skipped when not on Dartmouth."""
-    print("✅ This tensor01 test runs because we're on Dartmouth network")
+def test_gpu_cluster_in_name():
+    """Test with gpu_cluster in name - skipped when the cluster is absent."""
+    print("✅ This gpu_cluster test runs because the cluster is reachable")
     assert True
 
 
-def test_ndoli_in_name():
-    """Test with ndoli in name - should be skipped when not on Dartmouth."""
-    print("✅ This ndoli test runs because we're on Dartmouth network")
+def test_slurm_cluster_in_name():
+    """Test with slurm_cluster in name - skipped when the cluster is absent."""
+    print("✅ This slurm_cluster test runs because the cluster is reachable")
     assert True
 
 

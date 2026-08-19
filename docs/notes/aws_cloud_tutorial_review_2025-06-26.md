@@ -1,7 +1,7 @@
 # AWS Cloud Tutorial Review - Session Notes
 **Date:** 2025-06-26  
 **Task:** Review and improve AWS cloud tutorial notebook  
-**File:** `/Users/jmanning/clustrix/docs/source/notebooks/aws_cloud_tutorial.ipynb`
+**File:** `/home/you/clustrix/docs/source/notebooks/aws_cloud_tutorial.ipynb`
 
 ## Task Summary
 Reviewed the AWS cloud tutorial notebook to ensure complete setup instructions and clean up instructional print statements by converting them to markdown cells.

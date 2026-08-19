@@ -15,6 +15,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
 from clustrix.secure_credentials import ValidationCredentials
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_remote_work_dir,
+    require_test_username,
+)
 import tempfile
 import zipfile
 import json
@@ -31,7 +36,7 @@ def test_shared_filesystem_detection():
     # Test 1: Verify we can access shared filesystem directly
     try:
         # Try to access the known shared directory structure
-        test_dir = "/dartfs-hpc/rc/home/b/f002d6b/"
+        test_dir = require_test_remote_work_dir()
         files = os.listdir(test_dir)
         shared_fs_accessible = True
         file_count = len(files)
@@ -42,7 +47,9 @@ def test_shared_filesystem_detection():
 
     # Test 2: Create config and test cluster detection
     config = ClusterConfig(
-        cluster_type="slurm", cluster_host="ndoli.dartmouth.edu", username="f002d6b"
+        cluster_type="slurm",
+        cluster_host=require_test_host("slurm"),
+        username=require_test_username(),
     )
 
     # Test 3: Initialize ClusterFilesystem and check if it detects we're on cluster
@@ -107,7 +114,9 @@ def test_filesystem_integration_advanced():
     from clustrix.config import ClusterConfig
 
     config = ClusterConfig(
-        cluster_type="slurm", cluster_host="ndoli.dartmouth.edu", username="f002d6b"
+        cluster_type="slurm",
+        cluster_host=require_test_host("slurm"),
+        username=require_test_username(),
     )
 
     try:

@@ -358,9 +358,13 @@ class TestClusterExecutorReal:
             assert len(set(job_ids)) == 5  # All unique IDs
 
             # Collect results
+            # No `timeout=` here: ClusterExecutor.wait_for_result takes only
+            # the job ID. The old call passed one and died with TypeError
+            # before it ever collected a result -- it was written against an
+            # API clustrix does not have.
             results = {}
             for job_id in job_ids:
-                result = executor.wait_for_result(job_id, timeout=30)
+                result = executor.wait_for_result(job_id)
                 results[job_id] = result
 
             # Validate results
@@ -443,7 +447,10 @@ class TestExecutorIntegrationWorkflows:
                 import numpy as np
                 import time
 
-                start_time = time.time()
+                # perf_counter, not time(): the Windows wall clock ticks
+                # in ~15.6 ms steps, so work this short measures as
+                # exactly 0.0 and the assertion below has nothing to see.
+                start_time = time.perf_counter()
                 data = np.array(data_points)
                 results = {}
 
@@ -462,7 +469,7 @@ class TestExecutorIntegrationWorkflows:
                         autocorr = np.correlate(data, data, mode="full")
                         results[op] = float(np.max(autocorr))
 
-                results["processing_time"] = time.time() - start_time
+                results["processing_time"] = time.perf_counter() - start_time
                 return results
 
             # User executes function normally

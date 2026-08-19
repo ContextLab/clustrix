@@ -160,9 +160,13 @@ class TestClusterExecutorRealStandalone:
             assert len(set(job_ids)) == 3  # All unique IDs
 
             # Collect results
+            # No `timeout=` here: ClusterExecutor.wait_for_result takes only
+            # the job ID. The old call passed one and died with TypeError
+            # before it ever collected a result -- it was written against an
+            # API clustrix does not have.
             results = {}
             for job_id in job_ids:
-                result = executor.wait_for_result(job_id, timeout=30)
+                result = executor.wait_for_result(job_id)
                 results[job_id] = result
 
             # Validate results

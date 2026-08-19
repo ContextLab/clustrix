@@ -37,10 +37,10 @@ def _manager(home_output):
 
 class TestTildeExpansion:
     def test_expands_home_relative_path(self):
-        mgr, _ = _manager("/dartfs-hpc/rc/home/b/f002d6b\n")
+        mgr, _ = _manager("/remote/home/testuser\n")
         assert (
             mgr.resolve_remote_path("~/.clustrix/jobs")
-            == "/dartfs-hpc/rc/home/b/f002d6b/.clustrix/jobs"
+            == "/remote/home/testuser/.clustrix/jobs"
         )
 
     def test_expands_bare_tilde(self):

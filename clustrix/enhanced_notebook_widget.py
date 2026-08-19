@@ -73,7 +73,7 @@ def create_enhanced_cluster_widget(
 
     hostname = widgets.Text(
         value=config.cluster_host or "",
-        placeholder="e.g., tensor01.dartmouth.edu",
+        placeholder="e.g., gpu-node.example.edu",
         description="Hostname:",
         style=style,
         layout=full_layout,

@@ -51,9 +51,10 @@ Method 3: Python API
 
 .. code-block:: python
 
+   # cluster-required: connects to and deploys a key on a live host
    from clustrix import setup_ssh_keys_with_fallback
    from clustrix.config import ClusterConfig
-   
+
    config = ClusterConfig(
        cluster_type="slurm",
        cluster_host="cluster.university.edu", 
@@ -87,8 +88,73 @@ The automated SSH setup handles everything for you:
 
 🔒 **Security Features**
   - No plain-text credential storage
-  - Automatic password clearing from memory  
+  - Automatic password clearing from memory
   - Cross-platform compatibility (Windows, macOS, Linux)
+
+Host Key Verification (Read This Before Connecting to a New Cluster)
+----------------------------------------------------------------------
+
+This is the first thing you will hit the first time you point clustrix at a
+cluster it hasn't talked to before, so it's worth understanding before it
+happens to you.
+
+Every SSH connection clustrix makes -- for key setup, for job submission, for
+file transfer -- checks the remote host's SSH key against your local
+``known_hosts`` files (``/etc/ssh/ssh_known_hosts`` and
+``~/.ssh/known_hosts``) before doing anything else. **By default
+(``ssh_host_key_policy="reject"``), a host key that isn't already recorded
+there causes clustrix to refuse the connection outright.** This is not a
+prompt you can click through; it is a hard failure with an actionable
+message:
+
+.. code-block:: text
+
+   HostKeyVerificationError: Host key verification failed for 'cluster.university.edu':
+   this host is not in your known_hosts file(s), so clustrix refused the
+   connection rather than risk a machine-in-the-middle attack.
+     Offered key: ssh-ed25519 SHA256:AbCdEf...
+
+   To fix this:
+     1. If you recognize and trust this host, add its key with:
+          ssh-keyscan cluster.university.edu >> ~/.ssh/known_hosts
+        then retry.
+     2. If you understand the risk and want clustrix to trust unknown host
+        keys automatically (NOT recommended -- this is exactly the behavior
+        that enables MITM attacks), set on ClusterConfig:
+          ssh_host_key_policy="auto_add"
+
+**This is a change from clustrix's old behavior.** Every SSH call site used
+to call paramiko's ``AutoAddPolicy()``, which silently trusted whatever key
+a host offered on first connection -- convenient, but it meant clustrix
+never actually verified who it was talking to. The default is now secure,
+which means the first connection to any cluster needs one of:
+
+1. Run the ``ssh-keyscan`` command the error message gives you (this is the
+   same thing ``ssh`` itself would ask you to confirm interactively the
+   first time you connect by hand), or
+2. Already have a plain ``ssh`` connection to that host under your belt --
+   if you can already ``ssh cluster.university.edu`` from this machine, its
+   key is already in ``known_hosts`` and clustrix will never hit this error
+   for that host, or
+3. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
+   ``ClusterConfig`` or ``configure(...)`` call -- but understand that this
+   restores the old "trust anything" behavior for that configuration, which
+   is genuinely insecure. Only do this for a host you already trust through
+   some other channel (e.g. you set it up yourself and typed the hostname).
+
+.. code-block:: python
+
+   from clustrix import configure
+
+   # Secure default: unknown keys are rejected.
+   configure(cluster_type="slurm", cluster_host="cluster.university.edu")
+
+   # Explicit opt-out -- only for hosts you already trust out-of-band.
+   configure(
+       cluster_type="slurm",
+       cluster_host="cluster.university.edu",
+       ssh_host_key_policy="auto_add",
+   )
 
 Advanced Features
 -----------------
@@ -126,6 +192,8 @@ Key Rotation and Management
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Force generation of new keys (for security rotation)
    result = setup_ssh_keys_with_fallback(
        config, 
@@ -214,10 +282,11 @@ Here's a complete end-to-end example:
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host and submits a real job
    import clustrix
    from clustrix import setup_ssh_keys_with_fallback, cluster
    from clustrix.config import ClusterConfig
-   
+
    # Step 1: Automated SSH setup
    config = ClusterConfig(
        cluster_type="slurm",
@@ -312,10 +381,12 @@ Common Issues and Solutions
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Enable debug logging
    import logging
    logging.basicConfig(level=logging.DEBUG)
-   
+
    # Try setup with detailed output
    result = setup_ssh_keys_with_fallback(config)
    print(f"Detailed result: {result}")
@@ -332,6 +403,8 @@ Common Issues and Solutions
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Try force refresh to clean up old keys
    result = setup_ssh_keys_with_fallback(
        config, 

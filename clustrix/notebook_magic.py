@@ -11,7 +11,7 @@ is now split across several focused modules:
 - notebook_magic_config: Default configurations and config utilities
 - notebook_magic_widget: The main EnhancedClusterConfigWidget class
 - notebook_magic_core: Core magic functionality and IPython extension
-- notebook_magic_mocks: Mock classes for non-IPython environments
+- notebook_magic_fallback: Fallback implementations for non-IPython environments
 """
 
 # Import all functionality from the refactored modules to maintain backward compatibility
@@ -52,7 +52,7 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     # mypy sees these as redefinitions of the names bound in the try branch.
     # That is the point of the fallback: same names, non-IPython implementations.
-    from .notebook_magic_mocks import (  # type: ignore[assignment,no-redef]
+    from .notebook_magic_fallback import (  # type: ignore[assignment,no-redef]
         Magics,
         magics_class,
         cell_magic,

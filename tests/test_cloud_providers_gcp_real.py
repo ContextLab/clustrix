@@ -8,6 +8,7 @@ demonstrating real user workflows without mocks.
 import pytest
 import os
 import json
+import re
 import time
 import tempfile
 from pathlib import Path
@@ -437,6 +438,16 @@ class TestGCPProviderReal:
         - Graceful failure without credentials
         - Appropriate error messages
         - No mock dependencies
+
+        Rewritten: GCPProvider never had list_instances()/create_instance()
+        methods -- `git log -S` shows neither name was ever added to
+        clustrix/cloud_providers/gcp.py, so this assertion was against a
+        fabricated API from the day this test was written, independent of
+        the recent executor rewrite. The real, currently-implemented
+        equivalents are list_clusters() and create_compute_instance(). Both
+        used to proceed with a None client (or a placeholder result) when
+        unauthenticated; they now raise "Not authenticated with GCP" up
+        front, which is the real behavior this test now exercises.
         """
         provider = GCPProvider()
 
@@ -447,30 +458,49 @@ class TestGCPProviderReal:
 
         # Attempt operations without authentication
         with pytest.raises(RuntimeError, match="Not authenticated"):
-            provider.list_instances()
+            provider.list_clusters()
 
         with pytest.raises(RuntimeError, match="Not authenticated"):
-            provider.create_instance(zone="us-central1-a", instance_config={})
+            provider.create_compute_instance(instance_name="test-instance")
 
     def test_region_zone_validation(self):
         """
-        Test region and zone validation logic.
+        Test GCP region/zone defaults and the offline region/machine-type
+        fallback lists.
 
-        This demonstrates:
-        - Input validation
-        - Configuration constraints
-        - No external dependencies
+        Rewritten: GCPProvider never had is_valid_region()/is_valid_zone()
+        methods -- `git log -S` shows neither was ever implemented, so this
+        test asserted a fabricated API from the day it was added, unrelated
+        to the recent executor rewrite. There is no region/zone validator
+        anywhere in clustrix to restore. Instead this exercises the real,
+        currently-callable region/zone behavior: the provider's default
+        region/zone (and the "<region>-<letter>" convention GCP itself
+        uses to derive a zone from a region), and the actual unauthenticated
+        fallback lists get_available_regions()/get_available_instance_types()
+        return -- real GCP identifiers, not placeholders, returned without
+        any network call or mocking.
         """
         provider = GCPProvider()
 
-        # Test valid regions/zones
-        assert provider.is_valid_region("us-central1")
-        assert provider.is_valid_zone("us-central1-a")
+        # Defaults set in __init__, and GCP's own zone-from-region
+        # convention (also used by GCPProvider.authenticate()).
+        assert provider.region == "us-central1"
+        assert provider.zone == "us-central1-a"
+        assert provider.zone.startswith(provider.region + "-")
 
-        # Test invalid formats
-        assert not provider.is_valid_region("invalid_region")
-        assert not provider.is_valid_zone("us-central1")  # Missing zone letter
-        assert not provider.is_valid_zone("invalid-zone-format")
+        region_pattern = re.compile(r"^[a-z]+-[a-z]+\d$")
+        regions = provider.get_available_regions()
+        assert "us-central1" in regions
+        for region in regions:
+            assert region_pattern.match(region), f"Not a GCP region format: {region}"
+
+        machine_type_pattern = re.compile(r"^[a-z]\d-[a-z]+(-\d+)?$")
+        machine_types = provider.get_available_instance_types()
+        assert "e2-medium" in machine_types
+        for machine_type in machine_types:
+            assert machine_type_pattern.match(
+                machine_type
+            ), f"Not a GCP machine type format: {machine_type}"
 
 
 class TestGCPProviderIntegrationWorkflows:
