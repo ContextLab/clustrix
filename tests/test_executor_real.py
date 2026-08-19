@@ -28,18 +28,6 @@ class TestClusterExecutorReal:
         return config
 
     @pytest.fixture
-    def kubernetes_config(self):
-        """Create configuration for Kubernetes testing."""
-        config = ClusterConfig()
-        config.cluster_type = "kubernetes"
-        config.auto_provision_k8s = True
-        config.k8s_provider = "local"  # Use Docker Desktop or kind
-        config.k8s_node_count = 1
-        config.k8s_cleanup_on_exit = True
-        config.k8s_cluster_name = f"test-executor-{int(time.time())}"
-        return config
-
-    @pytest.fixture
     def ssh_config(self):
         """Create configuration for SSH testing if available."""
         ssh_host = os.getenv("TEST_SSH_HOST")
@@ -130,84 +118,6 @@ class TestClusterExecutorReal:
             assert result["sum"] == 55
 
         finally:
-            executor.disconnect()
-
-    @pytest.mark.real_world
-    def test_job_submission_kubernetes(self, kubernetes_config):
-        """
-        Test job submission with Kubernetes.
-
-        This demonstrates:
-        - Real Kubernetes job submission
-        - Container-based execution
-        - Pod monitoring and result retrieval
-        """
-        # Skip if Kubernetes not available
-        if not os.getenv("K8S_TEST_ENABLED", "false").lower() == "true":
-            pytest.skip("Kubernetes testing not enabled")
-
-        executor = ClusterExecutor(kubernetes_config)
-
-        # Ensure cluster is ready (auto-provisions if needed)
-        executor.ensure_cluster_ready(timeout=300)
-
-        try:
-            # Define computation for Kubernetes
-            def analyze_in_k8s(n):
-                """Perform analysis in Kubernetes pod."""
-                import platform
-                import socket
-                import math
-
-                # Compute prime numbers up to n
-                primes = []
-                for num in range(2, n + 1):
-                    is_prime = True
-                    for i in range(2, int(math.sqrt(num)) + 1):
-                        if num % i == 0:
-                            is_prime = False
-                            break
-                    if is_prime:
-                        primes.append(num)
-
-                return {
-                    "primes_count": len(primes),
-                    "largest_prime": max(primes) if primes else None,
-                    "execution_host": socket.gethostname(),
-                    "platform": platform.platform(),
-                    "container": "kubernetes" in platform.platform().lower()
-                    or "linux" in platform.platform().lower(),
-                }
-
-            # Serialize and submit
-            from clustrix.utils import serialize_function
-
-            func_data = serialize_function(analyze_in_k8s, (100,), {})
-
-            job_config = {"cores": 1, "memory": "512Mi"}
-            job_id = executor.submit_job(func_data, job_config)
-
-            # Verify Kubernetes job ID format
-            assert job_id is not None
-            assert "clustrix-job" in job_id or isinstance(job_id, str)
-
-            # Monitor job status
-            status = executor.get_job_status(job_id)
-            assert status in ["pending", "running", "completed", "failed"]
-
-            # Wait for completion
-            result = executor.wait_for_result(job_id, timeout=120)
-
-            # Validate Kubernetes execution
-            assert result["primes_count"] == 25  # 25 primes under 100
-            assert result["largest_prime"] == 97
-            assert result["container"] is True  # Should detect container environment
-            assert len(result["execution_host"]) > 0
-
-        finally:
-            # Cleanup Kubernetes resources
-            if hasattr(executor, "cleanup_auto_provisioned_cluster"):
-                executor.cleanup_auto_provisioned_cluster()
             executor.disconnect()
 
     @pytest.mark.real_world

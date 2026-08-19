@@ -380,13 +380,13 @@ class TestAuthFallbacksReal:
                 "name": "cluster2",
                 "host": "cluster2.example.com",
                 "username": "user2",
-                "type": "pbs",
+                "type": "ssh",
             },
             {
                 "name": "cluster3",
                 "host": "cluster3.example.com",
                 "username": "user3",
-                "type": "sge",
+                "type": "huggingface",
             },
         ]
 
@@ -579,13 +579,13 @@ class TestAuthFallbackIntegrationWorkflows:
                 "development": {
                     "cluster_host": "dev.cluster.com",
                     "username": "dev_user",
-                    "cluster_type": "kubernetes",
-                    "kubeconfig": "~/.kube/dev_config",
+                    "cluster_type": "ssh",
+                    "key_file": "~/.ssh/dev_key",
                 },
                 "research": {
                     "cluster_host": "research.hpc.edu",
                     "username": "researcher",
-                    "cluster_type": "pbs",
+                    "cluster_type": "slurm",
                     "password": None,  # Will need fallback
                 },
             },
@@ -608,19 +608,19 @@ class TestAuthFallbackIntegrationWorkflows:
             config = ClusterConfig()
 
             # Apply profile settings that are real ClusterConfig fields.
-            # "kubeconfig" is not a real field -- it is Kubernetes' own
-            # credential mechanism, tracked separately below.
+            # The "development" profile used to be a Kubernetes one carrying a
+            # "kubeconfig" key -- not a real ClusterConfig field, and a backend
+            # that has since been removed (issue #142). It is an SSH profile
+            # with a key file now, which is what made its expected outcome
+            # (no password fallback) true in the first place.
             for key, value in profile_config.items():
                 if hasattr(config, key):
                     setattr(config, key, value)
 
-            # A profile with a usable credential (an SSH key file, or a
-            # kubeconfig for Kubernetes) represents a key-setup attempt
-            # that succeeded; one without represents a failed/never
-            # attempted setup.
-            has_credential = bool(
-                profile_config.get("key_file") or profile_config.get("kubeconfig")
-            )
+            # A profile with a usable credential (an SSH key file) represents
+            # a key-setup attempt that succeeded; one without represents a
+            # failed/never attempted setup.
+            has_credential = bool(profile_config.get("key_file"))
             key_setup_result = (
                 {"success": True, "connection_tested": True}
                 if has_credential
@@ -631,6 +631,6 @@ class TestAuthFallbackIntegrationWorkflows:
             if profile_name == "production":
                 assert needs_auth is False  # Has SSH key
             elif profile_name == "development":
-                assert needs_auth is False  # Kubernetes uses kubeconfig
+                assert needs_auth is False  # Has SSH key
             elif profile_name == "research":
                 assert needs_auth is True  # Needs password fallback
