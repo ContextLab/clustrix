@@ -102,19 +102,12 @@ class EnhancedClusterConfigWidget:
                 "local",
                 "ssh",
                 "slurm",
-                "pbs",
-                "sge",
-                "kubernetes",
-                "aws",
-                "azure",
-                "gcp",
-                "lambda_cloud",
-                "huggingface_spaces",
+                "huggingface",
             ],
             description="Cluster Type:",
             tooltip=(
                 "Choose where to run your jobs: local machine, remote servers "
-                "(SSH/SLURM/PBS/SGE), Kubernetes clusters, or cloud providers"
+                "(SSH/SLURM), or HuggingFace Jobs"
             ),
             style=style,
             layout=full_layout,
@@ -128,7 +121,7 @@ class EnhancedClusterConfigWidget:
             placeholder="Enter configuration name",
             tooltip=(
                 "Give this configuration a descriptive name "
-                "(e.g., 'AWS Production', 'Local Testing', 'HPC Cluster')"
+                "(e.g., 'GPU Server', 'Local Testing', 'HPC Cluster')"
             ),
             style=style,
             layout=full_layout,
@@ -305,266 +298,13 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
-        # Kubernetes specific fields
-        self.k8s_namespace_field = widgets.Text(
-            description="K8s Namespace:",
-            value="default",
-            placeholder="Kubernetes namespace",
-            tooltip="Kubernetes namespace to deploy jobs in",
-            style=style,
-            layout=half_layout,
-        )
-        self.k8s_image_field = widgets.Text(
-            description="Container Image:",
-            value="python:3.11",
-            placeholder="e.g., python:3.11, ubuntu:20.04",
-            tooltip="Docker image to use for job containers",
-            style=style,
-            layout=full_layout,
-        )
-        # Kubernetes remote checkbox
-        self.k8s_remote_checkbox = widgets.Checkbox(
-            value=False,
-            description="Remote Kubernetes Cluster",
-            tooltip="Check if this is a remote Kubernetes cluster (requires SSH)",
-            style={"description_width": "160px"},
-            layout=widgets.Layout(width="300px"),
-        )
-        self.k8s_remote_checkbox.observe(self._on_k8s_remote_change, names="value")
-        # Cloud provider specific fields
-        # AWS fields
-        self.aws_region_field = widgets.Dropdown(
-            options=[
-                "us-east-1",
-                "us-east-2",
-                "us-west-1",
-                "us-west-2",
-                "eu-west-1",
-                "eu-west-2",
-                "eu-central-1",
-                "ap-southeast-1",
-                "ap-southeast-2",
-                "ap-northeast-1",
-            ],
-            value="us-east-1",
-            description="AWS Region:",
-            tooltip="AWS region for your resources",
-            style=style,
-            layout=half_layout,
-        )
-        self.aws_region_field.observe(self._on_aws_region_change, names="value")
-        self.aws_instance_type_field = widgets.Dropdown(
-            options=[
-                "t3.micro",
-                "t3.small",
-                "t3.medium",
-                "t3.large",
-                "t3.xlarge",
-                "m5.large",
-                "m5.xlarge",
-                "m5.2xlarge",
-                "c5.large",
-                "c5.xlarge",
-                "c5.2xlarge",
-                "r5.large",
-                "r5.xlarge",
-                "r5.2xlarge",
-            ],
-            value="t3.medium",
-            description="Instance Type:",
-            tooltip="AWS EC2 instance type",
-            style=style,
-            layout=half_layout,
-        )
-        self.aws_cluster_type_field = widgets.Dropdown(
-            options=["ec2", "eks", "batch"],
-            value="ec2",
-            description="AWS Service:",
-            tooltip="AWS service to use (EC2, EKS, or Batch)",
-            style=style,
-            layout=half_layout,
-        )
-        self.aws_access_key_field = widgets.Text(
-            description="Access Key ID:",
-            placeholder="Your AWS access key ID",
-            tooltip="AWS Access Key ID for authentication",
-            style=style,
-            layout=full_layout,
-        )
-        self.aws_secret_key_field = widgets.Text(
-            description="Secret Key:",
-            placeholder="Your AWS secret access key",
-            tooltip="AWS Secret Access Key for authentication",
-            style=style,
-            layout=full_layout,
-        )
-        # Azure fields
-        self.azure_region_field = widgets.Dropdown(
-            options=[
-                "eastus",
-                "eastus2",
-                "westus",
-                "westus2",
-                "centralus",
-                "northeurope",
-                "westeurope",
-                "eastasia",
-                "southeastasia",
-                "japaneast",
-            ],
-            value="eastus",
-            description="Azure Region:",
-            tooltip="Azure region for your resources",
-            style=style,
-            layout=half_layout,
-        )
-        self.azure_region_field.observe(self._on_azure_region_change, names="value")
-        self.azure_instance_type_field = widgets.Dropdown(
-            options=[
-                "Standard_B1s",
-                "Standard_B2s",
-                "Standard_D2s_v3",
-                "Standard_D4s_v3",
-                "Standard_D8s_v3",
-                "Standard_E2s_v3",
-                "Standard_E4s_v3",
-                "Standard_E8s_v3",
-                "Standard_F2s_v2",
-                "Standard_F4s_v2",
-            ],
-            value="Standard_D2s_v3",
-            description="VM Size:",
-            tooltip="Azure virtual machine size",
-            style=style,
-            layout=half_layout,
-        )
-        self.azure_subscription_field = widgets.Text(
-            description="Subscription ID:",
-            placeholder="Your Azure subscription ID",
-            tooltip="Azure subscription ID",
-            style=style,
-            layout=full_layout,
-        )
-        self.azure_client_id_field = widgets.Text(
-            description="Client ID:",
-            placeholder="Service principal client ID",
-            tooltip="Azure service principal client ID",
-            style=style,
-            layout=half_layout,
-        )
-        self.azure_client_secret_field = widgets.Text(
-            description="Client Secret:",
-            placeholder="Service principal client secret",
-            tooltip="Azure service principal client secret",
-            style=style,
-            layout=half_layout,
-        )
-        self.azure_tenant_id_field = widgets.Text(
-            description="Tenant ID:",
-            placeholder="Azure tenant ID",
-            tooltip="Azure Active Directory tenant ID",
-            style=style,
-            layout=full_layout,
-        )
-        # GCP fields
-        self.gcp_region_field = widgets.Dropdown(
-            options=[
-                "us-central1",
-                "us-east1",
-                "us-west1",
-                "us-west2",
-                "europe-west1",
-                "europe-west2",
-                "europe-west3",
-                "asia-east1",
-                "asia-southeast1",
-                "asia-northeast1",
-            ],
-            value="us-central1",
-            description="GCP Region:",
-            tooltip="Google Cloud region",
-            style=style,
-            layout=half_layout,
-        )
-        self.gcp_region_field.observe(self._on_gcp_region_change, names="value")
-        self.gcp_instance_type_field = widgets.Dropdown(
-            options=[
-                "e2-micro",
-                "e2-small",
-                "e2-medium",
-                "e2-standard-2",
-                "e2-standard-4",
-                "n1-standard-1",
-                "n1-standard-2",
-                "n1-standard-4",
-                "n2-standard-2",
-                "n2-standard-4",
-            ],
-            value="e2-medium",
-            description="Machine Type:",
-            tooltip="Google Cloud machine type",
-            style=style,
-            layout=half_layout,
-        )
-        self.gcp_project_field = widgets.Text(
-            description="Project ID:",
-            placeholder="Your GCP project ID",
-            tooltip="Google Cloud project ID",
-            style=style,
-            layout=half_layout,
-        )
-        self.gcp_zone_field = widgets.Text(
-            description="Zone:",
-            placeholder="e.g., us-central1-a",
-            tooltip="Google Cloud zone within the region",
-            style=style,
-            layout=half_layout,
-        )
-        self.gcp_credentials_field = widgets.Textarea(
-            description="Service Account:",
-            placeholder="Paste JSON service account key here",
-            tooltip="Google Cloud service account JSON key",
-            rows=5,
-            style=style,
-            layout=full_layout,
-        )
-        # Lambda Cloud fields
-        self.lambda_api_key_field = widgets.Text(
-            description="API Key:",
-            placeholder="Your Lambda Cloud API key",
-            tooltip="Lambda Cloud API key for authentication",
-            style=style,
-            layout=full_layout,
-        )
-        self.lambda_instance_type_field = widgets.Dropdown(
-            options=[
-                "gpu_1x_a10",
-                "gpu_1x_a100",
-                "gpu_2x_a100",
-                "gpu_4x_a100",
-                "gpu_8x_a100",
-                "gpu_1x_v100",
-            ],
-            value="gpu_1x_a10",
-            description="Instance Type:",
-            tooltip="Lambda Cloud instance type",
-            style=style,
-            layout=half_layout,
-        )
-        # HuggingFace fields
+        # HuggingFace Jobs fields
         self.hf_token_field = widgets.Text(
             description="HF Token:",
             placeholder="Your HuggingFace access token",
             tooltip="HuggingFace access token for authentication",
             style=style,
             layout=full_layout,
-        )
-        self.hf_space_name_field = widgets.Text(
-            description="Space Name:",
-            placeholder="e.g., my-awesome-space",
-            tooltip="Name of the HuggingFace Space to create",
-            style=style,
-            layout=half_layout,
         )
         self.hf_hardware_field = widgets.Dropdown(
             options=[
@@ -578,7 +318,7 @@ class EnhancedClusterConfigWidget:
             ],
             value="cpu-basic",
             description="Hardware:",
-            tooltip="HuggingFace Space hardware tier",
+            tooltip="HuggingFace Jobs hardware flavor",
             style=style,
             layout=half_layout,
         )
@@ -586,7 +326,7 @@ class EnhancedClusterConfigWidget:
             options=["gradio", "streamlit", "static"],
             value="gradio",
             description="SDK:",
-            tooltip="HuggingFace Space SDK to use",
+            tooltip="HuggingFace SDK to use",
             style=style,
             layout=half_layout,
         )
@@ -601,14 +341,6 @@ class EnhancedClusterConfigWidget:
             value="pip",
             description="Package Manager:",
             tooltip="Choose between pip and conda for dependency management",
-            style=style,
-            layout=widgets.Layout(width="48%"),
-        )
-        # Cost monitoring checkbox
-        self.cost_monitoring_checkbox = widgets.Checkbox(
-            value=False,
-            description="Cost Monitoring",
-            tooltip="Enable cost tracking for cloud providers",
             style=style,
             layout=widgets.Layout(width="48%"),
         )
@@ -740,7 +472,6 @@ class EnhancedClusterConfigWidget:
             self.password_field,
             self.port_field,
             self.package_manager,
-            self.cost_monitoring_checkbox,
             self.env_vars_field,
             self.module_loads_field,
             self.pre_exec_commands_field,
@@ -780,87 +511,11 @@ class EnhancedClusterConfigWidget:
                 display="none",
             ),
         )
-        # Kubernetes fields
-        self.kubernetes_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Kubernetes Settings</h5>"),
-                self.k8s_remote_checkbox,
-                widgets.HBox([self.k8s_namespace_field, widgets.HTML("")]),
-                self.k8s_image_field,
-            ],
-            layout=widgets.Layout(
-                border="1px solid #ddd",
-                padding="10px",
-                margin="10px 0px",
-                display="none",
-            ),
-        )
-        # Cloud provider fields containers
-        self.aws_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>AWS Settings</h5>"),
-                widgets.HBox([self.aws_region_field, self.aws_instance_type_field]),
-                widgets.HBox([self.aws_cluster_type_field, widgets.HTML("")]),
-                self.aws_access_key_field,
-                self.aws_secret_key_field,
-            ],
-            layout=widgets.Layout(
-                border="1px solid #ddd",
-                padding="10px",
-                margin="10px 0px",
-                display="none",
-            ),
-        )
-        self.azure_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Azure Settings</h5>"),
-                widgets.HBox([self.azure_region_field, self.azure_instance_type_field]),
-                self.azure_subscription_field,
-                widgets.HBox(
-                    [self.azure_client_id_field, self.azure_client_secret_field]
-                ),
-                self.azure_tenant_id_field,
-            ],
-            layout=widgets.Layout(
-                border="1px solid #ddd",
-                padding="10px",
-                margin="10px 0px",
-                display="none",
-            ),
-        )
-        self.gcp_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Google Cloud Settings</h5>"),
-                widgets.HBox([self.gcp_region_field, self.gcp_instance_type_field]),
-                widgets.HBox([self.gcp_project_field, self.gcp_zone_field]),
-                self.gcp_credentials_field,
-            ],
-            layout=widgets.Layout(
-                border="1px solid #ddd",
-                padding="10px",
-                margin="10px 0px",
-                display="none",
-            ),
-        )
-        self.lambda_fields = widgets.VBox(
-            [
-                widgets.HTML("<h5>Lambda Cloud Settings</h5>"),
-                self.lambda_api_key_field,
-                widgets.HBox([self.lambda_instance_type_field, widgets.HTML("")]),
-            ],
-            layout=widgets.Layout(
-                border="1px solid #ddd",
-                padding="10px",
-                margin="10px 0px",
-                display="none",
-            ),
-        )
         self.hf_fields = widgets.VBox(
             [
-                widgets.HTML("<h5>HuggingFace Settings</h5>"),
+                widgets.HTML("<h5>HuggingFace Jobs Settings</h5>"),
                 self.hf_token_field,
-                widgets.HBox([self.hf_space_name_field, self.hf_hardware_field]),
-                widgets.HBox([self.hf_sdk_field, widgets.HTML("")]),
+                widgets.HBox([self.hf_hardware_field, self.hf_sdk_field]),
             ],
             layout=widgets.Layout(
                 border="1px solid #ddd",
@@ -885,36 +540,16 @@ class EnhancedClusterConfigWidget:
 
         # Hide all sections first
         self.connection_fields.layout.display = "none"
-        self.kubernetes_fields.layout.display = "none"
-        self.aws_fields.layout.display = "none"
-        self.azure_fields.layout.display = "none"
-        self.gcp_fields.layout.display = "none"
-        self.lambda_fields.layout.display = "none"
         self.hf_fields.layout.display = "none"
 
         # Show relevant sections based on cluster type
-        if cluster_type in ["ssh", "slurm", "pbs", "sge"]:
+        if cluster_type in ["ssh", "slurm"]:
             self.connection_fields.layout.display = ""
-        elif cluster_type == "kubernetes":
-            self.kubernetes_fields.layout.display = ""
-            self._update_kubernetes_connection_visibility()
-        elif cluster_type == "aws":
-            self.aws_fields.layout.display = ""
-            # Populate AWS options if available
-            self._populate_cloud_provider_options("aws")
-        elif cluster_type == "azure":
-            self.azure_fields.layout.display = ""
-            self._populate_cloud_provider_options("azure")
-        elif cluster_type == "gcp":
-            self.gcp_fields.layout.display = ""
-            self._populate_cloud_provider_options("gcp")
-        elif cluster_type == "lambda_cloud":
-            self.lambda_fields.layout.display = ""
-        elif cluster_type == "huggingface_spaces":
+        elif cluster_type == "huggingface":
             self.hf_fields.layout.display = ""
 
         # Update time field visibility (only for cluster schedulers)
-        if cluster_type in ["slurm", "pbs", "sge"]:
+        if cluster_type == "slurm":
             self.time_field.layout.display = ""
         else:
             self.time_field.layout.display = "none"
@@ -928,165 +563,6 @@ class EnhancedClusterConfigWidget:
         # Mark as changed
         self._mark_unsaved_changes()
 
-    def _on_k8s_remote_change(self, change):
-        """Handle remote Kubernetes checkbox change."""
-        self._update_kubernetes_connection_visibility()
-
-    def _update_kubernetes_connection_visibility(self):
-        """Update connection fields visibility for Kubernetes clusters."""
-        if self.cluster_type.value == "kubernetes":
-            if self.k8s_remote_checkbox.value:
-                self.connection_fields.layout.display = ""
-            else:
-                self.connection_fields.layout.display = "none"
-
-    def _populate_cloud_provider_options(self, provider: str):
-        """Populate region and instance type options for the specified cloud provider."""
-        try:
-            from .cloud_providers import PROVIDERS
-
-            # Get the provider class
-            provider_class = PROVIDERS.get(provider)
-            if provider_class is None:
-                # Fallback to default options
-                self._set_default_cloud_options(provider)
-                return
-
-            # Initialize the provider
-            provider_instance = provider_class()
-
-            if provider == "aws":
-                # Get AWS regions and instance types
-                regions = provider_instance.get_available_regions()
-                if regions:
-                    self.aws_region_field.options = regions
-
-                instance_types = provider_instance.get_available_instance_types()
-                if instance_types:
-                    self.aws_instance_type_field.options = instance_types
-
-            elif provider == "azure":
-                # Get Azure regions and VM sizes
-                regions = provider_instance.get_available_regions()
-                if regions:
-                    self.azure_region_field.options = regions
-
-                vm_sizes = provider_instance.get_available_instance_types()
-                if vm_sizes:
-                    self.azure_instance_type_field.options = vm_sizes
-
-            elif provider == "gcp":
-                # Get GCP regions and machine types
-                regions = provider_instance.get_available_regions()
-                if regions:
-                    self.gcp_region_field.options = regions
-
-                machine_types = provider_instance.get_available_instance_types()
-                if machine_types:
-                    self.gcp_instance_type_field.options = machine_types
-
-        except Exception as e:
-            # If cloud provider API is unavailable, use default options
-            logger.warning(f"Could not load {provider} options: {e}")
-            self._set_default_cloud_options(provider)
-
-    def _set_default_cloud_options(self, provider: str):
-        """Set default options when cloud provider API is not available."""
-        defaults = {
-            "aws": {
-                "regions": ["us-east-1", "us-west-1", "us-west-2", "eu-west-1"],
-                "instances": [
-                    "t3.micro",
-                    "t3.small",
-                    "t3.medium",
-                    "t3.large",
-                    "m5.large",
-                    "c5.large",
-                    "r5.large",
-                ],
-            },
-            "azure": {
-                "regions": ["eastus", "westus", "northeurope", "westeurope"],
-                "instances": [
-                    "Standard_B1s",
-                    "Standard_B2s",
-                    "Standard_D2s_v3",
-                    "Standard_D4s_v3",
-                    "Standard_E2s_v3",
-                    "Standard_F2s_v2",
-                ],
-            },
-            "gcp": {
-                "regions": ["us-central1", "us-east1", "europe-west1", "asia-east1"],
-                "instances": [
-                    "e2-micro",
-                    "e2-small",
-                    "e2-medium",
-                    "e2-standard-2",
-                    "n1-standard-1",
-                    "n2-standard-2",
-                ],
-            },
-        }
-
-        if provider in defaults:
-            config = defaults[provider]
-            if provider == "aws":
-                self.aws_region_field.options = config["regions"]
-                self.aws_instance_type_field.options = config["instances"]
-            elif provider == "azure":
-                self.azure_region_field.options = config["regions"]
-                self.azure_instance_type_field.options = config["instances"]
-            elif provider == "gcp":
-                self.gcp_region_field.options = config["regions"]
-                self.gcp_instance_type_field.options = config["instances"]
-
-    def _on_aws_region_change(self, change):
-        """Handle AWS region change to update available instance types."""
-        try:
-            from .cloud_providers import PROVIDERS
-
-            provider_class = PROVIDERS.get("aws")
-            if provider_class:
-                provider_instance = provider_class()
-                instance_types = provider_instance.get_instance_types(
-                    region=change["new"]
-                )
-                if instance_types:
-                    self.aws_instance_type_field.options = instance_types
-        except Exception:
-            pass  # Keep current options
-
-    def _on_azure_region_change(self, change):
-        """Handle Azure region change to update available instance types."""
-        try:
-            from .cloud_providers import PROVIDERS
-
-            provider_class = PROVIDERS.get("azure")
-            if provider_class:
-                provider_instance = provider_class()
-                vm_sizes = provider_instance.get_vm_sizes(region=change["new"])
-                if vm_sizes:
-                    self.azure_instance_type_field.options = vm_sizes
-        except Exception:
-            pass  # Keep current options
-
-    def _on_gcp_region_change(self, change):
-        """Handle GCP region change to update available instance types."""
-        try:
-            from .cloud_providers import PROVIDERS
-
-            provider_class = PROVIDERS.get("gcp")
-            if provider_class:
-                provider_instance = provider_class()
-                machine_types = provider_instance.get_machine_types(
-                    region=change["new"]
-                )
-                if machine_types:
-                    self.gcp_instance_type_field.options = machine_types
-        except Exception:
-            pass  # Keep current options
-
     @staticmethod
     def _set_choice(field, value):
         """Select a value in a dropdown, widening the options if need be.
@@ -1097,8 +573,8 @@ class EnhancedClusterConfigWidget:
 
             TraitError: Invalid selection: value not found
 
-        and broke the widget outright. AWS alone has far more than ten regions,
-        so this was reachable with a perfectly ordinary config file.
+        and broke the widget outright. New hardware flavors appear faster than
+        the hardcoded list, so this was reachable with an ordinary config file.
 
         The saved configuration is authoritative -- a list baked into the UI
         should not be able to veto it -- so an unrecognised value is added to
@@ -1131,58 +607,13 @@ class EnhancedClusterConfigWidget:
         self.password_field.value = config.get("password", "")
         self.port_field.value = config.get("cluster_port", 22)
 
-        # Kubernetes fields
-        self.k8s_namespace_field.value = config.get("k8s_namespace", "default")
-        self.k8s_image_field.value = config.get("k8s_image", "python:3.11")
-        self.k8s_remote_checkbox.value = config.get("k8s_remote", False)
-
-        # AWS fields
-        self._set_choice(self.aws_region_field, config.get("aws_region", "us-east-1"))
-        self._set_choice(
-            self.aws_instance_type_field, config.get("aws_instance_type", "t3.medium")
-        )
-        self._set_choice(
-            self.aws_cluster_type_field, config.get("aws_cluster_type", "ec2")
-        )
-        self.aws_access_key_field.value = config.get("aws_access_key_id", "")
-        self.aws_secret_key_field.value = config.get("aws_secret_access_key", "")
-
-        # Azure fields
-        self._set_choice(self.azure_region_field, config.get("azure_region", "eastus"))
-        self._set_choice(
-            self.azure_instance_type_field,
-            config.get("azure_instance_type", "Standard_D2s_v3"),
-        )
-        self.azure_subscription_field.value = config.get("azure_subscription_id", "")
-        self.azure_client_id_field.value = config.get("azure_client_id", "")
-        self.azure_client_secret_field.value = config.get("azure_client_secret", "")
-        self.azure_tenant_id_field.value = config.get("azure_tenant_id", "")
-
-        # GCP fields
-        self._set_choice(self.gcp_region_field, config.get("gcp_region", "us-central1"))
-        self._set_choice(
-            self.gcp_instance_type_field, config.get("gcp_instance_type", "e2-medium")
-        )
-        self.gcp_project_field.value = config.get("gcp_project", "")
-        self.gcp_zone_field.value = config.get("gcp_zone", "")
-        self.gcp_credentials_field.value = config.get("gcp_credentials", "")
-
-        # Lambda Cloud fields
-        self.lambda_api_key_field.value = config.get("lambda_api_key", "")
-        self._set_choice(
-            self.lambda_instance_type_field,
-            config.get("lambda_instance_type", "gpu_1x_a10"),
-        )
-
-        # HuggingFace fields
+        # HuggingFace Jobs fields
         self.hf_token_field.value = config.get("hf_token", "")
-        self.hf_space_name_field.value = config.get("hf_space_name", "")
         self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
         self._set_choice(self.hf_sdk_field, config.get("hf_sdk", "gradio"))
 
         # Advanced options
         self.package_manager.value = config.get("package_manager", "pip")
-        self.cost_monitoring_checkbox.value = config.get("cost_monitoring", False)
 
         # Environment variables
         env_vars = config.get("environment_variables", {})
@@ -1220,7 +651,6 @@ class EnhancedClusterConfigWidget:
             "username": self.username_field.value,
             "cluster_port": self.port_field.value,
             "package_manager": self.package_manager.value,
-            "cost_monitoring": self.cost_monitoring_checkbox.value,
             "queue": self.queue_field.value,
             "ssh_key_path": self.ssh_key_field.value,
         }
@@ -1229,77 +659,8 @@ class EnhancedClusterConfigWidget:
         if self.password_field.value:
             config["password"] = self.password_field.value
 
-        # Kubernetes specific fields
-        if self.cluster_type.value == "kubernetes":
-            config.update(
-                {
-                    "k8s_namespace": self.k8s_namespace_field.value,
-                    "k8s_image": self.k8s_image_field.value,
-                    "k8s_remote": self.k8s_remote_checkbox.value,
-                }
-            )
-
-        # AWS specific fields
-        elif self.cluster_type.value == "aws":
-            config.update(
-                {
-                    "aws_region": self.aws_region_field.value,
-                    "aws_instance_type": self.aws_instance_type_field.value,
-                    "aws_cluster_type": self.aws_cluster_type_field.value,
-                }
-            )
-            # Include credentials only if provided
-            if self.aws_access_key_field.value:
-                config["aws_access_key_id"] = self.aws_access_key_field.value
-            if self.aws_secret_key_field.value:
-                config["aws_secret_access_key"] = self.aws_secret_key_field.value
-
-        # Azure specific fields
-        elif self.cluster_type.value == "azure":
-            config.update(
-                {
-                    "azure_region": self.azure_region_field.value,
-                    "azure_instance_type": self.azure_instance_type_field.value,
-                }
-            )
-            # Include credentials only if provided
-            if self.azure_subscription_field.value:
-                config["azure_subscription_id"] = self.azure_subscription_field.value
-            if self.azure_client_id_field.value:
-                config["azure_client_id"] = self.azure_client_id_field.value
-            if self.azure_client_secret_field.value:
-                config["azure_client_secret"] = self.azure_client_secret_field.value
-            if self.azure_tenant_id_field.value:
-                config["azure_tenant_id"] = self.azure_tenant_id_field.value
-
-        # GCP specific fields
-        elif self.cluster_type.value == "gcp":
-            config.update(
-                {
-                    "gcp_region": self.gcp_region_field.value,
-                    "gcp_instance_type": self.gcp_instance_type_field.value,
-                }
-            )
-            # Include credentials only if provided
-            if self.gcp_project_field.value:
-                config["gcp_project"] = self.gcp_project_field.value
-            if self.gcp_zone_field.value:
-                config["gcp_zone"] = self.gcp_zone_field.value
-            if self.gcp_credentials_field.value:
-                config["gcp_credentials"] = self.gcp_credentials_field.value
-
-        # Lambda Cloud specific fields
-        elif self.cluster_type.value == "lambda_cloud":
-            config.update(
-                {
-                    "lambda_instance_type": self.lambda_instance_type_field.value,
-                }
-            )
-            if self.lambda_api_key_field.value:
-                config["lambda_api_key"] = self.lambda_api_key_field.value
-
-        # HuggingFace specific fields
-        elif self.cluster_type.value == "huggingface_spaces":
+        # HuggingFace Jobs specific fields
+        if self.cluster_type.value == "huggingface":
             config.update(
                 {
                     "hf_hardware": self.hf_hardware_field.value,
@@ -1308,8 +669,6 @@ class EnhancedClusterConfigWidget:
             )
             if self.hf_token_field.value:
                 config["hf_token"] = self.hf_token_field.value
-            if self.hf_space_name_field.value:
-                config["hf_space_name"] = self.hf_space_name_field.value
 
         # Environment variables
         if self.env_vars_field.value.strip():
@@ -1632,218 +991,15 @@ class EnhancedClusterConfigWidget:
         except Exception as e:
             return False, str(e)
 
-    def _test_cloud_connectivity(self, cluster_type, config):
-        """Test cloud provider API connectivity."""
-        try:
-            if cluster_type == "aws":
-                return self._test_aws_connectivity(config)
-            elif cluster_type == "azure":
-                return self._test_azure_connectivity(config)
-            elif cluster_type == "gcp":
-                return self._test_gcp_connectivity(config)
-            elif cluster_type == "lambda_cloud":
-                return self._test_lambda_connectivity(config)
-            elif cluster_type == "huggingface_spaces":
-                return self._test_huggingface_connectivity(config)
-            else:
-                return False, f"Cloud testing not implemented for {cluster_type}"
-        except Exception as e:
-            return False, f"Cloud connectivity test failed: {str(e)}"
-
-    def _test_aws_connectivity(self, config):
-        """Test AWS API connectivity with proper field mapping."""
-        try:
-            import boto3  # type: ignore
-            from botocore.exceptions import NoCredentialsError, ClientError  # type: ignore
-            from .field_mappings import (
-                map_widget_fields_to_provider,
-                validate_provider_config,
-            )
-
-            # Map widget fields to provider fields
-            provider_config = map_widget_fields_to_provider(config, "aws")
-
-            # Validate configuration
-            is_valid, missing_fields = validate_provider_config(provider_config, "aws")
-            if not is_valid:
-                return False, f"Missing required fields: {', '.join(missing_fields)}"
-
-            # Create boto3 session
-            session_params = {}
-            if provider_config.get("aws_access_key_id"):
-                session_params["aws_access_key_id"] = provider_config[
-                    "aws_access_key_id"
-                ]
-            if provider_config.get("aws_secret_access_key"):
-                session_params["aws_secret_access_key"] = provider_config[
-                    "aws_secret_access_key"
-                ]
-
-            session = boto3.Session(**session_params)
-
-            # Test EC2 connectivity
-            region = provider_config.get("region", "us-east-1")
-            ec2_client = session.client("ec2", region_name=region)
-
-            # Try to describe regions (basic API call)
-            response = ec2_client.describe_regions()
-            if response.get("Regions"):
-                return True, "AWS connectivity successful"
-            else:
-                return False, "No AWS regions returned"
-
-        except ImportError:
-            return False, "boto3 not installed. Run: pip install boto3"
-        except NoCredentialsError:
-            return False, "AWS credentials not configured"
-        except ClientError as e:
-            error_code = e.response.get("Error", {}).get("Code", "Unknown")
-            if error_code == "UnauthorizedOperation":
-                return (
-                    True,
-                    "AWS credentials valid (got authorization error on describe_regions)",
-                )
-            else:
-                return False, f"AWS API error: {error_code}"
-        except Exception as e:
-            return False, f"AWS connectivity failed: {str(e)}"
-
-    def _test_azure_connectivity(self, config):
-        """Test Azure API connectivity with proper field mapping."""
-        try:
-            from azure.identity import ClientSecretCredential
-            from .field_mappings import (
-                map_widget_fields_to_provider,
-                validate_provider_config,
-            )
-
-            # Map widget fields to provider fields
-            provider_config = map_widget_fields_to_provider(config, "azure")
-
-            # Validate configuration
-            is_valid, missing_fields = validate_provider_config(
-                provider_config, "azure"
-            )
-            if not is_valid:
-                return False, f"Missing required fields: {', '.join(missing_fields)}"
-
-            # Create credentials
-            credential = ClientSecretCredential(
-                tenant_id=provider_config["tenant_id"],
-                client_id=provider_config["client_id"],
-                client_secret=provider_config["client_secret"],
-            )
-
-            # Test token acquisition
-            token = credential.get_token("https://management.azure.com/.default")
-            if token and token.token:
-                return True, "Azure connectivity successful"
-            else:
-                return False, "Could not acquire Azure token"
-
-        except ImportError:
-            return (
-                False,
-                "Azure SDK not installed. Run: pip install azure-identity azure-mgmt-compute",
-            )
-        except Exception as e:
-            return False, f"Azure connectivity failed: {str(e)}"
-
-    def _test_gcp_connectivity(self, config):
-        """Test GCP API connectivity with proper field mapping."""
-        try:
-            import json
-            from google.cloud import resourcemanager
-            from google.oauth2 import service_account
-            from .field_mappings import (
-                map_widget_fields_to_provider,
-                validate_provider_config,
-            )
-
-            # Map widget fields to provider fields
-            provider_config = map_widget_fields_to_provider(config, "gcp")
-
-            # Validate configuration
-            is_valid, missing_fields = validate_provider_config(provider_config, "gcp")
-            if not is_valid:
-                return False, f"Missing required fields: {', '.join(missing_fields)}"
-
-            # Parse credentials
-            credentials_json = provider_config.get("credentials_json")
-            if not credentials_json:
-                return False, "No GCP credentials provided"
-
-            try:
-                creds_dict = json.loads(credentials_json)
-            except json.JSONDecodeError:
-                return False, "Invalid JSON in GCP credentials"
-
-            # Create credentials object
-            credentials = service_account.Credentials.from_service_account_info(
-                creds_dict
-            )
-
-            # Test connectivity
-            client = resourcemanager.Client(credentials=credentials)
-
-            # Try to list projects (basic API call)
-            projects = list(client.list_projects())
-            return True, f"GCP connectivity successful (found {len(projects)} projects)"
-
-        except ImportError:
-            return (
-                False,
-                "Google Cloud SDK not installed. Run: pip install google-cloud-resource-manager",
-            )
-        except Exception as e:
-            return False, f"GCP connectivity failed: {str(e)}"
-
-    def _test_lambda_connectivity(self, config):
-        """Test Lambda Cloud API connectivity."""
-        try:
-            from .cloud_providers.lambda_cloud import LambdaCloudProvider
-
-            api_key = config.get("lambda_api_key")
-            if not api_key:
-                return False, "Lambda Cloud API key not provided"
-
-            provider = LambdaCloudProvider(api_key=api_key)
-            instances = provider.list_instances()
-
-            return (
-                True,
-                f"Lambda Cloud connectivity successful ({len(instances)} instances)",
-            )
-
-        except ImportError:
-            return False, "Lambda Cloud provider not available"
-        except Exception as e:
-            return False, f"Lambda Cloud connectivity failed: {str(e)}"
-
     def _test_huggingface_connectivity(self, config):
-        """Test HuggingFace API connectivity with proper field mapping."""
+        """Test HuggingFace Jobs API connectivity."""
         try:
-            from .field_mappings import (
-                map_widget_fields_to_provider,
-                validate_provider_config,
-            )
-
-            # Map widget fields to provider fields
-            provider_config = map_widget_fields_to_provider(
-                config, "huggingface_spaces"
-            )
-
-            # Validate configuration
-            is_valid, missing_fields = validate_provider_config(
-                provider_config, "huggingface_spaces"
-            )
-            if not is_valid:
-                return False, f"Missing required fields: {', '.join(missing_fields)}"
-
-            # Test HuggingFace API
             import requests
 
-            token = provider_config.get("token")
+            token = config.get("hf_token")
+            if not token:
+                return False, "Missing required fields: hf_token"
+
             headers = {"Authorization": f"Bearer {token}"}
 
             # Test API connectivity by getting user info
@@ -1878,7 +1034,7 @@ class EnhancedClusterConfigWidget:
                     print("✅ Local configuration - no connectivity test needed")
                     print("💡 Tip: Use cores=-1 to use all available CPU cores")
 
-                elif cluster_type in ["ssh", "slurm", "pbs", "sge"]:
+                elif cluster_type in ["ssh", "slurm"]:
                     # Test SSH-based clusters
                     host = config_data.get("cluster_host")
                     port = config_data.get("cluster_port", 22)
@@ -1921,37 +1077,10 @@ class EnhancedClusterConfigWidget:
                     else:
                         print("⚠️  Username not provided - skipping SSH test")
 
-                elif cluster_type == "kubernetes":
-                    k8s_remote = config_data.get("k8s_remote", False)
-                    if k8s_remote:
-                        # Test SSH connectivity for remote K8s
-                        host = config_data.get("cluster_host")
-                        if host:
-                            print(
-                                f"🌐 Testing connectivity to remote Kubernetes at {host}..."
-                            )
-                            # Same SSH tests as above
-                            port = config_data.get("cluster_port", 22)
-                            if not self._test_remote_connectivity(host, port):
-                                print(f"❌ Cannot reach {host}:{port}")
-                                return
-                            print("✅ Remote Kubernetes connectivity successful")
-                        else:
-                            print("❌ Host required for remote Kubernetes")
-                    else:
-                        print("✅ Local Kubernetes configuration")
-                        print("💡 Ensure kubectl is configured for your cluster")
-
-                elif cluster_type in [
-                    "aws",
-                    "azure",
-                    "gcp",
-                    "lambda_cloud",
-                    "huggingface_spaces",
-                ]:
-                    # Test cloud provider connectivity
-                    print(f"☁️  Testing {cluster_type.upper()} API connectivity...")
-                    result = self._test_cloud_connectivity(cluster_type, config_data)
+                elif cluster_type == "huggingface":
+                    # Test HuggingFace Jobs API connectivity
+                    print("☁️  Testing HuggingFace Jobs API connectivity...")
+                    result = self._test_huggingface_connectivity(config_data)
 
                     if isinstance(result, tuple):
                         success, message = result
@@ -1984,7 +1113,7 @@ class EnhancedClusterConfigWidget:
                 config_data = self._save_config_from_widgets()
                 cluster_type = config_data.get("cluster_type", "local")
 
-                if cluster_type not in ["ssh", "slurm", "pbs", "sge", "kubernetes"]:
+                if cluster_type not in ["ssh", "slurm"]:
                     print(f"❌ SSH key setup not applicable for {cluster_type}")
                     return
 
@@ -2059,18 +1188,13 @@ class EnhancedClusterConfigWidget:
         dynamic_sections = widgets.VBox(
             [
                 self.connection_fields,
-                self.kubernetes_fields,
-                self.aws_fields,
-                self.azure_fields,
-                self.gcp_fields,
-                self.lambda_fields,
                 self.hf_fields,
             ]
         )
         # Advanced options accordion
         advanced_content = widgets.VBox(
             [
-                widgets.HBox([self.package_manager, self.cost_monitoring_checkbox]),
+                widgets.HBox([self.package_manager, widgets.HTML("")]),
                 self.env_vars_field,
                 self.module_loads_field,
                 self.pre_exec_commands_field,
