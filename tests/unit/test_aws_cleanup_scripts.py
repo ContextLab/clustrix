@@ -46,11 +46,25 @@ def _load_module(script_path: pathlib.Path):
 
 def _clean_env_without_aws_credentials():
     """A real environment with no AWS/Clustrix credentials discoverable:
-    no AWS_* env vars, and HOME pointed at an empty directory so
-    ~/.clustrix/.env cannot exist. Not in GitHub Actions either."""
+    no AWS_* env vars, and the home directory pointed at an empty directory
+    so ~/.clustrix/.env cannot exist. Not in GitHub Actions either."""
     env = {"PATH": os.environ.get("PATH", "")}
     tmp_home = tempfile.mkdtemp(prefix="clustrix-no-creds-home-")
     env["HOME"] = tmp_home
+    if os.name == "nt":
+        # Windows expands ``~`` from USERPROFILE (falling back to
+        # HOMEDRIVE+HOMEPATH) and ignores HOME entirely, so pointing only HOME
+        # at the empty directory leaves the home directory *undeterminable*
+        # rather than empty. A handful of Windows variables also have to
+        # survive the scrub or the child interpreter cannot start.
+        drive, tail = os.path.splitdrive(tmp_home)
+        env["USERPROFILE"] = tmp_home
+        env["HOMEDRIVE"] = drive
+        env["HOMEPATH"] = tail
+        for name in ("SystemRoot", "COMSPEC", "PATHEXT", "TEMP", "TMP"):
+            value = os.environ.get(name)
+            if value is not None:
+                env[name] = value
     return env, tmp_home
 
 
@@ -332,7 +346,7 @@ class TestDeletePathUnreachableWithoutExecuteFlag:
 
     @pytest.mark.parametrize("script_path", [CLEANUP_SCRIPT, DESTROY_SCRIPT])
     def test_destructive_calls_only_appear_inside_execute_plan(self, script_path):
-        source = script_path.read_text()
+        source = script_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(script_path))
         functions = _function_defs_by_name(tree)
 
@@ -369,7 +383,7 @@ class TestDeletePathUnreachableWithoutExecuteFlag:
 
     @pytest.mark.parametrize("script_path", [CLEANUP_SCRIPT, DESTROY_SCRIPT])
     def test_execute_plan_only_called_inside_if_args_execute(self, script_path):
-        source = script_path.read_text()
+        source = script_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(script_path))
         functions = _function_defs_by_name(tree)
         main_node = functions["main"]
@@ -410,7 +424,7 @@ class TestDeletePathUnreachableWithoutExecuteFlag:
     def test_no_destructive_calls_at_module_scope(self, script_path):
         """Destructive calls must never run merely by importing the file
         (e.g. at module scope outside any function)."""
-        source = script_path.read_text()
+        source = script_path.read_text(encoding="utf-8")
         tree = ast.parse(source, filename=str(script_path))
 
         module_scope_calls = set()
@@ -452,7 +466,7 @@ class TestTaggingConventionMatchesProvisioner:
         aws_provisioner.py actually tags resources with."""
         provisioner_path = REPO_ROOT / "clustrix" / "kubernetes" / "aws_provisioner.py"
         assert provisioner_path.is_file()
-        source = provisioner_path.read_text()
+        source = provisioner_path.read_text(encoding="utf-8")
         assert '"clustrix:managed": "true"' in source
         assert '"clustrix:cluster"' in source
         assert "clustrix-eks-cluster-role-" in source

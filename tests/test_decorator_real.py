@@ -134,7 +134,12 @@ class TestClusterDecoratorReal:
             import time as time_module
             import math
 
-            start = time_module.time()
+            # perf_counter, not time(): the wall clock on Windows ticks in
+            # ~15.6 ms steps, so a computation this short measures as exactly
+            # 0.0 there and the elapsed-time assertion below has nothing to
+            # see. perf_counter is the high-resolution monotonic clock on
+            # every platform.
+            start = time_module.perf_counter()
 
             # Simulate complex computation
             results = []
@@ -142,7 +147,7 @@ class TestClusterDecoratorReal:
                 value = sum(math.sqrt(j) for j in range(1, data_size + 1))
                 results.append(value)
 
-            computation_time = time_module.time() - start
+            computation_time = time_module.perf_counter() - start
 
             return {
                 "iterations": iterations,

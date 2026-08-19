@@ -475,6 +475,53 @@ Use ``cluster_type="huggingface"`` (HuggingFace Jobs), not
 ``provider="huggingface"`` (Spaces).
 
 
+Windows clients: config and credential files are not permission-restricted
+--------------------------------------------------------------------------
+
+Clustrix runs on Windows as a *client*: it submits to a Linux cluster, and the
+job scripts it generates are quoted for the cluster's POSIX shell regardless of
+what your own machine runs. One security property does not carry across,
+however, and Windows users should know about it.
+
+On Linux and macOS, files that can hold credentials are created with mode
+``0600`` -- readable and writable by the owner only:
+
+* the config file written by :meth:`ClusterConfig.save_to_file` and
+  ``clustrix.config.save_config`` (with ``include_secrets=True``, or with a
+  secret in ``environment_variables``, this file contains plaintext
+  credentials);
+* ``~/.clustrix/.env``, the credential template and store;
+* the SSH keys and ``~/.ssh/config`` entries clustrix generates.
+
+**On Windows none of these files are restricted.** POSIX permission bits are a
+POSIX concept: NTFS controls access with ACLs instead, Python's ``os.chmod``
+there only toggles the read-only attribute, and ``os.fchmod`` does not exist at
+all before Python 3.13. Clustrix does not depend on ``pywin32``, so it has no
+way to set an ACL. The files are therefore created with whatever permissions
+they inherit from their parent directory -- typically readable by every account
+on the machine, and by anything that can reach the directory over a network
+share.
+
+What to do about it on Windows:
+
+* Prefer keeping secrets out of files entirely: set them in environment
+  variables, or let clustrix prompt for them, rather than saving them with
+  ``include_secrets=True``.
+* If you must save them, put the config directory somewhere already restricted
+  and restrict it explicitly, e.g.::
+
+      icacls "%USERPROFILE%\.clustrix" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"
+
+  Set ``CLUSTRIX_CONFIG_DIR`` if you want that directory to be somewhere other
+  than ``%USERPROFILE%\.clustrix``.
+* Treat a saved clustrix config on Windows as you would any other unprotected
+  file: do not put it on a shared drive, and do not commit it.
+
+The corresponding tests assert the ``0600`` mode only on POSIX, because there
+is no mode on Windows for them to assert -- the property genuinely does not
+exist there, rather than merely being untested.
+
+
 Smaller sharp edges
 -------------------
 

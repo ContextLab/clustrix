@@ -79,7 +79,12 @@ class TestIntegration:
             cluster_type="slurm",
             cluster_host="test.cluster.com",
             username="testuser",
-            remote_work_dir=temp_dir,
+            # A path on the cluster, not on this machine: it is written into
+            # the generated bash job script, so it must be a POSIX path. A
+            # local Windows temp directory ("C:\\Users\\...") is rejected by
+            # the job-script validator, and rightly so. The remote side is
+            # stubbed out here, so nothing is created at this path.
+            remote_work_dir="/scratch/clustrix-integration-test",
         )
 
         # Define and decorate function

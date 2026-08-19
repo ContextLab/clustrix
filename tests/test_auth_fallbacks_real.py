@@ -449,8 +449,12 @@ class TestAuthFallbacksReal:
         assert sensitive_password not in saved_text
         assert "password" not in yaml.safe_load(saved_text)
 
-        # File is owner-read/write only.
-        assert (config_file.stat().st_mode & 0o777) == 0o600
+        # File is owner-read/write only -- where file modes exist. Windows
+        # governs readability with NTFS ACLs and its chmod only toggles the
+        # read-only attribute, so there is no 0600 to assert there; see
+        # docs/source/limitations.rst.
+        if os.name != "nt":
+            assert (config_file.stat().st_mode & 0o777) == 0o600
 
         # Clear password from memory
         config.password = None

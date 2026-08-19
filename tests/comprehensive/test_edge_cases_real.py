@@ -547,6 +547,16 @@ class TestConcurrencyEdgeCases:
         assert len(results) == 10
         assert sorted(r["task_id"] for r in results) == list(range(10))
 
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason=(
+            "This test serializes the workers with fcntl.flock -- POSIX "
+            "advisory file locking, which does not exist on Windows "
+            "(there is no fcntl module and msvcrt.locking is mandatory "
+            "byte-range locking with different semantics). The locking "
+            "primitive is the test's own instrument, not clustrix code."
+        ),
+    )
     def test_race_conditions(self):
         """
         Test for race conditions in shared resources.

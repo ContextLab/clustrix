@@ -10,6 +10,7 @@ actually lands on disk and with what real permission bits.
 """
 
 import json
+import os
 import stat
 
 import pytest
@@ -20,6 +21,41 @@ from clustrix.config import SECRET_FIELDS, ClusterConfig
 
 def _mode(path) -> int:
     return stat.S_IMODE(path.stat().st_mode)
+
+
+# POSIX permission bits express "only the owner may read this file". Windows
+# has no such bit: readability is governed by NTFS ACLs, ``os.fchmod`` does not
+# exist there before Python 3.13, and ``os.chmod`` only toggles the read-only
+# attribute. So on Windows there is no mode for these tests to assert, because
+# clustrix genuinely does not (and with only stdlib cannot) restrict who may
+# read a saved config file. That gap is documented for users in
+# docs/source/limitations.rst -- it is a real Windows caveat, not a test
+# inconvenience.
+_POSIX_MODE_REASON = (
+    "File permission bits are a POSIX property; on Windows readability is "
+    "governed by NTFS ACLs and chmod only toggles the read-only attribute, so "
+    "'owner-only readable' is not a property that exists to be asserted. See "
+    "docs/source/limitations.rst."
+)
+
+requires_posix_modes = pytest.mark.skipif(os.name == "nt", reason=_POSIX_MODE_REASON)
+
+
+def assert_owner_only_mode(path) -> None:
+    """Assert a 0600 mode on platforms where that mode means something.
+
+    Used by tests whose primary subject is something else (secret redaction,
+    round-tripping) but which also check the mode in passing: on Windows the
+    permission property does not exist (see ``_POSIX_MODE_REASON``) while the
+    rest of the test still applies, so only this check is dropped there.
+    """
+    if os.name == "nt":
+        return
+    assert _mode(path) == 0o600, (
+        f"Expected mode 0o600, got {oct(_mode(path))} for {path}. "
+        f"A saved clustrix config can contain passwords/tokens and must "
+        f"never be group- or world-readable."
+    )
 
 
 @pytest.fixture
@@ -35,6 +71,7 @@ def secret_bearing_config():
     )
 
 
+@requires_posix_modes
 @pytest.mark.parametrize("suffix", [".json", ".yml"])
 def test_save_to_file_creates_file_mode_0600(tmp_path, secret_bearing_config, suffix):
     config_path = tmp_path / f"clustrix{suffix}"
@@ -95,7 +132,7 @@ def test_save_to_file_include_secrets_true_writes_plaintext(
 
     # Even with secrets included, the mode must still be 0600 -- opting into
     # writing secrets must never also opt into a wider file mode.
-    assert _mode(config_path) == 0o600
+    assert_owner_only_mode(config_path)
 
 
 def test_load_from_file_round_trips_after_default_save(tmp_path, secret_bearing_config):
@@ -116,6 +153,7 @@ def test_load_from_file_round_trips_after_default_save(tmp_path, secret_bearing_
     assert reloaded.hf_token is None
 
 
+@requires_posix_modes
 def test_overwriting_a_preexisting_world_readable_file_is_tightened(
     tmp_path, secret_bearing_config
 ):
@@ -156,7 +194,7 @@ def test_save_config_module_function_matches_save_to_file(tmp_path, monkeypatch)
     config_path = tmp_path / "module_saved.json"
     config_module.save_config(str(config_path))
 
-    assert _mode(config_path) == 0o600
+    assert_owner_only_mode(config_path)
     raw_text = config_path.read_text()
     assert "module-secret-value" not in raw_text
     loaded = json.loads(raw_text)
@@ -248,7 +286,7 @@ def test_environment_variable_secrets_survive_include_secrets(tmp_path):
     config.save_to_file(str(config_path), include_secrets=True)
 
     assert "fake-aws-secret-value" in config_path.read_text()
-    assert _mode(config_path) == 0o600
+    assert_owner_only_mode(config_path)
 
     reloaded = ClusterConfig.load_from_file(str(config_path))
     assert reloaded.environment_variables == config.environment_variables

@@ -471,6 +471,12 @@ class CloudJobManager:
         # Capture the signing key and drop it from the environment before the
         # user's function -- and anything it imports -- gets to run.
         capture = "\n".join(key_capture_lines())
+        # The job directory is interpolated into *Python source*, so it needs
+        # Python-literal quoting, not bare quotes: repr() escapes an embedded
+        # quote (which would otherwise close the literal and let the rest of
+        # the value run as code) and any backslash.
+        func_data_literal = repr(f"{remote_work_dir}/func_data.pkl")
+        error_literal = repr(f"{remote_work_dir}/error.pkl")
         return f"""#!/usr/bin/env python3
 import sys
 import os
@@ -483,7 +489,7 @@ import traceback
 def main():
     try:
         # Load function data
-        with open('{remote_work_dir}/func_data.pkl', 'rb') as f:
+        with open({func_data_literal}, 'rb') as f:
             func_data = cloudpickle.load(f)
 
         # Unpack what serialize_function() actually produced. It stores the
@@ -519,7 +525,7 @@ def main():
         traceback.print_exc()
 
         # Save error
-        with open('{remote_work_dir}/error.pkl', 'wb') as f:
+        with open({error_literal}, 'wb') as f:
             pickle.dump({{'error': str(e), 'traceback': traceback.format_exc()}}, f)
 
         sys.exit(1)

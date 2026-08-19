@@ -629,14 +629,14 @@ def _write_credentials_to_env_file(env_file: Path, credentials: Dict[str, str]) 
         # Read existing content to preserve comments and structure
         existing_content = ""
         if env_file.exists():
-            existing_content = env_file.read_text()
+            existing_content = env_file.read_text(encoding="utf-8")
 
         # Merge new credentials with existing content
         updated_content = _merge_env_content(existing_content, credentials)
 
         # Write with atomic operation
         temp_file = env_file.with_suffix(".tmp")
-        temp_file.write_text(updated_content)
+        temp_file.write_text(updated_content, encoding="utf-8")
         temp_file.chmod(0o600)  # Secure permissions
 
         # Atomic replacement

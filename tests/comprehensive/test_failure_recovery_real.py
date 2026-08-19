@@ -268,6 +268,14 @@ class TestJobFailures:
         assert result["allocated"] is False
         assert result["recovered"] is True
 
+    @pytest.mark.skipif(
+        not hasattr(signal, "SIGALRM"),
+        reason=(
+            "The timed task raises its timeout from a SIGALRM handler. "
+            "SIGALRM is a POSIX signal that Windows does not implement, "
+            "so signal.alarm() has nothing to deliver there."
+        ),
+    )
     def test_timeout_recovery(self):
         """
         Test recovery from job timeouts.

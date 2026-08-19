@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import os
 import pickle
+import shlex
 import shutil
 import subprocess
 import sys
@@ -70,7 +71,11 @@ class LocalTransport:
         # Mirrors `cat <file> 2>/dev/null`: the shell prints nothing and
         # succeeds when the file is absent.
         if command.startswith("cat "):
-            target = command.split()[1].strip("'\"")
+            # Parse the way a POSIX shell would. shlex.quote() quotes any
+            # word containing a backslash, so on a Windows filesystem the
+            # job directory arrives quoted; splitting on whitespace and
+            # stripping quote characters mangles it.
+            target = shlex.split(command)[1]
             try:
                 return Path(target).read_text(), ""
             except OSError:

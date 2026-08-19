@@ -111,7 +111,9 @@ def test_no_clustrix_module_fabricates_a_gpu_result():
 
     offenders = []
     for path in sorted(PACKAGE_DIR.rglob("*.py")):
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             if any(marker.search(line) for marker in fabrication_markers):
                 offenders.append(f"{path}:{lineno}: {line.strip()}")
 

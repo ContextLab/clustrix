@@ -290,7 +290,9 @@ def test_no_module_assigns_a_canned_value_to_result():
 
     offenders = []
     for path in sorted(package_dir.rglob("*.py")):
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        ):
             if canned_assignment.match(line):
                 offenders.append(f"{path}:{lineno}: {line.strip()}")
 
@@ -326,7 +328,7 @@ def test_decorator_does_not_reach_for_the_flattener():
     """
     import clustrix.decorator as decorator_module
 
-    source = Path(decorator_module.__file__).read_text()
+    source = Path(decorator_module.__file__).read_text(encoding="utf-8")
     code_lines = [
         line
         for line in source.splitlines()

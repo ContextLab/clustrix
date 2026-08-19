@@ -182,9 +182,14 @@ class TestFlexibleCredentialManager:
             manager = FlexibleCredentialManager(config_dir)
 
             assert manager.env_file.exists()
-            assert (
-                manager.env_file.stat().st_mode & 0o777 == 0o600
-            )  # Secure permissions
+            if os.name != "nt":
+                # POSIX permission bits are a POSIX property: on Windows
+                # readability is decided by NTFS ACLs and chmod only toggles
+                # the read-only attribute, so there is no 0600 to assert.
+                # Documented in docs/source/limitations.rst.
+                assert (
+                    manager.env_file.stat().st_mode & 0o777 == 0o600
+                )  # Secure permissions
 
     def test_ensure_credential_success(self):
         """Test successful credential retrieval."""

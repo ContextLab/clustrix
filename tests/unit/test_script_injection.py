@@ -15,6 +15,7 @@ generated line to a real ``bash`` and check that the marker file the payload
 tries to create does not appear.
 """
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -93,6 +94,24 @@ BASE_JOB_CONFIG = {
 # --------------------------------------------------------------------------
 
 
+# ``shlex.quote`` protects the REMOTE shell: clustrix generates a bash script
+# that runs on a Linux cluster, so the quoting is correct no matter what the
+# client machine runs, and a Windows client is fully supported here. What
+# cannot be done on a Windows client is *this class's verification method* --
+# handing the generated fragment to a real POSIX shell and checking the
+# payload's marker file never appears. Windows has no POSIX shell (the CI
+# runner's ``bash`` is the WSL launcher with no distribution installed), so
+# the observation these tests make does not exist there. The code under test
+# is unchanged and is still covered on Linux and macOS.
+_NO_POSIX_SHELL_REASON = (
+    "These tests verify remote-shell quoting by executing the generated "
+    "fragment in a real POSIX shell; Windows has no POSIX shell to execute it "
+    "in. The quoting itself is client-OS-independent and is exercised on "
+    "Linux/macOS."
+)
+
+
+@pytest.mark.skipif(os.name == "nt", reason=_NO_POSIX_SHELL_REASON)
 class TestQuotedSites:
     def test_command_substitution_in_remote_work_dir_does_not_run(self, tmp_path):
         marker = tmp_path / "pwn_workdir"

@@ -401,11 +401,26 @@ def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> Non
     and re-applied with fchmod() before writing (so overwriting a
     pre-existing, more permissive file is also tightened) -- in both cases
     before any content is written, never after.
+
+    POSIX permission bits are a POSIX concept. On Windows there is no
+    ``os.fchmod`` before Python 3.13, and even where ``chmod`` exists it only
+    toggles the read-only attribute rather than restricting who may read the
+    file, so the 0600 hardening step is skipped there and the file inherits
+    the directory's ACL. See ``docs/source/limitations.rst`` for what that
+    means for Windows users who save credentials to a config file.
     """
     flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
     fd = os.open(str(config_path_obj), flags, 0o600)
-    os.fchmod(fd, 0o600)
-    with os.fdopen(fd, "w") as f:
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        handle = os.fdopen(fd, "w")
+    except BaseException:
+        # Nothing owns the descriptor yet, so it would otherwise leak; on
+        # Windows a leaked handle also makes the file undeletable.
+        os.close(fd)
+        raise
+    with handle as f:
         if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
             yaml.dump(config_data, f, default_flow_style=False)
         else:
@@ -542,11 +557,23 @@ def get_config() -> ClusterConfig:
 # Try to load configuration from default locations
 def _load_default_config():
     """Load configuration from default locations."""
-    config_dir = get_config_dir()
-    default_paths = [
-        config_dir / "config.yml",
-        config_dir / "config.yaml",
-        config_dir / "config.json",
+    default_paths = []
+    try:
+        config_dir = get_config_dir()
+    except RuntimeError:
+        # Path.home() raises when the home directory cannot be determined --
+        # e.g. a Windows service account or a scrubbed environment with no
+        # USERPROFILE. Discovering a user config file is best effort, so this
+        # must not make ``import clustrix`` fail; the working-directory
+        # candidates below are still searched.
+        pass
+    else:
+        default_paths += [
+            config_dir / "config.yml",
+            config_dir / "config.yaml",
+            config_dir / "config.json",
+        ]
+    default_paths += [
         Path.cwd() / "clustrix.yml",
         Path.cwd() / "clustrix.yaml",
         Path.cwd() / "clustrix.json",

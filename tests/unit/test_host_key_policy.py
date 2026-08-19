@@ -11,6 +11,7 @@ paramiko, because the entire point of this fix is that paramiko's actual
 handshake behaves correctly -- a mock could not catch a regression here.
 """
 
+import os
 import socket
 import threading
 import time
@@ -239,6 +240,15 @@ def test_user_known_hosts_file_is_actually_loaded(tmp_path, monkeypatch):
     )
 
     monkeypatch.setenv("HOME", str(fake_home))
+    if os.name == "nt":
+        # Path.home() expands ``~`` from USERPROFILE (falling back to
+        # HOMEDRIVE+HOMEPATH) on Windows and ignores HOME, so redirecting
+        # HOME alone would leave clustrix reading the real user's
+        # ~/.ssh/known_hosts.
+        drive, tail = os.path.splitdrive(str(fake_home))
+        monkeypatch.setenv("USERPROFILE", str(fake_home))
+        monkeypatch.setenv("HOMEDRIVE", drive)
+        monkeypatch.setenv("HOMEPATH", tail)
 
     client = paramiko.SSHClient()
     configure_host_key_policy(client, None)
