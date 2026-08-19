@@ -303,6 +303,6 @@ Best Practices
 See Also
 --------
 
-- :doc:`../tutorials/filesystem_tutorial` - Comprehensive tutorial with examples
+- :doc:`../tutorials/filesystem_tutorial` - worked examples of each call
 - :doc:`config` - Configuration management
 - :doc:`decorator` - Using filesystem utilities with the @cluster decorator

@@ -303,7 +303,7 @@ A runnable walkthrough is in the [SSH Key Automation Tutorial](docs/ssh_key_auto
 
 ### Unified Filesystem Utilities
 
-Clustrix provides unified filesystem operations that work seamlessly across local and remote clusters:
+One set of calls answers questions about a filesystem, local or remote, and the config decides which:
 
 ```python
 # cluster-required: needs a configured cluster to execute
