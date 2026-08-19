@@ -525,6 +525,20 @@ class TestTravellingOverRealSFTP:
     asserting that a patched object was called.
     """
 
+    @pytest.fixture(autouse=True)
+    def _isolated_known_hosts(self, tmp_path, monkeypatch):
+        """Keep ``auto_add`` away from the real ``~/.ssh/known_hosts``.
+
+        ``ssh_security._load_known_hosts`` expanduser's that path, and paramiko's
+        AutoAddPolicy then *saves* back to whatever file was loaded -- rewriting
+        the whole thing, not appending. Pointing HOME at tmp_path means these
+        tests cannot add to, or truncate, the developer's real file. See the
+        defect reported alongside this work.
+        """
+        home = tmp_path / "home"
+        (home / ".ssh").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+
     def _connect(self, server):
         from clustrix.executor_connections import ConnectionManager
 
@@ -601,9 +615,23 @@ class TestTravellingOverRealSFTP:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.real_world
 @requires_hf
 class TestAgainstRealHuggingFace:
-    """Real uploads to a real private repo. Kilobytes only -- see the brief."""
+    """Real uploads to a real private repo. Kilobytes only -- see the brief.
+
+    Marked ``real_world`` so the standard ``-m "not real_world"`` command does
+    not select them. Not because they are slow or flaky, but because the Hub
+    rate-limits commits per hour per account: a suite that runs these on every
+    invocation spends the owner's quota, and quota exhaustion in the middle of
+    an unrelated test run is a genuinely confusing failure. Run them
+    deliberately::
+
+        pytest tests/unit/test_staging.py -m real_world
+
+    They are never mocked. Without a token they skip, and the remote half of
+    data packages is then simply unverified.
+    """
 
     @pytest.fixture
     def hf_config(self, tmp_path):

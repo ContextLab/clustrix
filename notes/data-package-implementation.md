@@ -89,6 +89,17 @@ because removing it is #122's call, not this issue's.
 classifies any string with a separator ending in one of 17 extensions as a data file, so it would
 "find" `"s3://bucket/notes.log"`. Nothing in `staging.py` calls it.
 
+## Two things found on the way, reported not fixed
+
+- **#157** — `ssh_security.py`'s `auto_add` path makes paramiko rewrite the whole
+  `~/.ssh/known_hosts` non-atomically on every connection. Reproduced 7 corruptions in 15 runs; a
+  truncated entry then breaks *every* later SSH connection. Also: the suite has appended 900+ junk
+  `[127.0.0.1]:<port>` lines to the developer's real file. `test_staging.py` now redirects `HOME`;
+  other modules using the test SSH server still need the same fixture.
+- HF rate-limits commits to 256/hour per account. The upload was one commit per file; it is now a
+  single atomic commit per package, which is both cheaper and removes the partial-upload problem.
+  The real-HF tests are marked `real_world` so the default suite does not spend the owner's quota.
+
 ## Verified against something real
 
 - Real files on real disk; real `@cluster` execution via `local_executor`.

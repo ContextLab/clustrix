@@ -64,8 +64,9 @@ goes away is an explicit :meth:`DataPackage.delete` or
 :func:`delete_data_package`.
 
 ``delete`` never touches the files you packaged. It removes the package's
-folder in the remote store, which also disposes of a half-finished upload, and
-it removes any copy clustrix itself materialised into its own cache. Deleting
+folder in the remote store and any copy clustrix itself materialised into its
+own cache. An upload is a single atomic commit, so there is no half-finished
+package to clean up in the first place. Deleting
 something that is already gone is not an error; failing to delete something
 that is there raises.
 
@@ -577,6 +578,9 @@ class DataPackage:
         because a warning here would leave the caller paying for storage they
         believe they released.
 
+        Nothing calls this for you. There is no TTL and no reaper: whether a
+        dataset is still needed is the user's judgement, not clustrix's.
+
         **The files you packaged are never touched.** ``local_root`` points at
         the user's own data; deleting that because a transfer was cleaned up
         would be indefensible. Only the remote folder, and the copy clustrix
@@ -877,70 +881,61 @@ def _upload(
     payloads: Dict[str, Union[bytes, Path]],
     config,
 ) -> None:
-    """Put a package's files in the private remote store.
+    """Put a package's files in the private remote store, in one commit.
 
-    The manifest goes up last. Until it is there the package is incomplete, and
-    a failure anywhere in this function deletes the folder rather than leaving
-    a half-uploaded package accruing storage in the caller's account.
+    Every file and the manifest go up as a single commit, which buys two
+    things. It is atomic -- either the whole package lands or none of it does,
+    so there is no half-uploaded package to clean up -- and it costs one commit
+    rather than one per file, which matters because the Hub rate-limits commits
+    per hour and a package of a thousand files would otherwise exhaust that on
+    its own.
+
+    The manifest is what marks a package complete; anything without one is
+    reported as incomplete by :func:`list_data_packages`.
     """
+    from huggingface_hub import CommitOperationAdd
+
     repo_id = _hf_repo(config)
     prefix = f"{PACKAGE_PREFIX}/{package.package_id}"
     api = _hf_api(config)
 
     api.create_repo(repo_id=repo_id, repo_type="dataset", private=True, exist_ok=True)
+
+    operations = [
+        CommitOperationAdd(
+            path_in_repo=f"{prefix}/files/{entry.relpath}",
+            path_or_fileobj=(
+                payloads[entry.relpath]
+                if isinstance(payloads[entry.relpath], bytes)
+                else str(payloads[entry.relpath])
+            ),
+        )
+        for entry in package.files
+    ]
+    manifest = json.dumps(
+        {
+            "name": package.name,
+            "package_id": package.package_id,
+            "files": [entry.as_dict() for entry in package.files],
+            "total_bytes": package.total_bytes,
+        },
+        indent=2,
+    ).encode()
+    operations.append(
+        CommitOperationAdd(
+            path_in_repo=f"{prefix}/{MANIFEST_NAME}", path_or_fileobj=manifest
+        )
+    )
+
+    api.create_commit(
+        repo_id=repo_id,
+        repo_type="dataset",
+        operations=operations,
+        commit_message=f"clustrix data package {package.name}",
+    )
+
     package.repo_id = repo_id
     package.path_in_repo = prefix
-
-    try:
-        for entry in package.files:
-            payload = payloads[entry.relpath]
-            api.upload_file(
-                path_or_fileobj=(
-                    payload if isinstance(payload, bytes) else str(payload)
-                ),
-                path_in_repo=f"{prefix}/files/{entry.relpath}",
-                repo_id=repo_id,
-                repo_type="dataset",
-                commit_message=f"clustrix data package {package.name}",
-            )
-        manifest = json.dumps(
-            {
-                "name": package.name,
-                "package_id": package.package_id,
-                "files": [entry.as_dict() for entry in package.files],
-                "total_bytes": package.total_bytes,
-            },
-            indent=2,
-        ).encode()
-        api.upload_file(
-            path_or_fileobj=manifest,
-            path_in_repo=f"{prefix}/{MANIFEST_NAME}",
-            repo_id=repo_id,
-            repo_type="dataset",
-            commit_message=f"clustrix data package {package.name} manifest",
-        )
-    except BaseException:
-        try:
-            api.delete_folder(
-                path_in_repo=prefix,
-                repo_id=repo_id,
-                repo_type="dataset",
-                commit_message="clustrix: discard incomplete data package",
-            )
-        except Exception as cleanup_error:  # noqa: BLE001
-            logger.warning(
-                "Data package %s failed to upload and its partial contents at "
-                "%s/%s could not be removed (%s). Run "
-                "clustrix.delete_data_package(%r) to reclaim the storage.",
-                package.name,
-                repo_id,
-                prefix,
-                cleanup_error,
-                package.package_id,
-            )
-        package.repo_id = None
-        package.path_in_repo = None
-        raise
     logger.info(
         "Staged data package %s (%d file(s), %s) at %s/%s",
         package.name,
