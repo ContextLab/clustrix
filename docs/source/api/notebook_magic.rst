@@ -47,7 +47,7 @@ Widget Interface
 - **Profile**: the active profile, and the configuration file that Save and
   Load use. New profiles are added with ``+`` and removed with ``-``.
 - **Resources**: cluster type, CPUs, memory, walltime.
-- **Connection** (``ssh``, ``slurm``, ``pbs``, ``sge`` only): host, port,
+- **Connection** (``ssh``, ``slurm`` only): host, port,
   username, SSH key file, password, remote work directory, an environment
   variable to read the password from, and an "Auto setup SSH keys" button.
 - **HuggingFace Jobs** (``huggingface`` only): namespace, flavor, token, and an
@@ -59,13 +59,14 @@ Widget Interface
   commands.
 - **Output**: where the test buttons and errors report.
 
-The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
-``sge``, ``kubernetes`` and ``huggingface``. Selecting ``kubernetes`` shows a
-Kubernetes section: namespace, image, service account and image pull policy.
-The remaining ``k8s_*`` settings (node count, region, provider,
-auto-provisioning) are configuration-file or ``clustrix.configure()`` only.
-There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
-backends are unverified.
+The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
+``huggingface`` -- the contents of
+:data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`, and nothing else. There are
+no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries, and no
+``k8s_*`` settings: those backends are **not currently supported**. They were
+removed in v0.2.0 because none had been shown to run a job end to end, and
+each is planned for a future release under its own tracking issue -- see
+:ref:`removed-backends`.
 
 "Apply" calls :func:`clustrix.configure` with the widget's values, so
 subsequent ``@cluster`` functions use them.
@@ -96,8 +97,9 @@ Legacy widget
 
    The previous widget implementation, along with :data:`DEFAULT_CONFIGS`. It
    is no longer what ``%%remote`` displays and is kept only for compatibility.
-   Several of its templates name cluster types (``aws``, ``azure``, ``gcp``,
-   ``lambda_cloud``, ``huggingface_spaces``) that the executor cannot dispatch.
+   Any template it offers that names a cluster type outside
+   :data:`clustrix.config.SUPPORTED_CLUSTER_TYPES` cannot be dispatched by the
+   executor; see :ref:`removed-backends`.
 
 .. Documented from the module that defines it, not from the one that
    re-exports it: autodoc only picks up the ``#:`` comment at the definition

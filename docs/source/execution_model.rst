@@ -8,9 +8,8 @@ Python reads your ``@cluster`` decorator to the moment your result comes back.
 Everything here was traced in the source (``clustrix/decorator.py``,
 ``clustrix/utils.py``, ``clustrix/executor_core.py``,
 ``clustrix/executor_connections.py``, ``clustrix/executor_schedulers.py``,
-``clustrix/local_executor.py``, ``clustrix/hf_jobs.py``,
-``clustrix/executor_kubernetes.py``), and every message quoted below is the
-real message the code prints.
+``clustrix/local_executor.py``, ``clustrix/hf_jobs.py``), and every message
+quoted below is the real message the code prints.
 
 If you only remember one thing: **the decorator does almost nothing at import
 time.** All of the interesting work happens on the call.
@@ -59,13 +58,11 @@ ignored option is worse than a rejected one:
 .. code-block:: text
 
    WARNING clustrix.decorator: @cluster received unrecognised option(s) gpu_type;
-   they have no effect. Recognised extras: aws_access_key_id, aws_region,
-   aws_secret_access_key, azure_client_id, azure_client_secret,
-   azure_subscription_id, azure_tenant_id, gcp_project_id,
-   gcp_service_account_key, hf_flavor, hf_namespace, hf_timeout, hf_token,
-   hf_username, instance_startup_timeout, k8s_image, k8s_namespace,
-   k8s_pull_policy, k8s_service_account, key_file, lambda_api_key,
-   terminate_on_completion
+   they have no effect. Recognised extras: hf_flavor, hf_namespace, hf_timeout,
+   hf_token, hf_username, key_file, ...
+
+The authoritative list is the ``cloud_params`` tuple in
+``clustrix/decorator.py``; the warning prints it sorted.
 
 
 The order of operations on a call
@@ -117,8 +114,6 @@ Memory strings are rewritten per scheduler by ``normalize_memory``:
    from clustrix.utils import normalize_memory
 
    print(normalize_memory("8GB", "slurm"))  # SLURM wants 8G
-   print(normalize_memory("8GB", "pbs"))    # PBS wants 8gb
-   print(normalize_memory("8GB", "k8s"))    # Kubernetes wants 8GB
 
 
 Step 3: local or remote
@@ -126,16 +121,15 @@ Step 3: local or remote
 
 ``_choose_execution_mode`` answers this, in this order:
 
-1. ``cluster_type == "kubernetes"`` **and** ``auto_provision_k8s`` -> remote.
-2. ``cluster_type == "huggingface"`` -> remote. This backend reaches its
+1. ``cluster_type == "huggingface"`` -> remote. This backend reaches its
    compute over an HTTP API, so it legitimately has no ``cluster_host``;
-   without this rule it would fall into rule 3 and silently run on your laptop
+   without this rule it would fall into rule 2 and silently run on your laptop
    while reporting success.
-3. No ``cluster_host`` -> **local**.
-4. ``prefer_local_parallel`` is true -> local.
-5. Otherwise -> remote.
+2. No ``cluster_host`` -> **local**.
+3. ``prefer_local_parallel`` is true -> local.
+4. Otherwise -> remote.
 
-Note rule 3: with the default configuration and no ``cluster_host``, a
+Note rule 2: with the default configuration and no ``cluster_host``, a
 ``@cluster`` function runs on your own machine. That is the intended
 development behaviour, not a failure. ``cluster_type="local"`` is different --
 it is a real backend that goes through serialization (see
@@ -488,10 +482,9 @@ For every SSH-reachable backend, ``_stage_job_directory`` does this:
 Step 7c: the job script
 -----------------------
 
-``create_job_script`` dispatches on cluster type to
-``_create_slurm_script`` / ``_create_pbs_script`` / ``_create_sge_script`` /
-``_create_ssh_script``. Anything else raises
-``ValueError: Unsupported cluster type: ...``. All four share
+``create_job_script`` dispatches on cluster type to ``_create_slurm_script``
+and ``_create_ssh_script``. Anything else raises
+``ValueError: Unsupported cluster type: ...``. Both share
 ``environment_setup_lines`` and ``job_execution_lines``.
 
 .. code-block:: python
@@ -574,8 +567,6 @@ seconds (default 30) until the status is ``completed`` or ``failed``.
 
 * **SLURM** -- ``squeue -j <id> -h -o %T``, with a file-based fallback because
   completed jobs leave the queue.
-* **PBS** -- ``qstat -f <id>``, reading ``job_state``.
-* **SGE** -- same shape as PBS.
 * **SSH** -- purely file-based: does ``result.pkl`` exist, or an error file.
 
 On ``completed``, the result path is downloaded, and then -- **before** any
@@ -665,20 +656,6 @@ Backend              How the flow differs
                      of ``result.pkl``.
 ``slurm``            Full flow. ``sbatch job.sh``; job id is the last whitespace
                      token of sbatch's output.
-``pbs``              Same staging and environment setup as SLURM (this used to be
-                     missing entirely), ``qsub job.pbs``, job id is the whole
-                     trimmed stdout. Not verified against real hardware.
-``sge``              ``qsub job.sge``; job id is the third token of
-                     ``Your job 123456 ...``. Not verified against real hardware.
-``kubernetes``       No SSH and **no environment replication**. A Job manifest runs
-                     ``pip install cloudpickle dill --quiet`` in ``k8s_image``
-                     (default ``python:3.11-slim``) and then a single embedded
-                     worker program. Result and signature come back as two prefixed
-                     lines in the **pod log**, HMAC-verified with
-                     ``CLUSTRIX_RESULT_KEY`` passed as a container env var. The
-                     worker program is refused if it contains ``"``, ``$`` or
-                     backtick, which the shell would reinterpret. Not verified
-                     against a real cluster.
 ``huggingface``      No SSH. One ``python -c`` bootstrap runs in a container whose
                      image defaults to ``python:<your minor version>-slim``. It pops
                      ``CLUSTRIX_HMAC_KEY`` from the environment *before* pip runs,
@@ -689,11 +666,13 @@ Backend              How the flow differs
                      a **private dataset repo** instead of the environment. A
                      function that raises exits 0 -- an exception is an ordinary
                      outcome, not a failed job.
-``provider=...``     ``@cluster(provider="aws"|"gcp"|"azure"|"lambda"|"huggingface")``
-                     routes to ``CloudJobManager`` instead of the cluster path.
-                     None of these has been shown to run a job end to end; see
-                     :doc:`limitations`.
 ===================  ==================================================================
+
+``pbs``, ``sge``, ``kubernetes`` and the ``provider="aws"|"gcp"|"azure"|"lambda"``
+cloud VM path are **not in this table and not currently supported**. They were
+removed in v0.2.0 because none of them had ever been shown to run a job end to
+end. They are planned for a future release; see :ref:`removed-backends` for the
+tracking issues.
 
 Two things every backend does share: the payload produced by
 ``serialize_function``, and the rule that results are dill-serialized and

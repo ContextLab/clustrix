@@ -222,24 +222,25 @@ Do not use it if:
   works well for pure-Python and common scientific stacks, and it can fail for
   packages with heavy system-level or GPU-driver-specific builds. Pin what
   matters and check the first job's output.
-- **You are targeting a backend that has not been verified.** See the table
-  below. Two of the implemented backends have never been run against real
-  hardware, and none of the cloud VM providers has been shown to complete a
-  job end to end.
+- **You need PBS, SGE, Kubernetes or a cloud VM provider.** None of those is
+  currently supported; see :ref:`removed-backends`.
 
 .. _maturity:
 
 Backend maturity
 ----------------
 
-Clustrix is at version 0.2.0 and the backends are not equally proven. This is
-tracked honestly in :ref:`supported-cluster-types` on the front page:
-``slurm``, ``ssh`` and ``huggingface`` have each run a real job on real
-infrastructure and returned its result; ``local`` runs in-process; ``pbs``,
-``sge`` and ``kubernetes`` are implemented but have never been run against
-real hardware; and the AWS / GCP / Azure / Lambda Cloud VM path is
-**unverified** -- no cloud job has been shown to run end to end. Read that
-table before you build on a backend.
+Clustrix is at version 0.2.0 and ships exactly four backends, each of which
+has been exercised against the real thing. This is tracked in
+:ref:`supported-cluster-types` on the front page: ``slurm``, ``ssh`` and
+``huggingface`` have each run a real job on real infrastructure and returned
+its result, and ``local`` runs in-process.
+
+PBS, SGE, Kubernetes and the AWS / GCP / Azure / Lambda Cloud VM providers are
+**not currently supported**. They were implemented but never shown to run a job
+end to end, so they were removed in v0.2.0 rather than published as if they
+worked. Each is planned for a future release and has a tracking issue --
+see :ref:`removed-backends`.
 
 Where to go next
 ----------------

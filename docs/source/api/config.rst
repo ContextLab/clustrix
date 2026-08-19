@@ -79,7 +79,7 @@ unconditionally, described below. Beyond those, three separate mechanisms
 read further variables, and each is narrower than it looks:
 
 **Connecting over SSH without a password or key file configured.** When an
-SSH-family cluster (``ssh``, ``slurm``, ``pbs``, ``sge``) has neither
+SSH-family cluster (``ssh``, ``slurm``) has neither
 ``password`` nor ``key_file`` set, ``ClusterExecutor.setup_ssh_connection``
 calls ``FlexibleCredentialManager.ensure_credential("ssh")``
 (``clustrix/executor_connections.py``). That call first loads
@@ -90,19 +90,14 @@ SSH-related ones. It then reads, via ``clustrix/credential_manager.py``:
 
 - ``SSH_HOST``, ``SSH_USERNAME``, ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``,
   ``SSH_PORT``
-- ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``
-- ``AZURE_SUBSCRIPTION_ID``, ``AZURE_TENANT_ID``, ``AZURE_CLIENT_ID``,
-  ``AZURE_CLIENT_SECRET``
-- ``GCP_PROJECT_ID``, ``GOOGLE_APPLICATION_CREDENTIALS``,
-  ``GCP_SERVICE_ACCOUNT_JSON``
-- ``KUBECONFIG``, ``K8S_NAMESPACE``, ``K8S_CONTEXT``
 - ``HF_TOKEN``, ``HF_USERNAME``
-- ``LAMBDA_CLOUD_API_KEY``, ``LAMBDA_CLOUD_ENDPOINT``
 
-The non-SSH entries above are loaded into the process environment by this
-call too, because loading ``.env`` loads the whole file regardless of which
-provider was asked for -- but only the ``SSH_*`` variables can affect *this*
-connection; the rest only matter if something else later reads them.
+Only the ``SSH_*`` variables can affect *this* connection. Everything else
+your ``.env`` happens to define is put into the process environment as a side
+effect of loading the whole file, and matters only if something else later
+reads it. In particular, cloud-provider and Kubernetes credentials no longer
+select any execution backend: those backends were removed in v0.2.0, see
+:ref:`removed-backends`.
 
 **The optional SSH-key-setup helper.** ``setup_ssh_keys_with_fallback()``
 (exported from ``clustrix``; not called automatically by ``@cluster`` or
@@ -156,10 +151,12 @@ Cluster Settings
 
 - ``cluster_type``: Type of cluster. The full, authoritative set is
   ``clustrix.config.SUPPORTED_CLUSTER_TYPES`` -- ``local``, ``ssh``,
-  ``slurm``, ``pbs``, ``sge``, ``kubernetes``, ``huggingface``. Both the CLI
-  and the notebook widget read this same tuple for their cluster-type
-  choices, so it is never possible for one of them to offer a backend the
-  other (or ``ClusterExecutor``) cannot actually run.
+  ``slurm``, ``huggingface``. Both the CLI and the notebook widget read this
+  same tuple for their cluster-type choices, so it is never possible for one
+  of them to offer a backend the other (or ``ClusterExecutor``) cannot
+  actually run. ``pbs``, ``sge``, ``kubernetes`` and the cloud VM providers
+  are not in the set: they were removed in v0.2.0 and now raise
+  ``ValueError: Unsupported cluster type``. See :ref:`removed-backends`.
 - ``cluster_type="local"`` runs the function on the submitting machine via
   ``LocalJobManager`` (see :doc:`local_executor`) instead of talking to a
   scheduler at all -- there is no host, no SSH connection, and
@@ -183,7 +180,7 @@ Paths
 
 - ``remote_work_dir``: Working directory on the cluster. Defaults to
   ``~/.clustrix/jobs``. It must be on a filesystem the compute node can see:
-  on SLURM, PBS and SGE each node has its own ``/tmp``, so an environment built
+  on SLURM each node has its own ``/tmp``, so an environment built
   on the login node is simply absent at run time and the job dies with exit 127
   before writing any diagnostics. A home directory or a shared scratch path
   both work; ``/tmp`` does not.

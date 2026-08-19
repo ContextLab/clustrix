@@ -28,7 +28,7 @@ it, and lets it go. What that operation does depends entirely on
 - **``cluster_type="local"``**: a plain ``os``/``glob`` call against
   ``config.local_work_dir`` (or the current directory). No network
   involved, nothing to connect or disconnect.
-- **Anything else (SLURM, PBS, SGE, SSH, Kubernetes)**: an operation over
+- **Anything else (SLURM, SSH)**: an operation over
   SFTP. The SSH connection is opened lazily, on the *first* call that needs
   one -- not when you construct the config -- and it applies
   ``config.ssh_host_key_policy`` (``"reject"`` by default; see

@@ -18,7 +18,7 @@ Install
    pip install clustrix
 
 Clustrix requires Python 3.10 or newer. See :doc:`installation` for the
-optional extras (Jupyter widget, Kubernetes, docs).
+optional extras (Jupyter widget, docs).
 
 .. _quickstart-first-result:
 
@@ -427,11 +427,12 @@ Which backend should I use?
 | No machine of your own                 | ``huggingface``           |
 +----------------------------------------+---------------------------+
 
-Those four are the ones that have been proven to work. ``pbs``, ``sge`` and
-``kubernetes`` are implemented but have never been run against real hardware,
-and the cloud VM path (AWS / GCP / Azure / Lambda) is unverified -- no cloud
-job has been shown to run end to end. Read :ref:`supported-cluster-types`
-before you depend on any of those.
+Those four are the only ``cluster_type`` values Clustrix accepts, and each one
+has been proven to work against real infrastructure. ``pbs``, ``sge``,
+``kubernetes`` and the cloud VM providers (AWS / GCP / Azure / Lambda Cloud)
+are **not currently supported** -- they were removed in v0.2.0 because none of
+them had ever been shown to run a job end to end. They are planned for a
+future release; see :ref:`removed-backends` for the tracking issues.
 
 Where to go next
 ----------------

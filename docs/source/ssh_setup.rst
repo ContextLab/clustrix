@@ -26,8 +26,8 @@ Open the widget with the ``%%remote`` magic, in a cell of its own. Importing
 
 Then:
 
-1. Choose a remote cluster type (``ssh``, ``slurm``, ``pbs`` or ``sge``) so the
-   connection section appears
+1. Choose a remote cluster type (``ssh`` or ``slurm``) so the connection
+   section appears
 2. Enter your cluster hostname (e.g. ``cluster.university.edu``)
 3. Enter your username
 4. Enter your password
