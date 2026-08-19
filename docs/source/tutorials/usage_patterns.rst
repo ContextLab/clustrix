@@ -106,15 +106,14 @@ a real file -- see :ref:`repl-limitation` below.
 
 .. _repl-limitation:
 
-A Note on the REPL Limitation
-------------------------------
+Functions Defined in the REPL
+-----------------------------
 
-Functions defined directly at the interactive ``python`` prompt cannot be
-decorated with ``@cluster`` reliably, because ``inspect.getsource()`` cannot
-retrieve their source there. This is narrower than it might sound:
-``clustrix.utils.serialize_function`` / ``deserialize_function`` themselves
-round-trip a function correctly even when its source is unavailable --
-verified directly:
+Functions defined at the interactive ``python`` prompt **do** work with
+``@cluster``: they serialize, run remotely, and return the right answer.
+``inspect.getsource()`` cannot retrieve their source, but serialization does
+not use source -- dill and cloudpickle work from the code object. Verified
+directly:
 
 .. code-block:: python
 
@@ -126,13 +125,16 @@ verified directly:
     fn, args, kwargs = deserialize_function(data)
     print(fn(*args, **kwargs))  # 5
 
-The limitation is specifically in the *source-based* features layered on top
-of serialization -- automatic loop-parallelization analysis, GPU-parallel
-detection, and dependency/complexity analysis -- which parse the function's
-source text with ``ast`` and therefore need a real file behind it. Plain
-``@cluster`` execution of a function whose source can't be read is a
-narrower case than "REPL functions never work"; define functions in ``.py``
-files or notebooks (where source is preserved) to get the full feature set.
+What is lost is only the *source-based* features layered on top of
+serialization -- automatic loop-parallelization analysis, GPU-parallel
+detection, and complexity analysis -- which parse the function's source text
+with ``ast`` and so need a real file behind it. Those are skipped; execution
+is unaffected.
+
+Define functions in ``.py`` files or notebooks to get the full feature set.
+Do not repeat the older claim that REPL functions "cannot be serialized": it
+is false, and believing it is what justified a code path that returned a
+fabricated string instead of the user's result. See :doc:`../limitations`.
 
 Pattern 3: Configuring a Real Backend
 ----------------------------------------
@@ -175,9 +177,24 @@ hostful cloud VM backends (Lambda Cloud, AWS, Azure, GCP). The Kubernetes
 provider is a separate setting, ``k8s_provider``, and it has to be set via
 ``configure()`` (default: ``"aws"``):
 
+.. danger::
+
+   Calling a function under ``auto_provision_k8s=True`` **creates real cloud
+   infrastructure and bills you for it**. ``k8s_provider`` defaults to
+   ``"aws"``, so omitting it -- or calling this function before
+   ``configure()`` has run -- goes straight to AWS EKS and starts creating a
+   VPC. A reviewer copy-pasting this example with only
+   ``configure(cluster_type="local")`` in effect got as far as
+   ``CreateVpc`` -> ``VpcLimitExceeded`` against a real account.
+
+   Set ``k8s_provider="local"`` (kind/minikube, no cloud account involved)
+   unless you have deliberately decided to spend money. The cloud
+   provisioning paths are **unverified**: no clustrix job has been shown to
+   run end to end on any of them.
+
 .. code-block:: python
 
-    # cluster-required: local path needs Docker + kind; cloud paths are unverified
+    # cluster-required: PROVISIONS REAL INFRASTRUCTURE. Do not run casually.
     from clustrix import configure, cluster
 
     configure(
@@ -187,7 +204,10 @@ provider is a separate setting, ``k8s_provider``, and it has to be set via
         k8s_node_count=2,
     )
 
-    @cluster(platform="kubernetes", auto_provision=True, cores=1, memory="512Mi")
+    # `platform` and `auto_provision` are NOT recognised @cluster keywords --
+    # they are accepted and ignored. Only `cores` and `memory` take effect
+    # per call here. They are shown because they appear in older examples.
+    @cluster(cores=1, memory="512Mi")
     def analyze_data(size, multiplier=1):
         import math
         import socket
@@ -209,8 +229,9 @@ are unverified and which environment variables each one needs.
 Key Takeaways
 -------------
 
-1. **Structure**: define ``@cluster``-decorated functions in ``.py`` modules,
-   not the interactive interpreter.
+1. **Structure**: define ``@cluster``-decorated functions in ``.py`` modules
+   or notebooks. They still execute correctly from the interactive
+   interpreter -- only the source-based analyses are skipped there.
 2. **Imports**: put every import your function needs *inside* the function
    body.
 3. **Configuration**: call ``configure()`` (or set up a config file) once,

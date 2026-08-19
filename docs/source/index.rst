@@ -52,7 +52,9 @@ Features
 --------
 
 - **Simple Decorator Interface**: Just add ``@cluster`` to any function
-- **Advanced Function Packaging**: AST-based dependency analysis replaces pickle limitations
+- **Function Packaging**: your function is serialized by value with dill and
+  cloudpickle, so closures, nested functions and project-local modules travel
+  with it -- source code is not required
 - **Interactive Jupyter Widget**: ``%%remote`` magic command with GUI configuration manager
 - **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working;
   PBS, SGE and Kubernetes are implemented but untested. See
@@ -61,7 +63,9 @@ Features
 - **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
 - **Cost Estimation**: Pricing and cost estimates for AWS, GCP, Azure, and Lambda Cloud
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Loop Parallelization**: Automatically distributes loops across cluster nodes
+- **Loop Parallelization**: distributes a loop across nodes when its body has
+  no dependencies between iterations. The analysis is deliberately
+  conservative and declines most real loops -- see :doc:`limitations`
 - **Local Parallelization**: Multi-core execution for development and testing
 - **Flexible Configuration**: Easy setup with config files or the interactive widget
 - **Error Handling**: Comprehensive error reporting and job monitoring
@@ -119,8 +123,10 @@ The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
 - ``huggingface`` shows namespace, flavor, token and an "Allow paid GPU
   flavors" checkbox. GPU flavors bill by the second, so that box has to be
   ticked before one is accepted.
-- ``kubernetes`` shows **no** dedicated fields. The ``k8s_*`` settings can only
-  be set from a configuration file or ``clustrix.configure()``.
+- ``kubernetes`` shows a Kubernetes section: namespace, image, service account
+  and image pull policy. The remaining ``k8s_*`` settings (node count, region,
+  provider, auto-provisioning) are configuration-file or
+  ``clustrix.configure()`` only.
 
 There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
 backends are unverified.
@@ -144,6 +150,7 @@ Table of Contents
    configuration
    ssh_setup
    limitations
+   troubleshooting
 
 .. toctree::
    :maxdepth: 2

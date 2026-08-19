@@ -3,6 +3,27 @@
 Installation
 ============
 
+.. warning::
+
+   **The version on PyPI is behind this documentation.** ``pip install
+   clustrix`` currently installs **0.1.1**; these pages document **0.2.0**.
+
+   That gap is not cosmetic. 0.1.1 predates fixes for two defects that
+   matter:
+
+   - ``@cluster`` could return a fabricated string instead of your result
+     when a function's source could not be read.
+   - Results fetched from a remote host were unpickled without
+     authentication, which is a remote-to-local code execution path.
+
+   Until 0.2.0 is published, install from the repository::
+
+       pip install "git+https://github.com/ContextLab/clustrix.git@master"
+
+   Everything below describes 0.2.0. If you installed from PyPI, check what
+   you actually have with ``python -c "import clustrix;
+   print(clustrix.__version__)"``.
+
 Clustrix is a pure-Python package. The base install pulls in everything the
 verified backends need -- SSH (``paramiko``), serialization (``cloudpickle``,
 ``dill``), the CLI (``click``) and the Hugging Face Jobs client

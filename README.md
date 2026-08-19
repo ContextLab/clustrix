@@ -20,8 +20,13 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 - **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working; PBS, SGE and Kubernetes are implemented but untested (see [Supported Cluster Types](#supported-cluster-types))
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Loop Parallelization**: Automatically distributes loops across cluster nodes
-- **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
+- **Loop Parallelization**: distributes a loop across nodes when its body has no
+  dependencies between iterations. The analysis is conservative and declines
+  most real loops — see [Limitations](https://clustrix.readthedocs.io/en/latest/limitations.html)
+- **Flexible Configuration**: config files, `configure()`, or the interactive
+  widget. Note there is no general "override any field from the environment"
+  mechanism — only `CLUSTRIX_CONFIG_DIR` and the password variable named by
+  `password_env_var`
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
 Read [Supported Cluster Types](#supported-cluster-types) before relying on a
@@ -32,8 +37,20 @@ parts do.
 
 ### Installation
 
+> **⚠️ PyPI is behind this README.** `pip install clustrix` installs **0.1.1**;
+> this document describes **0.2.0**. 0.1.1 predates the fixes for two real
+> defects: `@cluster` could return a fabricated string instead of your result,
+> and remote results were unpickled without authentication (a remote-to-local
+> code execution path). Until 0.2.0 is published, install from the repository.
+
 ```bash
-pip install clustrix
+pip install "git+https://github.com/ContextLab/clustrix.git@master"
+```
+
+Check what you actually have:
+
+```bash
+python -c "import clustrix; print(clustrix.__version__)"
 ```
 
 ### Basic Configuration
@@ -118,9 +135,9 @@ The cluster type dropdown offers `local`, `ssh`, `slurm`, `pbs`, `sge`,
 - `huggingface` shows namespace, flavor, token, and an "Allow paid GPU flavors"
   checkbox. GPU flavors bill by the second, so that box has to be ticked before
   one is accepted.
-- `kubernetes` shows a Kubernetes section with namespace, image, service account and image pull policy.
-  (`k8s_namespace`, `k8s_image` and the rest) can only be set from a config file
-  or `clustrix.configure()`.
+- `kubernetes` shows a Kubernetes section: namespace, image, service account and
+  image pull policy. The remaining `k8s_*` settings (node count, region,
+  provider, auto-provisioning) are config-file or `clustrix.configure()` only.
 
 There are no AWS, GCP, Azure or Lambda Cloud entries: those backends are
 unverified (see [Cloud Providers](#cloud-providers)).
