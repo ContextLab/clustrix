@@ -206,6 +206,79 @@ Configure Clustrix programmatically for your Kubernetes cluster:
        k8s_image="python:3.11-slim",  # Optional: custom image
    )
 
+Behind the Scenes: How a Job Actually Runs
+-------------------------------------------
+
+This section describes ``clustrix/executor_kubernetes.py`` as it exists today
+(``KubernetesJobManager``), not aspirational behaviour. It has never been
+run against a real cluster (see the warning at the top of this page), but
+the code path itself, and the order in which it does things, is exactly
+this:
+
+1. **Submission** (``submit_k8s_job``): the function, its positional
+   arguments and its keyword arguments are serialized with ``cloudpickle``
+   and base64-encoded. A fresh, random 32-byte hex key (``result_key``) is
+   generated for this job only.
+2. **Worker program construction** (``build_worker_program``): a Python
+   program is generated as a plain string. It decodes and unpickles the
+   function and arguments, calls the function, serializes the result with
+   ``dill`` (not the repr of the result -- see below), computes an
+   HMAC-SHA256 of those exact bytes keyed by ``CLUSTRIX_RESULT_KEY``, and
+   prints two lines to stdout: ``CLUSTRIX_RESULT_B64:<base64 dill>`` and
+   ``CLUSTRIX_RESULT_HMAC:<hex digest>``. ``build_container_command`` refuses
+   to proceed (raises ``ValueError``) if the generated program contains a
+   ``"``, ``$`` or backtick, since any of those would be reinterpreted by the
+   shell that embeds it.
+3. **Job manifest**: a ``batch/v1`` ``Job`` is created with one container
+   running ``python:3.11-slim`` (or your configured ``k8s_image``). The
+   command is ``pip install cloudpickle dill --quiet && python -c "<worker
+   program>"`` -- there is no custom image build step, and the per-job
+   ``result_key`` is passed in as the container env var
+   ``CLUSTRIX_RESULT_KEY``, never on the command line. CPU/memory
+   ``requests`` and ``limits`` are both set to the same values, derived from
+   ``cores``/``memory`` via ``normalize_memory()`` (which turns clustrix's
+   ``"8GB"`` spelling into the ``8Gi``/``8G`` Kubernetes accepts).
+4. **Status polling** (``wait_for_k8s_result`` / ``check_k8s_job_status``):
+   the job's status is read from the Kubernetes API's own
+   ``job.status.succeeded`` / ``.failed`` / ``.active`` fields, on a fixed
+   interval (``job_poll_interval``, default 30s). If the status API call
+   itself fails (evicted pod, lost namespace access, ``kubernetes`` package
+   missing), that raises ``RuntimeError`` rather than being treated as
+   success or silently retried forever -- there is a comment in the source
+   noting this used to report ``"completed"`` on any such error, which meant
+   a job that had been evicted, or whose namespace the caller could no
+   longer read, was reported as having finished successfully.
+5. **Result retrieval** (``get_k8s_result`` / ``decode_signed_result``): once
+   the job reports success, the manager reads the log of its (single)
+   succeeded pod, extracts the ``CLUSTRIX_RESULT_B64``/``CLUSTRIX_RESULT_HMAC``
+   lines, recomputes the HMAC over the decoded bytes with the ``result_key``
+   this job was given, and compares it with ``hmac.compare_digest``. Only if
+   that check passes does it call ``dill.loads`` on the payload. A log with
+   no result marker, no signature, or a signature that does not match raises
+   ``RuntimeError`` and is never deserialized -- unpickling untrusted bytes
+   executes code, so a pod log (which the function itself could also have
+   printed to, or which another process's stray line could reach) is not
+   trusted on sight. This replaced an earlier implementation that printed
+   ``repr(result)`` and ran the log through ``ast.literal_eval``: anything
+   without a literal Python repr (a NumPy array, a dataclass, most real
+   objects) came back as the *string* of its repr, with no indication that
+   had happened.
+6. **Failure retrieval** (``get_k8s_error_log`` / ``extract_k8s_exception``):
+   on a failed job, the manager reads the pod's log for lines starting
+   ``CLUSTRIX_ERROR:``/``CLUSTRIX_TRACEBACK:`` and re-raises a
+   ``RuntimeError`` carrying the remote message; if no such marker is found,
+   the raw error log is included in the exception instead of being
+   swallowed.
+7. **Cleanup** (``cleanup_k8s_job``): if ``cleanup_on_success`` is set (the
+   default), the ``Job`` -- and its pods, via
+   ``propagation_policy="Foreground"`` -- is deleted after a successful
+   result is collected. A cleanup failure is logged as a warning, not
+   raised, so it never masks the real result or error.
+
+None of this has been exercised against a live API server in this session;
+it is a description of what the code does, traced from source, not a record
+of it having run.
+
 Kubernetes-specific Features
 ----------------------------
 
@@ -214,16 +287,32 @@ Resource Specification
 
 Kubernetes uses different resource syntax:
 
+.. important::
+
+   ``cores`` and ``memory`` are the only settings ``@cluster(...)`` actually
+   applies per job -- they become the pod's resource requests and limits, as
+   shown in `Resource Limits and Requests`_ below. ``@cluster(...)`` will
+   *accept* ``k8s_namespace``, ``k8s_image``, ``k8s_service_account`` and
+   ``k8s_pull_policy`` as keyword arguments without warning (they were added
+   to the recognised-extras list so a typo there is no longer silently
+   dropped at the decorator), but ``KubernetesJobManager.submit_k8s_job``
+   never reads them back out of the per-job config -- it reads
+   ``self.config.k8s_namespace`` / ``self.config.k8s_image`` instead. So
+   passing them to ``@cluster(...)`` looks accepted and has no effect; set
+   them with ``configure()`` (see `Custom Docker Images`_ below) if you need
+   a namespace or image different from the default.
+
 .. code-block:: python
 
    from clustrix import cluster
-   
+
    @cluster(
        cores=2,              # CPU cores (can be fractional: 0.5, 1.5)
        memory="4Gi",         # Memory in Kubernetes format
-       time="01:00:00",      # Job timeout
-       k8s_namespace="compute",  # Kubernetes namespace
-       k8s_image="python:3.11",  # Custom Docker image
+       time="01:00:00",      # Job timeout -- not currently enforced by the
+                              # Kubernetes backend (no activeDeadlineSeconds
+                              # is set from it); accepted for parity with the
+                              # scheduler backends, which do use it.
    )
    def k8s_computation():
        """Example computation on Kubernetes."""
@@ -795,4 +884,11 @@ Distributed Machine Learning
    best_worker = max(worker_results, key=lambda x: x['accuracy'])
    print(f"Best worker: {best_worker['worker_id']} (accuracy: {best_worker['accuracy']:.4f})")
 
-This tutorial demonstrates the cloud-native capabilities of Clustrix with Kubernetes, showcasing containerized distributed computing, auto-scaling, fault tolerance, and comprehensive monitoring for modern cloud environments.
+The examples above show the *intended* interface for containerized distributed
+computing, auto-scaling-friendly resource requests, fault tolerance via
+``k8s_backoff_limit``, and log-based monitoring. As stated at the top of this
+page, none of it has been run against a real Kubernetes cluster in this
+project -- the code paths are traced from source in `Behind the Scenes: How
+a Job Actually Runs`_ above, not demonstrated end to end. Treat every example
+here as something to try and verify yourself, not as a report of a
+successful run.
