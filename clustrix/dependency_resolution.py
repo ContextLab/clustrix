@@ -356,7 +356,16 @@ class FunctionDependencyAnalyzer:
                 main_function=main_function,
                 dependencies=dependencies,
                 modules_to_import=modules_to_import,
-                global_variables={},  # TODO: Extract global variables
+                # Deliberately empty (#89). Extracting the globals a function
+                # reads only matters for rebuilding it from source, which is
+                # what clustrix.function_flattening does -- and nothing in the
+                # execution path calls that any more, because a source rewrite
+                # cannot be shown to preserve the caller's answer.
+                # clustrix.utils.serialize_function already bundles the globals
+                # a function names, by value, via dill(recurse=True). Filling
+                # this in would add a second, weaker copy of machinery that has
+                # no caller. See the module docstring in function_flattening.py.
+                global_variables={},
                 circular_dependencies=circular_deps,
             )
 

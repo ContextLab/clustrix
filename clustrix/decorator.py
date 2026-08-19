@@ -11,11 +11,6 @@ from .utils import detect_loops, serialize_function
 from .gpu_utils import (
     detect_gpu_parallelizable_operations,
 )
-from .function_flattening import (
-    analyze_function_complexity,
-    auto_flatten_if_needed,
-    create_simple_subprocess_fallback,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -320,39 +315,32 @@ def _execute_single(
     kwargs: dict,
     job_config: dict,
 ) -> Any:
-    """Execute function once on cluster."""
-    import logging
+    """Execute function once on cluster.
 
-    logger = logging.getLogger(__name__)
+    The function the caller wrote is the function that gets serialized. Nothing
+    is substituted for it, ever.
 
-    # Analyze function complexity and flatten if needed
-    complexity_info = analyze_function_complexity(func)
+    This used to run the function through ``analyze_function_complexity`` and,
+    when that reported "complex", swap in either a source-rewritten
+    "flattened" replacement or ``create_simple_subprocess_fallback``. Both
+    substitutions could silently return something that was not the user's
+    answer -- the fallback ran a hardcoded script whose whole body was
+    ``result = "Function execution completed"``, so clustrix handed that string
+    back as the result of the user's job with no error anywhere. Worse, the
+    complexity analyser reported ``is_complex: True`` from its except branch
+    whenever ``inspect.getsource`` failed, so the substitution fired precisely
+    for the functions (REPL, notebook, ``exec``-created) whose source no
+    rewriter could ever read.
 
-    if complexity_info.get("is_complex", False):
-        logger.info(
-            f"Function {func.__name__} is complex "
-            f"(score: {complexity_info['complexity_score']}), attempting automatic flattening"
-        )
-
-        # Attempt automatic flattening
-        flattened_func, flattening_info = auto_flatten_if_needed(func)
-
-        if flattening_info and flattening_info.get("success", False):
-            logger.info(f"Successfully flattened {func.__name__}")
-            func_to_execute = flattened_func
-        else:
-            logger.warning(
-                f"Failed to flatten {func.__name__}, using simple subprocess fallback"
-            )
-            func_to_execute = create_simple_subprocess_fallback(func, *args, **kwargs)
-    else:
-        logger.debug(
-            f"Function {func.__name__} is simple (score: {complexity_info['complexity_score']}), executing as-is"
-        )
-        func_to_execute = func
-
+    Rewriting a function to preserve its meaning cannot be verified without
+    running it, so no rewrite can be trusted here. It is also unnecessary:
+    ``serialize_function`` pickles by value via ``dill(recurse=True)`` /
+    cloudpickle, which round-trips nested functions, closures, module-level
+    globals and source-less ``exec``-created functions correctly. See
+    ``tests/unit/test_execute_single_no_fabrication.py``.
+    """
     # Serialize function and dependencies
-    func_data = serialize_function(func_to_execute, args, kwargs)
+    func_data = serialize_function(func, args, kwargs)
 
     # Submit job
     job_id = executor.submit_job(func_data, job_config)
