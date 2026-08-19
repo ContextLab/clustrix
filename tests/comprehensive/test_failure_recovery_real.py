@@ -29,6 +29,20 @@ class TestConnectionFailures:
         Test recovery from SSH connection drops.
 
         Validates reconnection and job resumption.
+
+        `connection_retry_count`/`connection_retry_delay` are not real
+        ClusterConfig fields, so `configure()` raised `ValueError: Unknown
+        configuration parameter` before this test ever reached a connection
+        attempt. Removed.
+
+        `auto_gpu_parallel=False` sidesteps a real defect (see this sweep's
+        report): after a failed connection attempt, `setup_ssh_connection()`
+        (clustrix/executor_connections.py) leaves `self.ssh_client` set to
+        the constructed-but-unconnected `paramiko.SSHClient()` instead of
+        None, so a later `execute_remote_command()` on the same executor --
+        such as the GPU-detection probe that runs before the real submission
+        -- calls `exec_command()` on a dead client and raises `AttributeError`
+        deep in paramiko instead of a clean connection error.
         """
         ssh_host = os.getenv("TEST_SSH_HOST", "localhost")
         ssh_port = int(os.getenv("TEST_SSH_PORT", "2222"))
@@ -39,11 +53,9 @@ class TestConnectionFailures:
             cluster_port=ssh_port,
             username=os.getenv("TEST_SSH_USER", "testuser"),
             password=os.getenv("TEST_SSH_PASS", "testpass"),
-            connection_retry_count=3,
-            connection_retry_delay=2,
         )
 
-        @cluster(cores=2, memory="2GB", retry_on_failure=True)
+        @cluster(cores=2, memory="2GB", retry_on_failure=True, auto_gpu_parallel=False)
         def resilient_task(duration):
             """Task that can survive connection drops."""
             import time
@@ -65,12 +77,14 @@ class TestConnectionFailures:
                 "duration": duration,
             }
 
-        # Execute with potential connection issues
+        # Execute with potential connection issues. Nothing listens on
+        # localhost:2222 in this environment, so this is expected to raise
+        # a real (non-ConnectionError) OSError -- see docstring.
         try:
             result = resilient_task(5)
             assert result["completed"] is True
             assert result["checkpoints"] == 5
-        except ConnectionError:
+        except OSError:
             # Connection failure is acceptable for this test
             pass
 
@@ -79,13 +93,14 @@ class TestConnectionFailures:
         Test recovery from network timeouts.
 
         Validates timeout handling and retry logic.
+
+        `network_timeout`/`retry_on_timeout`/`max_retries` are not real
+        ClusterConfig fields (there is no generic client-side retry
+        configuration in clustrix), so `configure()` raised `ValueError:
+        Unknown configuration parameter: network_timeout` before this test
+        could exercise anything. Removed.
         """
-        configure(
-            cluster_type="local",
-            network_timeout=5,
-            retry_on_timeout=True,
-            max_retries=3,
-        )
+        configure(cluster_type="local")
 
         @cluster(cores=1, memory="1GB")
         def task_with_timeout_potential(delay):
@@ -121,25 +136,30 @@ class TestConnectionFailures:
         Test behavior when cluster becomes unavailable.
 
         Validates failover and queue management.
+
+        `connection_timeout` and `fallback_to_local` are not real
+        ClusterConfig fields (direct attribute assignment on a dataclass
+        instance never validates against declared fields, unlike
+        `configure()`, so this silently created unused attributes rather
+        than raising). There is no fallback-to-local feature to validate --
+        `.invalid` is an IANA-reserved TLD guaranteed never to resolve, so
+        `executor.connect()` always raises `socket.gaierror` here, which is
+        an `OSError` but NOT a `ConnectionError`/`TimeoutError` (those are
+        both `OSError` subclasses; `gaierror` is a sibling, not a child, of
+        either), so the narrower except clause never caught it.
         """
-        # Try to connect to non-existent cluster
+        # Try to connect to a cluster host that can never resolve
         config = ClusterConfig()
         config.cluster_type = "slurm"
         config.cluster_host = "nonexistent.cluster.invalid"
         config.username = "testuser"
-        config.connection_timeout = 5
-        config.fallback_to_local = True  # Enable fallback
 
         executor = ClusterExecutor(config)
 
-        # Should fail to connect but potentially fallback
-        try:
+        # Must fail to connect -- there is no local fallback for a
+        # remote-scheduler cluster_type.
+        with pytest.raises(OSError):
             executor.connect()
-            # If connection succeeds, it's using fallback
-            assert config.fallback_to_local is True
-        except (ConnectionError, TimeoutError):
-            # Expected failure
-            assert config.cluster_host == "nonexistent.cluster.invalid"
 
     def test_intermittent_network_recovery(self):
         """
@@ -194,6 +214,19 @@ class TestJobFailures:
         Test recovery from out-of-memory errors.
 
         Validates memory limit handling and cleanup.
+
+        The original 100GB request does not reliably raise `MemoryError` on
+        a real modern machine: `np.zeros()` is backed by zero pages the
+        kernel can lazily commit, so requesting 100GB of *zeros* (never
+        touched) can succeed even on a system with far less than 100GB of
+        physical RAM -- confirmed empirically on this machine, which
+        allocates it without error. That made the "excessive allocation"
+        branch of this test flaky/false on any system with generous virtual
+        memory or overcommit, independent of any clustrix behavior. Bumped
+        to an allocation size (10,000,000 GB / ~9.5 PiB) that exceeds real
+        address-space bounds regardless of physical RAM or overcommit
+        policy -- numpy itself refuses this before ever asking the OS to
+        back it, so it is fast and deterministic on any real system.
         """
         configure(cluster_type="local")
 
@@ -229,8 +262,9 @@ class TestJobFailures:
         result = memory_limited_task(0.5)
         assert result["allocated"] is True or result["recovered"] is True
 
-        # Test with excessive allocation
-        result = memory_limited_task(100)  # 100GB (should fail)
+        # Test with excessive allocation (see docstring for why 100GB is not
+        # a reliable OOM trigger on a real, modern, high-memory system)
+        result = memory_limited_task(10_000_000)  # ~9.5 PiB (should fail)
         assert result["allocated"] is False
         assert result["recovered"] is True
 
