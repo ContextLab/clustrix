@@ -124,11 +124,13 @@ inspect and locate remote data, and they are not a transfer service for bulk
 inputs. Passing a 200 GB array as an *argument* is worse still, since it would
 be pickled into the payload.
 
-Explicit input and output staging -- declaring the files a call needs and the
-files it produces, and having Clustrix move them -- is planned rather than
-present. `Issue #151
-<https://github.com/ContextLab/clustrix/issues/151>`_ carries the design.
-Until it lands, treat the paragraph above as the working rule.
+What Clustrix will move is data you *declare*, never data it guesses at.
+:func:`clustrix.data_package` packages the files you name into an object you
+then pass to the function as an ordinary argument; the worker dereferences it
+on demand. Nothing is inferred from your source code, which is the whole point
+-- an inferred upload triggered by a string literal is the worst failure mode
+available here. `Issue #151
+<https://github.com/ContextLab/clustrix/issues/151>`_ tracks that work.
 
 .. _alternatives:
 

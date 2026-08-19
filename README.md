@@ -377,10 +377,12 @@ most often surprised by. They list, match and measure; there is no
 worse than useless, since it gets pickled into the payload and the HuggingFace
 backend caps that at 256 KB.
 
-Declaring the files a call needs and the files it produces, and having Clustrix
-stage them, is planned rather than present:
-[#151](https://github.com/ContextLab/clustrix/issues/151) carries the design.
-Until it lands, move your own data.
+Data you *declare* is a different matter. `clustrix.data_package()` packages
+the files you name into an object you pass to the function as an ordinary
+argument, and the worker reads it on demand. Nothing is inferred from your
+source code — an upload triggered by a string that merely looks like a path is
+the worst failure mode available here, so declaration is the only route.
+[#151](https://github.com/ContextLab/clustrix/issues/151) tracks that work.
 
 ### Cost monitoring
 

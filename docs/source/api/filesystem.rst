@@ -24,9 +24,9 @@ call. In other words, you write the code once and choose the machine later.
 :class:`DiskUsage` rather than tuples, so the fields have names.
 
 These utilities are **read-only**. There is no ``cluster_put``, no
-``cluster_get``, and no copy or delete. They tell you what is on a filesystem;
-moving data onto one is your job, and is tracked as `issue #151
-<https://github.com/ContextLab/clustrix/issues/151>`_.
+``cluster_get``, and no copy or delete. They tell you what is on a filesystem.
+To send data to a worker, declare it with :func:`clustrix.data_package` and
+pass the result to your function as an argument.
 
 Behind the Scenes
 ------------------

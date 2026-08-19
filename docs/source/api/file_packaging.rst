@@ -31,8 +31,9 @@ them together with a metadata record.
 
    That search returns nothing. Treat this page as a reference for a component
    you may call directly, not as a description of what happens when you submit
-   a job. Wiring an explicit staging path into submission is tracked in
-   `issue #151 <https://github.com/ContextLab/clustrix/issues/151>`_.
+   a job. To send data to a worker, use :func:`clustrix.data_package`, which
+   takes the files you name rather than the files this module's analysis
+   guesses at.
 
 What it does when you call it
 -----------------------------
