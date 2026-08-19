@@ -151,7 +151,10 @@ def test_cluster_decorator_parameters():
     def func3():
         return 3
 
-    @cluster(platform="local")
+    # Was @cluster(platform="local"). `platform` was a parameter of the
+    # removed cloud backends; it now only lands in **kwargs, so decorating
+    # with it proved nothing. `partition` is a real parameter.
+    @cluster(partition="gpu")
     def func4():
         return 4
 
