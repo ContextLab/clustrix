@@ -147,14 +147,18 @@ class TestSSHKeyAutomation:
         stubs it had installed were called. Nothing was generated and nothing
         was deployed.
 
-        ``connection_tested`` is asserted **False** here, and that is not a
-        weakened assertion -- it is a real defect being pinned. Step 5 of
-        ``setup_ssh_keys`` tests the connection with
-        ``detect_existing_ssh_key``, which only ever tries the six standard
-        key names from ``find_ssh_keys()``. The key it just generated is named
-        ``id_ed25519_clustrix_<user>_<alias>``, which is not one of them, so
-        the check can never succeed for a key clustrix generated itself. See
-        the note in the report accompanying this change.
+        ``connection_tested`` used to be asserted **False** here, pinning a
+        real defect: step 5 of ``setup_ssh_keys`` tests the connection with
+        ``detect_existing_ssh_key``, which asked ``find_ssh_keys()`` for
+        candidates, and ``find_ssh_keys()`` only ever tried six exact
+        filenames. The key clustrix had just generated is named
+        ``id_ed25519_clustrix_<user>_<alias>``, which was not one of them, so
+        the check could never succeed for a key clustrix generated itself.
+
+        Issue #154 fixed the discovery, so the assertion is now the opposite
+        one -- and it is the strong form: the key that step 5 found has to be
+        the very key this call generated, proving the verification really
+        exercised it rather than stumbling onto some other working key.
         """
         config = _config(ssh_server)
 
@@ -192,9 +196,11 @@ class TestSSHKeyAutomation:
         assert f"Port {ssh_server.port}" in ssh_config
         assert result["details"]["ssh_config_updated"] is True
 
-        # Pinned defect: the shipped connection test cannot pass here.
-        assert result["connection_tested"] is False
-        assert "connection_test_warning" in result["details"]
+        # Step 5 really verified the key it had just deployed.
+        assert result["connection_tested"] is True
+        assert "connection_test_warning" not in result["details"]
+        # ...and that is only meaningful because discovery can see the key:
+        assert str(key_path) in find_ssh_keys()
 
     def test_setup_ssh_keys_without_alias_names_the_key_after_the_host(
         self, isolated_home, ssh_server
@@ -422,11 +428,26 @@ class TestSSHKeyAutomation:
         # Right everything, but not a name find_ssh_keys looks for.
         unlisted = generate_keypair(ssh_dir, "id_something_else")
 
+        # A key clustrix generated for itself, named the way setup_ssh_keys
+        # really names one. Before #154 this was invisible to discovery, so
+        # clustrix could not find its own key.
+        generated = generate_keypair(ssh_dir, "id_ed25519_clustrix_testuser_alias")
+
+        # Things that live in ~/.ssh and are emphatically not private keys.
+        (ssh_dir / "config").write_text("Host example\n")
+        (ssh_dir / "known_hosts").write_text("example ssh-ed25519 AAAA\n")
+        os.chmod(ssh_dir / "config", 0o600)
+        os.chmod(ssh_dir / "known_hosts", 0o600)
+
         found = find_ssh_keys()
 
-        assert found == [str(good)]
+        assert found == [str(good), str(generated)]
         assert str(loose) not in found
         assert str(unlisted) not in found
+        # The public half of a key clustrix generated is not a private key.
+        assert f"{generated}.pub" not in found
+        assert str(ssh_dir / "config") not in found
+        assert str(ssh_dir / "known_hosts") not in found
 
 
 class TestSSHKeyErrorHandling:

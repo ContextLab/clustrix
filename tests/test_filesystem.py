@@ -2,7 +2,6 @@
 
 import pytest
 import socket
-import subprocess
 import tempfile
 import os
 from pathlib import Path
@@ -30,7 +29,25 @@ SSH_PASSWORD = "clustrix-test-password"
 
 
 @pytest.fixture
-def ssh_server(tmp_path):
+def isolated_home(tmp_path, monkeypatch):
+    """A real ``$HOME`` for the duration of one test.
+
+    ``ssh_host_key_policy="auto_add"`` makes paramiko *write* the server's
+    key into ``~/.ssh/known_hosts``. This server's key is generated per run
+    and its port is new for every test, so without an isolated home every run
+    appends junk to the developer's real known_hosts -- and two runs at once
+    interleave their writes and corrupt it, after which unrelated tests fail
+    with ``InvalidHostKey``.
+    """
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    os.chmod(home / ".ssh", 0o700)
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
+@pytest.fixture
+def ssh_server(tmp_path, isolated_home):
     """A real SSH server on a loopback port.
 
     The remote filesystem operations are all ``exec_command`` against a real
@@ -42,16 +59,6 @@ def ssh_server(tmp_path):
     with LocalSSHServer(root=root, password=SSH_PASSWORD) as server:
         server.root_path = root
         yield server
-
-
-def _has_gnu_stat() -> bool:
-    """Really ask this host whether its ``stat`` understands GNU ``-c``."""
-    probe = subprocess.run(
-        ["stat", "-c", "%s", os.devnull],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return probe.returncode == 0
 
 
 def _remote_filesystem(server) -> ClusterFilesystem:
@@ -295,34 +302,45 @@ class TestClusterFilesystem:
         assert fs.exists("test.txt") is False
 
     def test_remote_stat(self, ssh_server):
-        """Size and mtime read off a real file over a real connection.
+        """Size, mtime and mode read off a real file over a real connection.
 
-        The old version supplied the string ``"11 1640995200 81a4"`` and
-        asserted 11 and 1640995200 came back out of it. Because it supplied
-        the output, it could not notice what running the command for real
-        immediately shows: ``_remote_stat`` issues ``stat -c '%s %Y %f'``,
-        which is GNU coreutils syntax. A BSD ``stat`` (macOS, the BSDs) does
-        not accept ``-c``, prints nothing to stdout, and clustrix then reports
-        ``FileNotFoundError`` for a file that is plainly there.
+        This test used to branch: on a host whose ``stat`` was GNU coreutils
+        it asserted the real values, and on a BSD or macOS host it asserted
+        ``FileNotFoundError`` for a file that was plainly there. That second
+        branch pinned issue #154's second defect -- ``_remote_stat`` ran
+        ``stat -c``, which only GNU accepts, and ``2>/dev/null`` turned the
+        rejection into a false "not found".
 
-        Both real outcomes are asserted, chosen by really asking the host
-        which ``stat`` it has -- rather than skipping, which would let the
-        defect go unmentioned on the platform that has it.
+        The branch is gone because the defect is: ``_remote_stat`` reads the
+        attributes over SFTP, where size, mtime and mode are protocol fields
+        and no remote binary's option spelling is involved. The assertion is
+        now the same one on every platform, which is the point.
         """
         target = ssh_server.root_path / "test.txt"
         target.write_text("hello world")  # exactly 11 bytes
+        os.chmod(target, 0o640)
+        (ssh_server.root_path / "a_directory").mkdir()
         local_stat = target.stat()
         fs = _remote_filesystem(ssh_server)
 
-        if _has_gnu_stat():
-            file_info = fs.stat("test.txt")
-            assert file_info.size == 11 == local_stat.st_size
-            assert file_info.modified == pytest.approx(local_stat.st_mtime, abs=1)
-            assert file_info.is_dir is False
-        else:
-            # Pinned defect: GNU-only syntax against a BSD stat.
-            with pytest.raises(FileNotFoundError):
-                fs.stat("test.txt")
+        file_info = fs.stat("test.txt")
+        assert file_info.size == 11 == local_stat.st_size
+        assert file_info.modified == pytest.approx(local_stat.st_mtime, abs=1)
+        assert file_info.is_dir is False
+        assert file_info.is_file is True
+        assert file_info.permissions == "640"
+        assert file_info.name == "test.txt"
+
+        directory_info = fs.stat("a_directory")
+        assert directory_info.is_dir is True
+
+        # A genuine absence is still an absence...
+        with pytest.raises(FileNotFoundError):
+            fs.stat("no_such_file.txt")
+
+        # ...and the file really is found again once it is really there.
+        (ssh_server.root_path / "no_such_file.txt").write_text("now it exists")
+        assert fs.stat("no_such_file.txt").size == 13
 
 
 class TestConvenienceFunctions:

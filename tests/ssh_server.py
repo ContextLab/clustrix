@@ -102,6 +102,19 @@ class _RootedSFTPServer(paramiko.SFTPServerInterface):
         # canonicalize() gives us an absolute, normalized path in the client's
         # view of the world; joining it onto root maps that view onto disk.
         resolved = os.path.normpath(self.canonicalize(path))
+        # ...unless it already points inside root. Real sshd does not chroot
+        # its SFTP subsystem, so on a real host an absolute path names the
+        # same file over SFTP as it does in an exec channel. Re-joining such
+        # a path onto root would make this server's two transports disagree
+        # about the same string -- and code that legitimately uses both (the
+        # scheduler's completion check reads result.pkl by absolute path)
+        # would see a file through one and not the other. Containment is
+        # unaffected: a path outside root is still mapped inside it.
+        try:
+            if os.path.commonpath([resolved, self.root]) == self.root:
+                return resolved
+        except ValueError:  # pragma: no cover - different drives on Windows
+            pass
         return os.path.join(self.root, resolved.lstrip("/"))
 
     def list_folder(self, path):

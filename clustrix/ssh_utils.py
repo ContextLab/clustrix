@@ -6,6 +6,7 @@ SSH keys for seamless cluster authentication setup.
 """
 
 import os
+import re
 import subprocess
 import logging
 import platform
@@ -43,9 +44,31 @@ class SSHConnectionError(SSHKeySetupError):
     pass
 
 
+#: A key this module generated itself. ``setup_ssh_keys`` names its keys
+#: ``id_<type>_clustrix_<username>_<alias-or-host>`` (see the naming block in
+#: that function), and the two bare ``id_<type>_clustrix`` names an earlier
+#: version produced. Discovery used to list six exact filenames, none of which
+#: could ever match a generated name -- so ``setup_ssh_keys`` could not verify
+#: the key it had just deployed, and a second run did not notice the key
+#: already existed. The pattern is deliberately narrow: it will not match
+#: ``config``, ``known_hosts``, ``authorized_keys`` or a ``.pub`` file.
+_CLUSTRIX_KEY_NAME = re.compile(r"^id_[A-Za-z0-9]+_clustrix(_.+)?$")
+
+#: Private key names OpenSSH itself uses by default.
+_STANDARD_KEY_NAMES = [
+    "id_rsa",
+    "id_dsa",
+    "id_ecdsa",
+    "id_ed25519",
+]
+
+
 def find_ssh_keys() -> List[str]:
     """
     Find existing SSH private keys in ~/.ssh/ directory.
+
+    Both the standard OpenSSH key names and the keys clustrix generates for
+    itself are considered. Anything else in ``~/.ssh`` is ignored.
 
     Returns:
         List of paths to existing SSH private key files
@@ -54,15 +77,16 @@ def find_ssh_keys() -> List[str]:
     if not ssh_dir.exists():
         return []
 
-    # Common SSH private key names
-    key_names = [
-        "id_rsa",
-        "id_dsa",
-        "id_ecdsa",
-        "id_ed25519",
-        "id_rsa_clustrix",
-        "id_ed25519_clustrix",
-    ]
+    key_names = list(_STANDARD_KEY_NAMES)
+    try:
+        clustrix_names = sorted(
+            entry.name
+            for entry in ssh_dir.iterdir()
+            if _CLUSTRIX_KEY_NAME.match(entry.name) and not entry.name.endswith(".pub")
+        )
+    except OSError:
+        clustrix_names = []
+    key_names.extend(name for name in clustrix_names if name not in key_names)
 
     existing_keys = []
     for key_name in key_names:
