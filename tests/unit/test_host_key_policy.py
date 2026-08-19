@@ -89,8 +89,41 @@ class _RealLocalSSHServer:
             pass
 
 
+def _redirect_home(monkeypatch, home):
+    """Point ``~`` at `home` for both POSIX and Windows expansion rules."""
+    monkeypatch.setenv("HOME", str(home))
+    if os.name == "nt":
+        # Path.home() expands ``~`` from USERPROFILE (falling back to
+        # HOMEDRIVE+HOMEPATH) on Windows and ignores HOME, so redirecting
+        # HOME alone would leave clustrix reading the real user's
+        # ~/.ssh/known_hosts.
+        drive, tail = os.path.splitdrive(str(home))
+        monkeypatch.setenv("USERPROFILE", str(home))
+        monkeypatch.setenv("HOMEDRIVE", drive)
+        monkeypatch.setenv("HOMEPATH", tail)
+
+
 @pytest.fixture
-def real_ssh_server():
+def real_ssh_server(tmp_path, monkeypatch):
+    """A real local SSH server, with ``~`` pointed at a per-test directory.
+
+    The HOME redirection is not cosmetic. `configure_host_key_policy` calls
+    `load_host_keys(~/.ssh/known_hosts)`, which sets paramiko's
+    `_host_keys_filename`; paramiko's AutoAddPolicy then *saves* every key it
+    accepts back to that file. Without this fixture the auto_add test below
+    appended an `[127.0.0.1]:<ephemeral port>` entry to the developer's real
+    known_hosts on every run -- 83 of them had accumulated on the machine
+    where this was found. Ephemeral ports are eventually reused, and when one
+    came back around against a freshly generated server key, paramiko raised
+    BadHostKeyException instead of invoking the missing-host-key policy and
+    `test_reject_policy_blocks_connection_to_real_unknown_host` failed. The
+    test was not wrong about the behaviour it asserts; it was poisoning its
+    own precondition (that the host is unknown) one run at a time.
+    """
+    home = tmp_path / "home"
+    (home / ".ssh").mkdir(parents=True)
+    _redirect_home(monkeypatch, home)
+
     server = _RealLocalSSHServer()
     server.start()
     time.sleep(0.1)  # let the accept() loop actually reach listening state
@@ -239,16 +272,7 @@ def test_user_known_hosts_file_is_actually_loaded(tmp_path, monkeypatch):
         f"127.0.0.1 {trusted_key.get_name()} {trusted_key.get_base64()}\n"
     )
 
-    monkeypatch.setenv("HOME", str(fake_home))
-    if os.name == "nt":
-        # Path.home() expands ``~`` from USERPROFILE (falling back to
-        # HOMEDRIVE+HOMEPATH) on Windows and ignores HOME, so redirecting
-        # HOME alone would leave clustrix reading the real user's
-        # ~/.ssh/known_hosts.
-        drive, tail = os.path.splitdrive(str(fake_home))
-        monkeypatch.setenv("USERPROFILE", str(fake_home))
-        monkeypatch.setenv("HOMEDRIVE", drive)
-        monkeypatch.setenv("HOMEPATH", tail)
+    _redirect_home(monkeypatch, fake_home)
 
     client = paramiko.SSHClient()
     configure_host_key_policy(client, None)
