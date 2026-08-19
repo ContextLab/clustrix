@@ -1,65 +1,108 @@
 name: Real-World Tests
 
+# Deliberately no `push:` or `pull_request:` trigger. These jobs use real
+# credentials (SSH, cloud APIs, HuggingFace) and some provision real
+# resources, so a PR from a fork must never be able to run them -- GitHub
+# only allows that through `pull_request_target`, which this workflow does
+# not use. workflow_dispatch is manual-only and schedule only ever runs on
+# the default branch, so both are safe triggers for credentialed jobs. See
+# issue #113 / #118.
 on:
-  push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
   workflow_dispatch:
     inputs:
       run_expensive:
-        description: 'Run expensive tests'
+        description: 'Run expensive tests (provisions billable cloud resources)'
         required: false
         default: false
         type: boolean
+  schedule:
+    # Weekly, not daily: HF CPU flavors are cheap but not free (#118), and the
+    # SSH/cloud jobs below depend on credentials that may go stale between
+    # runs. Only the hf-jobs-integration job actually listens to this trigger
+    # (see its `if:` below) -- the rest stay workflow_dispatch-only until
+    # their credentials are confirmed live.
+    - cron: '0 3 * * 1'
 
 jobs:
+  # The `secrets` context is not available in `if:` conditions (job-level or
+  # step-level) per GitHub's own context-availability rules -- confirmed by
+  # actionlint rejecting `secrets.X != ''` there. This job is the standard
+  # workaround: resolve secret presence into step outputs here, then have
+  # downstream jobs gate on `needs.check-secrets.outputs.*`, which the
+  # `needs` context does allow in `if:`.
+  check-secrets:
+    runs-on: ubuntu-latest
+    outputs:
+      has_cluster_creds: ${{ steps.check.outputs.has_cluster_creds }}
+      has_hf_token: ${{ steps.check.outputs.has_hf_token }}
+    steps:
+      - name: Check which secrets are configured
+        id: check
+        env:
+          CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
+          CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          if [ -n "$CLUSTRIX_USERNAME" ] && [ -n "$CLUSTRIX_PASSWORD" ]; then
+            echo "has_cluster_creds=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_cluster_creds=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ -n "$HF_TOKEN" ]; then
+            echo "has_hf_token=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_hf_token=false" >> "$GITHUB_OUTPUT"
+          fi
+
   real-world-tests:
     runs-on: ubuntu-latest
-    if: false  # Disabled - requires actual cluster access and credentials
-    
+    needs: check-secrets
+    # Manual-only: needs CLUSTRIX_USERNAME/PASSWORD to be live, which is not
+    # guaranteed on a schedule. Run it by hand when validating those creds.
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_cluster_creds == 'true' }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-    
+        python-version: '3.11'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[test]"
-    
+
     - name: Set up SSH server for testing
       run: |
         # Install SSH server
         sudo apt-get update
         sudo apt-get install -y openssh-server
-        
+
         # Create test user
         sudo useradd -m -s /bin/bash ${{ secrets.CLUSTRIX_USERNAME }}
         echo "${{ secrets.CLUSTRIX_USERNAME }}:${{ secrets.CLUSTRIX_PASSWORD }}" | sudo chpasswd
-        
+
         # Configure SSH
         sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
         sudo systemctl restart ssh
-        
+
         # Test SSH connection
         timeout 10 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.CLUSTRIX_USERNAME }}@localhost "echo 'SSH connection successful'"
 
     - name: Run filesystem tests
       run: |
         python scripts/run_real_world_tests.py --filesystem
-    
+
     - name: Run SSH tests
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
         CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
       run: |
         python scripts/run_real_world_tests.py --ssh
-    
+
     - name: Run API tests (free tier)
       env:
         LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
@@ -71,11 +114,11 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python scripts/run_real_world_tests.py --api
-    
+
     - name: Run visual tests
       run: |
         python scripts/run_real_world_tests.py --visual
-    
+
     - name: Run expensive tests
       if: ${{ inputs.run_expensive }}
       env:
@@ -88,7 +131,7 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python scripts/run_real_world_tests.py --api --expensive
-    
+
     - name: Upload test artifacts
       uses: actions/upload-artifact@v4
       if: always()
@@ -101,22 +144,25 @@ jobs:
 
   slurm-tests:
     runs-on: ubuntu-latest
-    if: false  # Disabled until SLURM server is available
-    
+    needs: check-secrets
+    # Manual-only: no SLURM server is available in CI; this just probes
+    # whether the configured credentials resolve.
+    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_cluster_creds == 'true' }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-    
+        python-version: '3.11'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[test]"
-    
+
     - name: Test SLURM connection
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
@@ -131,22 +177,24 @@ jobs:
 
   credential-check:
     runs-on: ubuntu-latest
-    if: false  # Disabled - requires actual credentials
-    
+    # Diagnostic job: reports which secrets are configured, so it runs
+    # whenever triggered manually regardless of which secrets exist yet.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
-    
+        python-version: '3.11'
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[test]"
-    
+
     - name: Check credentials
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
@@ -160,7 +208,7 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python scripts/run_real_world_tests.py --check-creds
-    
+
     - name: Test credential integration
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
@@ -173,4 +221,63 @@ jobs:
         HF_USERNAME: ${{ secrets.HF_USERNAME }}
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        python scripts/test_real_world_credentials.py
+        # NB: this used to point at scripts/test_real_world_credentials.py,
+        # which does not exist. The real file lives under tests/real_world/
+        # -- it is a standalone script (has `if __name__ == "__main__"`),
+        # not a pytest module, despite the tests/ location.
+        python tests/real_world/test_real_world_credentials.py
+
+  hf-jobs-integration:
+    name: HF Jobs Integration Smoke Test
+    runs-on: ubuntu-latest
+    needs: check-secrets
+    timeout-minutes: 10
+    # This is the one job in this workflow verified against real
+    # infrastructure (issue #118): HuggingFace Jobs under the `contextlab`
+    # org namespace. It is the substrate clustrix's integration tests can
+    # actually run against, since it needs no cluster reservation, VPN or
+    # institutional SSH credentials -- just an org-scoped HF_TOKEN with
+    # job.write. Runs on workflow_dispatch and on the weekly schedule above;
+    # never on push/pull_request, so a fork PR cannot trigger a billable run.
+    if: ${{ (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && needs.check-secrets.outputs.has_hf_token == 'true' }}
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e ".[test]"
+
+    - name: Submit and execute a real HF Jobs round trip
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        python -c "
+        from clustrix import cluster, configure
+
+        # Verified working config (2026-08-17): the personal namespace
+        # returns 402 Payment Required (no credits); the org namespace does
+        # not. cpu-basic is the cheapest flavor and is pinned explicitly so
+        # this can never silently drift onto a billed GPU tier.
+        configure(
+            cluster_type='huggingface',
+            hf_namespace='contextlab',
+            hf_flavor='cpu-basic',
+            hf_job_timeout='10m',
+        )
+
+        @cluster(cores=1)
+        def hf_jobs_roundtrip(x, y):
+            return x + y
+
+        result = hf_jobs_roundtrip(21, 21)
+        assert result == 42, f'Expected 42, got {result}'
+        print('HF Jobs integration smoke test passed')
+        "
