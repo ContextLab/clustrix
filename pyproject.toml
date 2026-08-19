@@ -103,6 +103,9 @@ dev = [
     # them those modules raise ModuleNotFoundError during collection (see #130).
     "numpy>=1.19",
     "pandas>=1.1",
+    "scikit-learn>=1.0",  # tests/test_decorator_real.py trains a real model;
+    # it passed locally only because a developer environment happened to
+    # have sklearn, and failed in CI where nothing declared it
     "black==26.3.1",  # pinned - unbounded ">=" let CI pull a newer black (see
     # #110); 26.3.1 is the first release without GHSA cache-file-write issue
     "flake8>=3.8", 

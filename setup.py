@@ -89,6 +89,8 @@ setup(
             # raise ModuleNotFoundError during collection (see #130).
             "numpy>=1.19",
             "pandas>=1.1",
+            # tests/test_decorator_real.py trains a real model; see pyproject.
+            "scikit-learn>=1.0",
             "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
             # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
             "flake8>=3.8",
