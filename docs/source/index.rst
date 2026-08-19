@@ -163,6 +163,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Interactive Notebooks
 
+   notebooks/local_parallel_comparison
    notebooks/filesystem_tutorial
    notebooks/cluster_config_example
    notebooks/complete_api_demo
