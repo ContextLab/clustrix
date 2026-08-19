@@ -47,12 +47,15 @@ jobs:
     - name: Lint with black
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
-        black --check clustrix/ tests/
+        black --check clustrix/ tests/ scripts/
 
+    # No --exit-zero and no inline --extend-ignore: the flags made this step
+    # incapable of failing, and the inline list was a second, divergent copy
+    # of the project's lint policy. .flake8 is the single source of truth.
     - name: Lint with flake8
       if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
       run: |
-        flake8 clustrix/ tests/ --max-line-length=88 --extend-ignore=E203,W503,F401,E722,F541,F841,F811,E731,E501,W291,W293,F824 --exit-zero
+        flake8 clustrix/ tests/ scripts/
 
     - name: Test with pytest
       run: |
