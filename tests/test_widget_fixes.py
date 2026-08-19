@@ -91,7 +91,6 @@ class TestWidgetConfigurationFixes:
 
         widget.cluster_type.value = "huggingface"
         widget.hf_hardware_field.value = "t4-small"
-        widget.hf_sdk_field.value = "gradio"
         widget.hf_token_field.value = "test-hf-token"
 
         # Save configuration
@@ -100,7 +99,6 @@ class TestWidgetConfigurationFixes:
         # Verify saved configuration
         assert saved_config["cluster_type"] == "huggingface"
         assert saved_config["hf_hardware"] == "t4-small"
-        assert saved_config["hf_sdk"] == "gradio"
         # The token is saved under the field name hf_jobs.py reads.
         assert saved_config["hf_token"] == "test-hf-token"
 
@@ -111,12 +109,10 @@ class TestWidgetConfigurationFixes:
             hf_hardware="t4-medium",
             hf_token="test-hf-token",
             hf_username="test-user",
-            hf_sdk="gradio",
         )
         assert hf_config.hf_hardware == "t4-medium"
         assert hf_config.hf_token == "test-hf-token"
         assert hf_config.hf_username == "test-user"
-        assert hf_config.hf_sdk == "gradio"
 
     @pytest.mark.skipif(
         not WIDGET_DEPS_AVAILABLE, reason="Widget dependencies not available"

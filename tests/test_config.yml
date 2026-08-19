@@ -54,7 +54,6 @@ profiles:
     gpu_memory_fraction: 0.9
     gpu_requirements: null
     hf_hardware: null
-    hf_sdk: null
     hf_token: null
     hf_username: null
     job_poll_interval: 30
