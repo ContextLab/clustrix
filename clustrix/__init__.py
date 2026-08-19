@@ -1,5 +1,5 @@
 from .decorator import cluster
-from .config import configure, get_config
+from .config import ClusterConfig, configure, get_config
 from .executor import ClusterExecutor
 from .local_executor import LocalExecutor, create_local_executor
 from .loop_analysis import detect_loops_in_function, find_parallelizable_loops
@@ -61,11 +61,12 @@ from .modern_notebook_widget import (
     show_widget,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "cluster",
     "configure",
     "get_config",
+    "ClusterConfig",
     "ClusterExecutor",
     "LocalExecutor",
     "create_local_executor",

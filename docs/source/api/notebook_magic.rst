@@ -97,7 +97,14 @@ Legacy widget
    Several of its templates name cluster types (``aws``, ``azure``, ``gcp``,
    ``lambda_cloud``, ``huggingface_spaces``) that the executor cannot dispatch.
 
-.. autodata:: DEFAULT_CONFIGS
+.. Documented from the module that defines it, not from the one that
+   re-exports it: autodoc only picks up the ``#:`` comment at the definition
+   site, so pointing at ``clustrix.notebook_magic`` made it fall back to
+   ``dict.__doc__`` -- whose own ``**kwargs`` and indented body are not valid
+   RST and produced four build warnings.
+
+.. autodata:: clustrix.notebook_magic_config.DEFAULT_CONFIGS
+   :no-value:
 
    Legacy configuration templates, keyed by display name
    (``'Local Single-core'``, ``'University SLURM Cluster'``, ...). Entries hold

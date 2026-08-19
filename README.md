@@ -521,7 +521,9 @@ clustrix credentials --help
 
 ### Important Notes
 
-**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) cannot be serialized for remote execution because their source code is not available. This affects:
+**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) lose the *source-based* features — automatic loop parallelization, GPU-parallel detection, and complexity/dependency analysis — because those parse the function's source with `ast` and `inspect.getsource()` cannot recover it.
+
+Serialization itself does **not** need the source. `clustrix.utils.serialize_function` / `deserialize_function` work from the code object and round-trip such a function correctly, so it still runs remotely and returns the right answer. This affects:
 - Interactive Python sessions (`python` command)
 - Some notebook environments that don't preserve function source
 
@@ -532,18 +534,20 @@ clustrix credentials --help
 - Any environment where `inspect.getsource()` can access the function source code
 
 ```python
-# ❌ This won't work in interactive Python REPL
+# ⚠️ In the interactive REPL this still runs and returns the right answer,
+#    but no loop parallelization or GPU-parallel detection is applied,
+#    because those need the source.
 >>> @cluster(cores=2)
 ... def my_function(x):
 ...     return x * 2
->>> my_function(5)  # Error: source code not available
+>>> my_function(5)  # -> 10, executed remotely, analysed features skipped
 
-# ✅ This works in .py files and notebooks
+# ✅ In .py files and notebooks you get everything
 @cluster(cores=2)
 def my_function(x):
     return x * 2
 
-result = my_function(5)  # Works correctly
+result = my_function(5)  # Works correctly, with source-based features
 ```
 
 ## Supported Cluster Types

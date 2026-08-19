@@ -23,7 +23,13 @@ import yaml
 from dataclasses import asdict
 from pathlib import Path
 
-from .config import ClusterConfig, configure, get_config, get_config_dir
+from .config import (
+    ClusterConfig,
+    SUPPORTED_CLUSTER_TYPES,
+    configure,
+    get_config,
+    get_config_dir,
+)
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager
 from .auth_manager import AuthenticationManager
@@ -612,15 +618,7 @@ class ModernClustrixWidget:
 
         # 3.2 Cluster Type Dropdown - hardcoded options (not editable)
         self.widgets["cluster_type"] = widgets.Dropdown(
-            options=[
-                "local",
-                "ssh",
-                "slurm",
-                "pbs",
-                "sge",
-                "kubernetes",
-                "huggingface",
-            ],
+            options=list(SUPPORTED_CLUSTER_TYPES),
             value="local",
             layout=widgets.Layout(width="100px", height="35px"),
         )

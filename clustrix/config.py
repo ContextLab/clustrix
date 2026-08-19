@@ -18,7 +18,13 @@ class ClusterConfig:
     key_file: Optional[str] = None
 
     # Cluster settings
-    cluster_type: str = "slurm"  # slurm, pbs, sge, kubernetes, ssh
+    # One of SUPPORTED_CLUSTER_TYPES (defined below the class, since a
+    # dataclass body cannot reference a name it also defines). Every place
+    # that offers a choice of backend -- the CLI, the notebook widget --
+    # must read that tuple rather than keeping its own copy: the CLI was
+    # missing "huggingface" entirely, so a working backend could not be
+    # selected from the command line at all.
+    cluster_type: str = "slurm"
     cluster_host: Optional[str] = None
     cluster_port: int = 22
 
@@ -302,6 +308,21 @@ class ClusterConfig:
 # field (a new cloud provider's API key, say) is covered automatically
 # instead of silently leaking in plaintext until someone remembers to add it
 # here. Same approach as scripts/verify_cluster_usecases.py's redaction.
+#: Every backend ``ClusterExecutor`` can actually dispatch. This is the one
+#: place the set is written down; the CLI's ``click.Choice`` and the notebook
+#: widget's dropdown both read it. Offering a type the executor cannot run is
+#: worse than not offering it, and omitting one it can run hides a feature.
+SUPPORTED_CLUSTER_TYPES = (
+    "local",
+    "ssh",
+    "slurm",
+    "pbs",
+    "sge",
+    "kubernetes",
+    "huggingface",
+)
+
+
 _SECRET_FIELD_PATTERN = re.compile(
     r"secret|token|password|api_key|access_key|_key$|client_id|tenant_id"
     r"|subscription_id",
