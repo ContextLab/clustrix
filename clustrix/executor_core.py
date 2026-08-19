@@ -4,9 +4,7 @@ This module provides the main ClusterExecutor class that acts as a coordinator
 for different job execution backends (schedulers, Kubernetes, cloud providers).
 """
 
-import hashlib
 import shlex
-import hmac
 import time
 import tempfile
 import dill
@@ -22,6 +20,7 @@ from .executor_kubernetes import KubernetesJobManager
 from .executor_cloud import CloudJobManager
 from .hf_jobs import HFJobsManager
 from .local_executor import LocalJobManager
+from .utils import verify_signed_payload
 
 logger = logging.getLogger(__name__)
 
@@ -196,42 +195,28 @@ class ClusterExecutor:
         runs the function anyway -- but it does stop an unrelated user on a
         shared filesystem, a stale file from an earlier run, or a truncated
         transfer from being handed to the unpickler.
+
+        A job with no recorded key is refused rather than loaded with a
+        warning. "No key" and "forged" look identical from here, and the
+        warning branch meant anyone who could get the key forgotten -- an
+        adopted job id, a cleared table -- got an unverified pickle loaded.
         """
         job_info = self.scheduler_manager.active_jobs.get(job_id) or {}
         key = job_info.get("result_key")
-        if not key:
-            # Nothing to check against: a job submitted before this existed,
-            # or one adopted from another process.
-            logger.warning(
-                "No result-signing key for job %s; loading its result " "unverified.",
-                job_id,
-            )
-            return
 
-        try:
-            stdout, _ = self.connection_manager.execute_remote_command(
-                f"cat {shlex.quote(f'{remote_dir}/result.pkl.hmac')} 2>/dev/null"
-            )
-        except Exception as e:  # pragma: no cover - defensive
-            raise RuntimeError(
-                f"Could not read the signature for job {job_id}: {e}"
-            ) from e
+        tag = ""
+        if key:
+            try:
+                stdout, _ = self.connection_manager.execute_remote_command(
+                    f"cat {shlex.quote(f'{remote_dir}/result.pkl.hmac')} 2>/dev/null"
+                )
+            except Exception as e:  # pragma: no cover - defensive
+                raise RuntimeError(
+                    f"Could not read the signature for job {job_id}: {e}"
+                ) from e
+            tag = stdout or ""
 
-        tag = (stdout or "").strip()
-        if not tag:
-            raise RuntimeError(
-                f"Job {job_id} produced a result with no signature. Refusing "
-                "to deserialize it: loading a pickle executes code, and an "
-                "unsigned result cannot be told apart from a file someone "
-                "else wrote into the job directory."
-            )
-
-        expected = hmac.new(key.encode(), payload, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(tag, expected):
-            raise RuntimeError(
-                f"Job {job_id} result failed its integrity check. Refusing to "
-                "deserialize it."
-            )
+        verify_signed_payload(payload, tag, key, f"Job {job_id}")
 
     def _wait_for_scheduler_result(self, job_id: str) -> Any:
         """Wait for scheduler job result (SLURM/PBS/SGE/SSH)."""

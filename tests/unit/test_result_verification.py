@@ -108,26 +108,30 @@ class TestSignatureVerification:
 
 
 class TestUntrackedJobs:
-    def test_job_without_a_key_warns_rather_than_refusing(self, caplog):
-        """A job adopted from another process has no key to check against.
+    """No key means no way to tell a real result from a forged one.
 
-        Refusing outright would break resuming work that predates signing;
-        proceeding silently would hide that nothing was verified.
-        """
+    This used to log a warning and load the pickle anyway, which made
+    "arrange for the key to be forgotten" -- an adopted job id, a cleared
+    table -- a complete bypass of the check. Verification fails closed.
+    """
+
+    def test_job_without_a_key_is_refused(self):
         executor = _executor(_sign(PAYLOAD), key=None)
 
-        with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="No result-signing key"):
             executor._verify_result_signature("job-1", REMOTE_DIR, PAYLOAD)
 
-        assert "unverified" in caplog.text
+    def test_job_with_an_empty_key_is_refused(self):
+        executor = _executor(_sign(PAYLOAD), key="")
 
-    def test_completely_unknown_job_also_warns(self, caplog):
+        with pytest.raises(RuntimeError, match="No result-signing key"):
+            executor._verify_result_signature("job-1", REMOTE_DIR, PAYLOAD)
+
+    def test_completely_unknown_job_is_refused(self):
         executor = _executor(_sign(PAYLOAD), track=False)
 
-        with caplog.at_level("WARNING"):
+        with pytest.raises(RuntimeError, match="No result-signing key"):
             executor._verify_result_signature("nope", REMOTE_DIR, PAYLOAD)
-
-        assert "unverified" in caplog.text
 
 
 class TestJobScriptEmitsTheSignature:
@@ -148,7 +152,26 @@ class TestJobScriptEmitsTheSignature:
         script = "\n".join(generate_two_venv_execution_commands("/j", "e1", "e2"))
         assert "_payload_bytes = _ser.dumps(result, protocol=4)" in script
         assert "f.write(_payload_bytes)" in script
-        assert "_hmac.new(_key.encode(), _payload_bytes, _hashlib.sha256)" in script
+        assert (
+            "_hmac.new(_CLUSTRIX_KEY.encode(), _payload_bytes, _hashlib.sha256)"
+            in script
+        )
+
+    def test_the_error_report_is_signed_too(self):
+        """A job that fails must not be a cheaper way in than one that works."""
+        from clustrix.utils import generate_two_venv_execution_commands
+
+        script = "\n".join(generate_two_venv_execution_commands("/j", "e1", "e2"))
+        assert "error.pkl.hmac" in script
+        assert "_hmac.new(_CLUSTRIX_KEY.encode(), _blob, _hashlib.sha256)" in script
+
+    def test_the_key_is_taken_out_of_the_environment(self):
+        """Anything running in the job could otherwise forge a result."""
+        from clustrix.utils import generate_two_venv_execution_commands
+
+        script = "\n".join(generate_two_venv_execution_commands("/j", "e1", "e2"))
+        assert "_os.environ.pop('CLUSTRIX_RESULT_KEY', '')" in script
+        assert "environ.get('CLUSTRIX_RESULT_KEY'" not in script
 
     def test_key_is_read_from_a_file_not_baked_into_the_script(self):
         """job.sh is readable by others on some shared filesystems."""

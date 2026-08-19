@@ -6,6 +6,9 @@ provisioning, SSH-based execution, and cleanup for various cloud providers
 """
 
 import os
+import secrets
+import shlex
+import stat
 import time
 import tempfile
 import logging
@@ -17,6 +20,9 @@ from datetime import datetime, timezone
 import paramiko
 import cloudpickle
 import dill
+
+from .ssh_security import configure_host_key_policy
+from .utils import key_capture_lines, result_signing_lines, verify_signed_payload
 
 if TYPE_CHECKING:
     from .cloud_providers.base import CloudProvider
@@ -344,7 +350,10 @@ class CloudJobManager:
         """Execute job on cloud instance via SSH."""
         # Create temporary SSH client for cloud instance
         ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # The last host-key site in the package that had not been routed
+        # through ssh_security: a cloud instance's key was trusted on sight,
+        # which is a machine-in-the-middle away from someone else's job.
+        configure_host_key_policy(ssh_client, self.config)
 
         try:
             # Connect to cloud instance
@@ -359,9 +368,18 @@ class CloudJobManager:
             # Create SFTP client
             sftp_client = ssh_client.open_sftp()
 
-            # Create remote work directory
+            # Create remote work directory 0700 and drop a per-job signing
+            # key inside it, exactly as the scheduler backends do. The result
+            # this instance produces is deserialized with dill on the
+            # submitting machine, and dill.loads executes code, so it has to
+            # be authenticated -- this path had no key and no check at all.
             remote_work_dir = f"/tmp/clustrix_cloud_{job_id}"
-            sftp_client.mkdir(remote_work_dir)
+            sftp_client.mkdir(remote_work_dir, mode=0o700)
+            result_key = secrets.token_hex(32)
+            key_path = f"{remote_work_dir}/.clustrix_result_key"
+            with sftp_client.open(key_path, "w") as key_handle:
+                key_handle.write(result_key)
+            sftp_client.chmod(key_path, stat.S_IRUSR | stat.S_IWUSR)
 
             # Upload function data
             with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
@@ -388,9 +406,14 @@ class CloudJobManager:
             finally:
                 os.unlink(temp_script_path)
 
-            # Execute job
+            # Execute job. The key is read from the 0600 file rather than
+            # passed on the command line, which any user on the box can read
+            # out of /proc.
+            quoted_dir = shlex.quote(remote_work_dir)
             stdin, stdout, stderr = ssh_client.exec_command(
-                f"cd {remote_work_dir} && python execute_job.py"
+                f"cd {quoted_dir} && "
+                f"export CLUSTRIX_RESULT_KEY=$(cat {shlex.quote(key_path)}) && "
+                "python execute_job.py"
             )
 
             # Wait for completion
@@ -408,12 +431,25 @@ class CloudJobManager:
             try:
                 sftp_client.get(result_path, temp_result_path)
                 with open(temp_result_path, "rb") as f:
-                    # dill: the worker wrote this with dill, and stdlib
-                    # pickle would rebuild __main__ classes instead of reusing
-                    # the caller's.
-                    result = dill.load(f)
+                    payload = f.read()
             finally:
                 os.unlink(temp_result_path)
+
+            try:
+                with sftp_client.open(f"{result_path}.hmac") as tag_handle:
+                    tag = tag_handle.read().decode()
+            except IOError:
+                # Absent signature: verify_signed_payload refuses on an empty
+                # tag, which is what an unsigned result has to mean.
+                tag = ""
+
+            verify_signed_payload(payload, tag, result_key, f"Cloud job {job_id}")
+            # dill: the worker writes this with dill (see
+            # _create_cloud_execution_script), and stdlib pickle would rebuild
+            # __main__ classes instead of reusing the caller's. Safe to
+            # deserialize only because the bytes just verified against the
+            # per-job key.
+            result = dill.loads(payload)
 
             return result
 
@@ -429,12 +465,20 @@ class CloudJobManager:
         self, remote_work_dir: str, job_config: Dict[str, Any]
     ) -> str:
         """Create Python execution script for cloud instance."""
+        # The one signing implementation, shared with the SSH/SLURM job
+        # scripts; `_ser` is the dill alias this script already binds.
+        signing = "\n".join(result_signing_lines(indent=" " * 8, serializer="_ser"))
+        # Capture the signing key and drop it from the environment before the
+        # user's function -- and anything it imports -- gets to run.
+        capture = "\n".join(key_capture_lines())
         return f"""#!/usr/bin/env python3
 import sys
 import os
 import pickle
 import cloudpickle
 import traceback
+
+{capture}
 
 def main():
     try:
@@ -462,9 +506,11 @@ def main():
 
         result = func(*args, **kwargs)
 
-        # Save result
-        with open('{remote_work_dir}/result.pkl', 'wb') as f:
-            pickle.dump(result, f)
+        # Save result, signed with the per-job key. Written with _ser (dill),
+        # which is what the caller reads it back with -- it used to be written
+        # with stdlib pickle under a comment claiming dill, and with no
+        # signature at all.
+{signing}
 
         print("Job completed successfully")
 

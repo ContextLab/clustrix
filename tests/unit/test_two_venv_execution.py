@@ -75,7 +75,17 @@ class TestGeneratedStages:
         for block in _stages(*args):
             assert "import dill as _ser" in block
             assert "import cloudpickle as _ser" in block
-            assert "_ser = pickle" in block
+
+    def test_no_stage_degrades_to_stdlib_pickle(self, args):
+        """Falling back to pickle was not a degradation, it was a second bug.
+
+        Every payload these stages exchange is dill bytes, which stdlib pickle
+        cannot read, so `_ser = pickle` produced an unrelated failure deep in
+        the unpickler instead of naming the missing package (#121).
+        """
+        for block in _stages(*args):
+            assert "_ser = pickle" not in block
+            assert "pip install dill" in block
 
     def test_stages_do_not_clobber_each_other_error_file(self, args):
         """The first failure must survive the cascade it causes.
