@@ -257,9 +257,24 @@ def cost_tracking_decorator(provider: str, instance_type: str = "default"):
 
     Args:
         provider: Cloud provider name (e.g., 'lambda', 'aws', 'azure', 'gcp')
-        instance_type: Instance type for cost estimation
+        instance_type: Recorded, but not used to price the run. The wrapper
+            calls ``monitor.stop_monitoring()``, which prices the elapsed time
+            with a hardcoded ``estimate_cost("default", ...)``, so the cost in
+            ``result["cost_report"]`` is the provider's placeholder "default"
+            rate whatever is passed here. The value is echoed back unchanged
+            as ``result["instance_type"]`` and is used nowhere else. To price
+            a specific instance type, call
+            ``get_cost_monitor(provider).estimate_cost(instance_type, hours)``.
+
+    Returns:
+        A decorator whose wrapper returns a dict with keys ``result``,
+        ``success``, ``error``, ``cost_report``, ``provider`` and
+        ``instance_type``. It never re-raises: a failing function yields
+        ``success=False`` and the exception text in ``error``.
 
     Example::
+
+        from clustrix import cluster, cost_tracking_decorator
 
         @cost_tracking_decorator('lambda', 'a100_40gb')
         @cluster(cores=8, memory="32GB")
@@ -356,7 +371,15 @@ def start_cost_monitoring(provider: str) -> Optional[BaseCostMonitor]:
 def generate_cost_report(
     provider: str, instance_type: str = "default"
 ) -> Optional[Dict[str, Any]]:
-    """Generate a cost report for the current session."""
+    """Build a cost report from the monitor's current resource usage.
+
+    Despite the name, the ``cost_estimate`` in the report is not the cost of
+    the session so far. The hours are hardcoded to ``1.0`` below, so it is a
+    one-hour quote for ``instance_type``. The ``resource_usage`` in the same
+    report *is* current. Monitoring is neither stopped nor reset.
+
+    Returns ``None`` if ``provider`` is not supported.
+    """
     monitor = get_cost_monitor(provider)
     if monitor:
         # Get current state without stopping monitoring

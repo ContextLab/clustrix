@@ -72,9 +72,20 @@ Create a ``clustrix.yml`` file:
 Environment Variables
 ~~~~~~~~~~~~~~~~~~~~~
 
-Clustrix reads two environment variables. Individual settings are *not*
-configurable this way -- there is no ``CLUSTRIX_CLUSTER_TYPE`` or
-``CLUSTRIX_CLUSTER_HOST``; use a configuration file or ``configure()``.
+There is no general ``CLUSTRIX_<FIELD>`` layer: no ``CLUSTRIX_CLUSTER_TYPE``
+or ``CLUSTRIX_CLUSTER_HOST`` is read anywhere, so ordinary settings come from
+a configuration file or ``configure()``. Two ``CLUSTRIX_`` variables are read,
+described below, and three further variables are consulted by specific
+features:
+
+- ``HF_TOKEN`` -- the HuggingFace backend falls back to it when ``hf_token``
+  is unset (``clustrix/hf_jobs.py``).
+- ``HF_HOME`` -- if the token is still unset, the token written by
+  ``hf auth login`` is read from ``$HF_HOME/token``, falling back to
+  ``~/.cache/huggingface/token``.
+- the variable *named by* ``password_env_var`` -- read for the SSH password
+  when ``use_env_password`` is ``True``. The name is configurable, so there is
+  no fixed variable to document here; see ``ClusterConfig.get_env_password``.
 
 ``CLUSTRIX_CONFIG_DIR``
    Overrides the directory clustrix reads and writes user configuration in,
@@ -138,7 +149,10 @@ Paths
   before writing any diagnostics. A home directory or a shared scratch path
   both work; ``/tmp`` does not.
 - ``local_work_dir``: Local working directory (default: current directory)
-- ``local_cache_dir``: Local cache directory (default: ``~/.clustrix/cache``)
+- ``local_cache_dir``: Accepted and stored (default: ``~/.clustrix/cache``),
+  but nothing in clustrix reads it -- setting it has no effect. It is listed
+  here only so that a configuration file containing it is not mistaken for a
+  file that does something.
 - ``conda_env_name``: Conda environment to activate on the cluster
 - ``venv_setup_timeout``: Seconds allowed for remote virtualenv creation
   (default: 300)
@@ -148,7 +162,12 @@ HuggingFace Jobs
 
 Used when ``cluster_type='huggingface'``:
 
-- ``hf_token``: HuggingFace token. Required, and must be set explicitly --
+- ``hf_token``: HuggingFace token. A token is required, but this field is not
+  the only place it can come from: if it is unset, clustrix falls back to the
+  ``HF_TOKEN`` environment variable, and then to the token ``hf auth login``
+  writes (``$HF_HOME/token``, or ``~/.cache/huggingface/token``). Only when
+  all three are absent does job submission fail, with a message naming all
+  three options.
 - ``hf_namespace``: Account the job is billed to. Personal accounts are often
   not on a plan that can run jobs, so this is usually an organization. Falls
   back to ``hf_username``.

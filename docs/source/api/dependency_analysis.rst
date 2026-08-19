@@ -263,7 +263,7 @@ File Reference Detection
 
     def file_operations_function():
         import json
-        from clustrix import cluster_stat
+        from clustrix import cluster_exists, cluster_stat
         
         # Direct file operations
         with open("config.json", "r") as f:

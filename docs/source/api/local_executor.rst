@@ -150,9 +150,10 @@ immediately (via ``LocalExecutor(use_threads=True)``, internally) and
 records the outcome; ``wait_for_result()`` just hands that outcome back, and
 ``get_job_status()`` always finds the job already ``"completed"`` or
 ``"failed"`` by the time anything could ask. There is no scheduler to queue
-work with and nothing to poll, so ``cancel_job()`` always raises
-``RuntimeError`` -- reporting a successful cancellation would be a lie, since
-the work (and any side effects it had) already happened during submission.
+work with and nothing to poll, so ``cancel_job()`` never succeeds: it raises
+``ValueError`` for a job ID it does not know, and ``RuntimeError`` for one it
+does -- reporting a successful cancellation would be a lie, since the work
+(and any side effects it had) already happened during submission.
 
 This exists because ``"local"`` was already offered as a cluster type in the
 notebook widget's dropdown and in :data:`~clustrix.config.SUPPORTED_CLUSTER_TYPES`,

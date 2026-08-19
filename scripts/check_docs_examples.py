@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 """Execute (or, for cluster/network-dependent examples, statically verify)
-every Python code block in a fixed set of documentation files.
+every Python code block in the project's published documentation -- both the
+prose files and the docstrings those files publish through ``automodule`` /
+``currentmodule``.
 
 This exists because documentation drifts from the real API silently: a
 module gets deleted, a function gets renamed, and nobody notices until a
@@ -36,6 +38,34 @@ pricing) run for real and are expected to succeed via that provider's
 already-real fallback behavior; a case that additionally needs a private
 credential to be meaningful is marked ``# cluster-required`` instead.
 
+Docstrings are published documentation too: ``docs/source/api/*.rst`` renders
+them with ``automodule``/``currentmodule``, so a broken example in a docstring
+reaches a reader exactly the same way a broken example in an ``.rst`` file
+does. Three docstring examples were wrong while every ``.rst`` block passed:
+one raised ``AttributeError`` when run, one used a name it never imported, and
+one printed a result it does not produce (that last one is caught by ``python
+-m doctest``, not by this script -- see the known limit below). Every module
+named by an ``.. automodule::`` or ``.. currentmodule::`` directive
+anywhere under ``docs/source`` is therefore scanned as well -- derived from the
+directives, not hand-listed, so a new API page is covered the day it is added.
+
+Inside a docstring, three things count as a Python example:
+
+- a doctest run (``>>>`` / ``...`` lines). All of one docstring's examples are
+  concatenated and executed as a single block, in a fresh copy of the owning
+  module's globals -- the namespace ``doctest`` itself would use.
+- an explicit ``.. code-block:: python`` directive.
+- a literal block introduced by ``Example::``, ``Examples::`` or ``Usage::``.
+  Only those three introducers: a literal block introduced by anything else is
+  as likely to be shell or YAML, and guessing would manufacture noise rather
+  than coverage. Write ``.. code-block:: python`` to have any other block
+  checked.
+
+Known limit: expected doctest output (the ``want`` after a ``>>>`` line) is
+not compared. Blocks are executed and must not raise, which is the same
+contract every ``.rst`` block is held to. Use ``python -m doctest <file>`` to
+check the outputs themselves.
+
 Usage::
 
     python scripts/check_docs_examples.py
@@ -45,7 +75,9 @@ from __future__ import annotations
 
 import ast
 import contextlib
+import doctest
 import importlib
+import inspect
 import io
 import json
 import os
@@ -76,9 +108,10 @@ class CodeBlock:
 @dataclass
 class TargetFile:
     path: Path
-    kind: str  # "md" or "rst"
+    kind: str  # "md", "rst" or "py" (docstrings)
     section_start: Optional[str] = None  # restrict extraction to a section
     section_end: Optional[str] = None
+    module: Optional[str] = None  # importable name, for kind == "py"
 
 
 @dataclass
@@ -124,57 +157,133 @@ def extract_markdown_blocks(target: TargetFile) -> List[CodeBlock]:
     return blocks
 
 
+#: An explicit reST directive. Always Python, wherever it appears.
+CODE_BLOCK_DIRECTIVE_RE = re.compile(r"^( *)\.\. code-block:: python\s*$")
+
+#: A bare reST literal block. Only these introducers are assumed to be Python;
+#: see the module docstring for why guessing on the rest would be worse than
+#: not looking.
+LITERAL_BLOCK_INTRO_RE = re.compile(r"^( *)(?:Examples?|Usage)::\s*$")
+
+
+def _consume_indented_body(lines: List[str], i: int, indent: int) -> tuple[str, int]:
+    """Return the block indented deeper than ``indent``, and the index after it."""
+    # skip blank lines immediately after the introducer
+    while i < len(lines) and lines[i].strip() == "":
+        i += 1
+    raw_body: List[str] = []
+    body_indent: Optional[int] = None
+    while i < len(lines):
+        line = lines[i]
+        if line.strip() == "":
+            raw_body.append("")
+            i += 1
+            continue
+        cur_indent = len(line) - len(line.lstrip(" "))
+        if cur_indent <= indent:
+            break
+        if body_indent is None:
+            body_indent = cur_indent
+        raw_body.append(line)
+        i += 1
+    body_lines = [
+        (line[body_indent:] if body_indent and len(line) >= body_indent else line)
+        for line in raw_body
+    ]
+    while body_lines and body_lines[-1] == "":
+        body_lines.pop()
+    return "\n".join(body_lines) + "\n", i
+
+
+def _scan_rst_code_blocks(
+    lines: List[str], include_literal_blocks: bool = False
+) -> List[tuple[int, str]]:
+    """Find Python blocks in reST text; returns (introducer index, content)."""
+    found: List[tuple[int, str]] = []
+    i = 0
+    while i < len(lines):
+        m = CODE_BLOCK_DIRECTIVE_RE.match(lines[i])
+        if m is None and include_literal_blocks:
+            m = LITERAL_BLOCK_INTRO_RE.match(lines[i])
+        if m is None:
+            i += 1
+            continue
+        introducer = i
+        content, i = _consume_indented_body(lines, i + 1, len(m.group(1)))
+        found.append((introducer, content))
+    return found
+
+
 def extract_rst_blocks(target: TargetFile) -> List[CodeBlock]:
     text = target.path.read_text()
     slice_text, line_offset = _restrict_to_section(
         text, target.section_start, target.section_end
     )
     lines = slice_text.split("\n")
-    blocks = []
-    i = 0
-    directive_re = re.compile(r"^( *)\.\. code-block:: python\s*$")
-    while i < len(lines):
-        m = directive_re.match(lines[i])
-        if not m:
-            i += 1
+    return [
+        CodeBlock(target.path, line_offset + introducer + 2, content)
+        for introducer, content in _scan_rst_code_blocks(lines)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Docstring extraction
+# ---------------------------------------------------------------------------
+
+_DOCTEST_PARSER = doctest.DocTestParser()
+
+
+def _docstring_owners(tree: ast.Module):
+    """Every node in a module that can carry a docstring, in source order."""
+    for node in ast.walk(tree):
+        if isinstance(
+            node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+        ):
+            yield node
+
+
+def extract_docstring_blocks(target: TargetFile) -> List[CodeBlock]:
+    """Every Python example in every docstring of one documented module."""
+    module = importlib.import_module(target.module or "")
+    path = Path(inspect.getsourcefile(module) or module.__file__)
+    tree = ast.parse(path.read_text())
+
+    blocks: List[CodeBlock] = []
+    for node in _docstring_owners(tree):
+        # clean=False: doctest reads __doc__ verbatim, indentation and all.
+        doc = ast.get_docstring(node, clean=False)
+        if not doc:
             continue
-        indent = len(m.group(1))
-        start_line = i + 1
-        i += 1
-        # skip blank lines immediately after the directive
-        while i < len(lines) and lines[i].strip() == "":
-            i += 1
-        raw_body = []
-        body_indent: Optional[int] = None
-        while i < len(lines):
-            line = lines[i]
-            if line.strip() == "":
-                raw_body.append("")
-                i += 1
-                continue
-            cur_indent = len(line) - len(line.lstrip(" "))
-            if cur_indent <= indent:
-                break
-            if body_indent is None:
-                body_indent = cur_indent
-            raw_body.append(line)
-            i += 1
-        body_lines = [
-            (line[body_indent:] if body_indent and len(line) >= body_indent else line)
-            for line in raw_body
-        ]
-        # trim trailing blank lines
-        while body_lines and body_lines[-1] == "":
-            body_lines.pop()
-        content = "\n".join(body_lines) + "\n"
-        line_no = line_offset + start_line + 1
-        blocks.append(CodeBlock(target.path, line_no, content))
+        # Line of the opening quote; line 0 of the docstring text sits on it.
+        doc_start = node.body[0].lineno
+
+        examples = _DOCTEST_PARSER.get_examples(doc)
+        if examples:
+            # One block per docstring: doctest runs a docstring's examples in
+            # one shared namespace, and splitting them would break any example
+            # that builds on the one above it.
+            blocks.append(
+                CodeBlock(
+                    path,
+                    doc_start + examples[0].lineno,
+                    "".join(example.source for example in examples),
+                )
+            )
+
+        for introducer, content in _scan_rst_code_blocks(
+            doc.split("\n"), include_literal_blocks=True
+        ):
+            blocks.append(CodeBlock(path, doc_start + introducer + 1, content))
+
+    blocks.sort(key=lambda block: block.line_no)
     return blocks
 
 
 def extract_blocks(target: TargetFile) -> List[CodeBlock]:
     if target.kind == "md":
         return extract_markdown_blocks(target)
+    if target.kind == "py":
+        return extract_docstring_blocks(target)
     return extract_rst_blocks(target)
 
 
@@ -335,10 +444,27 @@ def check_file(target: TargetFile) -> List[Result]:
     blocks = extract_blocks(target)
     results: List[Result] = []
 
+    # A prose file's blocks share one namespace: they read as one session, and
+    # a later block routinely uses a name an earlier one bound. A docstring's
+    # examples do not -- doctest gives each docstring a fresh copy of the
+    # owning module's globals, and a docstring that only works because some
+    # other docstring ran first is not a working example.
+    if target.kind == "py":
+        module_globals = importlib.import_module(target.module or "").__dict__
+
+        def make_namespace() -> dict:
+            return dict(module_globals)
+
+    else:
+
+        shared_namespace: dict = {"__name__": "__main__"}
+
+        def make_namespace() -> dict:
+            return shared_namespace
+
     with tempfile.TemporaryDirectory(prefix="clustrix_docs_check_") as tmp:
         scratch_dir = Path(tmp)
         sys.path.insert(0, str(scratch_dir))
-        namespace: dict = {"__name__": "__main__"}
         try:
             for block in blocks:
                 first_line = (
@@ -349,7 +475,7 @@ def check_file(target: TargetFile) -> List[Result]:
                 if CLUSTER_REQUIRED_RE.match(first_line):
                     results.append(verify_static(block))
                 else:
-                    results.append(run_block(block, namespace, scratch_dir))
+                    results.append(run_block(block, make_namespace(), scratch_dir))
         finally:
             sys.path.remove(str(scratch_dir))
 
@@ -403,6 +529,42 @@ def discover_targets() -> List[TargetFile]:
 
     for scan_root in scan_roots:
         targets.extend(_discover_under(scan_root))
+
+    targets.extend(_discover_documented_modules(docs_root / "source"))
+    return targets
+
+
+#: ``.. automodule:: X`` / ``.. currentmodule:: X`` -- the two directives that
+#: put a module's docstrings on a published page.
+MODULE_DIRECTIVE_RE = re.compile(
+    r"^\s*\.\.\s+(?:auto|current)module::\s+(\S+)\s*$", re.MULTILINE
+)
+
+
+def _discover_documented_modules(scan_root: Path) -> List[TargetFile]:
+    """Every module whose docstrings Sphinx publishes, read off the pages.
+
+    Derived from the directives rather than listed, for the same reason the
+    prose files are: a hand-maintained list stops covering things silently.
+    """
+    modules = set()
+    for path in sorted(scan_root.rglob("*.rst")):
+        if any(part in _SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
+            continue
+        modules.update(MODULE_DIRECTIVE_RE.findall(path.read_text()))
+
+    targets: List[TargetFile] = []
+    for name in sorted(modules):
+        try:
+            module = importlib.import_module(name)
+        except Exception as exc:
+            # A page publishes a module that does not import. Nothing further
+            # can be checked and the docs are already broken; say so and stop.
+            raise SystemExit(f"documented module {name!r} cannot be imported: {exc}")
+        source = inspect.getsourcefile(module)
+        if source is None:  # pragma: no cover - namespace/extension modules
+            continue
+        targets.append(TargetFile(Path(source), "py", module=name))
     return targets
 
 
@@ -444,6 +606,7 @@ def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
             "kind": target.kind,
             "section_start": target.section_start,
             "section_end": target.section_end,
+            "module": target.module,
         }
     )
     try:
@@ -501,6 +664,7 @@ def _check_one_entry(payload: str) -> int:
         spec["kind"],
         section_start=spec["section_start"],
         section_end=spec["section_end"],
+        module=spec.get("module"),
     )
     results = check_file(target)
     print(
@@ -533,7 +697,8 @@ def main() -> int:
         results = _check_file_in_subprocess(target)
         all_results.extend(results)
         rel = target.path.relative_to(REPO_ROOT)
-        print(f"\n=== {rel} ({len(results)} block(s)) ===")
+        label = f"{rel} (docstrings)" if target.kind == "py" else str(rel)
+        print(f"\n=== {label} ({len(results)} block(s)) ===")
         for r in results:
             status = "PASS" if r.passed else "FAIL"
             tag = "[cluster-required]" if r.mode == "cluster-required" else "[runnable]"

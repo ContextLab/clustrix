@@ -410,7 +410,7 @@ Configuration and Options
 Where packages are written
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Packages are written to a fresh ``tempfile.mkdtemp(prefix="clustrix_packaging_")``
+Packages are written to a fresh ``tempfile.mkdtemp(prefix="clustrix_packages_")``
 directory. There is no environment variable that redirects this: no
 ``CLUSTRIX_PACKAGE_DIR``, ``CLUSTRIX_REMOTE_PYTHON_PATH`` or
 ``CLUSTRIX_DEBUG_PACKAGING`` is read anywhere in the codebase. Use
@@ -430,7 +430,7 @@ Package Cleanup
         import tempfile
 
         package_pattern = os.path.join(
-            tempfile.gettempdir(), "clustrix_packaging_*", "clustrix_package_*.zip"
+            tempfile.gettempdir(), "clustrix_packages_*", "clustrix_package_*.zip"
         )
         old_packages = glob.glob(package_pattern)
         

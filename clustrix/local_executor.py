@@ -239,7 +239,12 @@ class LocalExecutor:
                       with the respective item from the iterable.
 
         Examples:
-            >>> executor = LocalExecutor(max_workers=4)
+            ``use_threads=True`` is required. This method wraps the work in a
+            ``chunk_processor`` closure defined inside its own body, and a
+            closure cannot be pickled, so a process pool fails every task with
+            ``AttributeError: Can't pickle local object ... chunk_processor``.
+
+            >>> executor = LocalExecutor(max_workers=4, use_threads=True)
             >>> def square(x):
             ...     return x ** 2
             >>>
@@ -247,7 +252,8 @@ class LocalExecutor:
             >>> results = executor.execute_loop_parallel(
             ...     square, 'x', range(10), chunk_size=3
             ... )
-            >>> # Results: [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
+            >>> results
+            [0, 1, 4, 9, 16, 25, 36, 49, 64, 81]
 
             >>> # With additional arguments
             >>> def power(base, x, exp=2):
@@ -255,7 +261,8 @@ class LocalExecutor:
             >>> results = executor.execute_loop_parallel(
             ...     power, 'x', [1, 2, 3], func_args=(10,), func_kwargs={'exp': 3}
             ... )
-            >>> # Results: [11^3, 12^3, 13^3] = [1331, 1728, 2197]
+            >>> results
+            [1331, 1728, 2197]
 
         Raises:
             Exception: Any exception raised by the function during execution.
@@ -360,21 +367,25 @@ def choose_executor_type(func: Callable, args: tuple, kwargs: dict) -> bool:
               False to use ProcessPoolExecutor (for CPU-bound, picklable functions)
 
     Examples:
+        The decision is about the function *object*, not about what its body
+        looks like in the abstract. A function defined interactively -- in a
+        REPL, a notebook cell, or a doctest -- cannot be pickled by reference,
+        so it takes the threads branch however CPU-bound it is. The last two
+        examples therefore use functions imported from real modules, so that
+        the pickling check is not what decides.
+
         >>> # Lambda function (unpicklable) -> threads
         >>> choose_executor_type(lambda x: x*2, (5,), {})
         True
 
-        >>> # I/O function -> threads
-        >>> def io_func(filename):
-        ...     with open(filename, 'r') as f:
-        ...         return f.read()
-        >>> choose_executor_type(io_func, ("file.txt",), {})
+        >>> # Picklable, but its source calls open() -> threads
+        >>> import shutil
+        >>> choose_executor_type(shutil.copyfile, ('a', 'b'), {})
         True
 
-        >>> # CPU function -> processes
-        >>> def cpu_func(n):
-        ...     return sum(i**2 for i in range(n))
-        >>> choose_executor_type(cpu_func, (1000,), {})
+        >>> # Picklable CPU function -> processes
+        >>> import statistics
+        >>> choose_executor_type(statistics.mean, ([1, 2, 3],), {})
         False
 
     Note:

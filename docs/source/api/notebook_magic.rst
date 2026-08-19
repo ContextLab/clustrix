@@ -60,10 +60,12 @@ Widget Interface
 - **Output**: where the test buttons and errors report.
 
 The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
-``sge``, ``kubernetes`` and ``huggingface``. Selecting ``kubernetes`` shows no
-dedicated fields: the ``k8s_*`` settings can only be set from a configuration
-file or ``clustrix.configure()``. There are no AWS, GCP, Azure or Lambda Cloud
-entries, because those execution backends are unverified.
+``sge``, ``kubernetes`` and ``huggingface``. Selecting ``kubernetes`` shows a
+Kubernetes section: namespace, image, service account and image pull policy.
+The remaining ``k8s_*`` settings (node count, region, provider,
+auto-provisioning) are configuration-file or ``clustrix.configure()`` only.
+There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
+backends are unverified.
 
 "Apply" calls :func:`clustrix.configure` with the widget's values, so
 subsequent ``@cluster`` functions use them.
