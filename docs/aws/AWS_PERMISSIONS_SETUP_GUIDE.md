@@ -1,5 +1,14 @@
 # AWS IAM Permissions Setup Guide for Clustrix
 
+> **Historical.** Clustrix no longer has an AWS or Kubernetes execution
+> backend -- both were removed in v0.2.0 because neither had ever been shown to
+> run a job end to end (tracking issues
+> [#142](https://github.com/ContextLab/clustrix/issues/142) and
+> [#143](https://github.com/ContextLab/clustrix/issues/143); they are planned
+> for a future update). This guide is kept as a record of the IAM permissions
+> that provisioning needed, and because the `scripts/aws/` cleanup utilities
+> still need AWS credentials to reclaim anything left behind.
+
 ## Quick Setup via AWS Console (Recommended)
 
 ### Step 1: Open IAM Console

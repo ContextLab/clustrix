@@ -5,8 +5,8 @@ landed on `master`.
 
 The guiding rule for this file: a capability is only listed as working if it has
 been exercised against the real thing. Anything implemented but unproven is
-listed under **Implemented but unverified**, and stays there until someone runs
-it for real.
+labelled as such and stays labelled until someone runs it for real — and as of
+0.2.0, anything that stayed unproven was removed rather than shipped.
 
 ## [0.2.0] — unreleased
 
@@ -147,8 +147,8 @@ backend.
   default to a dry run and refuse to touch anything not tagged
   `clustrix:managed=true`. (The originals, recovered from git history, deleted
   every NAT gateway and VPC in the account with no ownership check at all.)
-- Kubernetes auto-provisioning documentation, and a usage-patterns tutorial. Every
-  example in the docs is executed by `scripts/check_docs_examples.py`.
+- A usage-patterns tutorial. Every example in the docs is executed by
+  `scripts/check_docs_examples.py`.
 - `clustrix.config.SUPPORTED_CLUSTER_TYPES` as the single source of truth. The
   CLI's own list had drifted and omitted `huggingface` entirely, so a working
   backend could not be selected from the command line.
@@ -162,15 +162,52 @@ backend.
 - Deleted 1,837 lines of genuinely orphaned modules. (The issue that requested
   this claimed ~5,100 lines and named five files that do not exist on `master`.)
 
-### Implemented but unverified
+### Removed — unverified backends (BREAKING)
 
-These have code paths and error handling, but no one has run them against real
-hardware. They are not claimed to work.
+Seven execution backends were implemented in full and not one of them had ever
+been shown to run a job end to end against real hardware. Rather than keep
+publishing them as if they worked, they were removed. `SUPPORTED_CLUSTER_TYPES`
+is now exactly `local`, `ssh`, `slurm`, `huggingface` — the four backends that
+have each run a real job and returned the right answer. Anything else raises
+`ValueError: Unsupported cluster type` at submit time.
 
-- PBS and SGE — never run against a real scheduler.
-- Kubernetes execution — never run against a real cluster.
-- AWS, GCP, Azure and Lambda VM backends — no cloud job has been shown to run end
-  to end.
+Each removed backend has a tracking issue and is planned for a future release.
+The gate for restoring one is the gate the surviving four already passed: a
+real job, on real hardware, whose result comes back and is checked in as
+evidence. No date is promised.
+
+| Removed | Issue | What it was |
+|-|-|-|
+| PBS | [#140](https://github.com/ContextLab/clustrix/issues/140) | `cluster_type="pbs"` — the PBS/Torque scheduler |
+| SGE | [#141](https://github.com/ContextLab/clustrix/issues/141) | `cluster_type="sge"` — Sun/Son of Grid Engine |
+| Kubernetes | [#142](https://github.com/ContextLab/clustrix/issues/142) | `cluster_type="kubernetes"`, the `k8s_*` settings, cluster auto-provisioning |
+| AWS | [#143](https://github.com/ContextLab/clustrix/issues/143) | `provider="aws"` — EC2 and EKS |
+| GCP | [#144](https://github.com/ContextLab/clustrix/issues/144) | `provider="gcp"` — Google Compute Engine |
+| Azure | [#145](https://github.com/ContextLab/clustrix/issues/145) | `provider="azure"` — Azure VMs |
+| Lambda Cloud | [#146](https://github.com/ContextLab/clustrix/issues/146) | `provider="lambda"` — Lambda Labs GPU cloud |
+
+The HuggingFace **Spaces** provider (`provider="huggingface"`) was removed with
+them. This is a different thing from `cluster_type="huggingface"`, which is
+HuggingFace **Jobs**: that backend is verified end to end and is fully
+supported.
+
+### Removed — cost monitoring API (BREAKING)
+
+The cost monitoring and cloud pricing API is gone, along with all five of its
+public functions:
+
+- `cost_tracking_decorator`
+- `get_cost_monitor`
+- `start_cost_monitoring`
+- `generate_cost_report`
+- `get_pricing_info`
+
+Importing any of them from `clustrix` now raises `ImportError`. They priced the
+cloud VM backends, so with those backends removed the API had nothing left to
+price. Use your provider's own pricing calculator instead.
+
+`scripts/aws/` is unaffected — it is operator cleanup tooling, not an execution
+backend, and it stays.
 
 ### Known limitations
 

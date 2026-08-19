@@ -17,7 +17,7 @@ Clustrix is a Python package that enables seamless distributed computing on clus
 - **Simple Decorator Interface**: Just add `@cluster` to any function
 - **Automated SSH Key Setup**: Create and deploy SSH keys to enable secure passwordless authentication with one click or API call
 - **Interactive Jupyter Widget**: `%%remote` magic command with GUI configuration manager
-- **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working; PBS, SGE and Kubernetes are implemented but untested (see [Supported Cluster Types](#supported-cluster-types))
+- **Multiple Cluster Backends**: local, SSH, SLURM and HuggingFace Jobs -- every backend Clustrix ships has been run end to end (see [Supported Cluster Types](#supported-cluster-types))
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Loop Parallelization**: distributes a loop across nodes when its body has no
@@ -126,21 +126,20 @@ variables, module loads and pre-execution commands:
 
 ##### What the widget covers
 
-The cluster type dropdown offers `local`, `ssh`, `slurm`, `pbs`, `sge`,
-`kubernetes` and `huggingface`.
+The cluster type dropdown offers `local`, `ssh`, `slurm` and `huggingface` --
+the contents of `clustrix.config.SUPPORTED_CLUSTER_TYPES`.
 
-- `ssh`, `slurm`, `pbs`, `sge` show the connection section: host, port,
-  username, SSH key file, password, remote work directory, an environment
-  variable to read the password from, and an "Auto setup SSH keys" button.
+- `ssh` and `slurm` show the connection section: host, port, username, SSH key
+  file, password, remote work directory, an environment variable to read the
+  password from, and an "Auto setup SSH keys" button.
 - `huggingface` shows namespace, flavor, token, and an "Allow paid GPU flavors"
   checkbox. GPU flavors bill by the second, so that box has to be ticked before
   one is accepted.
-- `kubernetes` shows a Kubernetes section: namespace, image, service account and
-  image pull policy. The remaining `k8s_*` settings (node count, region,
-  provider, auto-provisioning) are config-file or `clustrix.configure()` only.
+- `local` needs no connection settings at all.
 
-There are no AWS, GCP, Azure or Lambda Cloud entries: those backends are
-unverified (see [Cloud Providers](#cloud-providers)).
+There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries, and
+no `k8s_*` settings: those backends are not currently supported (see
+[Backends that are not currently supported](#backends-that-are-not-currently-supported)).
 
 ##### Using the widget
 
@@ -184,7 +183,7 @@ environment_variables:
 ```
 
 `remote_work_dir` defaults to `~/.clustrix/jobs`. It must be on a filesystem
-the compute node can see: on SLURM, PBS and SGE each node has its own `/tmp`,
+the compute node can see: on SLURM each node has its own `/tmp`,
 so an environment built on the login node is simply absent at run time and the
 job dies with exit 127 before writing any diagnostics. A home directory or a
 shared scratch path (as above) both work; `/tmp` does not.
@@ -219,8 +218,8 @@ Open the widget with the `%%remote` magic:
 %%remote
 ```
 
-1. Choose a remote cluster type (`ssh`, `slurm`, `pbs` or `sge`) so the
-   connection section appears
+1. Choose a remote cluster type (`ssh` or `slurm`) so the connection section
+   appears
 2. Enter your cluster hostname and username
 3. Enter your password
 4. Click "Auto setup SSH keys"
@@ -346,34 +345,16 @@ def process_datasets(config):
 - `cluster_du()` - Directory usage information
 - `cluster_count_files()` - Count files matching pattern
 
-### Cost Monitoring
+### Cost monitoring: removed in v0.2.0
 
-Clustrix includes cost estimation for cloud providers. This is independent of
-the (broken) cloud execution backends: it queries pricing and reports local
-resource usage, and never submits a job.
-
-```python
-from clustrix import get_cost_monitor
-
-monitor = get_cost_monitor('gcp')
-
-cost_estimate = monitor.estimate_cost('n2-standard-4', hours_used=2.0)
-print(f"Estimated cost: ${cost_estimate.estimated_cost:.2f}")
-
-pricing = monitor.get_pricing_info()          # {instance_type: hourly_usd}
-
-usage = monitor.get_resource_usage()          # CPU/memory/GPU on this machine
-recommendations = monitor.get_cost_optimization_recommendations(
-    usage, cost_estimate
-)
-```
-
-`get_cost_optimization_recommendations()` takes the usage and the estimate as
-positional arguments; calling it with none raises `TypeError`.
-
-Providers with a cost monitor: **AWS**, **Google Cloud**, **Azure**, **Lambda
-Cloud**. Where a live pricing API is unavailable the monitor falls back to a
-hardcoded table and says so on stderr.
+The cost monitoring and cloud pricing API is gone, along with all five of its
+public functions -- `cost_tracking_decorator`, `get_cost_monitor`,
+`start_cost_monitoring`, `generate_cost_report` and `get_pricing_info`.
+Importing any of them now raises `ImportError`. They priced the cloud VM
+backends, and those backends were removed too (see
+[Backends that are not currently supported](#backends-that-are-not-currently-supported)),
+so the API had nothing left to price. Use your provider's own pricing
+calculator instead.
 
 ### Custom Resource Requirements
 
@@ -425,12 +406,12 @@ clustrix.configure(cluster_type='ssh', cluster_host='server.example.com')
 # HuggingFace Jobs (no host: work is submitted over an HTTP API)
 clustrix.configure(cluster_type='huggingface', hf_namespace='my-org')
 
-# PBS and SGE clusters (implemented, not verified against real hardware)
-clustrix.configure(cluster_type='pbs', cluster_host='pbs.example.com')
-clustrix.configure(cluster_type='sge', cluster_host='sge.example.com')
+# Local execution, no cluster needed
+clustrix.configure(cluster_type='local')
 
-# Kubernetes (implemented, not verified against a real cluster)
-clustrix.configure(cluster_type='kubernetes')
+# Those four are the whole list. Anything else -- 'pbs', 'sge', 'kubernetes'
+# -- raises ValueError: Unsupported cluster type. See "Backends that are not
+# currently supported" below.
 ```
 
 ### HuggingFace Jobs
@@ -494,28 +475,37 @@ container prints an HMAC-SHA256 of the bytes it emitted, and clustrix refuses
 to unpickle anything whose tag does not verify. The SSH and scheduler paths
 verify their results the same way.
 
-### Cloud Providers
+### Backends that are not currently supported
 
-The `provider=` argument to `@cluster` (`'aws'`, `'gcp'`, `'azure'`,
-`'lambda'`, `'huggingface'`) routes to the AWS EC2, Google Compute Engine,
-Azure VM and Lambda Cloud backends. **None of them has been shown to run a job
-end to end.** Until recently the path could not have run at all: the serializer
-writes the function under a `"function"` key while the remote bootstrap read
-`"func"`, so every cloud job died with a `KeyError` on its first line. That was
-fixed (issue #119), but nothing has since demonstrated a completed cloud job,
-and `scripts/collect_execution_evidence.py` does not cover these backends.
+Clustrix once shipped seven more execution backends. All seven were implemented
+in full, and not one had ever been shown to run a job end to end against real
+hardware. Rather than keep publishing them as if they worked, they were removed
+in v0.2.0.
 
-Treat the cloud tutorials in the documentation as a description of the intended
-interface rather than a record of something that has been run. The notebook
-widget does not offer these as cluster types.
+They are planned for a future update. Each has a tracking issue, and the gate
+for restoring one is the gate the surviving four already passed: a real job, on
+real hardware, whose result comes back and is checked in as evidence. No date is
+promised.
 
-The pricing and cost-estimation clients for those providers (see
-[Cost Monitoring](#cost-monitoring)) are separate code and do work; they query
-provider pricing APIs and do not submit jobs.
+| Not supported | Issue | What it was |
+|-|-|-|
+| PBS | [#140](https://github.com/ContextLab/clustrix/issues/140) | `cluster_type="pbs"` -- the PBS/Torque scheduler |
+| SGE | [#141](https://github.com/ContextLab/clustrix/issues/141) | `cluster_type="sge"` -- Sun/Son of Grid Engine |
+| Kubernetes | [#142](https://github.com/ContextLab/clustrix/issues/142) | `cluster_type="kubernetes"`, the `k8s_*` settings, cluster auto-provisioning |
+| AWS | [#143](https://github.com/ContextLab/clustrix/issues/143) | `provider="aws"` -- EC2 and EKS |
+| GCP | [#144](https://github.com/ContextLab/clustrix/issues/144) | `provider="gcp"` -- Google Compute Engine |
+| Azure | [#145](https://github.com/ContextLab/clustrix/issues/145) | `provider="azure"` -- Azure VMs |
+| Lambda Cloud | [#146](https://github.com/ContextLab/clustrix/issues/146) | `provider="lambda"` -- Lambda Labs GPU cloud |
 
-`cluster_type='huggingface'` (HuggingFace Jobs, above) is a different thing
-from `provider='huggingface'` (the HuggingFace Spaces provider, which never
-satisfied the dispatch interface). Use the former.
+The HuggingFace **Spaces** provider (`provider="huggingface"`) went with them.
+That is a different thing from `cluster_type="huggingface"`, which is
+HuggingFace **Jobs** -- verified end to end and fully supported. The cost
+monitoring and cloud pricing API was removed too.
+
+**What to do instead.** For a rented GPU without owning hardware, use
+`cluster_type="huggingface"`. For a machine you brought up yourself through
+your provider's own console or CLI, point `cluster_type="ssh"` at it. For a
+batch allocation, `cluster_type="slurm"`. All three are verified end to end.
 
 ## Command Line Interface
 
@@ -595,9 +585,11 @@ result = my_function(5)
 | `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
 | `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
 | `local` | Runs in local processes. Used for development and the fast tests. |
-| `pbs` | Implemented, **not verified**. All four of SLURM/PBS/SGE/SSH now share one environment-setup path, so PBS builds the same two-venv environment SLURM does -- but no PBS job has been run against a real scheduler. |
-| `sge` | Implemented, **not verified**. Same caveat as PBS. |
-| AWS / GCP / Azure / Lambda VM backends | **Unverified.** No cloud job has been shown to run end to end. See [Cloud Providers](#cloud-providers). |
+
+Those four are the whole list -- the contents of
+`clustrix.config.SUPPORTED_CLUSTER_TYPES`. PBS, SGE, Kubernetes and the
+AWS / GCP / Azure / Lambda Cloud VM backends are **not currently supported**;
+see [Backends that are not currently supported](#backends-that-are-not-currently-supported).
 
 The three "Verified" rows are the backends exercised by
 `scripts/collect_execution_evidence.py`, which submits a genuine job to each
@@ -628,8 +620,7 @@ clustrix/
 │   ├── filesystem.py     # Cross-cluster filesystem utilities
 │   ├── utils.py          # Core utilities and job management
 │   ├── cli.py            # Command line interface
-│   ├── kubernetes/       # Kubernetes providers (AWS, GCP, Azure, etc.)
-│   └── pricing_clients/  # Cost monitoring integrations
+│   └── hf_jobs.py        # HuggingFace Jobs backend
 ├── tests/                # Test suite organized by category
 │   ├── unit/            # Fast unit tests (run in CI)
 │   ├── integration/     # Provisions REAL billable AWS resources;
@@ -866,8 +857,16 @@ pre-commit run --all-files
 
 For more detailed information on specific topics, see the organized documentation in the `docs/` directory:
 
-### Cloud Provider Setup
-- **[AWS Setup Guide](docs/aws/AWS_PERMISSIONS_SETUP_GUIDE.md)** - Complete AWS permissions configuration
+### AWS operator tooling
+
+Clustrix has no AWS *execution* backend -- see
+[Backends that are not currently supported](#backends-that-are-not-currently-supported).
+`scripts/aws/` is separate: cleanup and teardown utilities for AWS resources
+tagged `clustrix:managed=true`, kept so that anything left behind by the
+removed provisioning code can still be reclaimed. The IAM guides below are
+historical records of the permissions that tooling needed.
+
+- **[AWS Setup Guide](docs/aws/AWS_PERMISSIONS_SETUP_GUIDE.md)** - AWS permissions configuration
 - **[AWS Console Quick Steps](docs/aws/AWS_CONSOLE_QUICK_STEPS.md)** - Fast AWS setup guide
 - **[AWS EKS Policy Setup](docs/aws/ADD_CUSTOM_EKS_POLICY.md)** - EKS-specific policy configuration
 - **[AWS EKS Troubleshooting](docs/aws/AWS_EKS_TROUBLESHOOTING.md)** - Common AWS access issues
