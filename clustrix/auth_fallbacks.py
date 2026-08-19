@@ -210,8 +210,12 @@ def requires_password_fallback(auth_result: Dict[str, Any]) -> bool:
     if not auth_result.get("connection_tested", False):
         return True
 
-    # Check for specific error conditions that suggest password auth might work
-    error = auth_result.get("error", "")
+    # Check for specific error conditions that suggest password auth might work.
+    # ``.get("error", "")`` alone is not enough: setup_ssh_keys() always sets
+    # the "error" key, defaulting it to None (not absent) on success, so the
+    # dict-default never kicks in and `.lower()` below raised
+    # AttributeError on the ordinary success path (Issue #114).
+    error = auth_result.get("error") or ""
     if any(
         keyword in error.lower()
         for keyword in ["publickey", "key", "authentication", "gssapi", "kerberos"]

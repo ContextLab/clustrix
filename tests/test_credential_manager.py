@@ -13,6 +13,7 @@ from clustrix.credential_manager import (
     GitHubActionsCredentialSource,
     get_credential_manager,
 )
+from clustrix.config import get_config_dir
 
 
 class TestDotEnvCredentialSource:
@@ -166,7 +167,13 @@ class TestFlexibleCredentialManager:
 
             assert manager.config_dir == config_dir
             assert manager.env_file == config_dir / ".env"
-            assert len(manager.sources) == 4  # All four credential sources
+            # Three credential sources: .env, environment variables, and
+            # GitHub Actions secrets. There used to be a fourth (1Password),
+            # deliberately removed in Issue #97 ("Remove all 1Password
+            # integration -- use only .env, environment vars, and GitHub
+            # secrets"); this assertion is stale from before that removal
+            # (Issue #114).
+            assert len(manager.sources) == 3
 
     def test_env_file_creation(self):
         """Test that .env file is created automatically."""
@@ -230,8 +237,9 @@ class TestFlexibleCredentialManager:
             assert "sources" in status
             assert "providers" in status
 
-            # Should have all four sources
-            assert len(status["sources"]) == 4
+            # Should have all three sources (see test_initialization for why
+            # it's three, not four -- Issue #114).
+            assert len(status["sources"]) == 3
 
             # Should have all supported providers
             expected_providers = [
@@ -258,8 +266,20 @@ class TestGlobalCredentialManager:
         assert manager1 is manager2
 
     def test_get_credential_manager_default_location(self):
-        """Test that default manager uses correct location."""
+        """Test that default manager uses correct location.
+
+        NOTE (Issue #114): tests/conftest.py's session-scoped autouse
+        `isolate_config_dir` fixture points CLUSTRIX_CONFIG_DIR at a
+        throwaway temp directory for the entire test run specifically so
+        the suite never writes into a real ~/.clustrix. That means the
+        real "default location" during tests is never
+        Path.home() / ".clustrix" -- it's wherever get_config_dir()
+        resolves to (which honors CLUSTRIX_CONFIG_DIR). Hardcoding
+        Path.home() / ".clustrix" here encoded pre-isolation-fixture
+        behavior; asserting against get_config_dir() instead is correct
+        both with and without that env var set, and confirms no test
+        touches the developer's real ~/.clustrix.
+        """
         manager = get_credential_manager()
 
-        expected_dir = Path.home() / ".clustrix"
-        assert manager.config_dir == expected_dir
+        assert manager.config_dir == get_config_dir()
