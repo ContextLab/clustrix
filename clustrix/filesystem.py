@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any
 import paramiko
 
 from .config import ClusterConfig
+from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class ClusterFilesystem:
         """Get or create SSH client connection."""
         if self._ssh_client is None:
             self._ssh_client = paramiko.SSHClient()
-            self._ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(self._ssh_client, self.config)
 
             # Connect based on authentication method
             connect_kwargs: Dict[str, Any] = {

@@ -6,6 +6,7 @@ from typing import Dict, Optional
 import paramiko
 
 from .config import ClusterConfig
+from .ssh_security import configure_host_key_policy
 
 
 def validate_cluster_auth(
@@ -26,7 +27,7 @@ def validate_cluster_auth(
     try:
         # Try to establish SSH connection
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Try password auth if provided
         if password and config.cluster_host:
@@ -81,7 +82,7 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
 
     try:
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(client, config)
 
         # Try SSH key auth
         if config.cluster_host:

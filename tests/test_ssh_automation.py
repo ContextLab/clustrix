@@ -162,7 +162,7 @@ class TestSSHKeyAutomation:
             result = detect_working_ssh_key("test.com", "user", 22)
 
             assert result == "/test/key"
-            mock_detect.assert_called_once_with("test.com", "user", 22)
+            mock_detect.assert_called_once_with("test.com", "user", 22, config=None)
 
     @patch("subprocess.run")
     def test_generate_ssh_key_pair(self, mock_run):
@@ -183,7 +183,9 @@ class TestSSHKeyAutomation:
             result = deploy_ssh_key("host", "user", "pass", "/key.pub", 22)
 
             assert result is True
-            mock_deploy.assert_called_once_with("host", "user", "/key.pub", 22, "pass")
+            mock_deploy.assert_called_once_with(
+                "host", "user", "/key.pub", 22, "pass", config=None
+            )
 
     @patch("pathlib.Path.home")
     @patch("pathlib.Path.exists")

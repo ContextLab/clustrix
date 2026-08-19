@@ -1,4 +1,5 @@
 import json
+import re
 import yaml
 import os
 from pathlib import Path
@@ -163,6 +164,13 @@ class ClusterConfig:
     cache_credentials: bool = True  # Cache credentials in memory
     credential_cache_ttl: int = 300  # Credential cache TTL in seconds (5 minutes)
     ssh_port: int = 22  # SSH port (for consistency with cluster_port)
+    # Controls what clustrix does when a remote host's SSH key is not already
+    # in your known_hosts files. "reject" (default, secure) refuses the
+    # connection and tells you the exact ssh-keyscan command to add it.
+    # "auto_add" opts into trusting unknown host keys automatically -- this
+    # is insecure (vulnerable to machine-in-the-middle attacks) and must be
+    # chosen deliberately; it is never the default. See clustrix.ssh_security.
+    ssh_host_key_policy: str = "reject"
 
     # Advanced settings
     environment_variables: Optional[Dict[str, str]] = None
@@ -215,6 +223,13 @@ class ClusterConfig:
         if self.venv_post_install_commands is None:
             self.venv_post_install_commands = []
 
+        if self.ssh_host_key_policy not in ("reject", "auto_add"):
+            raise ValueError(
+                f"Invalid ssh_host_key_policy={self.ssh_host_key_policy!r}. "
+                f"Valid values are 'reject' (default, secure) or 'auto_add' "
+                f"(insecure, trusts unknown host keys automatically)."
+            )
+
         # Auto-install cloud provider dependencies if needed
         self._ensure_cloud_dependencies()
 
@@ -239,16 +254,28 @@ class ClusterConfig:
             return os.environ.get(self.password_env_var)
         return None
 
-    def save_to_file(self, config_path: str) -> None:
-        """Save this configuration instance to a file."""
+    def save_to_file(self, config_path: str, include_secrets: bool = False) -> None:
+        """Save this configuration instance to a file.
+
+        The file is created with 0600 permissions (owner read/write only)
+        from the moment it exists -- the mode is set before any content is
+        written, and re-applied even when overwriting a file that already
+        exists with looser permissions, so there is never a window where a
+        config file containing credentials is world- or group-readable.
+
+        Secret-bearing fields (passwords, tokens, API keys, etc. -- see
+        ``SECRET_FIELDS``) are omitted by default, since a saved config file
+        is easy to accidentally commit, back up, or share. Pass
+        ``include_secrets=True`` to write them anyway, e.g. for a config
+        file you deliberately keep out of version control.
+        """
         config_path_obj = Path(config_path)
         config_data = asdict(self)
+        if not include_secrets:
+            for key in SECRET_FIELDS:
+                config_data.pop(key, None)
 
-        with open(config_path_obj, "w") as f:
-            if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
-                yaml.dump(config_data, f, default_flow_style=False)
-            else:
-                json.dump(config_data, f, indent=2)
+        _write_config_file_securely(config_path_obj, config_data)
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
@@ -264,6 +291,40 @@ class ClusterConfig:
                 config_data = json.load(f)
 
         return cls(**config_data)
+
+
+# Fields treated as secret-bearing when saving configuration to disk. Derived
+# from field *names* rather than hand-listed, so a newly added credential
+# field (a new cloud provider's API key, say) is covered automatically
+# instead of silently leaking in plaintext until someone remembers to add it
+# here. Same approach as scripts/verify_cluster_usecases.py's redaction.
+_SECRET_FIELD_PATTERN = re.compile(
+    r"secret|token|password|api_key|access_key|_key$|client_id|tenant_id"
+    r"|subscription_id",
+    re.IGNORECASE,
+)
+SECRET_FIELDS = {
+    f.name for f in fields(ClusterConfig) if _SECRET_FIELD_PATTERN.search(f.name)
+} | {"environment_variables"}
+
+
+def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> None:
+    """Write ``config_data`` to ``config_path_obj`` with 0600 permissions.
+
+    The mode is applied via os.open()'s mode argument (so a newly created
+    file never exists at the default, wider permissions even momentarily)
+    and re-applied with fchmod() before writing (so overwriting a
+    pre-existing, more permissive file is also tightened) -- in both cases
+    before any content is written, never after.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(str(config_path_obj), flags, 0o600)
+    os.fchmod(fd, 0o600)
+    with os.fdopen(fd, "w") as f:
+        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
+            yaml.dump(config_data, f, default_flow_style=False)
+        else:
+            json.dump(config_data, f, indent=2)
 
 
 # Global configuration instance
@@ -354,21 +415,19 @@ def load_config(config_path: str) -> None:
     _config = ClusterConfig(**config_data)
 
 
-def save_config(config_path: str) -> None:
+def save_config(config_path: str, include_secrets: bool = False) -> None:
     """
     Save current configuration to a file.
 
+    See :meth:`ClusterConfig.save_to_file` for the 0600-permissions and
+    secret-redaction behavior this delegates to.
+
     Args:
         config_path: Path where to save configuration
+        include_secrets: Write secret-bearing fields (passwords, tokens,
+            API keys, etc.) in plaintext. Default False.
     """
-    config_path_obj = Path(config_path)
-    config_data = asdict(_config)
-
-    with open(config_path_obj, "w") as f:
-        if config_path_obj.suffix.lower() in [".yml", ".yaml"]:
-            yaml.dump(config_data, f, default_flow_style=False)
-        else:
-            json.dump(config_data, f, indent=2)
+    _config.save_to_file(config_path, include_secrets=include_secrets)
 
 
 CONFIG_DIR_ENV_VAR = "CLUSTRIX_CONFIG_DIR"

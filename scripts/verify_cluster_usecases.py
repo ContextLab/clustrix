@@ -35,7 +35,7 @@ import socket
 import sys
 import textwrap
 import traceback
-from dataclasses import asdict, fields
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
@@ -46,20 +46,15 @@ sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_ROOT / "tests" / "unit" / "localproject"))
 
 from clustrix import cluster, configure  # noqa: E402
-from clustrix.config import ClusterConfig, _config, get_config  # noqa: E402
+from clustrix.config import (  # noqa: E402
+    ClusterConfig,
+    SECRET_FIELDS,
+    _config,
+    get_config,
+)
 from mypkg.mathutils import SCALE, Widget, triple  # noqa: E402
 
 CRED_DIR = Path.home() / ".clustrix-dev-credentials"
-# Derived rather than hand-listed: a fixed set silently stops covering the
-# config the day someone adds a cloud credential field.
-_SECRET_PATTERN = re.compile(
-    r"secret|token|password|api_key|access_key|_key$|client_id|tenant_id"
-    r"|subscription_id",
-    re.IGNORECASE,
-)
-SECRET_FIELDS = {
-    f.name for f in fields(ClusterConfig) if _SECRET_PATTERN.search(f.name)
-} | {"environment_variables"}
 
 
 # Module-level state, referenced by the cases below. These exist to be *missing*

@@ -389,8 +389,11 @@ class LambdaCloudKubernetesProvisioner(BaseKubernetesProvisioner):
         self, instance: Dict[str, Any], private_key_file: str
     ) -> paramiko.SSHClient:
         """Connect to instance via SSH."""
+        from clustrix.ssh_security import configure_host_key_policy
+        from clustrix.ssh_utils import add_host_key
+
         ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh_client, None)
 
         # Load private key
         private_key = paramiko.RSAKey.from_private_key_file(private_key_file)
@@ -399,6 +402,14 @@ class LambdaCloudKubernetesProvisioner(BaseKubernetesProvisioner):
         max_attempts = 30
         for attempt in range(max_attempts):
             try:
+                # This instance was provisioned seconds ago, so there is no
+                # pre-existing known_hosts entry for it -- ssh-keyscan
+                # fetches and records its key the moment it starts
+                # answering on port 22, an explicit, logged
+                # trust-on-first-use step (not a blanket "accept anything"
+                # policy). The strict policy set above then verifies the
+                # handshake against that recorded key.
+                add_host_key(instance["ip"])
                 ssh_client.connect(
                     hostname=instance["ip"],
                     username="ubuntu",  # Default Lambda Cloud user

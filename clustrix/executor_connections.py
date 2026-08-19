@@ -12,6 +12,8 @@ from typing import Any, Dict, Optional
 import yaml
 import paramiko
 
+from clustrix.ssh_security import configure_host_key_policy
+
 logger = logging.getLogger(__name__)
 
 
@@ -36,7 +38,7 @@ class ConnectionManager:
             raise ValueError("cluster_host must be specified for SSH-based clusters")
 
         self.ssh_client = paramiko.SSHClient()
-        self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(self.ssh_client, self.config)
 
         # Connect using provided credentials
         connect_kwargs = {

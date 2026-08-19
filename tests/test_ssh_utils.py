@@ -344,7 +344,9 @@ class TestSetupSSHKeys:
         assert result["key_path"] == "/home/user/.ssh/id_rsa"
         assert result["key_already_existed"]
         assert config.key_file == "/home/user/.ssh/id_rsa"
-        mock_detect.assert_called_once_with("test.host.com", "testuser", 22)
+        mock_detect.assert_called_once_with(
+            "test.host.com", "testuser", 22, config=config
+        )
 
     @patch("clustrix.ssh_utils.detect_existing_ssh_key")
     @patch("clustrix.ssh_utils.generate_ssh_key")

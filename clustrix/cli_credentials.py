@@ -19,6 +19,7 @@ except ImportError:
     HAS_CLICK = False
 
 from .credential_manager import FlexibleCredentialManager, get_credential_manager
+from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
@@ -388,7 +389,10 @@ def _validate_ssh_credentials_real(credentials: Dict[str, str]) -> bool:
         import paramiko
 
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # No ClusterConfig exists yet at this stage of credential setup, so
+        # this always uses the strict default: unknown host keys are
+        # rejected with an actionable error rather than trusted silently.
+        configure_host_key_policy(ssh, None)
 
         # Prepare connection parameters with proper types
         hostname = credentials["SSH_HOST"]
