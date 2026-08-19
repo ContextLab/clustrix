@@ -439,9 +439,16 @@ class TestDeletePathUnreachableWithoutExecuteFlag:
 
 class TestTaggingConventionMatchesProvisioner:
     """The scripts must honour the exact tag/name convention that
-    clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner uses,
+    clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner used,
     per issue #95 ('Whatever tagging/naming convention the original used,
-    honour it and state it in --help')."""
+    honour it and state it in --help').
+
+    The provisioner itself has been removed with the Kubernetes/AWS backends
+    (issues #142, #143), so the cross-check against its source is gone. These
+    scripts are kept because resources provisioned by earlier versions of
+    clustrix are still out there carrying these tags and still need deleting;
+    the constants below are what identifies them.
+    """
 
     def test_cleanup_uses_clustrix_managed_tag(self):
         module = _load_module(CLEANUP_SCRIPT)
@@ -459,15 +466,3 @@ class TestTaggingConventionMatchesProvisioner:
         cluster_role, node_role = module.iam_role_names("demo-cluster")
         assert cluster_role == "clustrix-eks-cluster-role-demo-cluster"
         assert node_role == "clustrix-eks-node-role-demo-cluster"
-
-    def test_provisioner_actually_applies_these_tags(self):
-        """Cross-check against the real provisioner source so this test
-        (and the scripts) can't silently drift from what
-        aws_provisioner.py actually tags resources with."""
-        provisioner_path = REPO_ROOT / "clustrix" / "kubernetes" / "aws_provisioner.py"
-        assert provisioner_path.is_file()
-        source = provisioner_path.read_text(encoding="utf-8")
-        assert '"clustrix:managed": "true"' in source
-        assert '"clustrix:cluster"' in source
-        assert "clustrix-eks-cluster-role-" in source
-        assert "clustrix-eks-node-role-" in source
