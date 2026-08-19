@@ -105,7 +105,25 @@ def user_known_hosts_path() -> Path:
 
 
 def _load_known_hosts(client: paramiko.SSHClient) -> None:
-    """Load system and user known_hosts files into the client."""
+    """Load system and user known_hosts files into the client.
+
+    The second call looks redundant -- ``load_system_host_keys(None)`` already
+    reads ``~/.ssh/known_hosts`` -- and it is not. The two land in different
+    places inside paramiko:
+
+    * ``load_system_host_keys`` fills ``_system_host_keys``, which is consulted
+      when verifying and **never written back**.
+    * ``load_host_keys`` fills ``_host_keys`` *and* sets
+      ``_host_keys_filename``.
+
+    ``AutoAddPolicy.missing_host_key`` saves only ``if
+    client._host_keys_filename is not None``. So dropping the second call
+    would leave verification working while silently stopping
+    ``ssh_host_key_policy="auto_add"`` from ever persisting a key -- every
+    connection would re-accept the same host forever, and nothing would fail
+    to say so. Covered by
+    ``tests/unit/test_host_key_policy.py::test_auto_add_persists_the_key_it_accepted``.
+    """
     client.load_system_host_keys()
     user_known_hosts = user_known_hosts_path()
     if user_known_hosts.exists():
@@ -159,6 +177,22 @@ def configure_host_key_policy(
             "deliberate first contact with a host you already trust "
             "out-of-band."
         )
+        # AutoAddPolicy writes the key it accepted back to
+        # ``client._host_keys_filename``, and paramiko only sets that
+        # attribute inside ``load_host_keys``. _load_known_hosts skips that
+        # call when the file does not exist yet -- it would raise -- so on a
+        # machine with no ~/.ssh/known_hosts, auto_add accepted every host and
+        # persisted nothing, re-accepting the same host on every connection
+        # forever. That is trust-on-first-use with the "first" removed.
+        #
+        # Create it the way OpenSSH does before first contact: 0700 directory,
+        # 0600 file. Only on this branch -- the reject policy must never write
+        # to the user's filesystem as a side effect of verifying.
+        known_hosts = user_known_hosts_path()
+        if not known_hosts.exists():
+            known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            known_hosts.touch(mode=0o600)
+            client.load_host_keys(str(known_hosts))
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     else:
         client.set_missing_host_key_policy(RejectUnknownHostKeyPolicy())

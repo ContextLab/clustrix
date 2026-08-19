@@ -11,10 +11,12 @@ paramiko, because the entire point of this fix is that paramiko's actual
 handshake behaves correctly -- a mock could not catch a regression here.
 """
 
+import contextlib
 import os
 import socket
 import threading
 import time
+from pathlib import Path
 
 import paramiko
 import pytest
@@ -284,3 +286,47 @@ def test_user_known_hosts_file_is_actually_loaded(tmp_path, monkeypatch):
     )
     found_key = loaded.lookup("127.0.0.1")[trusted_key.get_name()]
     assert found_key.get_base64() == trusted_key.get_base64()
+
+
+def test_auto_add_persists_the_key_it_accepted(real_ssh_server, tmp_path):
+    """``auto_add`` must WRITE the key it accepted, not just tolerate it.
+
+    This covers a line that reads like dead code and is not.
+    ``_load_known_hosts`` calls ``load_system_host_keys()`` and then
+    ``load_host_keys(~/.ssh/known_hosts)``. paramiko puts those in different
+    places: the first fills ``_system_host_keys``, consulted when verifying
+    and never written back; the second also sets ``_host_keys_filename``, and
+    ``AutoAddPolicy.missing_host_key`` saves only when that attribute is set.
+
+    Delete the second call and verification still works, so almost every test
+    stays green -- while ``auto_add`` silently stops persisting anything and
+    re-accepts the same host on every connection forever. An adversarial
+    review reported the line as redundant on the strength of a surviving
+    mutant; this is the test that was missing rather than a line that was
+    spare.
+    """
+    known_hosts = Path(os.path.expanduser("~")) / ".ssh" / "known_hosts"
+    assert not known_hosts.exists(), "fixture should start with no known_hosts"
+
+    config = ClusterConfig(ssh_host_key_policy="auto_add")
+    client = paramiko.SSHClient()
+    configure_host_key_policy(client, config)
+
+    with contextlib.suppress(paramiko.AuthenticationException):
+        client.connect(
+            hostname="127.0.0.1",
+            port=real_ssh_server.port,
+            username="tester",
+            password="not-the-password",
+            timeout=5,
+            allow_agent=False,
+            look_for_keys=False,
+        )
+    client.close()
+
+    assert known_hosts.exists(), (
+        "auto_add accepted the host key but never wrote it: "
+        "_host_keys_filename was not set, so AutoAddPolicy's save was skipped"
+    )
+    recorded = known_hosts.read_text()
+    assert f"[127.0.0.1]:{real_ssh_server.port}" in recorded
