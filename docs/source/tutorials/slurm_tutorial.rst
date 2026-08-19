@@ -10,6 +10,144 @@ Prerequisites
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
 
+.. note::
+
+   SLURM is verified end to end against a real cluster (SSH connect, job
+   submission, environment build, result retrieval). PBS and SGE
+   (:doc:`pbs_tutorial`, :doc:`../notebooks/sge_tutorial`) share almost all of
+   the same code path but have not been exercised against real hardware.
+
+What Happens When You Call a ``@cluster``-Decorated Function
+--------------------------------------------------------------
+
+Calling a SLURM-decorated function is not a remote procedure call; it is a
+full job submission and poll cycle. In order:
+
+1. **Serialize.** The function, its arguments and keyword arguments are
+   pickled with ``dill`` (falling back to ``cloudpickle``). Serialization
+   does not need the function's source -- byte-compiled code objects travel
+   fine, including closures. Any module the function reaches into that lives
+   in your own project (not something ``pip`` installed) is walked and
+   embedded by value, because the worker will not have it on its Python
+   path. A package that *is* installed locally but cannot be reinstalled on
+   the cluster -- an editable install, a git checkout -- makes clustrix
+   **refuse to submit**, naming the offending package, rather than shipping a
+   job that fails on import an hour into the queue.
+2. **Connect.** Clustrix opens an SSH connection to ``cluster_host``. The
+   remote host's SSH key is checked against your local ``known_hosts``
+   files. An unrecognized key is rejected by default -- see
+   :doc:`../ssh_setup` for exactly what that looks like and how to fix it,
+   because it is the first thing a new cluster hits.
+3. **Stage the job directory.** A directory
+   ``{remote_work_dir}/job_{timestamp}_{8 hex chars}`` is created on the
+   cluster with mode ``0700``, and a random 256-bit result-signing key is
+   written inside it (``.clustrix_result_key``, mode ``0600``). Only someone
+   who can already read that directory can read the key.
+4. **Upload.** The pickled function/args/kwargs go up as
+   ``function_data.pkl`` over SFTP.
+5. **Build the environment.** By default (``use_two_venv=True``) clustrix
+   builds two virtualenvs on the cluster: one to run the submitting Python
+   version and unpickle the payload, one matching the packages your local
+   environment reports (``replicate_local_environment``, minus
+   ``excluded_packages``, plus ``cluster_packages``). GPU detection runs in
+   the first venv and, if a GPU is found, GPU-enabled packages are installed
+   into the second. This step has a timeout (``venv_setup_timeout``, default
+   300s) and falls back to a single shared venv if it fails or times out.
+6. **Generate and upload the job script.** ``clustrix/utils.py::create_job_script``
+   writes a bash script (see below) to ``job.sh`` in the job directory.
+7. **Submit.** Clustrix runs ``sbatch job.sh`` and parses the job ID from
+   the last whitespace-separated token of the output.
+8. **Poll.** The submitting process polls ``squeue``/``sacct`` every
+   ``job_poll_interval`` seconds (default 30) until the job leaves the
+   queue.
+9. **Verify and retrieve the result.** ``result.pkl`` and its
+   ``result.pkl.hmac`` signature are downloaded. The signature is recomputed
+   locally with the key from step 3 and compared; a missing key, a missing
+   signature, or a mismatch is refused outright -- the file is never handed
+   to the deserializer unverified, because unpickling runs arbitrary code.
+   Only then is ``result.pkl`` loaded with ``dill`` and returned to you.
+   Errors raised inside your function come back the same way, through a
+   signed ``error.pkl``, and re-raise with the original exception type.
+10. **Clean up.** If the job succeeded and ``cleanup_on_success=True``
+    (the default), the remote job directory is removed. A failed job's
+    directory is left in place for you to inspect.
+
+What the Generated Job Script Looks Like
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For ``@cluster(cores=4, memory="8GB", time="01:00:00", partition="compute")``,
+``job.sh`` looks like this (module loads, environment variables and
+``pre_execution_commands`` from your config are inserted between the
+``#SBATCH`` block and the execution block; the memory string is normalized
+to what SLURM's ``--mem`` accepts, so ``"8GB"`` becomes ``--mem=8G`` and a
+fractional value like ``"1.5GB"`` is rounded up to ``--mem=2G``):
+
+.. code-block:: bash
+
+   #!/bin/bash
+   #SBATCH --job-name=clustrix
+   #SBATCH --output=/scratch/you/clustrix/job_.../slurm-%j.out
+   #SBATCH --error=/scratch/you/clustrix/job_.../slurm-%j.err
+   #SBATCH --cpus-per-task=4
+   #SBATCH --mem=8G
+   #SBATCH --time=01:00:00
+   #SBATCH --partition=compute
+   module load python/3.11          # from module_loads, if set
+   export OMP_NUM_THREADS=8         # from environment_variables, if set
+   export CLUSTRIX_RESULT_KEY=$(cat .../.clustrix_result_key 2>/dev/null || true)
+   cd /scratch/you/clustrix/job_...
+   source venv/bin/activate         # or the two-venv activation sequence
+   python -c "
+   # unpickle function_data.pkl with dill, run the function,
+   # write result.pkl + result.pkl.hmac (or error.pkl + error.pkl.hmac
+   # on an exception), then remove CLUSTRIX_RESULT_KEY from the
+   # environment before any of that runs -- your function and everything
+   # it imports execute in this same interpreter, so nothing downstream
+   # can read the signing key.
+   "
+
+There is no pass-through for arbitrary ``sbatch`` directives beyond
+``cores``, ``memory``, ``time``, ``partition`` and ``queue`` -- an
+unrecognized keyword argument to ``@cluster`` is accepted but never written
+into the script. If you need ``--nodes``, ``--ntasks-per-node``,
+``--account`` or similar, put the equivalent in
+``pre_execution_commands`` or your cluster's own scheduler defaults.
+
+Configuration File Precedence
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Settings resolve in this order, highest priority first: keyword arguments
+to ``@cluster(...)`` at call time, then ``configure(...)``/
+``~/.clustrix/config.yml``, then the ``ClusterConfig`` dataclass defaults.
+``default_cores``, ``default_memory``, ``default_time`` and
+``default_partition`` fill in anything the decorator omits -- a decorator
+with no arguments at all still needs *some* resolved cores/memory/time, and
+these are where they come from.
+
+When Things Fail
+~~~~~~~~~~~~~~~~~
+
+- **Unknown host key**: refused before any of the above happens; see
+  :doc:`../ssh_setup`.
+- **Editable/unreproducible local package used by the function**: refused
+  at step 1, before any SSH connection is made, naming the package.
+- **``ModuleNotFoundError`` on the worker**: a package your function reaches
+  by *reference* (e.g. ``import mypkg; mypkg.helpers.clean(x)``) that
+  clustrix's dependency walk did not detect. Vendor the code into your
+  project or list it explicitly.
+- **Job sits in the queue past a reasonable time**: check with
+  ``squeue -u $USER`` / ``sinfo -p <partition>`` directly -- clustrix is
+  only polling, not scheduling.
+- **Job runs but the result never comes back**: check
+  ``{remote_work_dir}/job_.../slurm-<jobid>.out`` and ``.err`` on the
+  cluster (left behind unless ``cleanup_on_success`` removed them), and
+  look for ``result.pkl.hmac``/``error.pkl.hmac`` next to the payload -- a
+  missing signature file usually means the job died before reaching the
+  signing step, and the ``.err`` file has the traceback.
+- **Result refused locally with a signature error**: this means
+  ``result.pkl`` didn't match the key clustrix generated for that job --
+  treat it as "cannot trust this file," not as a bug to route around.
+
 Configuration Options
 ---------------------
 

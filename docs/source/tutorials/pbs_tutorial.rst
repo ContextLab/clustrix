@@ -5,10 +5,18 @@ This tutorial demonstrates how to use Clustrix with PBS (Portable Batch System) 
 
 .. warning::
 
-   The PBS backend is implemented but has not been verified against real
-   hardware. Unlike SLURM and SSH, it does not use the two-venv environment
-   setup path. Treat this tutorial as a description of the intended interface,
-   not as a record of something that has been run.
+   The PBS backend is implemented but has **not been verified against real
+   PBS hardware.** It shares its job-directory staging, environment build
+   and job-execution code with the SLURM and SSH backends (which *are*
+   verified) through ``clustrix/utils.py::job_execution_lines`` -- it is not
+   a separate, untested code path bolted on beside them -- but nobody has
+   run it against a live PBS/Torque scheduler. An older version of this
+   backend generated a script that invoked a file
+   (``execute_function.py``) nothing in clustrix ever created and never
+   built a venv for it to run in; both defects are fixed in the current
+   code, but "fixed in code" is not the same claim as "confirmed against a
+   scheduler." Treat this tutorial as a description of the intended
+   interface, not as a record of something that has been run to completion.
 
 Prerequisites
 -------------
@@ -16,6 +24,79 @@ Prerequisites
 1. Access to a PBS/Torque cluster
 2. SSH key setup (see :doc:`../ssh_setup`)
 3. Clustrix installed with: ``pip install clustrix``
+
+What Happens When You Call a ``@cluster``-Decorated Function
+--------------------------------------------------------------
+
+The submission pipeline is identical to SLURM's (see
+:doc:`slurm_tutorial`'s "What Happens" section for the full ten-step
+sequence: serialize, connect with host-key verification, stage a ``0700``
+job directory with a random result-signing key, upload
+``function_data.pkl``, build a two-venv environment, generate and upload
+the job script, submit, poll, verify-then-deserialize the signed result,
+clean up). The PBS-specific differences are:
+
+- **Submission command**: ``qsub job.pbs`` instead of ``sbatch job.sh``.
+  The job ID is whatever ``qsub`` prints to stdout, taken verbatim (PBS
+  implementations vary in exact format, unlike SLURM's fixed
+  ``Submitted batch job <id>``).
+- **Job script directives**: ``#PBS`` lines instead of ``#SBATCH``, using
+  PBS's own resource syntax (below).
+- **Queue vs. partition**: PBS uses ``queue=`` where SLURM uses
+  ``partition=``.
+
+What the Generated Job Script Looks Like
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For ``@cluster(cores=8, memory="16GB", time="02:00:00", queue="batch")``,
+``job.pbs`` looks like this. As with SLURM, ``module_loads``,
+``environment_variables`` and ``pre_execution_commands`` are inserted
+between the ``#PBS`` block and execution, and the memory string is
+normalized to what PBS's ``-l mem=`` accepts -- ``"16GB"`` becomes
+``mem=16gb`` (lowercase, unlike SLURM's ``G``):
+
+.. code-block:: bash
+
+   #!/bin/bash
+   #PBS -N clustrix
+   #PBS -o /home/you/clustrix/job_.../job.out
+   #PBS -e /home/you/clustrix/job_.../job.err
+   #PBS -l nodes=1:ppn=8
+   #PBS -l mem=16gb
+   #PBS -l walltime=02:00:00
+   #PBS -q batch
+   module load python/3.11          # from module_loads, if set
+   export CLUSTRIX_RESULT_KEY=$(cat .../.clustrix_result_key 2>/dev/null || true)
+   cd /home/you/clustrix/job_...
+   source venv/bin/activate         # or the two-venv activation sequence
+   python -c "
+   # same execution/signing body as SLURM: unpickle function_data.pkl
+   # with dill, run the function, write signed result.pkl or error.pkl
+   "
+
+As with SLURM, there is no pass-through for arbitrary ``qsub``/PBS
+directives beyond ``cores``, ``memory``, ``time`` and ``queue`` -- use
+``pre_execution_commands`` for anything else your site's PBS install
+requires.
+
+When Things Fail
+~~~~~~~~~~~~~~~~~
+
+Because this backend is unverified against real hardware, treat any
+failure here with extra suspicion -- it may be exposing a real defect in
+the PBS-specific parsing (job ID extraction, ``-l`` resource syntax) that
+SLURM's test coverage never exercised. In addition to the checks in the
+SLURM tutorial:
+
+- **Job ID parsing looks wrong**: ``submit_pbs_job`` takes ``qsub``'s
+  entire stripped stdout as the job ID, with no format validation. If your
+  site's PBS wraps that output (a banner line, a trailing newline with
+  extra text), status polling will look up the wrong ID. Check
+  ``qstat -f <job_id>`` directly against what clustrix printed.
+- **Resource string rejected by PBS**: confirm your site's PBS accepts
+  ``nodes=1:ppn=N`` and ``mem=<int>gb`` -- some Torque/PBS Pro
+  configurations expect ``select=1:ncpus=N:mem=<int>gb`` instead, which
+  clustrix does not currently generate.
 
 Configuration Options
 ---------------------
