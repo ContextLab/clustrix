@@ -428,7 +428,6 @@ def suggest_replacement(mock_info):
     """Suggest replacement for mock usage."""
     suggestions = {
         'paramiko.SSHClient': 'Use test SSH server on localhost:2222',
-        'kubernetes.client': 'Use Kind cluster or Docker Desktop Kubernetes',
         'builtins.open': 'Use tempfile.NamedTemporaryFile',
         'cloudpickle.dumps': 'Test actual serialization/deserialization',
         'subprocess.run': 'Execute real commands in Docker container'
@@ -454,7 +453,6 @@ def validate_test_infrastructure():
     """Validate that test infrastructure is ready."""
     checks = {
         'Docker': check_docker,
-        'Kubernetes': check_kubernetes,
         'SSH Server': check_ssh,
         'MinIO': check_minio,
         'PostgreSQL': check_postgres,
@@ -474,9 +472,6 @@ def validate_test_infrastructure():
 
 def check_docker():
     subprocess.run(['docker', 'ps'], check=True, capture_output=True)
-
-def check_kubernetes():
-    subprocess.run(['kubectl', 'cluster-info'], check=True, capture_output=True)
 
 def check_ssh():
     import socket

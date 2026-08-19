@@ -804,7 +804,6 @@ pytest tests/comprehensive/test_failure_recovery_real.py
 
 Clustrix provides Docker-based local test infrastructure for cost-free testing:
 
-- **Kubernetes**: Kind (Kubernetes in Docker) cluster
 - **SSH Server**: OpenSSH test server on port 2222
 - **SLURM Mock**: Simulated SLURM scheduler
 - **MinIO**: S3-compatible object storage
