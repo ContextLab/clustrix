@@ -147,28 +147,42 @@ class TestClusterDecorator:
         assert parallel_func._cluster_config["parallel"] is True
         assert sequential_func._cluster_config["parallel"] is False
 
-    @patch("clustrix.decorator.ClusterExecutor")
-    def test_kwargs_handling(self, mock_executor_class):
-        """Test handling of keyword arguments."""
-        configure(cluster_host="test.cluster.com")
+    def test_kwargs_handling(self):
+        """Keyword arguments must reach the function that runs on the cluster.
 
-        mock_executor = Mock()
-        mock_executor_class.return_value = mock_executor
-        mock_executor.submit_job.return_value = "job123"
-        mock_executor.wait_for_result.return_value = {"result": 123}
+        The previous version of this test asserted that a mocked executor's
+        ``submit_job`` had been called once and that the decorator returned
+        whatever the mock's ``wait_for_result`` was told to return. Neither
+        statement mentions the kwargs, so deleting the kwargs entirely from
+        ``decorator._execute_single`` -- ``serialize_function(func, args, {})``
+        -- left all 38 tests in this file green. It asserted that the call
+        completed, which was never in doubt.
 
-        @cluster(auto_gpu_parallel=False)
-        def test_func(a, b=10, c=20):
-            return a + b + c
+        This version asserts on the values the function actually received.
+        Nothing is mocked: ``cluster_type="local"`` is a real backend, so the
+        decorator builds a real ``ClusterExecutor``, really serialises the
+        function through ``serialize_function``, and really runs it. A
+        ``cluster_host`` is set because that is what makes
+        ``_choose_execution_mode`` take the remote branch -- the branch where
+        the kwargs pass-through lives.
+        """
+        configure(
+            cluster_type="local",
+            cluster_host="localhost",
+            auto_parallel=False,
+        )
 
-        result = test_func(5, c=30)
+        @cluster(cores=1)
+        def records_what_it_received(a, b=10, c=20):
+            return {"a": a, "b": b, "c": c, "total": a + b + c}
 
-        # Verify the function executed and returned the expected result
-        assert result == {"result": 123}
+        result = records_what_it_received(5, c=30)
 
-        # Verify submit_job was called
-        mock_executor.submit_job.assert_called_once()
-        mock_executor.wait_for_result.assert_called_once_with("job123")
+        assert result == {"a": 5, "b": 10, "c": 30, "total": 45}, (
+            "the function ran on the cluster with the wrong arguments. "
+            f"Got {result!r}. A 'c' of 20 means the keyword argument was "
+            "dropped somewhere between the decorator and serialisation."
+        )
 
     def test_decorator_stacking(self):
         """Test that decorator can be combined with other decorators."""

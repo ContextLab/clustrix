@@ -211,9 +211,26 @@ def detect_existing_ssh_key(
 
 
 def generate_ssh_key_pair(
-    key_name: str, key_type: str = "ed25519", key_dir: Path = Path.home() / ".ssh"
+    key_name: str, key_type: str = "ed25519", key_dir: Optional[Path] = None
 ) -> Tuple[str, str]:
-    """Generate new SSH key pair with proper permissions."""
+    """Generate new SSH key pair with proper permissions.
+
+    ``key_dir`` defaults to ``~/.ssh``, resolved when the call is made rather
+    than when this module is imported. It used to be a default *argument*,
+    ``key_dir: Path = Path.home() / ".ssh"``, which Python evaluates exactly
+    once at import and then reuses forever -- so any later change to ``$HOME``
+    was ignored and the key landed in the home directory that happened to be
+    in force when ``clustrix`` was first imported.
+
+    That was latent only because the sole caller passes ``key_dir``
+    explicitly. It is the same defect that wrote 1,191 junk entries into a
+    developer's real ``~/.ssh/known_hosts``: a home-directory path frozen
+    somewhere it could not follow a redirected ``$HOME``. The test suite
+    redirects ``$HOME`` per test *after* import, so the frozen default
+    pointed at the developer's real ``~/.ssh`` for the entire run.
+    """
+    if key_dir is None:
+        key_dir = Path.home() / ".ssh"
     key_path = str(key_dir / key_name)
     return generate_ssh_key(key_path, key_type)
 
