@@ -9,8 +9,10 @@ module gets deleted, a function gets renamed, and nobody notices until a
 user copy-pastes a broken example. Two documented bugs motivated this
 script directly:
 
-- ``MIGRATION.md`` claimed ``from clustrix import ClusterConfig`` works.
-  It doesn't; ``ClusterConfig`` is not re-exported from ``clustrix/__init__.py``.
+- ``MIGRATION.md`` asserted that ``ClusterConfig`` is *not* re-exported from
+  ``clustrix/__init__.py``. It is, and always was in this checkout. That file
+  documented a repository reorganization rather than the package, and has been
+  deleted along with the rest of the version-to-version prose.
 - ``docs/PRICING_API_REFERENCE.md`` and ``docs/PRICING_USER_GUIDE.md``
   documented ``clustrix.pricing_clients.performance_monitor`` and
   ``.resilience``; the whole pricing-client tree has since been deleted
@@ -113,6 +115,10 @@ class TargetFile:
     section_start: Optional[str] = None  # restrict extraction to a section
     section_end: Optional[str] = None
     module: Optional[str] = None  # importable name, for kind == "py"
+    # Historical records are read, never run. A session note from a year ago
+    # can contain a live cloud call; --include-notes exists to *inventory*
+    # broken examples, not to execute whatever they happened to contain.
+    never_execute: bool = False
 
 
 @dataclass
@@ -442,6 +448,7 @@ def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
 
 
 def check_file(target: TargetFile) -> List[Result]:
+    never_execute = target.never_execute
     blocks = extract_blocks(target)
     results: List[Result] = []
 
@@ -473,7 +480,7 @@ def check_file(target: TargetFile) -> List[Result]:
                     if block.content.strip()
                     else ""
                 )
-                if CLUSTER_REQUIRED_RE.match(first_line):
+                if never_execute or CLUSTER_REQUIRED_RE.match(first_line):
                     results.append(verify_static(block))
                 else:
                     results.append(run_block(block, make_namespace(), scratch_dir))
@@ -503,7 +510,7 @@ def discover_targets() -> List[TargetFile]:
     Derive the list; do not curate it.
     """
     targets: List[TargetFile] = []
-    for name in ("README.md", "MIGRATION.md"):
+    for name in ("README.md",):
         if (REPO_ROOT / name).exists():
             targets.append(TargetFile(REPO_ROOT / name, "md"))
 
@@ -519,12 +526,18 @@ def discover_targets() -> List[TargetFile]:
     # inventoried in the session notes instead. Run with --include-notes to
     # see them.
     docs_root = REPO_ROOT / "docs"
-    scan_roots = [docs_root / "source"]
-    if "--include-notes" in sys.argv:
-        scan_roots = [docs_root]
+    targets.extend(_discover_under(docs_root / "source"))
 
-    for scan_root in scan_roots:
-        targets.extend(_discover_under(scan_root))
+    if "--include-notes" in sys.argv:
+        # Inventoried, never executed. These files record what someone
+        # believed at the time; one of them makes a live AWS API call, and
+        # running a year-old example to find out whether it still parses is
+        # not a trade worth making.
+        for note in _discover_under(docs_root):
+            if note.path.is_relative_to(docs_root / "source"):
+                continue
+            note.never_execute = True
+            targets.append(note)
 
     targets.extend(_discover_documented_modules(docs_root / "source"))
     return targets
@@ -618,6 +631,7 @@ def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
             "section_start": target.section_start,
             "section_end": target.section_end,
             "module": target.module,
+            "never_execute": target.never_execute,
         }
     )
     try:
@@ -676,6 +690,7 @@ def _check_one_entry(payload: str) -> int:
         section_start=spec["section_start"],
         section_end=spec["section_end"],
         module=spec.get("module"),
+        never_execute=spec.get("never_execute", False),
     )
     results = check_file(target)
     print(
