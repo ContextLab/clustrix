@@ -61,10 +61,6 @@ WIDGET_MANAGED_FIELDS = frozenset(
         "password_env_var",
         "use_env_password",
         "remote_work_dir",
-        "k8s_namespace",
-        "k8s_image",
-        "k8s_service_account",
-        "k8s_pull_policy",
         "hf_namespace",
         "hf_flavor",
         "hf_token",
@@ -1112,61 +1108,6 @@ class ModernClustrixWidget:
         )
         self.widgets["hf_section"].add_class("clustrix-section")
 
-        # Kubernetes configuration. Like HuggingFace Jobs this reaches its
-        # compute over an API rather than SSH, so it needs a namespace and an
-        # image rather than a host and a key file. None of these had fields
-        # before, so only the shipped defaults were ever usable.
-        self.widgets["k8s_namespace"] = widgets.Text(
-            value="default",
-            placeholder="default",
-            layout=widgets.Layout(width="100%", height="26px"),
-        )
-        self.widgets["k8s_image"] = widgets.Text(
-            value="python:3.11-slim",
-            placeholder="python:3.12-slim",
-            layout=widgets.Layout(width="100%", height="26px"),
-        )
-        self.widgets["k8s_service_account"] = widgets.Text(
-            value="",
-            placeholder="(cluster default)",
-            layout=widgets.Layout(width="100%", height="26px"),
-        )
-        self.widgets["k8s_pull_policy"] = widgets.Dropdown(
-            options=["IfNotPresent", "Always", "Never"],
-            value="IfNotPresent",
-            layout=widgets.Layout(width="100%", height="26px"),
-        )
-
-        k8s_row1 = widgets.HBox(
-            [
-                self._field("Namespace", self.widgets["k8s_namespace"], flex="1 1 0"),
-                self._field("Image", self.widgets["k8s_image"], flex="2 1 0"),
-            ],
-            layout=widgets.Layout(width="100%", align_items="flex-end"),
-        )
-        k8s_row1.add_class("clustrix-row")
-
-        k8s_row2 = widgets.HBox(
-            [
-                self._field(
-                    "Service account",
-                    self.widgets["k8s_service_account"],
-                    flex="2 1 0",
-                ),
-                self._field(
-                    "Image pull policy", self.widgets["k8s_pull_policy"], flex="1 1 0"
-                ),
-            ],
-            layout=widgets.Layout(width="100%", align_items="flex-end"),
-        )
-        k8s_row2.add_class("clustrix-row")
-
-        self.widgets["k8s_section"] = widgets.VBox(
-            [self._section_heading("Kubernetes"), k8s_row1, k8s_row2],
-            layout=widgets.Layout(display="none", width="100%"),
-        )
-        self.widgets["k8s_section"].add_class("clustrix-section")
-
         self.widgets["remote_section"] = widgets.VBox(
             [
                 self._section_heading("Connection"),
@@ -1393,13 +1334,10 @@ class ModernClustrixWidget:
         # _create_remote_section; rebuilding them here used to splice in a
         # second "Advanced settings" button beside the one in the actions row
         # and drop every field after the third.
-        remote = cluster_type in ["ssh", "slurm", "pbs", "sge"]
+        remote = cluster_type in ["ssh", "slurm"]
         self.widgets["remote_section"].layout.display = "block" if remote else "none"
         self.widgets["hf_section"].layout.display = (
             "block" if cluster_type == "huggingface" else "none"
-        )
-        self.widgets["k8s_section"].layout.display = (
-            "block" if cluster_type == "kubernetes" else "none"
         )
 
     def get_widget(self) -> "widgets.Widget":
@@ -1416,7 +1354,6 @@ class ModernClustrixWidget:
                 self.widgets["grid_row3"],  # Resources
                 self.widgets["remote_section"],  # Connection
                 self.widgets["hf_section"],  # HuggingFace Jobs
-                self.widgets["k8s_section"],  # Kubernetes
                 self.widgets["grid_row4"],  # Actions
                 self.widgets["advanced_section"],
                 self._output_panel(),
@@ -1822,7 +1759,7 @@ class ModernClustrixWidget:
                     print(f"   User: {getattr(config, 'username', 'N/A')}")
 
                 # For remote clusters, test authentication
-                if config.cluster_type in ["ssh", "slurm", "pbs", "sge"]:
+                if config.cluster_type in ["ssh", "slurm"]:
                     print("   Testing authentication...")
 
                     # Initialize auth manager with config
@@ -2151,7 +2088,7 @@ class ModernClustrixWidget:
                 "(or D-HH:MM:SS)"
             )
 
-        if cluster_type in ("ssh", "slurm", "pbs", "sge"):
+        if cluster_type in ("ssh", "slurm"):
             if not str(self.widgets["host"].value).strip():
                 problems.append(f"A host is required for a {cluster_type} cluster")
             if not str(self.widgets["username"].value).strip():
@@ -2175,7 +2112,7 @@ class ModernClustrixWidget:
     #: _choose_execution_mode routes on cluster_host, so a leftover host would
     #: send a "local" job to a cluster.
     BACKEND_ONLY_FIELDS = {
-        ("ssh", "slurm", "pbs", "sge"): (
+        ("ssh", "slurm"): (
             "cluster_host",
             "cluster_port",
             "username",
@@ -2184,12 +2121,6 @@ class ModernClustrixWidget:
             "password_env_var",
             "use_env_password",
             "remote_work_dir",
-        ),
-        ("kubernetes",): (
-            "k8s_namespace",
-            "k8s_image",
-            "k8s_service_account",
-            "k8s_pull_policy",
         ),
         ("huggingface",): (
             "hf_namespace",
@@ -2267,11 +2198,6 @@ class ModernClustrixWidget:
                 self.widgets["home_dir"].value.strip()
                 or ClusterConfig().remote_work_dir
             ),
-            # Kubernetes
-            "k8s_namespace": self.widgets["k8s_namespace"].value or "default",
-            "k8s_image": self.widgets["k8s_image"].value or "python:3.11-slim",
-            "k8s_service_account": self.widgets["k8s_service_account"].value or None,
-            "k8s_pull_policy": self.widgets["k8s_pull_policy"].value,
             # HuggingFace
             "hf_namespace": self.widgets["hf_namespace"].value or None,
             "hf_flavor": self.widgets["hf_flavor"].value,
@@ -2299,8 +2225,8 @@ class ModernClustrixWidget:
 
         This must mirror `_get_config_from_widgets` field for field, including
         resetting a control to its default when the config does not set it.
-        It used to restore only a subset -- no HuggingFace or Kubernetes
-        settings, no remote work directory, no password -- and to leave
+        It used to restore only a subset -- no HuggingFace settings, no
+        remote work directory, no password -- and to leave
         environment variables and modules untouched when the incoming config
         had none. Combined with saving the visible state on the way out, that
         meant clicking through the profile dropdown overwrote each profile with
@@ -2329,12 +2255,6 @@ class ModernClustrixWidget:
         self.widgets["ssh_key_file"].value = config.key_file or ""
         self.widgets["local_env_var"].value = config.password_env_var or ""
         self.widgets["home_dir"].value = config.remote_work_dir or ""
-
-        # Kubernetes
-        self.widgets["k8s_namespace"].value = config.k8s_namespace or "default"
-        self.widgets["k8s_image"].value = config.k8s_image or "python:3.11-slim"
-        self.widgets["k8s_service_account"].value = config.k8s_service_account or ""
-        self.widgets["k8s_pull_policy"].value = config.k8s_pull_policy or "IfNotPresent"
 
         # HuggingFace
         self.widgets["hf_namespace"].value = config.hf_namespace or ""
