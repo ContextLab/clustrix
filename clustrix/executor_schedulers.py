@@ -3,9 +3,9 @@
 This module handles job submission, monitoring, and status checking for SLURM
 and for direct execution over SSH.
 
-PBS/Torque and SGE submission used to live here. Neither was ever verified
-against a real scheduler, so both were removed in v0.2.0 (PBS: issue #140,
-SGE: issue #141).
+Clustrix ships no PBS/Torque or SGE submission. Neither has been verified
+against a real scheduler of that kind, so neither is offered. Support for
+them is tracked in issues #140 and #141.
 """
 
 import os
