@@ -152,15 +152,30 @@ jobs:
         
     - name: Install system dependencies
       run: |
-        # Bounded: an unresponsive Ubuntu mirror makes a bare `apt-get update`
-        # hang until the job's 10-minute cap, which it did on two consecutive
-        # runs while fetching noble-security InRelease. Each fetch now gives up
-        # after 15s and retries three times, so a dead mirror costs seconds.
-        sudo apt-get update \
-          -o Acquire::Retries=3 \
-          -o Acquire::http::Timeout=15 \
-          -o Acquire::https::Timeout=15
-        sudo apt-get install -y --no-install-recommends pandoc
+        # pandoc is required: nbsphinx renders 30 notebook pages with it, so
+        # dropping it would silently lose them from the built docs.
+        #
+        # The Acquire::*::Timeout options below are not sufficient on their
+        # own -- this job burned its whole 10-minute cap on
+        # "Get:5 noble-security InRelease" despite them, twice. So try the
+        # install against the runner image's existing package lists first,
+        # and only refresh them if that fails, under a hard wall-clock bound
+        # that apt cannot ignore.
+        #
+        # `|| ...` here does not hide a failure: if pandoc is still missing
+        # afterwards the verification below exits non-zero and the job fails.
+        sudo apt-get install -y --no-install-recommends pandoc || {
+          echo "pandoc not in the cached lists; refreshing (bounded)"
+          sudo timeout 120 apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=15 \
+            -o Acquire::https::Timeout=15 || \
+            echo "apt-get update did not finish in 120s; trying the install anyway"
+          sudo apt-get install -y --no-install-recommends pandoc
+        }
+        # Fail loudly and immediately if pandoc is still absent, rather than
+        # letting sphinx produce notebook-less documentation that looks fine.
+        pandoc --version | head -1
         
     - name: Install dependencies
       run: |
