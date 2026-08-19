@@ -1,4 +1,5 @@
 import ast
+import collections
 import hashlib
 import hmac
 import logging
@@ -875,6 +876,17 @@ def _unreproducible_reason(
     return None
 
 
+#: Scanning installed metadata costs a few hundred milliseconds, and a single
+#: submission asks for it several times (once for the requirement set, once per
+#: serialized payload to check for uninstallable packages). Keyed on sys.path,
+#: because sys.path is what decides which distributions are visible: any change
+#: that could change the answer changes the key.
+_DISTRIBUTION_CACHE: (
+    "collections.OrderedDict[Tuple[str, ...], Dict[str, Dict[str, Any]]]"
+) = collections.OrderedDict()
+_DISTRIBUTION_CACHE_SIZE = 8
+
+
 def _distribution_records() -> Dict[str, Dict[str, Any]]:
     """Every distribution importable from this interpreter, keyed canonically.
 
@@ -897,6 +909,11 @@ def _distribution_records() -> Dict[str, Dict[str, Any]]:
         ``reason`` is None for anything a plain ``pip install name==version``
         recreates.
     """
+    cache_key = tuple(sys.path)
+    cached = _DISTRIBUTION_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+
     records: Dict[str, Dict[str, Any]] = {}
     for dist in importlib_metadata.distributions():
         try:
@@ -929,6 +946,10 @@ def _distribution_records() -> Dict[str, Dict[str, Any]]:
         if previous is not None and previous["reason"] and not record["reason"]:
             continue
         records[canonical] = record
+
+    _DISTRIBUTION_CACHE[cache_key] = records
+    while len(_DISTRIBUTION_CACHE) > _DISTRIBUTION_CACHE_SIZE:
+        _DISTRIBUTION_CACHE.popitem(last=False)
     return records
 
 

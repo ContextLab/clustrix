@@ -44,7 +44,8 @@ def takes_local_instance(widget):
 def _round_trip(func, args):
     """Deserialize and call in an interpreter that cannot import the package."""
     data = serialize_function(func, args, {})
-    program = textwrap.dedent("""
+    program = textwrap.dedent(
+        """
         import sys, base64
         import cloudpickle, dill
 
@@ -57,7 +58,8 @@ def _round_trip(func, args):
         func = load(base64.b64decode(sys.argv[1]))
         args = load(base64.b64decode(sys.argv[2]))
         print(repr(func(*args)))
-        """)
+        """
+    )
     import base64
 
     result = subprocess.run(
@@ -138,6 +140,12 @@ class TestFailuresAreLoudNotSilent:
 
         (A lock the function does not touch is fine: cloudpickle embeds only
         what is actually referenced.)
+
+        The message has to name the object that actually failed and where it
+        is. `LOCK` here is bound in the enclosing scope, so it reaches
+        `guarded` through a closure cell; the message must say so rather than
+        blame module level and advise moving it into a function, which is
+        where it already is.
         """
         package = tmp_path / "lockpkg"
         package.mkdir()
@@ -150,8 +158,13 @@ class TestFailuresAreLoudNotSilent:
             with LOCK:
                 return x * 2
 
-        with pytest.raises(RuntimeError, match="Cannot send your local module"):
+        with pytest.raises(RuntimeError) as excinfo:
             serialize_function(guarded, (1,), {})
+
+        message = str(excinfo.value)
+        assert "closure variable 'LOCK'" in message, message
+        assert "guarded()" in message, message
+        assert "_thread.lock" in message, message
 
     def test_an_unreferenced_unpicklable_object_is_not_a_problem(
         self, tmp_path, monkeypatch
