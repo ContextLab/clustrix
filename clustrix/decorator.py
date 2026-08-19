@@ -1,6 +1,7 @@
 import functools
 import inspect
 import logging
+import threading
 from typing import Any, Callable, Optional, Dict, List
 
 from .config import get_config
@@ -216,7 +217,7 @@ def cluster(
 
                 if use_async:
                     # Async local execution
-                    async_executor = AsyncClusterExecutor(config)
+                    async_executor = _shared_async_executor(config)
                     return async_executor.submit_job_async(
                         func, args, func_kwargs, job_config
                     )
@@ -234,7 +235,7 @@ def cluster(
                 )
                 if use_async:
                     # Async execution
-                    async_executor = AsyncClusterExecutor(config)
+                    async_executor = _shared_async_executor(config)
 
                     # NEW: Ensure Kubernetes cluster is ready if auto-provisioning (for async)
                     if config.cluster_type == "kubernetes" and getattr(
@@ -309,6 +310,27 @@ def cluster(
     else:
         # Called as @cluster (without parentheses)
         return decorator(_func)
+
+
+#: One async executor per process, not one per submission.
+#:
+#: Each SimpleAsyncClusterExecutor owns a four-worker ThreadPoolExecutor and
+#: nothing ever called its shutdown(), so building one per @cluster call leaked
+#: four threads every time an async job was submitted. The pool cannot be closed
+#: at the end of the call -- the submitted work outlives it, which is the point
+#: of async submission -- so the lifetime is the process instead, and one pool
+#: is shared. Threads are reused across submissions rather than accumulating.
+_ASYNC_EXECUTOR_LOCK = threading.Lock()
+_ASYNC_EXECUTOR: Optional[Any] = None
+
+
+def _shared_async_executor(config):
+    """Return the process-wide async executor, creating it on first use."""
+    global _ASYNC_EXECUTOR
+    with _ASYNC_EXECUTOR_LOCK:
+        if _ASYNC_EXECUTOR is None:
+            _ASYNC_EXECUTOR = AsyncClusterExecutor(config)
+        return _ASYNC_EXECUTOR
 
 
 def _execute_single(

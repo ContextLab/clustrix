@@ -8,6 +8,7 @@ from dataclasses import fields as dataclass_fields
 from unittest.mock import Mock, patch
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
+import clustrix.decorator as decorator_module
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig, configure
 
 _INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
@@ -256,3 +257,9 @@ def reset_config():
     # during an earlier test hands a stale path to every test after it. Any new
     # singleton of this shape belongs in this list.
     credential_manager_module._credential_manager = None
+    # The decorator caches one async executor per process so that async
+    # submissions reuse a thread pool instead of building one per call.
+    # Across tests that cache is shared state like any other: leaving it
+    # set means a later test gets the executor an earlier one created,
+    # including one built from a patched class.
+    decorator_module._ASYNC_EXECUTOR = None
