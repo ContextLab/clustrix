@@ -70,7 +70,8 @@ setup(
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
-            "black>=26.3.1",  # earlier releases have an arbitrary-file-write advisory
+            "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
+            # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
             "flake8>=3.8",
             "mypy>=0.812",
         ],
@@ -115,7 +116,8 @@ setup(
             # Development dependencies
             "pytest>=6.0",
             "pytest-cov>=2.0",
-            "black>=26.3.1",  # earlier releases have an arbitrary-file-write advisory
+            "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
+            # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
             "flake8>=3.8",
             "mypy>=0.812",
             # Documentation dependencies
