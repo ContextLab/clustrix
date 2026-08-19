@@ -47,7 +47,10 @@ import ast
 import contextlib
 import importlib
 import io
+import json
 import os
+import signal
+import subprocess
 import re
 import sys
 import tempfile
@@ -180,6 +183,19 @@ def extract_blocks(target: TargetFile) -> List[CodeBlock]:
 # ---------------------------------------------------------------------------
 
 
+def _is_ours(module_name: str) -> bool:
+    """True for modules this project is responsible for keeping importable.
+
+    The point of this check is to catch OUR api drifting away from the docs --
+    a renamed module, a deleted function. It cannot also demand that every
+    third-party library an example mentions be installed on the machine running
+    the check; a machine-learning example that imports tensorflow is not broken
+    documentation just because tensorflow is absent here. Those are reported as
+    unchecked rather than silently passed, so the gap is visible.
+    """
+    return module_name == "clustrix" or module_name.startswith("clustrix.")
+
+
 def verify_static(block: CodeBlock) -> Result:
     try:
         compile(block.content, f"{block.source_file}:{block.line_no}", "exec")
@@ -192,11 +208,17 @@ def verify_static(block: CodeBlock) -> Result:
         return Result(block, "cluster-required", False, f"SyntaxError: {e}")
 
     problems = []
+    skipped = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 try:
                     importlib.import_module(alias.name)
+                except ModuleNotFoundError:
+                    if _is_ours(alias.name):
+                        problems.append(f"import {alias.name}: module does not exist")
+                    else:
+                        skipped.append(alias.name)
                 except Exception as e:
                     problems.append(f"import {alias.name}: {e}")
         elif isinstance(node, ast.ImportFrom):
@@ -205,6 +227,14 @@ def verify_static(block: CodeBlock) -> Result:
             module_name = node.module or ""
             try:
                 mod = importlib.import_module(module_name)
+            except ModuleNotFoundError:
+                if _is_ours(module_name):
+                    problems.append(
+                        f"from {module_name} import ...: module does not exist"
+                    )
+                else:
+                    skipped.append(module_name)
+                continue
             except Exception as e:
                 problems.append(f"from {module_name} import ...: {e}")
                 continue
@@ -219,12 +249,33 @@ def verify_static(block: CodeBlock) -> Result:
 
     if problems:
         return Result(block, "cluster-required", False, "; ".join(problems))
-    return Result(block, "cluster-required", True, "syntax + imports OK (not executed)")
+    detail = "syntax + imports OK (not executed)"
+    if skipped:
+        detail += f"; not installed here, unchecked: {', '.join(sorted(set(skipped)))}"
+    return Result(block, "cluster-required", True, detail)
 
 
 # ---------------------------------------------------------------------------
 # Real execution
 # ---------------------------------------------------------------------------
+
+
+#: A documentation example is meant to demonstrate something, not to run a
+#: service. One in an operations guide started a monitoring loop and had to be
+#: killed from outside, which stopped the whole check. An example that cannot
+#: finish in this long is either not an example or needs marking.
+BLOCK_TIMEOUT_SECONDS = 30
+
+
+class BlockTimeout(Exception):
+    """Raised when a documentation example outruns BLOCK_TIMEOUT_SECONDS."""
+
+
+def _raise_block_timeout(signum, frame):  # pragma: no cover - signal handler
+    raise BlockTimeout(
+        f"example did not finish within {BLOCK_TIMEOUT_SECONDS}s; if it needs "
+        f"a cluster, a service or credentials, mark it # cluster-required"
+    )
 
 
 def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
@@ -239,6 +290,8 @@ def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
 
     old_cwd = os.getcwd()
     stdout_buf = io.StringIO()
+    previous_handler = signal.signal(signal.SIGALRM, _raise_block_timeout)
+    signal.alarm(BLOCK_TIMEOUT_SECONDS)
     try:
         os.chdir(scratch_dir)
         with contextlib.redirect_stdout(stdout_buf):
@@ -247,7 +300,19 @@ def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
             )
             exec(code, namespace)
         return Result(block, "runnable", True, "executed OK")
-    except Exception:
+    except SystemExit as e:
+        # A documented example that calls sys.exit() would otherwise terminate
+        # this checker mid-run, silently skipping every remaining file. That
+        # happened: the run stopped after two files with exit status 0, which
+        # reads exactly like success. An example is allowed to exit, but only
+        # cleanly -- a non-zero status means the example itself failed.
+        code_value = e.code if e.code is not None else 0
+        if code_value == 0:
+            return Result(block, "runnable", True, "executed OK (called sys.exit(0))")
+        return Result(
+            block, "runnable", False, f"example called sys.exit({code_value!r})"
+        )
+    except BaseException:
         tb = traceback.format_exc()
         return Result(
             block,
@@ -256,6 +321,8 @@ def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
             tb.strip().splitlines()[-1] if tb else "unknown error",
         )
     finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, previous_handler)
         os.chdir(old_cwd)
 
 
@@ -289,28 +356,181 @@ def check_file(target: TargetFile) -> List[Result]:
     return results
 
 
-def main() -> int:
-    targets = [
-        TargetFile(REPO_ROOT / "MIGRATION.md", "md"),
-        TargetFile(
-            REPO_ROOT / "docs" / "source" / "tutorials" / "usage_patterns.rst", "rst"
-        ),
-        TargetFile(
-            REPO_ROOT / "docs" / "source" / "tutorials" / "kubernetes_tutorial.rst",
-            "rst",
-            section_start="Auto-Provisioning a Cluster\n----",
-            section_end="Configuration Options\n---",
-        ),
-        TargetFile(REPO_ROOT / "docs" / "PRICING_API_REFERENCE.md", "md"),
-        TargetFile(REPO_ROOT / "docs" / "PRICING_USER_GUIDE.md", "md"),
+#: Pages that need a narrower window than "the whole file". Keyed by path
+#: relative to the repository root.
+_SECTION_BOUNDS = {
+    "docs/source/tutorials/kubernetes_tutorial.rst": (
+        "Auto-Provisioning a Cluster\n----",
+        "Configuration Options\n---",
+    ),
+}
+
+#: Directories under docs/ that are build output or vendored, not sources.
+_SKIP_DIRS = {"build", "_build", "_static", "_templates"}
+
+
+def discover_targets() -> List[TargetFile]:
+    """Every prose file in the repository that can carry a code example.
+
+    Discovered rather than hand-listed. A hand-maintained list is the reason
+    four newly written documentation pages went unchecked the moment they were
+    added: nothing failed, because nothing looked. The same mistake has shown
+    up three separate times in this project -- a reset fixture that named
+    eight of a hundred fields, a secret-field set that named some of the
+    credentials, a lint ignore list that had drifted from the shared config.
+    Derive the list; do not curate it.
+    """
+    targets: List[TargetFile] = []
+    for name in ("README.md", "MIGRATION.md"):
+        if (REPO_ROOT / name).exists():
+            targets.append(TargetFile(REPO_ROOT / name, "md"))
+
+    # Scope: everything Sphinx publishes, plus the user-facing files at the
+    # repository root. That is a principled boundary rather than a curated
+    # list -- if a reader can reach it from the built documentation, its
+    # examples are a promise and must hold.
+    #
+    # Deliberately NOT enforced: the development notes elsewhere under docs/
+    # (session logs, design analyses, issue write-ups). Those are historical
+    # records of what someone believed at the time, and several contain code
+    # that never ran. Rewriting them would falsify the record; they are
+    # inventoried in the session notes instead. Run with --include-notes to
+    # see them.
+    docs_root = REPO_ROOT / "docs"
+    scan_roots = [docs_root / "source"]
+    if "--include-notes" in sys.argv:
+        scan_roots = [docs_root]
+
+    for scan_root in scan_roots:
+        targets.extend(_discover_under(scan_root))
+    return targets
+
+
+def _discover_under(scan_root: Path) -> List[TargetFile]:
+    found: List[TargetFile] = []
+    if not scan_root.exists():
+        return found
+    for path in sorted(scan_root.rglob("*")):
+        if path.suffix not in (".rst", ".md"):
+            continue
+        if any(part in _SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        start, end = _SECTION_BOUNDS.get(rel, (None, None))
+        found.append(
+            TargetFile(
+                path,
+                "rst" if path.suffix == ".rst" else "md",
+                section_start=start,
+                section_end=end,
+            )
+        )
+    return found
+
+
+#: How long one documentation file gets to have all its blocks checked. The
+#: in-process SIGALRM below is a courtesy; this is the guarantee. paramiko
+#: retries through EINTR, so an unmarked example that dials a fictitious host
+#: ignored the alarm and hung the whole run indefinitely. A file is checked in
+#: its own process so that no example can do that again.
+FILE_TIMEOUT_SECONDS = 120
+
+
+def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
+    """Run one file's checks in a child process, so a hang cannot spread."""
+    payload = json.dumps(
+        {
+            "path": str(target.path),
+            "kind": target.kind,
+            "section_start": target.section_start,
+            "section_end": target.section_end,
+        }
+    )
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--check-one", payload],
+            capture_output=True,
+            text=True,
+            timeout=FILE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        blocks = extract_blocks(target)
+        return [
+            Result(
+                b,
+                "runnable",
+                False,
+                f"file exceeded {FILE_TIMEOUT_SECONDS}s; an example is most "
+                f"likely waiting on a network call and needs # cluster-required",
+            )
+            for b in blocks
+        ] or [
+            Result(
+                CodeBlock(target.path, 0, ""),
+                "runnable",
+                False,
+                f"file exceeded {FILE_TIMEOUT_SECONDS}s",
+            )
+        ]
+
+    blocks = extract_blocks(target)
+    try:
+        decoded = json.loads(completed.stdout.strip().splitlines()[-1])
+    except Exception:
+        return [
+            Result(
+                b,
+                "runnable",
+                False,
+                f"checker subprocess failed: {completed.stderr.strip()[-200:]}",
+            )
+            for b in blocks
+        ]
+    return [
+        Result(blocks[d["index"]], d["mode"], d["passed"], d["detail"])
+        for d in decoded
+        if d["index"] < len(blocks)
     ]
+
+
+def _check_one_entry(payload: str) -> int:
+    """Child-process entry point: check one file, print results as JSON."""
+    spec = json.loads(payload)
+    target = TargetFile(
+        Path(spec["path"]),
+        spec["kind"],
+        section_start=spec["section_start"],
+        section_end=spec["section_end"],
+    )
+    results = check_file(target)
+    print(
+        json.dumps(
+            [
+                {
+                    "index": i,
+                    "mode": r.mode,
+                    "passed": r.passed,
+                    "detail": r.detail,
+                }
+                for i, r in enumerate(results)
+            ]
+        )
+    )
+    return 0
+
+
+def main() -> int:
+    if len(sys.argv) > 2 and sys.argv[1] == "--check-one":
+        return _check_one_entry(sys.argv[2])
+
+    targets = discover_targets()
 
     all_results: List[Result] = []
     for target in targets:
         if not target.path.exists():
             print(f"SKIP (missing): {target.path}")
             continue
-        results = check_file(target)
+        results = _check_file_in_subprocess(target)
         all_results.extend(results)
         rel = target.path.relative_to(REPO_ROOT)
         print(f"\n=== {rel} ({len(results)} block(s)) ===")

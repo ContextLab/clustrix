@@ -39,6 +39,7 @@ pip install clustrix
 ### Basic Configuration
 
 ```python
+# cluster-required: needs a configured cluster to execute
 import clustrix
 
 # Configure your cluster
@@ -54,6 +55,7 @@ clustrix.configure(
 ### Using the Decorator
 
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import cluster
 
 @cluster(cores=8, memory='16GB', time='02:00:00')
@@ -219,6 +221,7 @@ clustrix ssh-setup --host cluster.university.edu --user your_username --alias my
 
 #### Method 3: Python API
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import setup_ssh_keys_with_fallback
 from clustrix.config import ClusterConfig
 
@@ -268,6 +271,7 @@ ssh your_netid@cluster.university.edu
 Clustrix provides unified filesystem operations that work seamlessly across local and remote clusters:
 
 ```python
+# cluster-required: needs a configured cluster to execute
 from clustrix import cluster_ls, cluster_find, cluster_stat, cluster_exists, cluster_glob
 from clustrix.config import ClusterConfig
 
@@ -355,6 +359,7 @@ hardcoded table and says so on stderr.
 ### Custom Resource Requirements
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(
     cores=16,
     memory='32GB',
@@ -370,6 +375,7 @@ def train_model(data, epochs=100):
 ### Manual Parallelization Control
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(parallel=False)  # Disable automatic loop parallelization
 def sequential_computation(data):
     result = []
@@ -388,6 +394,7 @@ def parallel_computation(data):
 ### Different Cluster Types
 
 ```python
+# cluster-required: needs a configured cluster to execute
 # SLURM cluster
 clustrix.configure(cluster_type='slurm', cluster_host='slurm.example.com')
 
@@ -412,6 +419,7 @@ needs no cluster reservation, no VPN and no institutional SSH credentials,
 which is why the integration tests use it.
 
 ```python
+# cluster-required: needs a configured cluster to execute
 import clustrix
 from clustrix import cluster
 
@@ -533,21 +541,29 @@ Serialization itself does **not** need the source. `clustrix.utils.serialize_fun
 - IPython environments
 - Any environment where `inspect.getsource()` can access the function source code
 
-```python
-# ⚠️ In the interactive REPL this still runs and returns the right answer,
-#    but no loop parallelization or GPU-parallel detection is applied,
-#    because those need the source.
+```pycon
+# In the interactive REPL this still runs and returns the right answer, but no
+# loop parallelization or GPU-parallel detection is applied, because those
+# need the source.
 >>> @cluster(cores=2)
 ... def my_function(x):
 ...     return x * 2
 >>> my_function(5)  # -> 10, executed remotely, analysed features skipped
+10
+```
 
-# ✅ In .py files and notebooks you get everything
+In a `.py` file or a notebook you get everything, including the source-based
+features:
+
+```python
+# cluster-required: needs a configured cluster to execute
+from clustrix import cluster
+
 @cluster(cores=2)
 def my_function(x):
     return x * 2
 
-result = my_function(5)  # Works correctly, with source-based features
+result = my_function(5)
 ```
 
 ## Supported Cluster Types
@@ -627,7 +643,10 @@ clustrix/
 
 Clustrix automatically handles dependency management by:
 
-- Capturing your current Python environment with `pip freeze`
+- Capturing your current Python environment by reading installed package
+  metadata directly (`importlib.metadata`), not by shelling out to `pip freeze`
+  -- the freeze output renders conda-built packages as unusable local paths,
+  which silently dropped a third of the environment
 - Creating virtual environments on cluster nodes
 - Installing exact package versions to match your local environment
 - Supporting conda environments for complex scientific software stacks
@@ -635,22 +654,29 @@ Clustrix automatically handles dependency management by:
 ## Error Handling and Monitoring
 
 ```python
+# cluster-required: needs a real submitted job to monitor
+import clustrix
 from clustrix import ClusterExecutor
 
-# Monitor job status
 executor = ClusterExecutor(clustrix.get_config())
-job_id = "12345"
+
+# job_id is what submit_job() returned for a job you actually submitted.
 status = executor.get_job_status(job_id)
 
-# Cancel jobs if needed
+# Cancel it if needed.
 executor.cancel_job(job_id)
 ```
+
+Results are HMAC-verified before they are deserialized, so a job whose result
+cannot be authenticated raises rather than returning a value -- see
+[the execution model](https://clustrix.readthedocs.io/en/latest/execution_model.html).
 
 ## Examples
 
 ### Machine Learning Training
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=8, memory='32GB', time='12:00:00', partition='gpu')
 def train_neural_network(training_data, model_config):
     import tensorflow as tf
@@ -672,6 +698,7 @@ weights = train_neural_network(my_data, {'epochs': 50})
 ### Scientific Computing
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=16, memory='64GB')
 def monte_carlo_simulation(n_samples=1000000):
     import numpy as np
@@ -694,6 +721,7 @@ pi_value = monte_carlo_simulation(10000000)
 ### Data Processing Pipeline
 
 ```python
+# cluster-required: needs a configured cluster to execute
 @cluster(cores=8, memory='16GB')
 def process_large_dataset(file_path, chunk_size=10000):
     import pandas as pd
