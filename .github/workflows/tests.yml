@@ -13,7 +13,15 @@ permissions:
 jobs:
   test:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
+    # 15 minutes was set when this job ran only tests/unit -- about 350 tests.
+    # It now runs the whole non-billable suite, ~1790 tests (issue #113).
+    # Linux finishes in ~10 minutes and macOS in ~14; Windows reached 96% and
+    # was cancelled mid-run, because process-spawning tests (the serialization
+    # round-trips each start a fresh interpreter) are markedly slower there.
+    # This is a bound on a genuinely longer job, not a relaxed check: every
+    # test still has to pass, and pytest's own --timeout=120 still bounds any
+    # individual test that wedges.
+    timeout-minutes: 30
     strategy:
       # Show every platform's failures in one run. With the default
       # fail-fast, one job failing cancelled the other six, so a
