@@ -560,7 +560,22 @@ def _discover_documented_modules(scan_root: Path) -> List[TargetFile]:
         source = inspect.getsourcefile(module)
         if source is None:  # pragma: no cover - namespace/extension modules
             continue
-        targets.append(TargetFile(Path(source), "py", module=name))
+        source_path = Path(source).resolve()
+        # The docs in this checkout are only meaningfully checked against the
+        # code in this checkout. If `clustrix` imports from somewhere else --
+        # a non-editable `pip install .` earlier in the same CI job puts it in
+        # site-packages -- then every docstring example read here belongs to a
+        # different copy, and a pass would mean nothing. Say so plainly
+        # instead of failing 20 frames down inside `Path.relative_to`.
+        if not source_path.is_relative_to(REPO_ROOT):
+            raise SystemExit(
+                f"documented module {name!r} imports from {source_path}, which "
+                f"is outside this checkout ({REPO_ROOT}). The examples here "
+                f"would be checked against a different copy of the code. "
+                f"Install the package editable (pip install -e .) or run this "
+                f"before a non-editable install."
+            )
+        targets.append(TargetFile(source_path, "py", module=name))
     return targets
 
 

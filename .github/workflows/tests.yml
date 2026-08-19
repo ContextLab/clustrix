@@ -103,6 +103,19 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+    # Must run BEFORE "Test installation": that step does a non-editable
+    # `pip install .`, after which `import clustrix` resolves to
+    # site-packages and this checker would be reading a different copy of
+    # the code than the docs in this checkout describe. Executes every code
+    # block the documentation publishes (#124) -- the script existed and
+    # passed, but nothing ran it, so the docs were correct only as long as
+    # someone remembered to check by hand. Run once on the primary target;
+    # the examples are not version-specific.
+    - name: Check documentation examples
+      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
+      run: |
+        python scripts/check_docs_examples.py
+
     - name: Test installation
       run: |
         pip install .
@@ -112,17 +125,6 @@ jobs:
       run: |
         clustrix --help
         clustrix config --help
-
-    # Executes every code block the documentation publishes (#124). The
-    # script existed and passed, but nothing ran it, so the docs were
-    # correct only for as long as someone remembered to check by hand --
-    # and stale examples have been this project's largest recurring defect
-    # class. Run once on the primary target; the examples are not
-    # version-specific.
-    - name: Check documentation examples
-      if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.11'
-      run: |
-        python scripts/check_docs_examples.py
 
   integration-test:
     runs-on: ubuntu-latest
