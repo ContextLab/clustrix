@@ -276,7 +276,7 @@ class TestAuthFallbacksReal:
 
         # Setup authentication
         auth_result = setup_auth_with_fallback(
-            config, real_key_setup, password="irrelevant-because-key-already-works"
+            config, real_key_setup, password="fake-unused-key-auth-succeeds-first"
         )
 
         # Should succeed with key file
@@ -509,7 +509,7 @@ class TestAuthFallbackIntegrationWorkflows:
             return dict(key_setup_result, key_path=config.key_file)
 
         auth_result = setup_auth_with_fallback(
-            config, real_key_setup, password="irrelevant-because-key-already-works"
+            config, real_key_setup, password="fake-unused-key-auth-succeeds-first"
         )
         assert auth_result["success"] is True
 

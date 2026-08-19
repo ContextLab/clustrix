@@ -62,8 +62,6 @@ class SchedulerManager:
         )
         return key
 
-    """Manages jobs for traditional HPC schedulers (SLURM, PBS, SGE)."""
-
     def __init__(self, config, connection_manager):
         """Initialize scheduler manager.
 
