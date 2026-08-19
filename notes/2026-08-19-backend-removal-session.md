@@ -204,3 +204,69 @@ The four failures themselves are explained by this branch's tip not importing
 (`clustrix.executor_kubernetes` is gone) — pytest could not collect, so no real
 SSH or cloud calls were made. That does not soften #147: a tree that cannot
 import is exactly the case the hook exists to stop, and it waved it through.
+
+---
+
+## COMPLETE — PR #149 opened
+
+The removal is done and the branch is green locally. `remove/unverified-backends`
+tip carries 44 commits; PR #149 opened against master.
+
+### Final gate, all six checks in one cycle on the final tree
+
+```
+pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+    1240 passed, 18 skipped, 0 failed
+black --check clustrix/ tests/ scripts/    223 files unchanged  (black 26.3.1)
+flake8 clustrix/ tests/ scripts/           clean
+mypy clustrix/                             no issues in 34 source files
+python scripts/check_docs_examples.py      143/143 passed (110 executed for real)
+python -m sphinx -b html docs/source -W    build succeeded, zero warnings
+```
+
+**Use the pinned black.** The project pins `black==26.3.1`; the black on PATH
+here is 25.11.0 and the two disagree. Seven files were formatted by the wrong
+one, so a local `black --check` passed where CI would have failed. There is a
+venv with the right version at
+`<scratchpad>/blackenv/bin/black` for this session; recreate with
+`python3.11 -m venv … && pip install black==26.3.1` if it is gone.
+
+`236 files changed, 2093 insertions(+), 63437 deletions(-)`.
+
+### Resolved since the checkpoint
+
+- **master `Tests` on `0e3490e`: success.** Master is green.
+- **The nightly "Real World Tests" failure was not a code defect.** There were
+  two similarly-named workflows; the failing one (`real_world_tests.yml`)
+  referenced `GCP_CREDENTIALS` and `AZURE_CREDENTIALS`, secrets that were never
+  created — the repo has `GCP_JSON` and no Azure secret. All 94 runs since
+  2025-08-24 failed; it never had a green run. Already deleted from master in
+  #139. No cost, no leak: auth failed before any provider call.
+
+### Filed during this pass
+
+- **#147** — pre-push hook could not block a push. **Fixed** in `9b90eaa`,
+  verified with a deliberately failing test (exit 1, real assertion text in the
+  body). One checklist item deliberately left open and explained in the issue
+  comment: an automatic test of the exit code would run the real-world suite.
+- **#148** — the real-world SSH tests bypass host-key verification.
+  `AutoAddPolicy` at 38 sites across 28 files, which `ssh_security.py` and
+  `CLAUDE.md` both forbid. **Not fixed**, deliberately: the one-line change is
+  not behaviour-preserving (the default is `reject`), so each file needs a real
+  cluster run to confirm the host is trusted. A blind sweep would trade a silent
+  security gap for a silently broken suite.
+
+### Evidence posted
+
+Comments with direct evidence on #140-#146 (each with its own `ClusterConfig`
+rejection message and a grep showing the backend is gone) and on #147.
+
+### Still open after this
+
+- PR #149 CI must go green (watching).
+- The Colab tutorial verification never produced findings — it was stopped at
+  the suspend. Its browser scratch is in the session scratchpad under
+  `colab-evidence/`. Restart it against a clean checkout of pushed master;
+  executing cells needs a Google sign-in, which is not something to do, so
+  expect it to distinguish *loaded in Colab* from *executed locally*.
+- Evidence comments on the remaining pre-existing open issues.
