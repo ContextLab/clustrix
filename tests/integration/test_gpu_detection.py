@@ -229,6 +229,4 @@ if __name__ == "__main__":
     if passed == total:
         print("\n🎉 All GPU detection tests passed!")
     else:
-        print(
-            f"\n⚠️  {total - passed} tests failed - GPU functionality needs attention"
-        )
+        print(f"\n⚠️  {total - passed} tests failed - GPU functionality needs attention")

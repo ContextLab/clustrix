@@ -627,9 +627,7 @@ def main():
                     f"   {'✅' if status == 'PASSED' else '⚠️'} {test_name}: {status} ({success_rate*100:.1f}%)"
                 )
             elif result == {}:
-                print(
-                    f"   ⚠️  {test_name}: No schedulers detected (regular SSH server)"
-                )
+                print(f"   ⚠️  {test_name}: No schedulers detected (regular SSH server)")
             else:
                 print(f"   ❌ {test_name}: FAILED")
 
