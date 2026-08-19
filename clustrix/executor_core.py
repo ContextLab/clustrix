@@ -175,7 +175,14 @@ class ClusterExecutor:
 
         remote_dir = job_info["remote_dir"]
 
-        # Poll for completion
+        # Poll for completion, under a deadline. An unbounded `while True`
+        # here meant a job that never reached a terminal state -- held by the
+        # scheduler, stuck behind a queue that never cleared -- hung the
+        # caller with no way out but Ctrl-C, and no indication of why.
+        timeout = getattr(self.config, "job_wait_timeout", None)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        status = "unknown"
+
         while True:
             status = self.scheduler_manager.check_job_status(job_id)
 
@@ -231,6 +238,21 @@ class ClusterExecutor:
                 else:
                     # Fallback to RuntimeError with log
                     raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
+
+            if deadline is not None and time.monotonic() >= deadline:
+                # The job is left alone deliberately: it may still be
+                # queued, and cancelling someone's allocation because the
+                # client got bored is not this function's decision. The
+                # remote directory is named so the result can be collected
+                # by hand.
+                raise TimeoutError(
+                    f"Job {job_id} did not finish within "
+                    f"{timeout}s (config.job_wait_timeout). Its last known "
+                    f"status was {status!r}. The job has NOT been cancelled; "
+                    f"its files are at {remote_dir} on the cluster. Raise "
+                    f"job_wait_timeout, or set it to None to wait "
+                    f"indefinitely."
+                )
 
             # Wait before next poll
             time.sleep(self.config.job_poll_interval)

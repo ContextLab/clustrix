@@ -76,6 +76,13 @@ class ClusterConfig:
     max_parallel_jobs: int = 100
     max_gpu_parallel_jobs: int = 8
     job_poll_interval: int = 30
+    # Seconds to keep polling a submitted job before giving up. Without a
+    # bound, a job that never reaches a terminal state -- held by the
+    # scheduler, stuck in a node-drain loop, a queue that never clears --
+    # hangs the caller forever with no way out but Ctrl-C. 24 hours is
+    # deliberately generous, because a real HPC queue wait legitimately runs
+    # into hours; set it to None to restore the unbounded wait.
+    job_wait_timeout: Optional[int] = 86400
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
