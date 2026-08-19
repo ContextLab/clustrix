@@ -325,10 +325,11 @@ def _removed_setting_reason(name: str) -> Optional[str]:
 def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:
     """Reject a backend clustrix cannot run, saying which kind of wrong it is.
 
-    Three outcomes rather than two: a supported type passes, a *removed* type
-    is named along with why it went and where it is tracked, and anything else
-    is an ordinary typo. Collapsing the middle case into the last one is what
-    left ``cluster_type: pbs`` looking like a spelling mistake.
+    Three outcomes rather than two: a supported type passes, a type clustrix
+    knows about but does not implement is named along with why and where it is
+    tracked, and anything else is an ordinary typo. Collapsing the middle case
+    into the last one is what left ``cluster_type: pbs`` looking like a
+    spelling mistake.
     """
     if cluster_type in SUPPORTED_CLUSTER_TYPES:
         return
@@ -336,11 +337,12 @@ def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> No
     supported = ", ".join(SUPPORTED_CLUSTER_TYPES)
     if cluster_type in REMOVED_CLUSTER_TYPES:
         issue = REMOVED_CLUSTER_TYPES[cluster_type]
-        where = f" Its return is tracked in issue #{issue}." if issue else ""
+        where = f" Support for it is tracked in issue #{issue}." if issue else ""
         raise ValueError(
-            f"{source}={cluster_type!r} is no longer implemented. It was "
-            f"removed in v0.2.0 because it had never been verified against "
-            f"real hardware.{where} Supported types are: {supported}."
+            f"{source}={cluster_type!r} is not implemented. Clustrix ships no "
+            f"backend for it, because none has been verified against real "
+            f"hardware of that kind, so there is no code path that would run "
+            f"your function there.{where} Supported types are: {supported}."
         )
 
     raise ValueError(

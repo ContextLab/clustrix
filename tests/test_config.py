@@ -251,9 +251,13 @@ class TestRemovedBackendsAreExplained:
 
         message = str(excinfo.value)
         assert cluster_type in message
-        assert "no longer implemented" in message
-        assert "never been verified against real hardware" in message
+        assert "is not implemented" in message
+        assert "verified against real hardware" in message
         assert f"#{issue}" in message
+        # The message describes the state of the code, not a transition
+        # between releases: a user reading it wants to know what to do now,
+        # and a version number in it goes stale the moment one is cut.
+        assert "v0." not in message
         for supported in SUPPORTED_CLUSTER_TYPES:
             assert supported in message
         # The file that caused it, so the user knows which one to edit.

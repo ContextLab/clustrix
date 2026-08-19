@@ -215,4 +215,8 @@ Key Takeaways
    whether a job actually ran remotely.
 6. **Backends**: ``local``, ``ssh``, ``slurm`` and ``huggingface`` are the
    only ``cluster_type`` values Clustrix accepts. Anything else raises
-   ``ValueError`` at submit time -- see :ref:`removed-backends`.
+   ``ValueError`` when you configure it -- from ``configure()``,
+   ``load_config()`` or the ``ClusterConfig`` constructor -- rather than when
+   you submit. In other words, the failure lands on the line where you named
+   the backend, not after an SSH round trip to a host that was never going to
+   be used. See :ref:`removed-backends`.

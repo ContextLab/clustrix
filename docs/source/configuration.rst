@@ -4,13 +4,16 @@ Configuration
 =============
 
 Every setting Clustrix has lives on one dataclass, ``clustrix.config.ClusterConfig``,
-and there is exactly one instance of it per process. This page lists every
-field that changes behaviour, says what it actually does and what its real
-default is, and -- just as importantly -- says which fields currently do
-nothing.
+and there is exactly one instance of it per process. This page covers all of
+the fields on that dataclass: what each one actually does, what its real
+default is, and -- for the ones that read like settings but change nothing --
+that it is inert.
 
-Defaults quoted here were read out of the dataclass, not out of an older
-version of this document.
+Defaults quoted here were read out of the dataclass rather than out of an
+older version of this document, and the field list was checked the same way.
+Concretely, every name returned by ``dataclasses.fields(ClusterConfig)``
+appears somewhere below, either with an effect or in the table of fields that
+have none.
 
 .. contents:: On this page
    :local:
@@ -63,9 +66,12 @@ file. Both reject unknown names rather than accepting them silently:
    (did you mean cleanup_on_success?)
 
 **Per call.** Six settings can be overridden on the decorator: ``cores``,
-``memory``, ``time``, ``partition``, ``queue`` and ``environment``. Everything
-else is configuration-only, with the exception of the pass-through extras
-listed under :ref:`decorator-extras`.
+``memory``, ``time``, ``partition``, ``queue`` and ``environment``. Five of
+the six reach a backend. ``queue`` does not: the decorator resolves it against
+``default_queue`` and writes it into the job configuration, and nothing reads
+it back out, because none of ``local``, ``ssh``, ``slurm`` or ``huggingface``
+has a queue to submit to. Everything else is configuration-only, with the
+exception of the pass-through extras listed under :ref:`decorator-extras`.
 
 **Effective precedence**
 
@@ -74,12 +80,49 @@ listed under :ref:`decorator-extras`.
 3. The configuration file found at import.
 4. Dataclass defaults.
 
-There is **no** general environment-variable layer. Only three environment
-variables are read at all: ``CLUSTRIX_CONFIG_DIR`` (where to look for config),
-``CLUSTRIX_AUTO_WIDGET`` (display the notebook widget on import), and whatever
-name you put in ``password_env_var``. Documentation elsewhere that lists
-"environment variables" as a general precedence level is describing something
-the code does not do.
+There is **no** general environment-variable layer. Nothing reads a
+``CLUSTRIX_<FIELD>`` variable, and no environment variable assigns to a field
+on ``ClusterConfig``. Documentation elsewhere that lists "environment
+variables" as a general precedence level is describing something the code does
+not do.
+
+Clustrix does read the environment for other purposes. Those uses group as
+follows, and not one of them writes to a configuration field.
+
+*Where configuration lives.* ``CLUSTRIX_CONFIG_DIR`` chooses the directory
+searched at import and written by ``save_config``.
+
+*What happens on import.* ``CLUSTRIX_AUTO_WIDGET`` displays the notebook
+widget when clustrix is imported.
+
+*Credentials.* Whatever name you put in ``password_env_var`` supplies an SSH
+password. ``FlexibleCredentialManager`` -- the fallback used when neither
+``key_file`` nor ``password`` is set -- reads ``SSH_HOST``, ``SSH_USERNAME``,
+``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``, ``SSH_PORT``, ``HF_TOKEN`` (or
+``HUGGINGFACE_TOKEN``), ``HUGGINGFACE_USERNAME`` and ``HF_USERNAME``, from a
+``.env`` file or from the process environment, and switches to its CI source
+when ``GITHUB_ACTIONS`` is ``"true"``. The HuggingFace backend reads
+``HF_TOKEN`` directly as well, and honours ``HF_HOME`` when locating the token
+that ``hf auth login`` cached. The key-setup helper in ``auth_fallbacks`` has
+its own list: ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
+``<HOST>_PASSWORD``, ``CLUSTRIX_DEFAULT_PASSWORD`` and ``CLUSTER_PASSWORD``,
+with the host name upper-cased and its dots turned into underscores. All of
+these hand a credential to the authentication path; none of them writes to
+``ClusterConfig``.
+
+*Variables clustrix sets for its own remote code.* ``CLUSTRIX_PACKAGES``,
+``CLUSTRIX_PAYLOAD``, ``CLUSTRIX_PAYLOAD_REPO``, ``CLUSTRIX_PAYLOAD_FILE`` and
+``CLUSTRIX_HMAC_KEY`` are written into the HuggingFace container by the
+submitter and read back by the program running inside it;
+``CLUSTRIX_ORIGINAL_CWD`` plays the same role for a packaged remote job. In
+other words, these are an internal channel between the two halves of one
+submission, and you do not set them yourself.
+
+Separately, ``clustrix.validation`` -- a diagnostic helper, not part of
+execution -- takes its target hosts from ``CLUSTRIX_VALIDATION_SSH_HOST``,
+``CLUSTRIX_VALIDATION_SSH_NAME``, ``CLUSTRIX_VALIDATION_SLURM_HOST`` and
+``CLUSTRIX_VALIDATION_SLURM_NAME``. With none of them set it reports that it
+has nothing to check.
 
 Reading and saving
 ~~~~~~~~~~~~~~~~~~
@@ -177,7 +220,9 @@ Connection and authentication
        turns an unreachable host into a hang rather than an error.
    * - ``ssh_port``
      - ``22``
-     - Read by ``auth_manager`` only. The executor uses ``cluster_port``.
+     - Read by ``auth_manager``, and by ``validate_cluster_auth`` in
+       ``clustrix.validation`` -- the connection test behind the notebook
+       widget's password check. The executor uses ``cluster_port``.
    * - ``api_key``
      - ``None``
      - Generic API key used by the credential/auth helpers.
@@ -247,6 +292,14 @@ Paths and the remote environment
      - Base directory for the *filesystem utilities* when operating locally.
        Defaults to the current working directory. Does not affect job
        execution.
+   * - ``local_cache_dir``
+     - ``"~/.clustrix/cache"``
+     - Where a staged data package lands when it is materialized without an
+       explicit destination: the files go under
+       ``<local_cache_dir>/data-packages/<package id>``. That same
+       subdirectory is the only thing ``DataPackage.delete`` clears out
+       locally -- never the cache directory above it, and never the originals
+       you packaged.
    * - ``python_executable``
      - ``"python"``
      - Command used to create the single-venv fallback and to run the job
@@ -337,6 +390,15 @@ Execution behaviour
    * - ``job_poll_interval``
      - ``30``
      - Seconds between status checks while waiting for a scheduler job.
+   * - ``job_wait_timeout``
+     - ``86400``
+     - Seconds to keep polling before giving up on a scheduler job and raising
+       ``TimeoutError``. The job is deliberately **not** cancelled, and the
+       message names the remote directory so the result can still be collected
+       by hand. Set it to ``None`` to wait indefinitely. The default of 24
+       hours is generous because a real queue wait legitimately runs into
+       hours; a job that is held or stuck behind a queue that never clears
+       would otherwise hang the caller with no way out but Ctrl-C.
    * - ``cleanup_on_success``
      - ``True``
      - ``rm -rf`` the remote job directory after a successful collection. A
@@ -402,6 +464,46 @@ cache), so passing them per call has no effect on this backend.
    hf_allow_gpu_flavors=True to confirm you intend to pay for it; otherwise use
    a CPU flavor (default: cpu-basic).
 
+Data staging
+~~~~~~~~~~~~
+
+These four control ``clustrix.staging``, which moves a directory of input files
+to wherever the function will run. Small packages ride inside the pickled
+payload; larger ones go to a private HuggingFace dataset repo. The size bands
+below decide which, and where the second one stops.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 18 54
+
+   * - Field
+     - Default
+     - Effect
+   * - ``hf_data_repo``
+     - ``None``
+     - Repo that oversized packages are uploaded to. Unset, the repo is
+       ``<namespace>/clustrix-data``, with the namespace taken from
+       ``hf_namespace``, then ``hf_username``, then whatever the token's
+       ``whoami()`` reports. Applies whichever backend you run on: a ``slurm``
+       job with a package too big to inline still stages through HuggingFace.
+   * - ``stage_inline_max_bytes``
+     - ``1048576`` (1 MB)
+     - Packages smaller than this carry their file contents inside the package
+       object, so no remote store is involved and there is nothing to clean up
+       afterwards.
+   * - ``stage_warn_bytes``
+     - ``104857600`` (100 MB)
+     - At or above this, staging logs a warning before starting. A transfer
+       that takes minutes with no output is indistinguishable from a hang.
+   * - ``stage_max_bytes``
+     - ``5368709120`` (5 GB)
+     - At or above this, staging refuses outright and names the largest file.
+       Raise it if you genuinely mean to move that much over the network.
+
+Nothing staged is reclaimed automatically. There is no TTL and no reaper --
+deleting a package is always something you do, through
+``DataPackage.delete``.
+
 Settings that currently have no effect
 --------------------------------------
 
@@ -431,7 +533,11 @@ Field                         Status
                               ``os.cpu_count() * 2`` instead.
 ``cache_credentials``         Not read.
 ``credential_cache_ttl``      Not read.
-``local_cache_dir``           Not read.
+``default_queue``             Resolved and placed in the job configuration
+                              by the decorator, then never read: none of the
+                              four supported backends submits to a queue.
+                              ``@cluster(queue=...)`` is inert for the same
+                              reason. Use ``default_partition`` on SLURM.
 ``hf_hardware``               Read only as a fallback for ``hf_flavor``.
                               Set ``hf_flavor``.
 ``venv_info``                 Runtime scratch space, written by clustrix
