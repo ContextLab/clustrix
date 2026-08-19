@@ -83,9 +83,8 @@ the opposite: **serialization does not need your function's source code.**
 A function defined in a REPL, a notebook cell, or by ``exec`` serializes and
 runs correctly. Only the *source-based* features need
 ``inspect.getsource()`` -- automatic loop parallelization
-(``@cluster(parallel=True)``) and GPU-parallel detection
-(``auto_gpu_parallel``) parse the function body with ``ast``, and quietly do
-nothing when the source is unavailable.
+(``@cluster(parallel=True)``) parses the function body with ``ast``, and
+quietly does nothing when the source is unavailable.
 
 .. _what-clustrix-is-not:
 

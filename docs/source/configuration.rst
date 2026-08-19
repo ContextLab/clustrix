@@ -332,11 +332,6 @@ Execution behaviour
        ``_execute_local_parallel``; remotely through ``detect_loops`` and
        ``_execute_parallel``. Read :doc:`limitations` before trusting it: the
        preconditions are narrow and the *return shape can change*.
-   * - ``auto_gpu_parallel``
-     - ``True``
-     - Attempt GPU parallelization before CPU parallelization on remote
-       backends. Requires 2+ detected GPUs and a detected parallelizable
-       operation; otherwise it logs and falls through.
    * - ``async_submit``
      - ``False``
      - Return an ``AsyncJobResult`` immediately instead of blocking.
@@ -475,11 +470,22 @@ Field                         Status
 ``gpu_requirements``          Not read.
 ``rapids_ecosystem``          Not read.
 ``max_gpu_parallel_jobs``     Not read.
+``auto_gpu_parallel``         Not read. It used to select a client-side GPU
+                              path that never called your function -- it ran a
+                              fixed torch program per GPU and returned the
+                              traces of random matrices as your result. That
+                              path was deleted; the field is kept so existing
+                              config files keep loading, and passing it to
+                              ``@cluster`` now warns.
 ``local_parallel_threshold``  Not read. Local chunking uses
                               ``os.cpu_count() * 2`` instead.
 ``cache_credentials``         Not read.
 ``credential_cache_ttl``      Not read.
 ``local_cache_dir``           Not read.
+``k8s_service_account``       Not read by the executor.
+``k8s_pull_policy``           Not read by the executor.
+``k8s_auto_cleanup``          Not read by the executor.
+``cost_monitoring``           Not read.
 ``k8s_remote``                Notebook widget only.
 ``hf_sdk`` / ``hf_hardware``  Spaces-era fields. ``hf_hardware`` survives only
                               as a fallback for ``hf_flavor``.

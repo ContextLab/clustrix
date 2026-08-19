@@ -1,3 +1,18 @@
+> **⚠️ WITHDRAWN.** The feature described below was removed in 0.2.0. It never
+> worked: `_attempt_client_side_gpu_parallelization` did not call the decorated
+> function at all. It ran a fixed `torch.randn(100, 100)` program on each GPU,
+> scraped the matrix trace out of stdout, and returned those numbers to the
+> caller as the user's result. `auto_gpu_parallel` defaulted to `True` and the
+> path triggered on any host reporting two or more GPUs.
+>
+> `clustrix/gpu_utils.py` went with it: its other four public functions had no
+> callers anywhere, and two of them generated code referencing undefined names.
+>
+> To use multiple GPUs, parallelize inside your own function — request the
+> resources with `@cluster(...)` and drive the devices yourself. This document
+> is kept as a record of the intended design, not as documentation of
+> behaviour.
+
 # ClustriX Automatic GPU Parallelization
 
 ## Overview

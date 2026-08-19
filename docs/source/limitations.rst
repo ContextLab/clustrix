@@ -34,7 +34,6 @@ serialized. Nothing is substituted for it, ever.
 
 * loop parallelization (``detect_loops``, ``find_parallelizable_loops`` -- both
   start with ``inspect.getsource``),
-* GPU-parallel operation detection,
 * the source-text fallback the worker would use if binary deserialization
   failed.
 

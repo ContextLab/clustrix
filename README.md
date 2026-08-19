@@ -546,7 +546,7 @@ clustrix credentials --help
 
 ### Important Notes
 
-**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) lose the *source-based* features — automatic loop parallelization, GPU-parallel detection, and complexity/dependency analysis — because those parse the function's source with `ast` and `inspect.getsource()` cannot recover it.
+**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) lose the *source-based* features — automatic loop parallelization and complexity analysis — because those parse the function's source with `ast` and `inspect.getsource()` cannot recover it.
 
 Serialization itself does **not** need the source. `clustrix.utils.serialize_function` / `deserialize_function` work from the code object and round-trip such a function correctly, so it still runs remotely and returns the right answer. This affects:
 - Interactive Python sessions (`python` command)
@@ -560,7 +560,7 @@ Serialization itself does **not** need the source. `clustrix.utils.serialize_fun
 
 ```pycon
 # In the interactive REPL this still runs and returns the right answer, but no
-# loop parallelization or GPU-parallel detection is applied, because those
+# loop parallelization is applied, because that
 # need the source.
 >>> @cluster(cores=2)
 ... def my_function(x):
@@ -862,7 +862,6 @@ For more detailed information on specific topics, see the organized documentatio
 - **[AWS EKS Troubleshooting](docs/aws/AWS_EKS_TROUBLESHOOTING.md)** - Common AWS access issues
 
 ### GPU Computing
-- **[GPU Parallelization Design](docs/gpu/GPU_PARALLELIZATION_DESIGN.md)** - Comprehensive GPU parallelization guide
 - **[GPU Detection Fix](docs/gpu/GPU_DETECTION_FIX.md)** - GPU detection troubleshooting
 
 ### Technical Design
