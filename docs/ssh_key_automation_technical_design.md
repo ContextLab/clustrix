@@ -10,7 +10,7 @@
 
 ### Implementation Status
 - **✅ COMPLETE**: All features implemented and tested on real infrastructure
-- **✅ VALIDATED**: Successfully tested on Dartmouth HPC clusters (tensor01, ndoli)
+- **✅ VALIDATED**: Successfully tested on real HPC clusters (gpu, hpc2)
 - **✅ PRODUCTION READY**: 15/15 unit tests passing, comprehensive error handling
 - **📚 DOCUMENTED**: Complete tutorial and API documentation available
 
@@ -231,8 +231,8 @@ clustrix ssh-setup --host cluster.edu --user jdoe [--alias mycluster]
 
 #### Known Requirements
 
-1. **Dartmouth Clusters (ndoli, tensor01)**:
-   - Home directories: `/dartfs-hpc/rc/home/b/{username}/`
+1. **Test Clusters (hpc2, gpu)**:
+   - Home directories: `/remote/home/{username}/`
    - May require module loads before Python
    - Shared filesystem across compute nodes
 
@@ -271,8 +271,8 @@ def detect_cluster_requirements(hostname: str) -> Dict[str, Any]:
 1. Fresh setup (no existing keys)
 2. Existing non-working keys
 3. Existing working keys
-4. Test on SLURM cluster (ndoli)
-5. Test on SSH cluster (tensor01)
+4. Test on SLURM cluster (hpc2)
+5. Test on SSH cluster (gpu)
 6. Permission and quota issues
 7. Network failure scenarios
 
@@ -292,7 +292,7 @@ def validate_ssh_automation(cluster_configs: List[Dict]):
 
 ## Success Metrics
 
-1. **Test System Success**: Works reliably on ndoli (SLURM) and tensor01 (SSH)
+1. **Test System Success**: Works reliably on hpc2 (SLURM) and gpu (SSH)
 2. **Time to Complete**: <30 seconds for key setup
 3. **User Satisfaction**: Eliminate manual SSH configuration
 4. **Reliability**: Passwordless auth works consistently after setup
@@ -304,7 +304,7 @@ def validate_ssh_automation(cluster_configs: List[Dict]):
 - Basic key generation and deployment
 - Password-based authentication
 - Simple success/failure detection
-- **Immediate testing on ndoli (SLURM) and tensor01 (SSH)**
+- **Immediate testing on hpc2 (SLURM) and gpu (SSH)**
 - Fix issues discovered during real cluster testing
 
 ### Phase 2: Robustness and Key Rotation (Week 2)
@@ -361,7 +361,7 @@ def validate_ssh_automation(cluster_configs: List[Dict]):
 
 1. Review and approve this technical design
 2. Update GitHub issue #57 with design document
-3. Implement Phase 1 with focus on Dartmouth clusters
+3. Implement Phase 1 with focus on the test clusters
 4. Create comprehensive validation suite
 5. Iterate based on real-world testing
 

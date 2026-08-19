@@ -217,7 +217,7 @@ Supported Cluster Types
 +--------------------+-------------------+--------------------------------------------------+
 | ``cluster_type``   | Status            | Notes                                            |
 +====================+===================+==================================================+
-| ``slurm``          | Verified          | A real job ran on ``discovery.dartmouth.edu``    |
+| ``slurm``          | Verified          | A real job ran on ``hpc.example.edu``            |
 |                    |                   | and returned its result.                         |
 +--------------------+-------------------+--------------------------------------------------+
 | ``ssh``            | Verified          | Direct execution, no scheduler. A real job ran   |

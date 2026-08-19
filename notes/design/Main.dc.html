@@ -123,7 +123,7 @@
           <div>
             <label class="lbl">Active profile</label>
             <select class="fld">
-              <option>discovery — SLURM (Dartmouth)</option>
+              <option>hpc — SLURM (example.edu)</option>
             </select>
           </div>
           <button class="btn btn-icon" title="Add profile" aria-label="Add profile">
@@ -172,11 +172,11 @@
         <div style="display: grid; grid-template-columns: 2fr 1fr 1.4fr; gap: 8px;">
           <div>
             <label class="lbl">Host</label>
-            <input class="fld" value="discovery.dartmouth.edu">
+            <input class="fld" value="hpc.example.edu">
           </div>
           <div>
             <label class="lbl">Username</label>
-            <input class="fld" value="f002d6b">
+            <input class="fld" value="testuser">
           </div>
           <div>
             <label class="lbl">Authentication</label>
@@ -216,7 +216,7 @@
 
 <script data-dc-script data-props='{
   "accent": {"editor": "color", "default": "#1976d2", "options": ["#1976d2", "#00796b", "#5e35b1", "#c2185b"]},
-  "log": {"editor": "text", "default": "$ sinfo -o %P\nstandard*  up  30-00:00:00\n✓ connected to discovery.dartmouth.edu as f002d6b\n✓ SLURM 23.02.7 detected, 45 nodes available"},
+  "log": {"editor": "text", "default": "$ sinfo -o %P\nstandard*  up  30-00:00:00\n✓ connected to hpc.example.edu as testuser\n✓ SLURM 23.02.7 detected, 45 nodes available"},
   "$preview": {"width": 828, "height": 640}
 }'>
 class Component extends DCLogic {

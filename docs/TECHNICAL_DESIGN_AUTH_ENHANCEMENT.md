@@ -27,7 +27,7 @@ This document outlines the technical design for implementing enhanced authentica
 2. **Security**: Credentials should be stored and handled securely using environment variables and SSH keys
 3. **Flexibility**: Support multiple authentication methods with intelligent fallback mechanisms
 4. **User Experience**: Clear feedback and guidance when authentication requires user action
-5. **Continuous Validation**: Validate on real clusters (tensor01.dartmouth.edu and ndoli.dartmouth.edu) from the first implementation step
+5. **Continuous Validation**: Validate on real clusters (gpu.example.edu and hpc2.example.edu) from the first implementation step
 
 ## Current State
 
@@ -454,7 +454,7 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
 def validate_kerberos_auth(config: ClusterConfig) -> bool:
     """Validate Kerberos authentication if applicable"""
     # Check if this is a Kerberos-enabled cluster
-    kerberos_clusters = ['ndoli.dartmouth.edu', 'discovery.dartmouth.edu']
+    kerberos_clusters = ['hpc2.example.edu', 'hpc.example.edu']
     
     if not any(config.cluster_host.endswith(cluster) for cluster in kerberos_clusters):
         return True  # Not a Kerberos cluster
@@ -524,24 +524,24 @@ def add_auth_arguments(parser):
    - Create `AuthenticationManager` class
    - Implement environment variable support
    - Create validation framework
-   - **Validate**: Test password auth on tensor01.dartmouth.edu
+   - **Validate**: Test password auth on gpu.example.edu
 
 2. **Day 3-4: Widget Enhancement**
    - Add dynamic checkbox/field UI
    - Implement widget password handling
-   - **Validate**: Test widget flow on tensor01
+   - **Validate**: Test widget flow on gpu
 
 3. **Day 5: Integration**
    - Connect auth manager to executor
    - Test complete flow
-   - **Validate**: End-to-end test on both tensor01 and ndoli
+   - **Validate**: End-to-end test on both gpu and hpc2
 
 ### Phase 2: Enhanced Environment Variable Support (Week 2)
 
 1. **Day 1-2: Advanced Environment Setup**
    - Support multiple environment variable patterns
    - Add secure environment variable validation
-   - **Validate**: Test multiple environment variable patterns on tensor01
+   - **Validate**: Test multiple environment variable patterns on gpu
 
 2. **Day 3-4: Integration Testing**
    - Test with different shell environments
@@ -558,7 +558,7 @@ def add_auth_arguments(parser):
 1. **Day 1-2: Kerberos Support**
    - Detect Kerberos requirements
    - Implement GSSAPI auth
-   - **Validate**: Test on ndoli.dartmouth.edu
+   - **Validate**: Test on hpc2.example.edu
 
 2. **Day 3-4: Fallback Chain**
    - Complete auth chain implementation
@@ -610,15 +610,15 @@ from clustrix.validation import (
 # Test clusters
 TEST_CLUSTERS = [
     {
-        'name': 'tensor01',
-        'host': 'tensor01.dartmouth.edu',
+        'name': 'gpu',
+        'host': 'gpu.example.edu',
         'type': 'ssh',
         'simple_auth': True,
         'kerberos': False
     },
     {
-        'name': 'ndoli',
-        'host': 'ndoli.dartmouth.edu', 
+        'name': 'hpc2',
+        'host': 'hpc2.example.edu', 
         'type': 'slurm',
         'simple_auth': False,
         'kerberos': True
@@ -720,7 +720,7 @@ class TestAuthenticationManager:
         os.environ['TEST_CLUSTER_PASS'] = 'testpass123'
         
         config = ClusterConfig(
-            cluster_host='tensor01.dartmouth.edu',
+            cluster_host='gpu.example.edu',
             username='testuser',
             use_env_password=True,
             password_env_var='TEST_CLUSTER_PASS'
@@ -741,10 +741,10 @@ class TestAuthenticationManager:
             pytest.skip("Real cluster tests not enabled")
         
         config = ClusterConfig(
-            cluster_host='tensor01.dartmouth.edu',
+            cluster_host='gpu.example.edu',
             username=os.environ.get('USER'),
             use_env_password=True,
-            password_env_var='TENSOR01_PASSWORD'
+            password_env_var='GPU_HOST_PASSWORD'
         )
         
         # Should work if env var is set correctly
@@ -772,8 +772,8 @@ class TestAuthenticationManager:
 ## Success Metrics
 
 1. **Functionality**
-   - All auth methods work on tensor01.dartmouth.edu
-   - Kerberos auth works on ndoli.dartmouth.edu
+   - All auth methods work on gpu.example.edu
+   - Kerberos auth works on hpc2.example.edu
    - Seamless fallback between methods
 
 2. **User Experience**
@@ -795,4 +795,4 @@ This enhanced design provides a complete authentication solution with:
 - Comprehensive fallback chain with clear user feedback
 - Secure password and credential handling throughout the system
 
-The implementation plan ensures that every feature is validated on both tensor01.dartmouth.edu (simple SSH) and ndoli.dartmouth.edu (Kerberos/GSSAPI) before moving to the next phase.
+The implementation plan ensures that every feature is validated on both gpu.example.edu (simple SSH) and hpc2.example.edu (Kerberos/GSSAPI) before moving to the next phase.

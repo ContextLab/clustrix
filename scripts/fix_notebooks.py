@@ -95,7 +95,9 @@ def fix_notebook(notebook_path):
 
 def main():
     """Fix all notebooks in the docs/source/notebooks directory."""
-    notebooks_dir = Path("/Users/jmanning/clustrix/docs/source/notebooks")
+    notebooks_dir = (
+        Path(__file__).resolve().parent.parent / "docs" / "source" / "notebooks"
+    )
 
     if not notebooks_dir.exists():
         print(f"Directory not found: {notebooks_dir}")

@@ -25,12 +25,12 @@ Run from an arm64 macOS laptop on 2026-08-18:
 
 ```
 ========================================================================
-slurm: SLURM scheduler (discovery.dartmouth.edu)
+slurm: SLURM scheduler (hpc.example.edu)
 ========================================================================
 Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh)
 Reusing existing conda environments (py312_fab7c2f690ab)
 RESULT (62s): {
-  "host": "s07.hpcc.dartmouth.edu",
+  "host": "node2.hpc.example.edu",
   "machine": "x86_64",
   "python": "3.12.13",
   "slurm_job_id": "9219882",
@@ -40,13 +40,13 @@ RESULT (62s): {
 }
 
 ========================================================================
-gpu: SSH + GPU host (tensor01.dartmouth.edu)
+gpu: SSH + GPU host (gpu.example.edu)
 ========================================================================
-Conda available on remote system (/home/f002d6b/miniforge3/etc/profile.d/conda.sh)
+Conda available on remote system (/home/testuser/miniforge3/etc/profile.d/conda.sh)
 GPU detected (8 devices), setting up GPU-enabled VENV2...
 RESULT (65s): {
   "gpus": "NVIDIA RTX A6000, 49140 MiB  (x8)",
-  "host": "tensor01.dartmouth.edu",
+  "host": "gpu.example.edu",
   "machine": "x86_64",
   "python": "3.12.13",
   "sum": 499500,
@@ -67,8 +67,8 @@ RESULT (10s): {
 ========================================================================
 SUMMARY
 ========================================================================
-slurm  PASSED  s07.hpcc.dartmouth.edu   python 3.12.13  62.1s
-gpu    PASSED  tensor01.dartmouth.edu   python 3.12.13  65.5s
+slurm  PASSED  node2.hpc.example.edu   python 3.12.13  62.1s
+gpu    PASSED  gpu.example.edu   python 3.12.13  65.5s
 hf     PASSED  j-contextlab-...         python 3.12.14   9.7s
 ```
 
@@ -110,8 +110,8 @@ generated job script.
 **5. Any host in the same domain was mistaken for the cluster.**
 `ClusterFilesystem` matched hostnames by substring and by shared institution
 domain, so a laptop on the VPN
-(`vpn-two-factor-general-229-128-226.dartmouth.edu`) was judged to *be*
-`discovery.dartmouth.edu`. Clustrix then looked for the job's result on the
+(`caller.example.edu`) was judged to *be*
+`hpc.example.edu`. Clustrix then looked for the job's result on the
 laptop and reported the job's status as unknown while it ran fine on the
 cluster. The test is now factual: this host is the target host **and** the
 remote working directory is visible here.
@@ -200,7 +200,7 @@ filesystems) and writes an HMAC-SHA256 over exactly the bytes it wrote. The
 caller compares in constant time before unpickling, and refuses an absent,
 truncated or mismatched signature.
 
-Demonstrated on tensor01 by overwriting a finished job's `result.pkl` in place
+Demonstrated on gpu by overwriting a finished job's `result.pkl` in place
 and leaving the original signature -- what someone with write access to the
 job directory would do:
 
@@ -280,6 +280,6 @@ pip install -e ".[dev]"
 python scripts/collect_execution_evidence.py
 ```
 
-The Dartmouth hosts are split-DNS internal names and need the VPN; without it
+Some test hosts are split-DNS internal names and need a VPN; without it
 they are reported as skipped. HuggingFace Jobs needs `HF_TOKEN` and a namespace
 on a plan that can run jobs.

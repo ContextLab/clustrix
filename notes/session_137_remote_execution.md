@@ -9,17 +9,17 @@
 distinct use cases correctly on five:
 
 ```
-slurm-discovery  PASSED   18/18 correct
-slurm-ndoli      PASSED   18/18 correct
-gpu-tensor01     PASSED   18/18 correct
-gpu-tensor02     PASSED   18/18 correct
-hf               PASSED   18/18 correct
+slurm-1  PASSED   18/18 correct
+slurm-2  PASSED   18/18 correct
+gpu-1    PASSED   18/18 correct
+gpu-2    PASSED   18/18 correct
+hf       PASSED   18/18 correct
 ```
 
 Reproduce with `python scripts/verify_cluster_usecases.py`; full transcript in
-`docs/evidence/usecase-matrix.txt`. Requires the Dartmouth VPN, and `HF_TOKEN`
-for the HuggingFace target. Unreachable targets are reported as SKIPPED and
-exit non-zero, so a skipped run cannot be read as a pass.
+`docs/evidence/usecase-matrix.txt`. Requires VPN access to the test clusters, and
+`HF_TOKEN` for the HuggingFace target. Unreachable targets are reported as SKIPPED
+and exit non-zero, so a skipped run cannot be read as a pass.
 
 ## The one idea worth carrying forward
 

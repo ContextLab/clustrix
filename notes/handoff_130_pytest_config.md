@@ -269,8 +269,8 @@ to work rather than assumed:
 
 | state | `pytestconfig.inipath` | project markers in `getini("markers")` |
 |-|-|-|
-| today (broken) | `/Users/jmanning/clustrix/pytest.ini` | absent — only plugin markers |
-| after Step 2 | `/Users/jmanning/clustrix/pyproject.toml` | `real_world`, `slow`, `unit`, `integration` present |
+| today (broken) | `/home/you/clustrix/pytest.ini` | absent — only plugin markers |
+| after Step 2 | `/home/you/clustrix/pyproject.toml` | `real_world`, `slow`, `unit`, `integration` present |
 
 So `test_pytest_reads_the_intended_config` fails today and passes after the fix — write
 it first and watch it fail, per the project's TDD rule.

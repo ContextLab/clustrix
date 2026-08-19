@@ -34,8 +34,8 @@ We have identified a **complexity threshold** in ClustriX function execution whe
 | 5 | Very high | ~150+ | 10+ | 5+ | ❌ FAIL |
 
 ### Cluster Type Impact
-- **SSH clusters (tensor01)**: Same threshold applies
-- **SLURM clusters (ndoli)**: Same threshold applies
+- **SSH clusters (gpu)**: Same threshold applies
+- **SLURM clusters (hpc2)**: Same threshold applies
 - **Issue is cluster-type agnostic**
 
 ### GPU Configuration Impact
