@@ -107,16 +107,15 @@ Messages you are likely to see
 
 The job produced a result or error file that carries no HMAC. Loading a pickle
 executes code, so clustrix refuses rather than trusting a file from a remote
-host. This is expected if you are pointing a new clustrix at a job submitted by
-an older one; it is a genuine warning sign otherwise. See
-:doc:`execution_model`.
+host. Treat it as a warning sign: a result that should have been signed at
+submission was not. See :doc:`execution_model`.
 
 **"No result-signing key is recorded for Job ... "**
 
-The submitting process no longer has the key. Keys live in memory for the life
-of the submitting process only, so a *different* process cannot collect a job's
-result -- including a fresh interpreter after you restarted your notebook. Job
-results are not portable across processes.
+This process does not hold the key. Keys live in memory for the life of the
+submitting process only, so a *different* process cannot collect a job's result
+-- and a fresh interpreter after a notebook restart is a different process.
+Job results are not portable across processes.
 
 **"Host key verification failed for '<host>' ..."**
 

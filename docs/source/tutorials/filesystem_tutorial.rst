@@ -1,21 +1,27 @@
 Filesystem Utilities Tutorial
 =============================
 
-This tutorial demonstrates how to use Clustrix's unified filesystem utilities for seamless file operations across local and remote clusters.
+How to ask questions about a filesystem without first knowing which machine it
+is on.
 
 Overview
 --------
 
-Clustrix provides a set of filesystem utilities that work identically whether you're operating on local files or files on remote clusters. This enables data-driven cluster computing workflows where your code can discover, analyze, and process files without worrying about whether they're local or remote.
+The ``cluster_*`` functions behave the same way whether the files are on the
+machine you are sitting at or on a cluster across the country. Which one they
+reach is decided by the :class:`~clustrix.config.ClusterConfig` you hand them,
+so a function that discovers its own inputs -- listing a directory, checking a
+size, globbing for a pattern -- can be written once and run in either place.
 
-Key Benefits
-~~~~~~~~~~~~
+For example, a routine that skips files above 100 MB reads the same locally,
+where ``cluster_stat`` is an ``os.stat``, and remotely, where it is an SFTP
+round trip.
 
-- **Unified API**: Same function calls work locally and remotely
-- **Automatic SSH Management**: No need to manage SSH connections manually
-- **Path Normalization**: Consistent behavior across different operating systems
-- **Data-Driven Workflows**: Enable processing based on actual file contents and metadata
-- **Seamless Integration**: Works perfectly with the ``@cluster`` decorator
+Two limits to keep in view. These functions are **read-only**: they list,
+match and measure, and there is no ``cluster_put`` or ``cluster_get``.
+And on a remote config, each call opens and closes its own SSH connection, so
+a tight loop over thousands of paths is slow by construction -- prefer one
+``cluster_glob`` to a thousand ``cluster_exists`` calls.
 
 What Actually Happens Behind the Scenes
 -----------------------------------------

@@ -430,9 +430,9 @@ Which backend should I use?
 Those four are the only ``cluster_type`` values Clustrix accepts, and each one
 has been proven to work against real infrastructure. ``pbs``, ``sge``,
 ``kubernetes`` and the cloud VM providers (AWS / GCP / Azure / Lambda Cloud)
-are **not currently supported** -- they were removed in v0.2.0 because none of
-them had ever been shown to run a job end to end. They are planned for a
-future release; see :ref:`removed-backends` for the tracking issues.
+are **not supported**, and naming one raises a ``ValueError`` that points at
+its tracking issue. Each is planned for a future release; see
+:ref:`removed-backends`.
 
 Where to go next
 ----------------

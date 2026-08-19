@@ -170,24 +170,21 @@ project has verified end to end, and :ref:`supported-cluster-types` for what
 Pattern 4: what to do when you wanted Kubernetes or a cloud VM
 ---------------------------------------------------------------
 
-Earlier versions of Clustrix documented a Kubernetes auto-provisioning
-pattern here, plus ``@cluster(provider="aws"|"gcp"|"azure"|"lambda")`` for
-cloud VMs. **None of those is currently supported.** Kubernetes, PBS, SGE and
-the four cloud VM providers were removed in v0.2.0 because none of them had
-ever been shown to run a job end to end, and the cost monitoring and cloud
-pricing API went with them.
+Clustrix supports neither. There is no ``cluster_type="kubernetes"``, no
+``@cluster(provider="aws"|"gcp"|"azure"|"lambda")``, and no cost monitoring or
+cloud pricing API to go with them. PBS and SGE are absent for the same reason.
 
-They are planned for a future release, and each has a tracking issue --
+Each is planned for a future release, and each has a tracking issue --
 Kubernetes `#142`_, AWS `#143`_, GCP `#144`_, Azure `#145`_, Lambda Cloud
 `#146`_, PBS `#140`_, SGE `#141`_. :ref:`removed-backends` has the full
 table.
 
-In the meantime:
+What to reach for instead:
 
 * **A cloud GPU without owning hardware**: ``cluster_type="huggingface"``
   submits to HuggingFace Jobs, which runs your function in a container on
-  rented GPUs. It is verified end to end. (Note that this is HuggingFace
-  *Jobs*; the separate HuggingFace *Spaces* provider was removed too.)
+  rented GPUs. It is verified end to end. Mind the name: this is HuggingFace
+  *Jobs*, and there is no HuggingFace *Spaces* backend.
 * **A machine you brought up yourself**: bring up the VM through your
   provider's own console or CLI, then point ``cluster_type="ssh"`` at it.
   That path is verified end to end.

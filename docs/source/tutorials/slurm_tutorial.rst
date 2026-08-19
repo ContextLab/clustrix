@@ -14,8 +14,8 @@ Prerequisites
 
    SLURM is verified end to end against a real cluster (SSH connect, job
    submission, environment build, result retrieval). PBS and SGE are **not
-   currently supported** -- they were removed in v0.2.0 and are planned for a
-   future release; see :ref:`removed-backends`.
+   supported**, and are planned for a future release; see
+   :ref:`removed-backends`.
 
 What Happens When You Call a ``@cluster``-Decorated Function
 --------------------------------------------------------------

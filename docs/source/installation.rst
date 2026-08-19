@@ -81,12 +81,11 @@ Run ``%%remote`` in a cell to show the widget.
 Kubernetes and cloud provider extras
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-There are none, and there is nothing to install. The Kubernetes backend and
-the AWS / GCP / Azure / Lambda Cloud VM backends were removed in v0.2.0
-because none of them had ever been shown to run a job end to end. The cost
-monitoring and cloud pricing API went with them. They are planned for a future
-release and each has a tracking issue -- see :ref:`removed-backends` for the
-list and the links.
+There are none, and there is nothing to install. Clustrix has no Kubernetes
+backend and no AWS / GCP / Azure / Lambda Cloud VM backend, and no cost
+monitoring or cloud pricing API. Each backend is planned for a future release
+and each has a tracking issue -- see :ref:`removed-backends` for the list and
+the links.
 
 Documentation
 ~~~~~~~~~~~~~

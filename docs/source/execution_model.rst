@@ -257,7 +257,8 @@ requirement map and reported separately by
 A ``name @ file:///.../work`` line from conda is **not** one of these: conda
 records the build directory it compiled from, but the artifact landed in
 site-packages like any other wheel and ``name==version`` reinstalls it.
-Dropping those used to remove about a third of a conda environment.
+Treating those as unreproducible would strip roughly a third of a conda
+environment out of the mirrored requirement set for no reason.
 
 If your function reaches into one of those packages, submission is refused
 immediately, naming the package:
@@ -465,11 +466,11 @@ For every SSH-reachable backend, ``_stage_job_directory`` does this:
    because SFTP does not expand ``~`` and would create a directory literally
    named ``~``).
 2. ``mkdir -p`` the parent, then ``mkdir -m 700`` the job directory itself.
-   The exclusive create is deliberate: ``mkdir -p`` succeeds on a directory
-   somebody else already owns, and job directory names used to be fully
-   predictable, so on a world-writable work directory an attacker could
-   pre-create the directory and receive the signing key into it.
-   Names are now ``job_<unix-time>_<8 hex chars>``.
+   The exclusive create is deliberate. ``mkdir -p`` succeeds on a directory
+   somebody else already owns, so on a world-writable work directory an
+   attacker who could predict the name would pre-create the directory and
+   receive the signing key into it. Names are ``job_<unix-time>_<8 hex
+   chars>``, and the hex is what makes them unpredictable.
 3. Write a fresh 64-hex-character key to ``.clustrix_result_key`` with mode
    0600, **over SFTP** -- writing it with ``printf ... > file`` would put the
    secret in a remote command line, readable from ``ps`` by any user on the
@@ -669,10 +670,9 @@ Backend              How the flow differs
 ===================  ==================================================================
 
 ``pbs``, ``sge``, ``kubernetes`` and the ``provider="aws"|"gcp"|"azure"|"lambda"``
-cloud VM path are **not in this table and not currently supported**. They were
-removed in v0.2.0 because none of them had ever been shown to run a job end to
-end. They are planned for a future release; see :ref:`removed-backends` for the
-tracking issues.
+cloud VM path are **not in this table and not supported**. Clustrix has no
+dispatch for them; naming one raises a ``ValueError``. Each is planned for a
+future release; see :ref:`removed-backends` for the tracking issues.
 
 Two things every backend does share: the payload produced by
 ``serialize_function``, and the rule that results are dill-serialized and
