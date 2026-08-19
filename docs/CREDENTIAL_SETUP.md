@@ -2,6 +2,14 @@
 
 This guide explains how to set up credentials for Clustrix real-world testing, supporting both local development (with environment variables) and GitHub Actions (with repository secrets).
 
+> **Scope note.** Clustrix has four execution backends: `local`, `ssh`, `slurm`
+> and `huggingface` (HuggingFace **Jobs**). Only the SSH/SLURM and HuggingFace
+> credentials below reach an execution backend. The AWS, GCP, Azure and Lambda
+> Cloud entries no longer select any backend -- those were removed in v0.2.0
+> and are planned for a future update (tracking issues
+> [#140-#146](https://github.com/ContextLab/clustrix/issues/140)). AWS
+> credentials are still useful for the `scripts/aws/` cleanup tooling.
+
 ## Overview
 
 The credential system supports two modes:
@@ -107,7 +115,7 @@ Add the following secrets to your GitHub repository (`Settings → Secrets and v
 #### Required Secrets
 - `CLUSTRIX_USERNAME`: Username for SSH and SLURM servers
 - `CLUSTRIX_PASSWORD`: Password for SSH and SLURM servers
-- `LAMBDA_CLOUD_API_KEY`: Lambda Cloud API key
+- `HF_TOKEN`: HuggingFace token with job-write permission in the target namespace
 
 #### Optional Secrets (for expanded testing)
 - `AWS_ACCESS_KEY_ID`: AWS access key ID

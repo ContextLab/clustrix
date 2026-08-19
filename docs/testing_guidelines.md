@@ -67,20 +67,20 @@ Tests that validate interactions between components using real infrastructure.
 
 ```python
 @pytest.mark.real_world
-def test_kubernetes_integration():
-    """Test Kubernetes job submission."""
+def test_huggingface_integration():
+    """Test HuggingFace Jobs submission."""
     configure(
-        cluster_type="kubernetes",
-        namespace="test"
+        cluster_type="huggingface",
+        hf_namespace="contextlab",
     )
-    
-    @cluster(cores=2, memory="2Gi")
-    def k8s_task():
+
+    @cluster(cores=2, memory="2GB")
+    def hf_task():
         import socket
         return socket.gethostname()
-    
-    result = k8s_task()
-    assert "clustrix-job" in result or "pod" in result
+
+    result = hf_task()
+    assert isinstance(result, str) and result
 ```
 
 ### 3. Edge Case Tests
@@ -321,7 +321,6 @@ jobs:
 
 3. **Infrastructure Tests** (< 30 minutes)
    - Docker-based tests
-   - Kind Kubernetes tests
    - SSH server tests
 
 4. **Comprehensive Tests** (< 60 minutes)
@@ -392,8 +391,8 @@ assert len(result["data"]) == 100
 def cluster_config():
     """Shared cluster configuration."""
     config = ClusterConfig()
-    config.cluster_type = "kubernetes"
-    config.namespace = "test"
+    config.cluster_type = "slurm"
+    config.cluster_host = "login.hpc.example.edu"
     yield config
     # Cleanup if needed
 

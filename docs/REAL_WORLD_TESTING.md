@@ -194,10 +194,14 @@ Real-world tests implement cost controls:
 
 We prioritize free or low-cost operations:
 
-1. **AWS**: STS GetCallerIdentity, Pricing API (free)
-2. **Azure**: List subscriptions, resource groups (free)
-3. **GCP**: List zones, instances (free if no instances)
-4. **Public APIs**: GitHub, PyPI, HuggingFace (free)
+1. **HuggingFace Jobs**: CPU-flavor jobs only unless a paid GPU flavor is
+   explicitly allowed (GPU flavors bill by the second)
+2. **AWS**: STS GetCallerIdentity (free) -- credential validation for the
+   `scripts/aws/` cleanup tooling, not an execution backend
+3. **Public APIs**: GitHub, PyPI, HuggingFace (free)
+
+Clustrix's own cloud pricing clients were removed in v0.2.0 along with the
+cloud VM backends they served.
 
 ### Monitoring Costs
 

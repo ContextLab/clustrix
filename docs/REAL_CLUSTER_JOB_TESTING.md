@@ -6,7 +6,7 @@ This guide explains how to use the comprehensive real cluster job testing system
 
 The real cluster job testing system provides:
 
-- **Real job submission tests** for all cluster types (SLURM, PBS, SGE, Kubernetes, SSH)
+- **Real job submission tests** for every supported cluster type (SLURM, SSH, HuggingFace Jobs)
 - **Complete end-to-end validation** using the `@cluster` decorator
 - **Comprehensive monitoring** of job status and resource usage
 - **Automatic validation** of job results and error handling
@@ -17,10 +17,11 @@ The real cluster job testing system provides:
 ### Cluster-Specific Test Files
 
 - `tests/real_world/test_slurm_job_submission_real.py` - SLURM job submission tests
-- `tests/real_world/test_pbs_job_submission_real.py` - PBS job submission tests
-- `tests/real_world/test_sge_job_submission_real.py` - SGE job submission tests
-- `tests/real_world/test_kubernetes_job_submission_real.py` - Kubernetes job submission tests
 - `tests/real_world/test_ssh_job_execution_real.py` - SSH-based job execution tests
+
+The PBS, SGE and Kubernetes job-submission tests were deleted along with their
+backends in v0.2.0; see "Backends that are not currently supported" in the
+project README.
 
 ### Supporting Infrastructure
 
@@ -89,9 +90,6 @@ python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster al
 ```bash
 # Test only SLURM
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster slurm
-
-# Test only Kubernetes
-python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster kubernetes
 
 # Test only SSH
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ssh
@@ -236,37 +234,6 @@ Test SLURM-specific features:
 - Job arrays and parallel execution
 - SLURM accounting and metrics
 
-### PBS Tests
-
-Test PBS-specific features:
-
-- PBS environment variables (`PBS_JOBID`, `PBS_NODEFILE`, etc.)
-- Queue specification
-- Node file processing
-- Resource management
-- Job arrays simulation
-
-### SGE Tests
-
-Test SGE-specific features:
-
-- SGE environment variables (`JOB_ID`, `QUEUE`, `SGE_TASK_ID`, etc.)
-- Parallel environments
-- Queue specification
-- Resource limits
-- Array job simulation
-
-### Kubernetes Tests
-
-Test Kubernetes-specific features:
-
-- Kubernetes environment variables (`KUBERNETES_SERVICE_HOST`, etc.)
-- Pod and container management
-- Resource specifications (CPU, memory limits)
-- Namespace isolation
-- Persistent storage access
-- Service account and secrets
-
 ### SSH Tests
 
 Test SSH-based execution:
@@ -329,7 +296,6 @@ python -m tests.real_world.cluster_validation.run_cluster_job_tests --output my_
   },
   "credential_status": {
     "slurm": true,
-    "kubernetes": true,
     "ssh": true
   }
 }
@@ -355,12 +321,6 @@ python -m tests.real_world.cluster_validation.run_cluster_job_tests --output my_
    ```bash
    # SLURM
    squeue -u $USER
-   
-   # PBS
-   qstat -u $USER
-   
-   # SGE
-   qstat -u $USER
    ```
 
 #### Test Timeouts
@@ -469,7 +429,6 @@ on:
         options:
         - all
         - slurm
-        - kubernetes
         - ssh
 
 jobs:
@@ -492,7 +451,7 @@ jobs:
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
         CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
-        LAMBDA_CLOUD_API_KEY: ${{ secrets.LAMBDA_CLOUD_API_KEY }}
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ${{ inputs.cluster_type }}
     

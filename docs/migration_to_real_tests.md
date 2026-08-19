@@ -137,40 +137,38 @@ def test_ssh_connection_real():
     executor.disconnect()
 ```
 
-### Pattern 2: Mock Kubernetes API → Real Kind Cluster
+### Pattern 2: Mock HTTP-API backend → Real HuggingFace Job
 
 **Before (Mocked):**
 ```python
-@patch('kubernetes.client.BatchV1Api')
-def test_k8s_job(mock_api):
-    mock_response = Mock()
-    mock_response.metadata.name = 'test-job'
-    mock_api.return_value.create_namespaced_job.return_value = mock_response
-    
-    job_id = submit_k8s_job(func_data, config)
+@patch('clustrix.hf_jobs.HFJobsManager.submit_job')
+def test_hf_job(mock_submit):
+    mock_submit.return_value = 'test-job'
+
+    job_id = submit_hf_job(func_data, config)
     assert job_id == 'test-job'
 ```
 
 **After (Real):**
 ```python
 @pytest.mark.real_world
-def test_k8s_job_real():
-    """Test real Kubernetes job submission."""
+def test_hf_job_real():
+    """Test real HuggingFace Jobs submission."""
     configure(
-        cluster_type="kubernetes",
-        namespace="default"
+        cluster_type="huggingface",
+        hf_namespace="contextlab",
     )
-    
-    @cluster(cores=1, memory="512Mi")
-    def k8s_task():
+
+    @cluster(cores=1, memory="512MB")
+    def hf_task():
         import socket
         return {
             'hostname': socket.gethostname(),
-            'pod': os.environ.get('HOSTNAME', 'unknown')
+            'container': os.environ.get('HOSTNAME', 'unknown'),
         }
-    
-    result = k8s_task()
-    assert 'clustrix-job' in result['hostname'] or 'pod' in result['pod']
+
+    result = hf_task()
+    assert result['hostname']
 ```
 
 ### Pattern 3: Mock File Operations → Real File System
