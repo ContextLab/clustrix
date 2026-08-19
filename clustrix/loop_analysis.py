@@ -2,6 +2,7 @@
 
 import ast
 import inspect
+import textwrap
 from typing import Any, Dict, List, Optional, Callable, Set
 import logging
 
@@ -290,6 +291,22 @@ class SafeRangeEvaluator(ast.NodeVisitor):
             )
         elif isinstance(node, ast.BinOp):
             return self._evaluate_binop(node)
+        elif isinstance(node, ast.UnaryOp):
+            # A literal negative number (e.g. the -1 in range(10, 0, -1)) is
+            # not an ast.Constant(-1); Python's AST represents it as
+            # UnaryOp(USub, Constant(1)). Without handling this, every
+            # range() call with a literal negative bound or step -- the
+            # normal way to write a reverse-iterating range -- failed to
+            # evaluate, leaving range_info as None and falling back to the
+            # generic, less accurate iteration-count estimate.
+            operand = self._evaluate_node(node.operand)
+            if operand is None:
+                return None
+            if isinstance(node.op, ast.USub):
+                return -operand
+            elif isinstance(node.op, ast.UAdd):
+                return operand
+            return None
         else:
             return None
 
@@ -370,6 +387,14 @@ class DependencyAnalyzer(ast.NodeVisitor):
                     in ["Add", "Mult", "BitOr", "BitAnd", "BitXor"],
                 }
             )
+            # `x += y` reads the prior value of x before writing the new one,
+            # even though the AST target's ctx is Store, not Load. Without
+            # this, an accumulator like `total += i` never appears in
+            # `reads`, so it is invisible to the dependency check in
+            # `_analyze_for_loop` and the loop gets classified as having zero
+            # dependencies -- a false "safe to parallelize" for a loop whose
+            # iterations are not independent (see issue #106/#131).
+            self.reads.add(node.target.id)
         self.generic_visit(node)
 
     def visit_Break(self, node):
@@ -590,7 +615,15 @@ def detect_loops_in_function(
         kwargs = {}
 
     try:
-        source = inspect.getsource(func)
+        # inspect.getsource() returns the source exactly as it appears in the
+        # file, including any leading indentation from enclosing scopes
+        # (methods, closures defined inside a function, etc.). ast.parse()
+        # rejects an indented module-level statement with IndentationError,
+        # which the broad except below swallows -- so without dedenting,
+        # loop detection silently returns [] ("no loops") for every function
+        # that is not defined at column 0, which in practice means most
+        # methods and nested/closure functions never get analyzed at all.
+        source = textwrap.dedent(inspect.getsource(func))
         tree = ast.parse(source)
 
         # Build local variables context
@@ -607,15 +640,20 @@ def detect_loops_in_function(
 
         detector = LoopDetector(local_vars)
 
-        # Visit all nodes, not just the root
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.For, ast.While)):
-                if isinstance(node, ast.For):
-                    loop_info = detector._analyze_for_loop(node)
-                else:
-                    loop_info = detector._analyze_while_loop(node)
-                if loop_info:
-                    detector.loops.append(loop_info)
+        # Use the visitor's own traversal (visit_For/visit_While) rather than
+        # a manual ast.walk() that called `_analyze_for_loop`/
+        # `_analyze_while_loop` directly. Calling those private methods
+        # bypasses the current_level bookkeeping that visit_For/visit_While
+        # maintain, so every loop -- regardless of actual nesting depth --
+        # came out with nested_level == -1. That silently defeated
+        # find_parallelizable_loops's `nested_level <= max_nesting_level`
+        # filter (a loop of any depth passes -1 <= 1) and made
+        # LoopInfo.estimate_parallelization_benefit's and
+        # suggest_parallelization_strategy's nesting-aware branches dead
+        # code. detector.visit(tree) still finds loops anywhere in the
+        # function (generic_visit recurses through ifs/trys/etc. to reach
+        # them) while tracking depth correctly.
+        detector.visit(tree)
 
         return detector.loops
 
