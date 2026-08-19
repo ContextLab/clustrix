@@ -637,7 +637,7 @@ clustrix/
 │   └── infrastructure/  # Test infrastructure setup
 ├── docs/                # Documentation and tutorials
 │   ├── source/          # Sphinx documentation source
-│   ├── notebooks/       # Tutorial notebooks
+│   │   └── notebooks/   # Tutorial notebooks
 │   └── *.md             # Various documentation files
 ├── scripts/             # Utility scripts for development
 │   ├── check_quality.py               # Code quality validation
