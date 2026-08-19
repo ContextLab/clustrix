@@ -16,6 +16,16 @@
 
 **📖 Try the interactive [SSH Key Automation Tutorial](ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
+> **Note added 2026-08-19:** the "Initial Connection" snippet under
+> "Secure Key Deployment Process" below calls
+> `client.set_missing_host_key_policy(paramiko.AutoAddPolicy())` directly.
+> That has since been identified as insecure (silently trusts unknown host
+> keys) and is now the one pattern `clustrix/ssh_security.py` says no call
+> site may use. Every real SSH connection in the current codebase goes
+> through `clustrix.ssh_security.configure_host_key_policy()` instead, which
+> defaults to rejecting unknown host keys. The snippet below is left as
+> originally written, for the historical record; do not copy it.
+
 ## Executive Summary
 
 This document outlines the technical design for automating SSH key setup in Clustrix. The goal is to enable users to establish passwordless SSH authentication with remote clusters through a single button click in the Jupyter widget or CLI command, eliminating manual SSH key configuration.

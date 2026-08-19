@@ -74,9 +74,48 @@ Environment Variables
 
 There is no general ``CLUSTRIX_<FIELD>`` layer: no ``CLUSTRIX_CLUSTER_TYPE``
 or ``CLUSTRIX_CLUSTER_HOST`` is read anywhere, so ordinary settings come from
-a configuration file or ``configure()``. Two ``CLUSTRIX_`` variables are read,
-described below, and three further variables are consulted by specific
-features:
+a configuration file or ``configure()``. Two ``CLUSTRIX_`` variables are read
+unconditionally, described below. Beyond those, three separate mechanisms
+read further variables, and each is narrower than it looks:
+
+**Connecting over SSH without a password or key file configured.** When an
+SSH-family cluster (``ssh``, ``slurm``, ``pbs``, ``sge``) has neither
+``password`` nor ``key_file`` set, ``ClusterExecutor.setup_ssh_connection``
+calls ``FlexibleCredentialManager.ensure_credential("ssh")``
+(``clustrix/executor_connections.py``). That call first loads
+``~/.clustrix/.env`` (directory overridable via ``CLUSTRIX_CONFIG_DIR``) with
+``python-dotenv``, which -- as a side effect of loading the *whole file* --
+puts every variable defined there into the process environment, not only the
+SSH-related ones. It then reads, via ``clustrix/credential_manager.py``:
+
+- ``SSH_HOST``, ``SSH_USERNAME``, ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``,
+  ``SSH_PORT``
+- ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``
+- ``AZURE_SUBSCRIPTION_ID``, ``AZURE_TENANT_ID``, ``AZURE_CLIENT_ID``,
+  ``AZURE_CLIENT_SECRET``
+- ``GCP_PROJECT_ID``, ``GOOGLE_APPLICATION_CREDENTIALS``,
+  ``GCP_SERVICE_ACCOUNT_JSON``
+- ``KUBECONFIG``, ``K8S_NAMESPACE``, ``K8S_CONTEXT``
+- ``HF_TOKEN``, ``HF_USERNAME``
+- ``LAMBDA_CLOUD_API_KEY``, ``LAMBDA_CLOUD_ENDPOINT``
+
+The non-SSH entries above are loaded into the process environment by this
+call too, because loading ``.env`` loads the whole file regardless of which
+provider was asked for -- but only the ``SSH_*`` variables can affect *this*
+connection; the rest only matter if something else later reads them.
+
+**The optional SSH-key-setup helper.** ``setup_ssh_keys_with_fallback()``
+(exported from ``clustrix``; not called automatically by ``@cluster`` or
+``ClusterExecutor``) reads, via ``clustrix/auth_fallbacks.py``:
+
+- ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
+  ``<HOST>_PASSWORD`` (``<HOST>`` is the cluster hostname, upper-cased with
+  ``.`` replaced by ``_``)
+- ``CLUSTRIX_DEFAULT_PASSWORD``
+- ``CLUSTER_PASSWORD``
+
+**Feature-specific variables**, read independently of the two mechanisms
+above:
 
 - ``HF_TOKEN`` -- the HuggingFace backend falls back to it when ``hf_token``
   is unset (``clustrix/hf_jobs.py``).

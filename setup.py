@@ -56,6 +56,10 @@ setup(
         "azure": [
             "azure-identity>=1.12.0",
             "azure-mgmt-containerservice>=20.0.0",
+            "azure-mgmt-compute>=30.0.0",
+            "azure-mgmt-resource>=23.0.0,<26.0.0",
+            "azure-mgmt-network>=25.0.0",
+            "azure-mgmt-authorization>=4.0.0",
             "kubernetes>=20.13.0",
         ],
         "gcp": [
@@ -68,6 +72,10 @@ setup(
             "boto3>=1.26.0",
             "azure-identity>=1.12.0",
             "azure-mgmt-containerservice>=20.0.0",
+            "azure-mgmt-compute>=30.0.0",
+            "azure-mgmt-resource>=23.0.0,<26.0.0",
+            "azure-mgmt-network>=25.0.0",
+            "azure-mgmt-authorization>=4.0.0",
             "google-cloud-container>=2.15.0",
             "google-cloud-resource-manager>=1.14.0",
             "google-auth>=2.15.0",
@@ -106,7 +114,7 @@ setup(
             "azure-identity>=1.12.0",  # Azure auth
             "azure-mgmt-compute>=30.0.0",  # Azure compute
             "azure-mgmt-containerservice>=20.0.0",  # Azure AKS
-            "azure-mgmt-resource>=23.0.0",  # Azure resources
+            "azure-mgmt-resource>=23.0.0,<26.0.0",  # Azure resources
             "azure-mgmt-network>=25.0.0",  # Azure networking
             "google-cloud-compute>=1.11.0",  # GCP compute
             "google-cloud-container>=2.15.0",  # GCP GKE
@@ -132,6 +140,10 @@ setup(
             "boto3>=1.26.0",
             "azure-identity>=1.12.0",
             "azure-mgmt-containerservice>=20.0.0",
+            "azure-mgmt-compute>=30.0.0",
+            "azure-mgmt-resource>=23.0.0,<26.0.0",
+            "azure-mgmt-network>=25.0.0",
+            "azure-mgmt-authorization>=4.0.0",
             "google-cloud-container>=2.15.0",
             "google-cloud-resource-manager>=1.14.0",
             "google-auth>=2.15.0",

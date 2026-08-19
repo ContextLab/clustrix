@@ -61,7 +61,7 @@ aws iam list-attached-user-policies --user-name $USER_NAME
 
 After adding permissions, test with:
 ```bash
-python test_aws_preflight.py
+python tests/integration/test_aws_preflight.py
 ```
 
 You should see:
@@ -116,6 +116,6 @@ print("Roles:", len(iam.list_roles()['Roles']))
 ## Next Steps
 
 Once permissions are set up:
-1. Run pre-flight check: `python test_aws_preflight.py`
-2. Test EKS provisioning: `python test_aws_eks_real.py`
+1. Run pre-flight check: `python tests/integration/test_aws_preflight.py`
+2. Test EKS provisioning: `python tests/integration/test_aws_eks_real.py`
 3. Remember to destroy the cluster after testing to avoid charges!

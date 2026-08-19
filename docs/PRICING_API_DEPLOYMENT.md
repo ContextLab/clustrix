@@ -1,5 +1,25 @@
 # Production Deployment Guide: Cloud Provider Pricing APIs
 
+> **Status: aspirational, never implemented. Verified 2026-08-19.**
+> This document describes a standalone `pricing_service` daemon, a
+> `clustrix[pricing]` package extra, an `/etc/clustrix/clustrix.yml` service
+> config, and eight `CLUSTRIX_*`/systemd environment variables. None of that
+> exists: there is no `clustrix.services.pricing_service` module (`clustrix/`
+> has no `services/` package at all), no `pricing` extra in `pyproject.toml`
+> or `setup.py`, and `clustrix.config.load_config` rejects any YAML key that
+> is not a `ClusterConfig` field -- a top-level `pricing:` block like the one
+> shown below would fail to load. None of the environment variables in the
+> "Performance Tuning" and "Configuration File" sections are read anywhere in
+> `clustrix/`. What *is* real and working is the plain-Python pricing system
+> in `clustrix/pricing_clients/` and `clustrix/cost_providers/`, used as a
+> library (`from clustrix.cost_providers.aws import AWSCostMonitor`), with no
+> daemon, service config, or extra to install -- see
+> [`PRICING_API_REFERENCE.md`](PRICING_API_REFERENCE.md) and
+> [`PRICING_USER_GUIDE.md`](PRICING_USER_GUIDE.md), which describe that real
+> system and have been checked against the code. The rest of this document
+> is left unedited below as a record of the deployment that was planned but
+> never built; do not follow it.
+
 This guide provides comprehensive instructions for deploying Clustrix's programmatic cloud provider pricing system in production environments.
 
 ## Overview

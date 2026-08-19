@@ -1,5 +1,22 @@
 # Technical Design: Enhanced Authentication Methods for Cluster Access (Issue #66)
 
+> **Status: historical design document, partially implemented. Verified
+> 2026-08-19.** This proposal was only partly built. Implemented:
+> `ClusterConfig.use_env_password`, `.password_env_var`, `.cache_credentials`,
+> `.credential_cache_ttl` and `.get_env_password()` (`clustrix/config.py`);
+> the environment-aware password fallback chain in
+> `clustrix/auth_fallbacks.py` (`get_cluster_password`,
+> `setup_auth_with_fallback`, etc.), reached via
+> `clustrix.setup_ssh_keys_with_fallback`. **Not implemented** and not present
+> anywhere in the codebase: the `create_cluster_widget` function in
+> `clustrix/notebook_magic.py` (§"Enhanced Widget with Dynamic Fields" below)
+> -- the notebook widget that does exist,
+> `EnhancedClusterConfigWidget` in `clustrix/notebook_magic_widget.py`, took a
+> different, class-based shape; `validate_kerberos_auth` (§"Component Design"
+> item 4); and the `--password-env-var` CLI flag (§"CLI Interface
+> Enhancement"). Treat everything below as the original proposal, not as a
+> description of current behavior.
+
 ## Overview
 
 This document outlines the technical design for implementing enhanced authentication methods in Clustrix, addressing issue #66. The design focuses on providing seamless authentication fallbacks using environment variables and SSH keys for enterprise clusters.

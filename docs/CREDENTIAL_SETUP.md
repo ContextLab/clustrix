@@ -94,14 +94,8 @@ export LAMBDA_CLOUD_API_KEY="your-api-key"
 ### 3. Test Local Setup
 
 ```bash
-# Check environment variable setup
+# Check environment variable setup and credential access for every provider
 python scripts/run_real_world_tests.py --check-creds
-
-# Test credential access
-python scripts/test_credential_access.py
-
-# Verify specific services
-python scripts/test_real_world_credentials.py
 ```
 
 ## GitHub Actions Setup
@@ -178,12 +172,17 @@ python scripts/run_real_world_tests.py --all --expensive
 
 ### GitHub Actions
 
-Tests run automatically on push/PR. To run expensive tests:
+Tests do **not** run automatically on push or PR. The `Real-World Tests`
+workflow (`.github/workflows/real-world-tests.yml`) deliberately has no
+`push:` or `pull_request:` trigger, because these jobs use real credentials
+and some provision billable resources -- a PR from a fork must never be able
+to trigger them. It runs only on a weekly `schedule` (default branch only)
+or when triggered manually:
 
 1. Go to `Actions` tab in GitHub
 2. Select `Real-World Tests` workflow
 3. Click `Run workflow`
-4. Check `Run expensive tests`
+4. Check `Run expensive tests` if you want those included
 5. Click `Run workflow`
 
 ## Cost Control
@@ -236,7 +235,7 @@ python -c "from dotenv import load_dotenv; load_dotenv(); import os; print(os.en
 # Test locally with environment variables
 export GITHUB_ACTIONS=true
 export CLUSTRIX_USERNAME="..."
-python scripts/test_real_world_credentials.py
+python scripts/run_real_world_tests.py --check-creds
 ```
 
 ### Permission Issues
@@ -280,7 +279,7 @@ ssh -vvv user@host
 
 For issues with credential setup:
 1. Check the troubleshooting section above
-2. Run `python scripts/test_real_world_credentials.py` for diagnostics
+2. Run `python scripts/run_real_world_tests.py --check-creds` for diagnostics
 3. Review workflow logs in GitHub Actions
 4. Verify environment variables are properly set and loaded
 5. Ensure `.env` file is in the correct location and not committed to git

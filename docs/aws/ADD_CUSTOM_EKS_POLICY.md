@@ -73,7 +73,7 @@ aws iam attach-user-policy \
 
 Test that it works:
 ```bash
-python test_aws_preflight.py
+python tests/integration/test_aws_preflight.py
 ```
 
 You should see:

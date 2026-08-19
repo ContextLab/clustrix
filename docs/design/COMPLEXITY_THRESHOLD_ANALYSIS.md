@@ -1,5 +1,17 @@
 # ClustriX Complexity Threshold Analysis
 
+> **Status: historical. Root cause found and fixed, 2026-08-17.** This
+> document's "Root cause: still under investigation" line (under "Status"
+> below) is no longer accurate. The `result_raw.pkl not found` symptom this
+> document investigated turned out to have a different cause than function
+> complexity: the two-venv handoff re-serialized functions with stdlib
+> `pickle` instead of `dill`, which fails for any function defined in the
+> caller's `__main__` -- see the commit for issue #120 ("Make remote
+> @cluster execution actually work (two-venv seam)") and
+> `docs/design/function_dependency_design.md`, which cross-references this
+> file. The rest of this document is left as originally written, as a record
+> of the investigation.
+
 ## Executive Summary
 
 We have identified a **complexity threshold** in ClustriX function execution where functions exceeding certain complexity levels fail with `result_raw.pkl not found - VENV2 execution may have failed`. This issue affects both SSH and SLURM cluster types.
