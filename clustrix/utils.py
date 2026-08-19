@@ -96,7 +96,7 @@ def validate_shell_fragment(config_key: str, value: Any) -> str:
     """Refuse a config value that cannot be safely pasted in unquoted.
 
     Used only where quoting would break the feature: a ``module load`` line,
-    a ``#SBATCH``/``#PBS``/``#$`` directive body, the name in ``export
+    a ``#SBATCH`` directive body, the name in ``export
     NAME=...``. Everywhere else the value is quoted with ``shlex.quote``
     instead, which needs no allowlist.
 
@@ -2140,7 +2140,7 @@ def generate_two_venv_execution_commands(
     Generate the standardized two-venv execution commands.
 
     This centralizes the two-venv logic to eliminate code duplication across
-    different cluster types (SLURM, SSH, PBS, SGE).
+    different cluster types (SLURM, SSH).
 
     The three stages hand objects to each other through files on disk. Those
     handoffs use dill (falling back to cloudpickle, then stdlib pickle) rather
@@ -2449,20 +2449,13 @@ MEMORY_PATTERN = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([KMGTP]?)(i?)B?\s*$", re.I)
 def normalize_memory(value: Any, target: str) -> str:
     """Render a memory size in the form a given scheduler accepts.
 
-    Clustrix's own configuration uses human sizes like ``"16GB"``. Schedulers
-    do not agree on that spelling:
-
-    * Kubernetes quantities are ``16G`` (decimal) or ``16Gi`` (binary) and a
-      pod carrying ``16GB`` is rejected outright by the API server.
-    * SLURM's ``--mem`` takes a bare number with an optional ``K|M|G|T``.
-    * PBS and SGE accept ``16gb`` and ``16G`` respectively.
-
-    Passing the configured string through unchanged is what made
-    ``default_memory`` unusable on Kubernetes.
+    Clustrix's own configuration uses human sizes like ``"16GB"``, which is
+    not what SLURM's ``--mem`` accepts: it takes a bare number with an
+    optional ``K|M|G|T`` suffix, so ``16GB`` is rejected.
 
     Args:
         value: A size such as ``"16GB"``, ``"512Mi"``, ``16`` (GB assumed).
-        target: ``"kubernetes"``, ``"slurm"``, ``"pbs"`` or ``"sge"``.
+        target: ``"slurm"``.
 
     Returns:
         The size spelled the way ``target`` expects it.
@@ -2483,10 +2476,10 @@ def normalize_memory(value: Any, target: str) -> str:
     if not unit:
         unit = "G"  # a bare number has always meant gigabytes here
 
-    # Schedulers take integers. "1.5GB" would reach SLURM as --mem=1.5G and
-    # PBS as mem=1.5gb, both of which they reject, so round up to the next
-    # whole unit rather than emit something that cannot be submitted. Rounding
-    # *up* because a job asking for 1.5G and given 1G would be killed.
+    # SLURM takes integers. "1.5GB" would reach it as --mem=1.5G, which it
+    # rejects, so round up to the next whole unit rather than emit something
+    # that cannot be submitted. Rounding *up* because a job asking for 1.5G
+    # and given 1G would be killed.
     if "." in amount:
         import math
 
@@ -2500,15 +2493,7 @@ def normalize_memory(value: Any, target: str) -> str:
         )
         amount = str(whole)
 
-    if target == "kubernetes":
-        # "16GB" means 16 gibibytes in every other part of clustrix, so keep
-        # the binary suffix rather than silently shrinking the request by 7%.
-        return f"{amount}{unit}i" if unit else amount
     if target == "slurm":
-        return f"{amount}{unit}"
-    if target == "pbs":
-        return f"{amount.lower()}{unit.lower()}b"
-    if target == "sge":
         return f"{amount}{unit}"
     return text
 
@@ -2543,10 +2528,6 @@ def create_job_script(
 
     if cluster_type == "slurm":
         return _create_slurm_script(job_config, remote_job_dir, config)
-    elif cluster_type == "pbs":
-        return _create_pbs_script(job_config, remote_job_dir, config)
-    elif cluster_type == "sge":
-        return _create_sge_script(job_config, remote_job_dir, config)
     elif cluster_type == "ssh":
         return _create_ssh_script(job_config, remote_job_dir, config)
     else:
@@ -2621,11 +2602,10 @@ def result_signing_lines(indent: str = "    ", serializer: str = "pickle") -> li
 def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
     """The lines that actually run the user's function in a job script.
 
-    Shared by every scheduler. It used to live only inside the SLURM
-    generator: PBS ran `python execute_function.py`, a file nothing in
-    clustrix has ever created, and SGE carried its own divergent copy of
-    the single-venv script. Both therefore missed the two-venv path, the
-    result signing and every fix made to the SLURM one.
+    Shared by every scheduler, rather than living inside one generator: the
+    now-removed PBS and SGE generators each carried a divergent copy, and
+    both therefore missed the two-venv path, the result signing and every
+    fix made to the SLURM one.
     """
     script_lines: list = []
     # Add execution commands
@@ -2760,66 +2740,6 @@ def _create_slurm_script(
     if job_config.get("partition"):
         partition = validate_shell_fragment("partition", job_config["partition"])
         script_lines.append(f"#SBATCH --partition={partition}")
-
-    # Add environment setup
-    script_lines.extend(environment_setup_lines(config))
-
-    script_lines.extend(job_execution_lines(remote_job_dir, config))
-
-    return "\n".join(script_lines)
-
-
-def _create_pbs_script(
-    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
-) -> str:
-    """Create PBS job script."""
-
-    # As for SLURM: #PBS directives are parsed by the scheduler, so these are
-    # validated rather than quoted.
-    job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
-    script_lines = [
-        "#!/bin/bash",
-        "#PBS -N clustrix",
-        f"#PBS -o {job_dir}/job.out",
-        f"#PBS -e {job_dir}/job.err",
-        f"#PBS -l nodes=1:ppn={validate_shell_fragment('cores', job_config['cores'])}",
-        f"#PBS -l mem="
-        f"{validate_shell_fragment('memory', normalize_memory(job_config['memory'], 'pbs'))}",
-        f"#PBS -l walltime={validate_shell_fragment('time', job_config['time'])}",
-    ]
-
-    if job_config.get("queue"):
-        queue = validate_shell_fragment("queue", job_config["queue"])
-        script_lines.append(f"#PBS -q {queue}")
-
-    # Add environment setup
-    script_lines.extend(environment_setup_lines(config))
-
-    script_lines.extend(job_execution_lines(remote_job_dir, config))
-
-    return "\n".join(script_lines)
-
-
-def _create_sge_script(
-    job_config: Dict[str, Any], remote_job_dir: str, config: ClusterConfig
-) -> str:
-    """Create SGE job script."""
-
-    # As for SLURM: #$ directives are parsed by the scheduler, so these are
-    # validated rather than quoted.
-    job_dir = validate_shell_fragment("remote_work_dir", remote_job_dir)
-    script_lines = [
-        "#!/bin/bash",
-        "#$ -N clustrix",
-        f"#$ -o {job_dir}/job.out",
-        f"#$ -e {job_dir}/job.err",
-        f"#$ -pe smp {validate_shell_fragment('cores', job_config['cores'])}",
-        f"#$ -l h_vmem="
-        f"{validate_shell_fragment('memory', normalize_memory(job_config['memory'], 'sge'))}",
-        f"#$ -l h_rt={validate_shell_fragment('time', job_config['time'])}",
-        "#$ -cwd",
-        "",
-    ]
 
     # Add environment setup
     script_lines.extend(environment_setup_lines(config))
