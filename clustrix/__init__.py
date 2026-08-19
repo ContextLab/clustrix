@@ -43,6 +43,15 @@ from .file_packaging import (
     create_execution_context,
     package_function_for_execution,
 )
+from .staging import (
+    DataPackage,
+    PackagedFile,
+    StagingError,
+    data_package,
+    list_data_packages,
+    delete_data_package,
+    materialize_packages,
+)
 from .profile_manager import ProfileManager
 from .modern_notebook_widget import (
     ModernClustrixWidget,
@@ -94,6 +103,13 @@ __all__ = [
     "ExecutionContext",
     "create_execution_context",
     "package_function_for_execution",
+    "DataPackage",
+    "PackagedFile",
+    "StagingError",
+    "data_package",
+    "list_data_packages",
+    "delete_data_package",
+    "materialize_packages",
     "ProfileManager",
     "ModernClustrixWidget",
     "create_modern_cluster_widget",

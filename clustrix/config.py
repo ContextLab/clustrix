@@ -45,6 +45,23 @@ class ClusterConfig:
     # GPU flavors bill real money, so selecting one is an explicit act.
     hf_allow_gpu_flavors: bool = False
 
+    # Data staging (clustrix/staging.py). A data package below
+    # stage_inline_max_bytes rides inside the package object itself and needs
+    # no remote store at all; above it, the contents go to a private
+    # HuggingFace dataset repo -- hf_data_repo overrides where, and defaults
+    # to "<hf_namespace>/clustrix-data".
+    #
+    # The two size bands above that are about not surprising anyone:
+    # stage_warn_bytes logs before a slow transfer, and stage_max_bytes
+    # refuses outright, because a silent multi-hour upload is indistinguishable
+    # from a hang. Nothing staged is ever reclaimed automatically -- deletion
+    # is always an explicit act by the user, so there is no TTL or size cap on
+    # the store itself here by design.
+    hf_data_repo: Optional[str] = None
+    stage_inline_max_bytes: int = 1 * 1024 * 1024  # 1 MB
+    stage_warn_bytes: int = 100 * 1024 * 1024  # 100 MB
+    stage_max_bytes: int = 5 * 1024 * 1024 * 1024  # 5 GB
+
     # Resource defaults
     default_cores: int = 4
     default_memory: str = "8GB"
