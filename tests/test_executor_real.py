@@ -447,7 +447,10 @@ class TestExecutorIntegrationWorkflows:
                 import numpy as np
                 import time
 
-                start_time = time.time()
+                # perf_counter, not time(): the Windows wall clock ticks
+                # in ~15.6 ms steps, so work this short measures as
+                # exactly 0.0 and the assertion below has nothing to see.
+                start_time = time.perf_counter()
                 data = np.array(data_points)
                 results = {}
 
@@ -466,7 +469,7 @@ class TestExecutorIntegrationWorkflows:
                         autocorr = np.correlate(data, data, mode="full")
                         results[op] = float(np.max(autocorr))
 
-                results["processing_time"] = time.time() - start_time
+                results["processing_time"] = time.perf_counter() - start_time
                 return results
 
             # User executes function normally
