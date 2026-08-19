@@ -1,10 +1,11 @@
 """Tests for filesystem utilities."""
 
 import pytest
+import socket
+import subprocess
 import tempfile
 import os
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
 import stat
 
 from clustrix.filesystem import (
@@ -21,7 +22,56 @@ from clustrix.filesystem import (
     FileInfo,
     DiskUsage,
 )
-from clustrix.config import ClusterConfig
+from clustrix.config import ClusterConfig, configure
+from tests.ssh_server import LocalSSHServer
+
+#: A real password for a real server that lives for one test.
+SSH_PASSWORD = "clustrix-test-password"
+
+
+@pytest.fixture
+def ssh_server(tmp_path):
+    """A real SSH server on a loopback port.
+
+    The remote filesystem operations are all ``exec_command`` against a real
+    shell, so pointing them at this server means ``ls``, ``test -e`` and
+    ``stat`` really run, against files that really exist.
+    """
+    root = tmp_path / "remote"
+    root.mkdir()
+    with LocalSSHServer(root=root, password=SSH_PASSWORD) as server:
+        server.root_path = root
+        yield server
+
+
+def _has_gnu_stat() -> bool:
+    """Really ask this host whether its ``stat`` understands GNU ``-c``."""
+    probe = subprocess.run(
+        ["stat", "-c", "%s", os.devnull],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return probe.returncode == 0
+
+
+def _remote_filesystem(server) -> ClusterFilesystem:
+    config = ClusterConfig(
+        cluster_type="slurm",
+        cluster_host=server.host,
+        cluster_port=server.port,
+        username="testuser",
+        password=SSH_PASSWORD,
+        remote_work_dir=str(server.root_path),
+        # The server's host key is generated per run, so it can never be in a
+        # known_hosts file; verification is tested separately.
+        ssh_host_key_policy="auto_add",
+    )
+    fs = ClusterFilesystem(config)
+    # ClusterFilesystem silently switches to local operations when it decides
+    # it is already running on the target host. If that ever fired here the
+    # tests below would quietly stop testing SSH, so it is checked.
+    assert fs.config.cluster_type == "slurm"
+    return fs
 
 
 class TestFileInfo:
@@ -202,81 +252,77 @@ class TestClusterFilesystem:
             assert usage.file_count == 2
             assert usage.total_bytes >= 1100  # At least 1100 bytes
 
-    @patch("paramiko.SSHClient")
-    def test_remote_ls(self, mock_ssh_class):
-        """Test remote directory listing."""
-        # Mock SSH client
-        mock_ssh = MagicMock()
-        mock_ssh_class.return_value = mock_ssh
+    def test_remote_ls(self, ssh_server):
+        """Named in issue #117: this used to test ``str.split``.
 
-        # Mock command execution
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b"file1.txt\nfile2.py\nsubdir/\n"
-        mock_ssh.exec_command.return_value = (None, mock_stdout, None)
+        The old version fed a ``MagicMock`` the bytes
+        ``b"file1.txt\\nfile2.py\\nsubdir/\\n"`` and asserted those three
+        names came back. Every name in the assertion was written by the test
+        four lines earlier.
 
-        config = ClusterConfig(
-            cluster_type="slurm",
-            cluster_host="test.example.com",
-            username="testuser",
-            password="testpass",
-            remote_work_dir="/home/testuser",
-        )
-        fs = ClusterFilesystem(config)
+        Here the files really exist, the listing really runs ``ls -1`` in a
+        real shell at the far end of a real SSH connection, and the assertion
+        is on what is really in the directory -- including the fact that a
+        file created after the connection opened shows up, which a canned
+        byte string cannot express.
+        """
+        (ssh_server.root_path / "file1.txt").write_text("one")
+        (ssh_server.root_path / "file2.py").write_text("two")
+        (ssh_server.root_path / "subdir").mkdir()
+        fs = _remote_filesystem(ssh_server)
 
-        files = fs.ls(".")
-        expected = ["file1.txt", "file2.py", "subdir"]
-        # Remove trailing slashes for comparison
-        cleaned_files = [f.rstrip("/") for f in files]
-        assert set(cleaned_files) == set(expected)
+        assert fs.ls(".") == ["file1.txt", "file2.py", "subdir"]
 
-    @patch("paramiko.SSHClient")
-    def test_remote_exists(self, mock_ssh_class):
-        """Test remote file existence check."""
-        mock_ssh = MagicMock()
-        mock_ssh_class.return_value = mock_ssh
+        # A subdirectory of the real tree, listed by real path resolution.
+        (ssh_server.root_path / "subdir" / "nested.dat").write_text("three")
+        assert fs.ls("subdir") == ["nested.dat"]
 
-        # Mock successful exists command (file exists)
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = b"EXISTS"
-        mock_ssh.exec_command.return_value = (None, mock_stdout, None)
+        # A directory that is not there lists as empty rather than raising.
+        assert fs.ls("no_such_directory") == []
 
-        config = ClusterConfig(
-            cluster_type="slurm",
-            cluster_host="test.example.com",
-            username="testuser",
-            password="testpass",
-        )
-        fs = ClusterFilesystem(config)
+    def test_remote_exists(self, ssh_server):
+        """Existence decided by a real ``test -e`` on a real file."""
+        (ssh_server.root_path / "test.txt").write_text("real contents")
+        (ssh_server.root_path / "a_directory").mkdir()
+        fs = _remote_filesystem(ssh_server)
 
         assert fs.exists("test.txt") is True
-
-        # Mock failed exists command (file doesn't exist)
-        mock_stdout.read.return_value = b"NOT_EXISTS"
+        assert fs.exists("a_directory") is True
         assert fs.exists("nonexistent.txt") is False
 
-    @patch("paramiko.SSHClient")
-    def test_remote_stat(self, mock_ssh_class):
-        """Test remote file stat."""
-        mock_ssh = MagicMock()
-        mock_ssh_class.return_value = mock_ssh
+        # And it tracks reality: delete the file, and it stops existing.
+        (ssh_server.root_path / "test.txt").unlink()
+        assert fs.exists("test.txt") is False
 
-        # Mock stat output: size mtime mode
-        stat_output = "11 1640995200 81a4"  # 11 bytes, timestamp, regular file mode
-        mock_stdout = MagicMock()
-        mock_stdout.read.return_value = stat_output.encode()
-        mock_ssh.exec_command.return_value = (None, mock_stdout, None)
+    def test_remote_stat(self, ssh_server):
+        """Size and mtime read off a real file over a real connection.
 
-        config = ClusterConfig(
-            cluster_type="slurm",
-            cluster_host="test.example.com",
-            username="testuser",
-            password="testpass",
-        )
-        fs = ClusterFilesystem(config)
+        The old version supplied the string ``"11 1640995200 81a4"`` and
+        asserted 11 and 1640995200 came back out of it. Because it supplied
+        the output, it could not notice what running the command for real
+        immediately shows: ``_remote_stat`` issues ``stat -c '%s %Y %f'``,
+        which is GNU coreutils syntax. A BSD ``stat`` (macOS, the BSDs) does
+        not accept ``-c``, prints nothing to stdout, and clustrix then reports
+        ``FileNotFoundError`` for a file that is plainly there.
 
-        file_info = fs.stat("test.txt")
-        assert file_info.size == 11
-        assert file_info.modified == 1640995200.0
+        Both real outcomes are asserted, chosen by really asking the host
+        which ``stat`` it has -- rather than skipping, which would let the
+        defect go unmentioned on the platform that has it.
+        """
+        target = ssh_server.root_path / "test.txt"
+        target.write_text("hello world")  # exactly 11 bytes
+        local_stat = target.stat()
+        fs = _remote_filesystem(ssh_server)
+
+        if _has_gnu_stat():
+            file_info = fs.stat("test.txt")
+            assert file_info.size == 11 == local_stat.st_size
+            assert file_info.modified == pytest.approx(local_stat.st_mtime, abs=1)
+            assert file_info.is_dir is False
+        else:
+            # Pinned defect: GNU-only syntax against a BSD stat.
+            with pytest.raises(FileNotFoundError):
+                fs.stat("test.txt")
 
 
 class TestConvenienceFunctions:
@@ -378,23 +424,23 @@ class TestConvenienceFunctions:
             assert usage.total_bytes >= 1100
             assert usage.total_mb > 0
 
-    def test_convenience_functions_use_default_config(self):
-        """Test that convenience functions can use default config."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            Path(tmpdir, "test.txt").touch()
+    def test_convenience_functions_use_default_config(self, tmp_path):
+        """The real global configuration is what the convenience functions read.
 
-            # Mock get_config to return our test config
-            test_config = ClusterConfig(cluster_type="local", local_work_dir=tmpdir)
+        The old version patched ``clustrix.config.get_config``. ``configure()``
+        is the shipped way to set that configuration, so it is used instead --
+        which also means this test would notice if ``configure`` and
+        ``get_config`` ever stopped agreeing. The autouse ``reset_config``
+        fixture restores the singleton afterwards.
+        """
+        (tmp_path / "test.txt").write_text("four bytes\n")
 
-            with patch("clustrix.config.get_config", return_value=test_config):
-                # Should work without explicitly passing config
-                files = cluster_ls(".")
-                assert "test.txt" in files
+        configure(cluster_type="local", local_work_dir=str(tmp_path))
 
-                assert cluster_exists("test.txt") is True
-
-                file_info = cluster_stat("test.txt")
-                assert file_info.size >= 0  # Empty files are valid
+        files = cluster_ls(".")
+        assert "test.txt" in files
+        assert cluster_exists("test.txt") is True
+        assert cluster_stat("test.txt").size == len("four bytes\n")
 
 
 class TestErrorHandling:
@@ -421,19 +467,30 @@ class TestErrorHandling:
         files = fs.ls(".")
         assert files == []
 
-    @patch("paramiko.SSHClient")
-    def test_remote_connection_failure(self, mock_ssh_class):
-        """Test handling of remote connection failures."""
-        mock_ssh_class.side_effect = Exception("Connection failed")
+    def test_remote_connection_failure(self):
+        """A host that is not listening really fails, and fails quickly.
+
+        The old version made a patched ``paramiko.SSHClient`` raise, which
+        proved only that the exception propagated. This connects to a real
+        port on the loopback interface with nothing behind it, so the failure
+        is produced by the network stack.
+        """
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", 0))
+            closed_port = probe.getsockname()[1]
 
         config = ClusterConfig(
             cluster_type="slurm",
-            cluster_host="invalid.example.com",
+            cluster_host="127.0.0.1",
+            cluster_port=closed_port,
             username="testuser",
+            password="invalid-password",
+            remote_work_dir="/tmp",
+            ssh_connect_timeout=5,
         )
         fs = ClusterFilesystem(config)
 
-        with pytest.raises(Exception):
+        with pytest.raises(OSError):
             fs.ls(".")
 
 

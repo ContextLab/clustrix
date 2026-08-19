@@ -1,8 +1,55 @@
+import os
+
+import cloudpickle
+import paramiko
 import pytest
-from unittest.mock import Mock, patch
+
 from clustrix.executor import ClusterExecutor
 from clustrix.config import ClusterConfig
 from clustrix.utils import create_job_script, serialize_function
+from tests.ssh_server import LocalSSHServer, generate_keypair
+
+#: Password the in-process SSH server accepts. It is a real credential for a
+#: real server that exists only for the duration of one test.
+SSH_PASSWORD = "clustrix-test-password"
+
+
+@pytest.fixture
+def ssh_server(tmp_path):
+    """A real SSH server on a loopback port.
+
+    Not a mock, and not a stand-in for one: paramiko's server side, a real
+    socket, a real handshake, real key and password authentication, and
+    commands run by a real shell against real files. `clustrix` runs against
+    it completely unmodified.
+    """
+    root = tmp_path / "remote"
+    root.mkdir()
+    private_key = generate_keypair(tmp_path, "id_ed25519")
+    with LocalSSHServer(
+        root=root, password=SSH_PASSWORD, authorized_keys=[f"{private_key}.pub"]
+    ) as server:
+        server.root_path = root
+        server.private_key_path = private_key
+        yield server
+
+
+def _real_config(server, **overrides):
+    """A ClusterConfig pointed at the real test server."""
+    kwargs = dict(
+        cluster_type="slurm",
+        cluster_host=server.host,
+        cluster_port=server.port,
+        username="testuser",
+        password=SSH_PASSWORD,
+        remote_work_dir=str(server.root_path),
+        # The server generates its host key per run, so it can never appear in
+        # a known_hosts file. Verification of unknown host keys is a separate
+        # subject with its own tests (tests/unit/test_host_key_policy.py).
+        ssh_host_key_policy="auto_add",
+    )
+    kwargs.update(overrides)
+    return ClusterConfig(**kwargs)
 
 
 def _double(x):
@@ -38,82 +85,105 @@ class TestClusterExecutor:
         assert executor.ssh_client is None
         assert executor.sftp_client is None
 
-    @patch("paramiko.SSHClient")
-    def test_connect(self, mock_ssh_class, executor):
-        """Test SSH connection establishment."""
-        mock_ssh = Mock()
-        mock_ssh_class.return_value = mock_ssh
-        mock_sftp = Mock()
-        mock_ssh.open_sftp.return_value = mock_sftp
+    def test_connect(self, ssh_server):
+        """A real SSH connection, authenticated with a real key.
+
+        The old version patched ``paramiko.SSHClient``, then asserted that
+        ``executor.ssh_client`` was the Mock it had just installed and that
+        ``connect`` had been called with the arguments the config held. No
+        socket was opened and no key was used. Here the key really is on
+        disk, the server really verifies possession of it, and the SFTP
+        channel really lists a file that really exists.
+        """
+        executor = ClusterExecutor(
+            _real_config(ssh_server, key_file=str(ssh_server.private_key_path))
+        )
 
         executor.connect()
+        try:
+            transport = executor.ssh_client.get_transport()
+            assert transport is not None and transport.is_active()
+            # The far end saw the username, and saw it prove the key.
+            assert ("testuser", "publickey") in ssh_server.authentications
 
-        mock_ssh.set_missing_host_key_policy.assert_called_once()
-        mock_ssh.connect.assert_called_once_with(
-            hostname="test.cluster.com",
-            port=22,
-            username="testuser",
-            key_filename="~/.ssh/test_key",
-        )
-        assert executor.ssh_client == mock_ssh
-        assert executor.sftp_client == mock_sftp
+            (ssh_server.root_path / "marker.txt").write_text("hello")
+            assert "marker.txt" in executor.sftp_client.listdir(".")
+        finally:
+            executor.disconnect()
 
-    @patch("paramiko.SSHClient")
-    def test_connect_with_password(self, mock_ssh_class):
-        """Test SSH connection with password."""
-        config = ClusterConfig(
-            cluster_host="test.cluster.com", username="testuser", password="testpass"
-        )
-        executor = ClusterExecutor(config)
-
-        mock_ssh = Mock()
-        mock_ssh_class.return_value = mock_ssh
+    def test_connect_with_password(self, ssh_server):
+        """Password authentication, really performed by a real server."""
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
 
         executor.connect()
+        try:
+            assert ("testuser", "password") in ssh_server.authentications
+            stdout, _ = executor._execute_command("echo connected")
+            assert stdout.strip() == "connected"
+        finally:
+            executor.disconnect()
 
-        mock_ssh.connect.assert_called_once_with(
-            hostname="test.cluster.com",
-            port=22,
-            username="testuser",
-            password="testpass",
-        )
+    def test_connect_with_the_wrong_password_fails(self, ssh_server):
+        """Authentication has to be capable of failing.
 
-    def test_disconnect(self, executor):
-        """Test SSH disconnection."""
-        mock_ssh = Mock()
-        mock_sftp = Mock()
-        executor.ssh_client = mock_ssh
-        executor.sftp_client = mock_sftp
+        A mocked ``SSHClient`` accepts every credential, so the mocked tests
+        above it could never have caught an executor that authenticated
+        against nothing.
+        """
+        executor = ClusterExecutor(_real_config(ssh_server, password="wrong"))
+
+        with pytest.raises(paramiko.AuthenticationException):
+            executor.connect()
+
+    def test_disconnect(self, ssh_server):
+        """Disconnect really closes a really open connection."""
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
+        executor.connect()
+        transport = executor.ssh_client.get_transport()
+        assert transport.is_active()
 
         executor.disconnect()
 
-        mock_sftp.close.assert_called_once()
-        mock_ssh.close.assert_called_once()
         assert executor.ssh_client is None
         assert executor.sftp_client is None
+        assert not transport.is_active()
 
-    @patch("paramiko.SSHClient")
-    def test_execute_command(self, mock_ssh_class, executor):
-        """Test command execution."""
-        mock_ssh = Mock()
-        mock_ssh_class.return_value = mock_ssh
-        executor.ssh_client = mock_ssh
+    def test_execute_command(self, ssh_server):
+        """Named in issue #117: the old test asserted Python assignment works.
 
-        # Setup mock response
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b"command output"
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        It set ``mock_stdout.read.return_value = b"command output"`` and then
+        asserted ``stdout == "command output"``. Every byte in that assertion
+        was supplied by the test itself.
 
-        mock_stderr = Mock()
-        mock_stderr.read.return_value = b""
+        This runs a real command in a real shell at the far end of a real SSH
+        connection, and asserts on output clustrix has no other way of
+        knowing: the contents of a file on the server's disk, the server's
+        real stderr, and a real non-zero exit status.
+        """
+        (ssh_server.root_path / "greeting.txt").write_text("hello from a real shell\n")
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
+        executor.connect()
+        try:
+            stdout, stderr = executor._execute_command("cat greeting.txt")
+            assert stdout == "hello from a real shell\n"
+            assert stderr == ""
 
-        mock_ssh.exec_command.return_value = (None, mock_stdout, mock_stderr)
+            # Real stderr, kept separate from stdout.
+            out, err = executor.connection_manager.execute_remote_command(
+                "echo oops >&2; exit 3"
+            )
+            assert out == ""
+            assert err.strip() == "oops"
 
-        stdout, stderr = executor._execute_command("echo test")
+            # And `check=True` really reads the real exit status.
+            with pytest.raises(RuntimeError, match=r"exit 3"):
+                executor.connection_manager.execute_remote_command(
+                    "echo oops >&2; exit 3", check=True
+                )
 
-        assert stdout == "command output"
-        assert stderr == ""
-        mock_ssh.exec_command.assert_called_once_with("echo test")
+            assert ssh_server.commands.count("cat greeting.txt") == 1
+        finally:
+            executor.disconnect()
 
     def test_execute_command_not_connected(self, executor):
         """A command with no SSH connection must fail, and say why.
@@ -128,26 +198,27 @@ class TestClusterExecutor:
         with pytest.raises(RuntimeError, match="SSH client not connected"):
             executor._execute_command("echo test")
 
-    @patch("cloudpickle.dumps")
-    def test_prepare_function_data(self, mock_pickle, executor):
-        """Test function data preparation."""
+    def test_prepare_function_data(self, executor):
+        """Real serialization, really round-tripped.
+
+        The old version patched ``cloudpickle.dumps`` to return
+        ``b"pickled_data"`` and asserted it got ``b"pickled_data"`` back, so it
+        would have passed against a serializer that could not serialize
+        anything. This asserts the bytes deserialize into a working function.
+        """
 
         def test_func(x):
             return x * 2
 
-        mock_pickle.return_value = b"pickled_data"
-
         result = executor._prepare_function_data(test_func, (5,), {}, {"cores": 4})
 
-        assert result == b"pickled_data"
-        mock_pickle.assert_called_once()
-
-        # Check the structure of pickled data
-        call_args = mock_pickle.call_args[0][0]
-        assert call_args["func"].__name__ == "test_func"
-        assert call_args["args"] == (5,)
-        assert call_args["kwargs"] == {}
-        assert call_args["config"] == {"cores": 4}
+        assert isinstance(result, bytes)
+        restored = cloudpickle.loads(result)
+        assert restored["args"] == (5,)
+        assert restored["kwargs"] == {}
+        assert restored["config"] == {"cores": 4}
+        # The point of serializing it at all: it still runs on the far side.
+        assert restored["func"](5) == 10
 
     # ------------------------------------------------------------------
     # Job submission.
@@ -226,25 +297,37 @@ class TestClusterExecutor:
         assert executor.scheduler_manager.active_jobs == {}
         assert executor.active_jobs == {}
 
-    def test_check_slurm_status(self, executor):
-        """Test SLURM job status checking."""
-        executor.ssh_client = Mock()
+    def test_check_slurm_status(self, ssh_server):
+        """Status detection over a real connection, from real files.
 
-        # Mock squeue output
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b"RUNNING"
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        The old version fed a Mock ``b"RUNNING"`` and asserted "running" --
+        it tested a lookup table against a string it had supplied.
 
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
+        There is no SLURM here, but that is the case this code was written
+        for: `squeue` stops listing a job the moment it finishes, so the
+        answer has to come from what the job left on disk. Those files are
+        real and they are read over the real SSH connection.
+        """
+        job_dir = ssh_server.root_path / "job_12345"
+        job_dir.mkdir()
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
+        executor.connect()
+        try:
+            executor.scheduler_manager.active_jobs["12345"] = {
+                "remote_dir": str(job_dir)
+            }
 
-        status = executor._check_slurm_status("12345")
+            (job_dir / "result.pkl").write_bytes(b"a real result file")
+            assert executor._check_slurm_status("12345") == "completed"
 
-        assert status == "running"
+            (job_dir / "result.pkl").unlink()
+            (job_dir / "error.pkl").write_bytes(b"a real error file")
+            assert executor._check_slurm_status("12345") == "failed"
 
-        # Verify squeue command
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "squeue" in call_args
-        assert "12345" in call_args
+            # `squeue` really was asked first, and really crossed the wire.
+            assert any(c.startswith("squeue -j 12345") for c in ssh_server.commands)
+        finally:
+            executor.disconnect()
 
     # ------------------------------------------------------------------
     # Status and results.
@@ -296,21 +379,20 @@ class TestClusterExecutor:
         assert executor.get_result(job_id) == 42
         assert job_id not in executor.active_jobs
 
-    def test_cancel_job_slurm(self, executor):
-        """Test canceling SLURM job."""
-        executor.ssh_client = Mock()
-        executor.config.cluster_type = "slurm"
+    def test_cancel_job_slurm(self, ssh_server):
+        """`scancel` really crosses the wire.
 
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""
-        mock_stdout.channel.recv_exit_status.return_value = 0
-
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
-
-        executor.cancel_job("12345")
-
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "scancel 12345" in call_args
+        Was: a Mock recorded the string clustrix handed it, and the test read
+        it back off the Mock. Now the command is observed at the far end of a
+        real socket, by a real SSH server that really received it.
+        """
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
+        executor.connect()
+        try:
+            executor.cancel_job("12345")
+            assert "scancel 12345" in ssh_server.commands
+        finally:
+            executor.disconnect()
 
     def test_cancel_job_that_cannot_be_reached_stays_tracked(self, executor):
         """A job clustrix failed to cancel must stay tracked.
@@ -357,99 +439,93 @@ class TestClusterExecutorEdgeCases:
         with pytest.raises(ValueError, match="cluster_host must be specified"):
             executor._setup_ssh_connection()
 
-    @patch("os.getenv")
-    @patch("paramiko.SSHClient")
-    def test_setup_ssh_connection_no_username(self, mock_ssh_class, mock_getenv):
-        """Test SSH setup uses environment USER when no username specified."""
+    def test_setup_ssh_connection_no_username(self, ssh_server):
+        """With no username configured, the OS user is what reaches the server.
 
-        # Return different values for different env vars
-        def getenv_side_effect(key, default=None):
-            if key == "USER":
-                return "envuser"
-            return default
+        The old version patched ``os.getenv`` and inspected a Mock's kwargs.
+        The environment variable set here is a real environment variable, and
+        the username asserted on is the one the server really authenticated.
+        """
+        previous = os.environ.get("USER")
+        os.environ["USER"] = "envuser"
+        try:
+            executor = ClusterExecutor(
+                _real_config(ssh_server, username=None, key_file=None)
+            )
+            executor._setup_ssh_connection()
+            try:
+                assert ("envuser", "password") in ssh_server.authentications
+            finally:
+                executor.disconnect()
+        finally:
+            if previous is None:
+                del os.environ["USER"]
+            else:
+                os.environ["USER"] = previous
 
-        mock_getenv.side_effect = getenv_side_effect
-        config = ClusterConfig(cluster_host="test.cluster.com", username=None)
-        executor = ClusterExecutor(config)
+    def test_setup_ssh_connection_no_auth(self, ssh_server):
+        """With neither key nor password configured, clustrix does not get in.
 
-        mock_ssh = Mock()
-        mock_ssh_class.return_value = mock_ssh
-
-        executor._setup_ssh_connection()
-
-        # Should have called getenv for USER
-        assert any(call[0][0] == "USER" for call in mock_getenv.call_args_list)
-        connect_call = mock_ssh.connect.call_args[1]
-        assert connect_call["username"] == "envuser"
-
-    @patch("paramiko.SSHClient")
-    def test_setup_ssh_connection_no_auth(self, mock_ssh_class):
-        """Test SSH setup with neither key nor password (uses agent/default)."""
-        config = ClusterConfig(
-            cluster_host="test.cluster.com",
-            username="testuser",
-            key_file=None,
-            password=None,
+        The old version asserted that ``key_filename`` and ``password`` were
+        absent from a Mock's call kwargs -- true regardless of whether the
+        connection would have succeeded. The server here authorizes exactly
+        one key and one password; offering neither must be refused, and this
+        is the honest thing to assert without a host that trusts an agent.
+        """
+        config = _real_config(
+            ssh_server, key_file=None, password=None, username="testuser"
         )
         executor = ClusterExecutor(config)
 
-        mock_ssh = Mock()
-        mock_ssh_class.return_value = mock_ssh
+        with pytest.raises(paramiko.SSHException):
+            executor._setup_ssh_connection()
 
-        executor._setup_ssh_connection()
-
-        # Should not include key_filename or password
-        connect_call = mock_ssh.connect.call_args[1]
-        assert "key_filename" not in connect_call
-        assert "password" not in connect_call
-        assert connect_call["username"] == "testuser"
+        assert ("testuser", "password") not in ssh_server.authentications
+        assert ("testuser", "publickey") not in ssh_server.authentications
 
 
 class TestJobSubmissionEdgeCases:
     """Test job submission edge cases and error handling."""
 
     @pytest.fixture
-    def mock_executor(self):
-        """Create a mock executor with necessary setup."""
+    def executor(self):
+        """A real executor. It has no connection, and does not need one.
+
+        The fixture used to install ``Mock()`` SSH and SFTP clients. The test
+        below rejects its cluster type before any connection is consulted, so
+        the mocks were pure decoration -- and they hid the fact that the
+        rejection happens that early.
+        """
         config = ClusterConfig(
             cluster_host="test.cluster.com", cluster_type="slurm", username="testuser"
         )
-        executor = ClusterExecutor(config)
+        return ClusterExecutor(config)
 
-        # Mock SSH connection
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
-
-        return executor
-
-    def test_submit_job_unsupported_cluster_type(self, mock_executor):
+    def test_submit_job_unsupported_cluster_type(self, executor):
         """Test job submission with unsupported cluster type."""
-        mock_executor.config.cluster_type = "unsupported_type"
+        executor.config.cluster_type = "unsupported_type"
 
         func_data = {"function": b"test", "args": b"test", "kwargs": b"test"}
         job_config = {"cores": 2}
 
         with pytest.raises(ValueError, match="is not a supported cluster type"):
-            mock_executor.submit_job(func_data, job_config)
+            executor.submit_job(func_data, job_config)
 
 
 class TestJobStatusAndResults:
     """Test job status checking and result retrieval."""
 
     @pytest.fixture
-    def mock_executor(self):
-        """Create a mock executor."""
+    def executor(self):
+        """A real executor with no connection; none is needed below."""
         config = ClusterConfig(
             cluster_host="test.cluster.com", cluster_type="slurm", username="testuser"
         )
-        executor = ClusterExecutor(config)
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
-        return executor
+        return ClusterExecutor(config)
 
-    def test_get_job_status_unsupported_type(self, mock_executor):
-        """Test job status check with unsupported cluster type."""
-        mock_executor.config.cluster_type = "unsupported"
+    def test_get_job_status_unsupported_type(self, executor):
+        """An unrecognised cluster type yields "unknown", not a crash."""
+        executor.config.cluster_type = "unsupported"
 
-        status = mock_executor.get_job_status("job123")
+        status = executor.get_job_status("job123")
         assert status == "unknown"
