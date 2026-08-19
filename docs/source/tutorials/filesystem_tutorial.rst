@@ -261,7 +261,8 @@ Automatic Dataset Processing
         print(f"Found {len(csv_files)} CSV files to process")
         
         results = []
-        for filename in csv_files:  # This loop gets parallelized automatically!
+        # Sequential -- see the auto-parallelization contract in limitations.
+        for filename in csv_files:
             # Get file info to make processing decisions
             file_info = cluster_stat(filename, config)
             

@@ -484,7 +484,8 @@ The packaging system is automatically used by the @cluster decorator:
         data_files = cluster_find("*.csv", "data/")
         
         total_size = 0
-        for filename in data_files:  # This loop gets parallelized automatically
+        # Sequential -- see the auto-parallelization contract in limitations.
+        for filename in data_files:
             file_info = cluster_stat(filename)
             total_size += file_info.size
         

@@ -169,7 +169,9 @@ def process_datasets(config):
     data_files = cluster_glob("*.csv", "input/", config)
     
     results = []
-    for filename in data_files:  # Loop gets parallelized automatically
+    # Sequential: auto-parallelization needs a literal range() and a callee
+    # that accepts the chunk keywords.
+    for filename in data_files:
         # Check file size before processing
         file_info = cluster_stat(filename, config)
         if file_info.size > 100_000_000:  # Large files
