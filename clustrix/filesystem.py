@@ -136,8 +136,8 @@ class ClusterFilesystem:
             # about the FILESYSTEM, not about names. The previous test asked
             # whether the two hostnames looked related -- substring matches
             # plus "same institution domain" -- so a laptop on the VPN, whose
-            # hostname was vpn-two-factor-general-229-128-226.dartmouth.edu,
-            # was judged to be discovery.dartmouth.edu. Clustrix then looked
+            # hostname was a VPN-assigned name in the same domain as the
+            # cluster, it was judged to BE the cluster. Clustrix then looked
             # for the job's result file on the laptop, found an empty
             # directory, and reported the job's status as unknown.
             #

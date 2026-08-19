@@ -2023,7 +2023,7 @@ dependencies:
         # Now create the virtual environment. `python_executable` defaults to
         # "python", which does not exist on most modern systems -- Python 3
         # installs ship `python3`, and `python` is only present where someone
-        # added a compatibility symlink. tensor01 is one of the many hosts
+        # added a compatibility symlink. Plenty of real hosts are
         # where it is absent, so `python -m venv venv` failed, the venv was
         # never created, and the job script then died on
         # `source venv/bin/activate` with "python: command not found".

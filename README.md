@@ -591,7 +591,7 @@ result = my_function(5)
 
 | `cluster_type` | Status |
 |-|-|
-| `slurm` | Verified. A real job ran on `discovery.dartmouth.edu` and returned its result. |
+| `slurm` | Verified. A real job ran on a production SLURM cluster and returned its result. |
 | `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
 | `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
 | `local` | Runs in local processes. Used for development and the fast tests. |
