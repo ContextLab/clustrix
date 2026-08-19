@@ -107,8 +107,8 @@ class TestNotebookMagicReal:
 
         # Write JSON config
         json_data = {
-            "cluster_type": "kubernetes",
-            "namespace": "default",
+            "cluster_type": "huggingface",
+            "hf_flavor": "cpu-basic",
             "default_cores": 4,
             "default_memory": "8GB",
         }
@@ -117,7 +117,7 @@ class TestNotebookMagicReal:
 
         # Write custom config
         custom_data = {
-            "cluster_type": "pbs",
+            "cluster_type": "slurm",
             "cluster_host": "cluster.edu",
             "queue": "batch",
         }
@@ -181,12 +181,12 @@ class TestNotebookMagicReal:
 
         # Write valid JSON config
         config_data = {
-            "cluster_type": "kubernetes",
-            "namespace": "ml-workloads",
+            "cluster_type": "slurm",
+            "queue": "ml-workloads",
             "default_cores": 8,
             "default_memory": "16Gi",
             "gpu": 1,
-            "node_selector": {"workload": "gpu", "tier": "production"},
+            "module_loads": {"workload": "gpu", "tier": "production"},
         }
 
         with open(config_file, "w") as f:
@@ -195,10 +195,10 @@ class TestNotebookMagicReal:
         # Load and validate
         loaded_config = load_config_from_file(str(config_file))
 
-        assert loaded_config["cluster_type"] == "kubernetes"
-        assert loaded_config["namespace"] == "ml-workloads"
+        assert loaded_config["cluster_type"] == "slurm"
+        assert loaded_config["queue"] == "ml-workloads"
         assert loaded_config["gpu"] == 1
-        assert loaded_config["node_selector"]["workload"] == "gpu"
+        assert loaded_config["module_loads"]["workload"] == "gpu"
 
     def test_validate_ip_address(self):
         """
@@ -498,8 +498,10 @@ print(f"Analysis complete: {results['total_variance_explained']:.2%} variance ex
 
         results = ip.user_ns["results"]
         assert results["n_samples"] == 1000
-        assert results["original_shape"] == [1000, 20]
-        assert results["reduced_shape"] == [1000, 5]
+        # numpy's .shape is a tuple, and the cell runs in this process, so
+        # nothing converts it to a list on the way out.
+        assert results["original_shape"] == (1000, 20)
+        assert results["reduced_shape"] == (1000, 5)
         assert len(results["explained_variance"]) == 5
         assert 0 < results["total_variance_explained"] <= 1
 

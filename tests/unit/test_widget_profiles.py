@@ -244,7 +244,7 @@ class TestBackendSettingsSurviveSwitching:
         widget._update_profile_dropdown()
         return widget
 
-    def test_huggingface_and_kubernetes_settings_are_not_cross_contaminated(self):
+    def test_huggingface_and_ssh_settings_are_not_cross_contaminated(self):
         widget = self._widget_with(
             {
                 "MyHF": ClusterConfig(
@@ -252,21 +252,21 @@ class TestBackendSettingsSurviveSwitching:
                     hf_namespace="contextlab",
                     hf_flavor="cpu-upgrade",
                 ),
-                "MyK8s": ClusterConfig(
-                    cluster_type="kubernetes",
-                    k8s_namespace="research",
-                    k8s_image="python:3.10",
+                "MySSH": ClusterConfig(
+                    cluster_type="ssh",
+                    cluster_host="gpu.example.edu",
+                    username="researcher",
                 ),
             }
         )
         dropdown = widget.widgets["profile_dropdown"]
-        for name in ["MyHF", "MyK8s", "MyHF", "MyK8s"]:
+        for name in ["MyHF", "MySSH", "MyHF", "MySSH"]:
             dropdown.value = name
 
         hf = widget.profile_manager.load_profile("MyHF")
-        k8s = widget.profile_manager.load_profile("MyK8s")
+        ssh = widget.profile_manager.load_profile("MySSH")
         assert (hf.hf_namespace, hf.hf_flavor) == ("contextlab", "cpu-upgrade")
-        assert (k8s.k8s_namespace, k8s.k8s_image) == ("research", "python:3.10")
+        assert (ssh.cluster_host, ssh.username) == ("gpu.example.edu", "researcher")
 
     def test_the_remote_work_directory_survives(self):
         widget = self._widget_with(

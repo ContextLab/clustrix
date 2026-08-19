@@ -45,7 +45,8 @@ class TestWidgetVisualVerification:
                 html_file.parent.mkdir(parents=True, exist_ok=True)
 
                 with open(html_file, "w") as f:
-                    f.write(f"""
+                    f.write(
+                        f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -101,7 +102,8 @@ class TestWidgetVisualVerification:
     </div>
 </body>
 </html>
-""")
+"""
+                    )
 
                 assert html_file.exists()
                 print(f"Widget HTML saved to: {html_file}")
@@ -132,7 +134,8 @@ class TestWidgetVisualVerification:
             html_file.parent.mkdir(parents=True, exist_ok=True)
 
             with open(html_file, "w") as f:
-                f.write(f"""
+                f.write(
+                    f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -184,7 +187,8 @@ class TestWidgetVisualVerification:
     </div>
 </body>
 </html>
-""")
+"""
+                )
 
             assert html_file.exists()
             print(f"Enhanced widget HTML saved to: {html_file}")
@@ -267,9 +271,10 @@ class TestWidgetVisualVerification:
                         ),
                     ),
                     (
-                        "AWS Batch",
+                        "HuggingFace Jobs",
                         ClusterConfig(
-                            cluster_type="aws",
+                            cluster_type="huggingface",
+                            hf_namespace="contextlab",
                             default_cores=4,
                             default_memory="8GB",
                             default_time="01:00:00",
@@ -356,7 +361,8 @@ class TestWidgetVisualVerification:
                 accessibility_file.parent.mkdir(parents=True, exist_ok=True)
 
                 with open(accessibility_file, "w") as f:
-                    f.write(f"""
+                    f.write(
+                        f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -440,7 +446,8 @@ class TestWidgetVisualVerification:
     </div>
 </body>
 </html>
-""")
+"""
+                    )
 
                 assert accessibility_file.exists()
                 print(f"Accessibility report saved to: {accessibility_file}")
@@ -480,7 +487,8 @@ class TestWidgetVisualVerification:
                 responsive_file.parent.mkdir(parents=True, exist_ok=True)
 
                 with open(responsive_file, "w") as f:
-                    f.write(f"""
+                    f.write(
+                        f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -567,7 +575,8 @@ class TestWidgetVisualVerification:
     </div>
 </body>
 </html>
-""")
+"""
+                    )
 
                 assert responsive_file.exists()
                 print(f"Responsive design report saved to: {responsive_file}")
@@ -613,7 +622,8 @@ class TestWidgetVisualVerification:
                 comparison_file.parent.mkdir(parents=True, exist_ok=True)
 
                 with open(comparison_file, "w") as f:
-                    f.write(f"""
+                    f.write(
+                        f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -735,7 +745,8 @@ class TestWidgetVisualVerification:
     </div>
 </body>
 </html>
-""")
+"""
+                    )
 
                 assert comparison_file.exists()
                 print(f"Widget comparison report saved to: {comparison_file}")
@@ -855,7 +866,8 @@ class TestPlotVisualization:
         index_file = Path("tests/real_world/screenshots/index.html")
 
         with open(index_file, "w") as f:
-            f.write(f"""
+            f.write(
+                f"""
 <!DOCTYPE html>
 <html>
 <head>
@@ -940,7 +952,8 @@ class TestPlotVisualization:
     </div>
 </body>
 </html>
-""")
+"""
+            )
 
         assert index_file.exists()
         print(f"Visual test index saved to: {index_file}")

@@ -113,8 +113,8 @@ class TestConfigFileDetection:
         """Test loading configuration from JSON file."""
         test_config = {
             "test_cluster": {
-                "cluster_type": "kubernetes",
-                "cluster_host": "k8s.example.com",
+                "cluster_type": "slurm",
+                "cluster_host": "hpc.example.com",
                 "default_cores": 4,
             }
         }
@@ -321,8 +321,6 @@ class TestEnhancedClusterConfigWidget:
         widget.work_dir_field.value = "/tmp/clustrix"
         widget.ssh_key_field = MagicMock()
         widget.ssh_key_field.value = ""
-        widget.cost_monitoring_checkbox = MagicMock()
-        widget.cost_monitoring_checkbox.value = True
 
         # Test save functionality
         config = widget._save_config_from_widgets()
@@ -333,7 +331,6 @@ class TestEnhancedClusterConfigWidget:
         assert config["default_cores"] == 8
         assert config["default_memory"] == "32GB"
         assert config["package_manager"] == "conda"
-        assert config["cost_monitoring"] is True
 
     def test_load_config_to_widgets(self, mock_ipython_environment):
         """Test loading configuration into widgets."""
@@ -346,26 +343,22 @@ class TestEnhancedClusterConfigWidget:
         widget.port_field = MagicMock()
         widget.cores_field = MagicMock()
         widget.memory_field = MagicMock()
-        widget.k8s_namespace_field = MagicMock()
         widget.package_manager = MagicMock()
         widget.username_field = MagicMock()
         widget.ssh_key_field = MagicMock()
         widget.work_dir_field = MagicMock()
         widget.time_field = MagicMock()
         widget.env_vars_field = MagicMock()
-        widget.k8s_image_field = MagicMock()
-        widget.cost_monitoring_checkbox = MagicMock()
 
         test_config = {
             "name": "Test Load Config",
-            "cluster_type": "kubernetes",
-            "cluster_host": "k8s.example.com",
+            "cluster_type": "slurm",
+            "cluster_host": "hpc.example.com",
             "cluster_port": 443,
             "default_cores": 12,
             "default_memory": "64GB",
-            "k8s_namespace": "production",
+            "queue": "production",
             "package_manager": "uv",
-            "cost_monitoring": True,
         }
         # Add test config and load it
         widget.configs["test_load"] = test_config
@@ -375,14 +368,13 @@ class TestEnhancedClusterConfigWidget:
         assert (
             widget.config_name.value == "Test Load Config"
         )  # Uses the "name" field from test_config
-        assert widget.cluster_type.value == "kubernetes"
-        assert widget.host_field.value == "k8s.example.com"
+        assert widget.cluster_type.value == "slurm"
+        assert widget.host_field.value == "hpc.example.com"
         assert widget.port_field.value == 443
         assert widget.cores_field.value == 12
         assert widget.memory_field.value == "64GB"
-        assert widget.k8s_namespace_field.value == "production"
+        assert widget.queue_field.value == "production"
         assert widget.package_manager.value == "uv"
-        assert widget.cost_monitoring_checkbox.value is True
 
     def test_cluster_type_field_visibility(self, mock_ipython_environment):
         """Test field visibility changes based on cluster type."""
@@ -397,8 +389,8 @@ class TestEnhancedClusterConfigWidget:
         # Test SSH cluster type (should show SSH fields)
         widget._on_cluster_type_change({"new": "ssh"})
         # In a real environment, fields would be shown/hidden
-        # Test Kubernetes cluster type (should show K8s fields)
-        widget._on_cluster_type_change({"new": "kubernetes"})
+        # Test HuggingFace cluster type (should show HF Jobs fields)
+        widget._on_cluster_type_change({"new": "huggingface"})
         # In a real environment, different fields would be shown/hidden
         # The key test is that the method executes without error
         assert True  # Method executed successfully
@@ -669,8 +661,6 @@ class TestConfigurationSaveLoad:
             widget.module_loads_field.value = ""
             widget.pre_exec_commands = MagicMock()
             widget.pre_exec_commands.value = ""
-            widget.cost_monitoring_checkbox = MagicMock()
-            widget.cost_monitoring_checkbox.value = False
             # Mock the new filename input field
             widget.save_filename_input = MagicMock()
             widget.save_filename_input.value = "clustrix.yml"
@@ -780,8 +770,6 @@ class TestConfigurationSaveLoad:
         widget.work_dir_field.value = "/tmp/clustrix"
         widget.ssh_key_field = MagicMock()
         widget.ssh_key_field.value = ""
-        widget.cost_monitoring_checkbox = MagicMock()
-        widget.cost_monitoring_checkbox.value = False
         widget.save_filename_input = MagicMock()
         widget.save_filename_input.value = "test_all_configs.yml"
         widget.status_output = MagicMock()
@@ -850,8 +838,6 @@ class TestConfigurationSaveLoad:
         widget.work_dir_field.value = "/tmp/clustrix"
         widget.ssh_key_field = MagicMock()
         widget.ssh_key_field.value = "~/.ssh/id_rsa"
-        widget.cost_monitoring_checkbox = MagicMock()
-        widget.cost_monitoring_checkbox.value = False
         widget.status_output = MagicMock()
         widget.status_output.clear_output = MagicMock()
 

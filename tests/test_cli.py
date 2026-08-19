@@ -54,7 +54,7 @@ class TestCLI:
             [
                 "config",
                 "--cluster-type",
-                "pbs",
+                "ssh",
                 "--cluster-host",
                 "new.cluster.com",
                 "--username",
@@ -73,7 +73,7 @@ class TestCLI:
 
         # Verify configure was called with correct parameters
         mock_configure.assert_called_once_with(
-            cluster_type="pbs",
+            cluster_type="ssh",
             cluster_host="new.cluster.com",
             username="newuser",
             default_cores=16,

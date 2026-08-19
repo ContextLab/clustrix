@@ -31,9 +31,6 @@ class TestProfileManager:
                 "local",
                 "ssh",
                 "slurm",
-                "pbs",
-                "sge",
-                "kubernetes",
                 "huggingface",
             }
 
@@ -164,28 +161,28 @@ class TestProfileManager:
 
             # Create a custom profile
             config = ClusterConfig(
-                cluster_type="pbs",
+                cluster_type="slurm",
                 default_cores=8,
                 default_memory="32GB",
                 default_time="04:00:00",
             )
-            pm.create_profile("PBS Cluster", config)
+            pm.create_profile("SLURM Cluster", config)
 
             # Export the profile
-            export_file = os.path.join(temp_dir, "pbs_profile.yml")
-            pm.export_profile("PBS Cluster", export_file)
+            export_file = os.path.join(temp_dir, "slurm_profile.yml")
+            pm.export_profile("SLURM Cluster", export_file)
 
             assert os.path.exists(export_file)
 
             # Create new ProfileManager and import
             pm2 = ProfileManager(config_dir=temp_dir)
-            imported_name = pm2.import_profile(export_file, "Imported PBS")
+            imported_name = pm2.import_profile(export_file, "Imported SLURM")
 
-            assert imported_name == "Imported PBS"
-            assert "Imported PBS" in pm2.get_profile_names()
+            assert imported_name == "Imported SLURM"
+            assert "Imported SLURM" in pm2.get_profile_names()
 
-            imported_config = pm2.load_profile("Imported PBS")
-            assert imported_config.cluster_type == "pbs"
+            imported_config = pm2.load_profile("Imported SLURM")
+            assert imported_config.cluster_type == "slurm"
             assert imported_config.default_cores == 8
 
 
