@@ -1,7 +1,15 @@
 # AWS Cloud Tutorial Review - Session Notes
-**Date:** 2025-06-26  
-**Task:** Review and improve AWS cloud tutorial notebook  
-**File:** `/home/you/clustrix/docs/source/notebooks/aws_cloud_tutorial.ipynb`
+
+> **Historical record.** This file documents work completed on the date below.
+> It is kept for provenance and does not describe current behaviour. Clustrix
+> does not support an AWS backend (tracked in
+> [#143](https://github.com/ContextLab/clustrix/issues/143)) and the notebook
+> this session reviewed is no longer part of the documentation. For current
+> behaviour see the docs under `docs/source/`.
+
+**Date:** 2025-06-26
+**Task:** Review and improve AWS cloud tutorial notebook
+**File:** `docs/source/notebooks/aws_cloud_tutorial.ipynb`
 
 ## Task Summary
 Reviewed the AWS cloud tutorial notebook to ensure complete setup instructions and clean up instructional print statements by converting them to markdown cells.

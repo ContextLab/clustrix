@@ -1,5 +1,10 @@
 # SSH Key Automation Technical Design - Summary for Issue #57
 
+> **Historical record.** This file documents work as it was proposed at the
+> time it was written. It is kept for provenance and does not describe
+> current behaviour. For current behaviour see the docs under
+> `docs/source/`.
+
 ## Overview
 This design addresses the automated setup of SSH keys for passwordless cluster authentication, replacing the current manual process documented at https://clustrix.readthedocs.io/en/latest/ssh_setup.html.
 

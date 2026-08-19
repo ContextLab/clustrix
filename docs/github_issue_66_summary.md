@@ -1,5 +1,10 @@
 # Enhanced Authentication Methods - Technical Design Summary
 
+> **Historical record.** This file documents work as it was proposed at the
+> time it was written. It is kept for provenance and does not describe
+> current behaviour. For current behaviour see the docs under
+> `docs/source/`.
+
 I've created a comprehensive technical design document for implementing the enhanced authentication methods described in this issue. Here's a summary of the key features and implementation approach:
 
 ## Key Features

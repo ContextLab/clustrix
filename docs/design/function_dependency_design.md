@@ -1,15 +1,16 @@
 # Function flattening: a post-mortem
 
-**Status: abandoned. The code this document described was deleted in the 0.2.0
-cycle. Do not rebuild it without reading this first.**
+**Status: abandoned. Clustrix has no function-flattening layer and no
+dependency-resolution layer. Do not build one without reading this first.**
 
-The original version of this file proposed a "comprehensive function dependency
-resolution system" — hoisting nested functions to module level, resolving
-cross-file dependencies, distinguishing local from external code. Some of it was
-built, as `clustrix/function_flattening.py` (1,027 lines) and
-`clustrix/dependency_resolution.py` (445 lines). Both are gone.
+This file began life as a proposal for a function dependency resolution system
+— hoisting nested functions to module level, resolving cross-file
+dependencies, distinguishing local from external code. Part of it was built, as
+`clustrix/function_flattening.py` (1,027 lines) and
+`clustrix/dependency_resolution.py` (445 lines). Neither module exists now, and
+this page is the record of why.
 
-## Why it was removed
+## Why it did not survive
 
 **It never produced a runnable function.** Both generators were exercised
 against every shape they were meant to handle. The basic flattener emitted a
@@ -44,11 +45,11 @@ The user's function was never called and no error was raised. For
 That is the most serious defect ever found in this project, and this machinery
 is where it lived.
 
-**The problem it solved had already been solved elsewhere.** Flattening was a
-workaround for a serialization layer that could not ship closures and nested
-functions. Since the by-value serialization work,
-`clustrix.utils.serialize_function` handles all of it. Verified in a fresh
-subprocess interpreter with the defining module off `sys.path`:
+**The problem it solved is solved elsewhere.** Flattening was a workaround for
+a serialization layer that could not ship closures and nested functions.
+`clustrix.utils.serialize_function` serializes by value and handles all of
+them. Verified in a fresh subprocess interpreter with the defining module off
+`sys.path`:
 
 ```
 SUBPROCESS nested_fn           = 45 (direct=45) MATCH
@@ -59,13 +60,13 @@ SUBPROCESS exec_made           =  5 (direct=5)  MATCH
 SUBPROCESS with_args           = 21 (direct=21) MATCH
 ```
 
-There is no function flattening helped that the serializer does not already
+There is no case flattening helps with that the serializer does not already
 handle.
 
-## What the project lost
+## What is actually missing
 
-Nothing that worked. The only real loss is the *aspiration* of rewriting
-functions whose source is unavailable — which was never achievable, because
+Nothing that worked. The one genuine gap is the *aspiration* of rewriting
+functions whose source is unavailable — which is not achievable, because
 rewriting source requires source, and those are exactly the functions that do
 not have it.
 
@@ -85,9 +86,9 @@ Two questions to answer first, with evidence, before writing any code:
    to return a hardcoded string.
 
 Two related issues, #89 (extract global variables) and #90 (closure variable
-handling), were TODOs inside this machinery. They were closed by its removal
-rather than implemented: implementing them would have meant building on a
-foundation that had never held weight.
+handling), were TODOs inside this machinery. They are closed, not implemented:
+implementing them would have meant building on a foundation that never held
+weight.
 
 See also `COMPLEXITY_THRESHOLD_ANALYSIS.md`, which recorded the symptom that
 originally motivated flattening — jobs failing above a complexity threshold with

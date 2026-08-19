@@ -13,9 +13,11 @@
 
 ### The Mocking Policy
 
-Clustrix does **not** follow a strict "no mocks ever" rule -- 42 of the
-project's 215 `test_*.py` modules use `unittest.mock`, and pretending
-otherwise would just make this document wrong. The actual policy:
+Clustrix does **not** follow a strict "no mocks ever" rule -- 19 of the
+project's 152 `test_*.py` modules import `unittest.mock`, and pretending
+otherwise would just make this document wrong. Getting that number to zero is
+issue [#117](https://github.com/ContextLab/clustrix/issues/117). The policy in
+the meantime:
 
 1. **Real first, always.** A capability may not be marked working until it
    has been exercised against the real thing -- a real cluster, a real API,
@@ -52,15 +54,22 @@ Tests that validate individual functions and classes using local execution.
 def test_local_execution():
     """Test function execution locally."""
     configure(cluster_type="local")
-    
+
     @cluster(cores=2, memory="4GB")
     def process_data(data):
         import numpy as np
         return np.mean(data)
-    
+
     result = process_data([1, 2, 3, 4, 5])
     assert result == 3.0
 ```
+
+The backend is chosen by `configure`, not by the decorator: `cluster_type` is
+not a `@cluster` keyword and passing it there is ignored with a warning. On
+the `local` backend `cores=2` is also inert — the function runs in the
+caller's own process, sequentially (issue
+[#152](https://github.com/ContextLab/clustrix/issues/152)). For actual
+in-process parallelism, use `clustrix.local_executor.LocalExecutor` directly.
 
 ### 2. Integration Tests
 Tests that validate interactions between components using real infrastructure.
@@ -86,53 +95,67 @@ def test_huggingface_integration():
 ### 3. Edge Case Tests
 Tests that validate behavior in unusual or boundary conditions.
 
+An edge-case test has to assert what the code actually does. `@cluster` does
+not validate `cores`, so `cores=0` decorates and runs without complaint; a
+test asserting `pytest.raises(ValueError)` there fails. What *is* validated is
+`cluster_type`:
+
 ```python
-def test_zero_resources():
-    """Test handling of zero resource requests."""
-    with pytest.raises(ValueError):
-        @cluster(cores=0, memory="1GB")
-        def invalid_task():
-            return "should not execute"
+def test_unsupported_backend_rejected():
+    """An unimplemented backend is rejected by name, with its issue number."""
+    with pytest.raises(ValueError, match="#140"):
+        configure(cluster_type="pbs")
 ```
 
 ### 4. Performance Tests
 Tests that measure and validate performance characteristics.
 
 ```python
-def test_submission_latency():
-    """Test job submission latency."""
-    start = time.perf_counter()
-    
+def test_local_dispatch_overhead():
+    """The local backend adds negligible overhead to a trivial call."""
+    configure(cluster_type="local")
+
     @cluster(cores=1, memory="1GB")
     def quick_task():
         return "done"
-    
+
+    start = time.perf_counter()
     result = quick_task()
-    latency = time.perf_counter() - start
-    
-    assert latency < 1.0  # Should submit in <1 second
+    elapsed = time.perf_counter() - start
+
+    assert result == "done"
+    assert elapsed < 1.0
 ```
+
+Mark anything that measures a remote round trip with `@pytest.mark.slow` and
+`@pytest.mark.real_world`; wall-clock assertions against a shared scheduler are
+assertions about that scheduler's queue, not about clustrix.
 
 ### 5. Failure Recovery Tests
 Tests that validate error handling and recovery mechanisms.
 
+There is no retry setting on `@cluster` and no `connection_retry_*` field on
+`ClusterConfig`. `@cluster` accepts `cores`, `memory`, `time`, `partition`,
+`queue`, `parallel`, `auto_gpu_parallel`, `environment` and `async_submit`,
+plus the pass-through extras `hf_token`, `hf_username`, `hf_flavor`,
+`hf_timeout`, `hf_namespace` and `key_file`; anything else is logged as
+unrecognised and dropped. So a recovery test drives the failure itself:
+
 ```python
-def test_connection_recovery():
-    """Test recovery from connection failures."""
+def test_unreachable_host_raises():
+    """A host that cannot be reached fails loudly rather than hanging."""
     configure(
         cluster_type="ssh",
-        connection_retry_count=3,
-        connection_retry_delay=1
+        cluster_host="unreachable.invalid",
+        username="user",
     )
-    
-    @cluster(cores=2, memory="2GB", retry_on_failure=True)
-    def resilient_task():
-        # Task that might experience connection issues
-        return process_data()
-    
-    # Should retry and eventually succeed
-    result = resilient_task()
-    assert result is not None
+
+    @cluster(cores=2, memory="2GB")
+    def task():
+        return "should not execute"
+
+    with pytest.raises(Exception):
+        task()
 ```
 
 ## Writing Tests
@@ -172,8 +195,9 @@ class TestComponentReal:
         - [Key aspect 2]
         - [Key aspect 3]
         """
-        # Step 1: Configuration (as users would do)
-        configure(test_config)
+        # Step 1: Configuration. configure() takes keyword arguments only --
+        # passing a ClusterConfig positionally is a TypeError.
+        configure(**vars(test_config))
         
         # Step 2: Define function (realistic user code)
         @cluster(cores=2, memory="4GB")
@@ -217,34 +241,37 @@ error, not a warning. These are the markers that actually exist — the full lis
 is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
 
 ```python
-@pytest.mark.real_world        # opens real SSH/cloud connections
-@pytest.mark.slow              # takes a long time
-@pytest.mark.unit              # a unit test
-@pytest.mark.integration       # exercises several components together
-@pytest.mark.expensive         # provisions billable resources
-@pytest.mark.cluster_network # needs the configured cluster network
-@pytest.mark.performance       # a benchmark
+@pytest.mark.real_world    # opens real SSH or API connections
+@pytest.mark.slow          # takes a long time
+@pytest.mark.unit          # a unit test
+@pytest.mark.integration   # exercises several components together
+@pytest.mark.expensive     # provisions billable resources
+@pytest.mark.performance   # a benchmark
 ```
+
+Three more are registered from conftest rather than `pyproject.toml`, because
+the suites that use them are routinely excluded from a run:
+`cluster_network` (from `tests/conftest.py`, for tests needing a private host
+named by `CLUSTRIX_TEST_*_HOST`), and `visual` and `ssh_required` (from
+`tests/real_world/conftest.py`).
 
 `real_world` is applied automatically to everything under `tests/real_world/`
 by that directory's `conftest.py`, so you do not need to add it by hand — and
 more importantly, forgetting it cannot silently expose a live-network test to
 the ordinary run.
 
-To add a marker, register it in `pyproject.toml` first. This document
-previously listed `kubernetes`, `ssh` and `flaky`; none were registered and no
-test used them, so following it produced a collection error.
+To add a marker, register it in `pyproject.toml` first. Names not on the
+lists above — `kubernetes`, `ssh`, `flaky` and anything else you might reach
+for by habit — are unregistered, and using one is a collection error.
 
 ## Running Tests
 
 ### Prerequisite for real-world tests: host keys in `known_hosts`
 
-Anything under `tests/real_world/` that opens an SSH connection now goes
-through `clustrix.ssh_security.configure_host_key_policy()`, whose default
-policy is `"reject"` (issue #148). The tests previously used
-`paramiko.AutoAddPolicy()`, which trusted any key on first contact. **A host
-that is not in `known_hosts` now raises `HostKeyVerificationError` rather
-than connecting.**
+Anything under `tests/real_world/` that opens an SSH connection goes through
+`clustrix.ssh_security.configure_host_key_policy()`, whose default policy is
+`"reject"`. **A host that is not in `known_hosts` raises
+`HostKeyVerificationError` rather than connecting.**
 
 Add the host key once, deliberately, before running those tests:
 
@@ -278,27 +305,29 @@ pytest --cov=clustrix --cov-report=html
 ### Using Test Infrastructure
 
 ```bash
-# Setup local infrastructure
+# Bring the local services up (SSH server, SLURM, MinIO, PostgreSQL, Redis)
 python tests/infrastructure/setup_test_infrastructure.py setup
 
-# Run tests against infrastructure
-source tests/infrastructure/test.env
+# See what is running
+python tests/infrastructure/setup_test_infrastructure.py status
+
+# Run against them
 pytest tests/real_world/
 
-# Teardown infrastructure
+# Take them down again
 python tests/infrastructure/setup_test_infrastructure.py teardown
 ```
 
-### Running Comprehensive Test Suite
+### Running the real-world test runner
 
 ```bash
-# Run all comprehensive tests
+# Everything
 python tests/run_real_world_tests.py
 
-# Run specific category
-python tests/run_real_world_tests.py --category performance
+# One or more categories: executor, decorator, config, credentials, ssh, notebook
+python tests/run_real_world_tests.py --category executor decorator
 
-# With infrastructure setup/teardown
+# Bring the Docker services up first and take them down afterwards
 python tests/run_real_world_tests.py \
     --setup-infrastructure \
     --teardown-infrastructure
@@ -306,52 +335,30 @@ python tests/run_real_world_tests.py \
 
 ## CI/CD Pipeline
 
-### Workflow Structure
+There are three workflows in `.github/workflows/`:
 
-```yaml
-on:
-  push:         # Run on push to main
-  pull_request: # Run on PRs
-  schedule:     # Daily comprehensive tests
-  workflow_dispatch: # Manual trigger
+| Workflow | Trigger | What it runs |
+|-|-|-|
+| `fast_ci.yml` | push, pull request | the quick format/lint/type gate |
+| `tests.yml` | push, pull request | the credential-free test suite |
+| `real-world-tests.yml` | `workflow_dispatch`, weekly `schedule` | the real SSH, SLURM and HF Jobs jobs |
 
-jobs:
-  quick-checks:    # Fast format/lint/type checks
-  unit-tests:      # Unit tests without infrastructure
-  integration:     # Integration tests with Docker
-  edge-cases:      # Edge case validation
-  performance:     # Performance benchmarks
-  failure-recovery: # Failure scenario tests
-  cloud-providers: # Cloud-specific tests (scheduled)
-```
+The split matters. Nothing that needs a credential runs on `push` or
+`pull_request`, so a pull request from a fork cannot reach a real cluster or
+spend money. `real-world-tests.yml` resolves secret presence into job outputs
+in a `check-secrets` job first, because the `secrets` context is not available
+in `if:` conditions, and every credentialed job gates on those outputs.
 
-### Test Stages
+What the credential-free run covers, in the order it fails fastest:
 
-1. **Quick Checks** (< 1 minute)
-   - Black formatting
-   - Flake8 linting
-   - MyPy type checking
-   - Quick unit tests
+1. **Formatting and typing** — black, flake8, mypy. Under a minute.
+2. **Unit tests** — everything under `tests/` that needs nothing external.
+3. **Documentation** — `scripts/check_docs_examples.py` executes the Python
+   blocks on the published pages, and the Sphinx build runs with `-W`.
 
-2. **Local Tests** (< 5 minutes)
-   - Unit tests
-   - Local integration
-   - Serialization tests
-
-3. **Infrastructure Tests** (< 30 minutes)
-   - Docker-based tests
-   - SSH server tests
-
-4. **Comprehensive Tests** (< 60 minutes)
-   - Edge cases
-   - Performance benchmarks
-   - Failure recovery
-   - Full integration
-
-5. **Cloud Tests** (scheduled)
-   - AWS/GCP/Azure tests
-   - Real cluster tests
-   - Production validation
+There is no cloud-provider stage, because there is no cloud backend to test.
+`tests/integration/` provisions real billable AWS resources through boto3 and
+never runs in CI at all; it refuses to start without `CLUSTRIX_ALLOW_BILLABLE=1`.
 
 ## Best Practices
 
@@ -416,7 +423,7 @@ def cluster_config():
     # Cleanup if needed
 
 def test_with_config(cluster_config):
-    configure(cluster_config)
+    configure(**vars(cluster_config))
     # Run test
 ```
 
@@ -448,26 +455,24 @@ def test_parallel_execution():
 # Check Docker
 docker ps
 
-# Check Kind cluster
-kubectl cluster-info
-
-# Check SSH server
+# Check the SSH server container
 ssh -p 2222 testuser@localhost echo "connected"
 
-# Restart infrastructure
-cd tests/infrastructure
-docker-compose restart
+# Restart everything
+docker compose -f tests/infrastructure/docker-compose.yml restart
 ```
 
 #### 2. Test Timeouts
 
+`pytest-timeout` is a declared test dependency, so both of these work:
+
 ```python
-# Increase timeout for slow tests
 @pytest.mark.timeout(300)  # 5 minutes
 def test_slow_operation():
-    pass
+    ...
+```
 
-# Or use command line
+```bash
 pytest --timeout=600 tests/
 ```
 
@@ -559,12 +564,7 @@ When contributing new tests:
 - [ ] Test is repeatable
 - [ ] Test completes in reasonable time
 
-## Conclusion
+## The short version
 
-By following these guidelines, you'll create tests that:
-- Catch real issues before they reach production
-- Serve as documentation for users
-- Build confidence in Clustrix reliability
-- Validate actual functionality, not mocked behavior
-
-Remember: **Every test should mirror real user workflows!**
+A test earns its place by being able to fail for a reason you care about. Run
+it against the real thing, assert on what came back, and clean up after it.

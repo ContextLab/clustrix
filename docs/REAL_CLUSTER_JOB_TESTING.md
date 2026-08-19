@@ -1,272 +1,239 @@
 # Real Cluster Job Testing Guide
 
-This guide explains how to use the comprehensive real cluster job testing system for Clustrix. These tests actually submit jobs to real cluster systems using the `@cluster` decorator and validate the complete end-to-end workflow.
+This guide covers the real cluster job tests. They submit jobs to live cluster
+systems through the `@cluster` decorator and check the whole path end to end:
+submission, scheduling, execution, result retrieval.
 
-## Overview
+## What the suite covers
 
-The real cluster job testing system provides:
+- Real job submission against SLURM and against a plain SSH host
+- End-to-end validation through the `@cluster` decorator
+- Job status and resource-usage monitoring
+- Checks that results match what the function should have returned
+- A JSON report of every run
 
-- **Real job submission tests** for every supported cluster type (SLURM, SSH, HuggingFace Jobs)
-- **Complete end-to-end validation** using the `@cluster` decorator
-- **Comprehensive monitoring** of job status and resource usage
-- **Automatic validation** of job results and error handling
-- **Detailed reporting** with metrics and analysis
+Clustrix does not support the PBS, SGE or Kubernetes backends, so there are no
+job-submission tests for them. Their return is tracked in issues
+[#140](https://github.com/ContextLab/clustrix/issues/140),
+[#141](https://github.com/ContextLab/clustrix/issues/141) and
+[#142](https://github.com/ContextLab/clustrix/issues/142).
 
-## Test Structure
+## Test structure
 
-### Cluster-Specific Test Files
+### Cluster-specific test files
 
-- `tests/real_world/test_slurm_job_submission_real.py` - SLURM job submission tests
-- `tests/real_world/test_ssh_job_execution_real.py` - SSH-based job execution tests
+- `tests/real_world/test_slurm_job_submission_real.py` — SLURM job submission
+- `tests/real_world/test_ssh_job_execution_real.py` — SSH-based job execution
 
-The PBS, SGE and Kubernetes job-submission tests were deleted along with their
-backends in v0.2.0; see "Backends that are not currently supported" in the
-project README.
+### Supporting infrastructure
 
-### Supporting Infrastructure
+- `tests/real_world/cluster_job_validator.py` — job monitoring and validation
+- `tests/real_world/cluster_validation/run_cluster_job_tests.py` — the test
+  runner. Invoke it as
+  `python -m tests.real_world.cluster_validation.run_cluster_job_tests`; its
+  `sys.path` setup only resolves correctly when it runs as a module from the
+  repository root.
+- `tests/real_world/credential_manager.py` — credential lookup
 
-- `tests/real_world/cluster_job_validator.py` - Job monitoring and validation framework
-- `tests/real_world/cluster_validation/run_cluster_job_tests.py` - Comprehensive test runner (invoke as `python -m tests.real_world.cluster_validation.run_cluster_job_tests`; moved here in #76, and its own `sys.path` setup only resolves correctly when run as a module from the repo root)
-- `tests/real_world/credential_manager.py` - Secure credential management
+## Test categories
 
-## Test Categories
+### Basic tests (`@pytest.mark.real_world`)
 
-### Basic Tests (`@pytest.mark.real_world`)
+Simple function execution, environment variable access, file I/O, error
+handling, resource allocation, job monitoring.
 
-These tests validate core functionality:
+### Expensive tests (`@pytest.mark.expensive`)
 
-- Simple function execution
-- Environment variable access
-- File I/O operations
-- Error handling
-- Resource allocation
-- Job monitoring
+Memory-intensive computation, long-running jobs, parallel processing, large
+data. These take real cluster time, so they are opt-in.
 
-### Expensive Tests (`@pytest.mark.expensive`)
-
-These tests are resource-intensive and run longer:
-
-- Memory-intensive computations
-- Long-running jobs
-- Parallel processing
-- Large data processing
-
-## Running Tests
+## Running the tests
 
 ### Prerequisites
 
-1. **Install dependencies:**
+1. Install dependencies:
    ```bash
    pip install -e ".[test]"
    ```
 
-2. **Set up credentials:**
-   - Follow the [Credential Setup Guide](CREDENTIAL_SETUP.md)
-   - Ensure environment variables are configured (local development)
-   - Or set up GitHub Actions secrets (CI/CD)
+2. Set up credentials — see the [Credential Setup Guide](CREDENTIAL_SETUP.md).
 
-3. **Verify cluster access:**
+3. Confirm the clusters answer:
    ```bash
    python -m tests.real_world.cluster_validation.run_cluster_job_tests --check-only
    ```
 
-### Running Tests
-
-#### Test All Available Clusters
+### Through the runner
 
 ```bash
-# Run basic tests on all available clusters
+# Basic tests on every reachable cluster
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests basic
 
-# Run all tests (including expensive ones)
+# Everything, expensive tests included
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests all
 
-# Run with custom timeout
+# A longer per-test timeout (default is 300 seconds)
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster all --tests basic --timeout 600
-```
 
-#### Test Specific Cluster Types
-
-```bash
-# Test only SLURM
+# One cluster type at a time
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster slurm
-
-# Test only SSH
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ssh
 ```
 
-#### Using pytest Directly
+`--cluster` accepts `slurm`, `ssh` or `all`; `--tests` accepts `basic`,
+`expensive` or `all`. `--validate` turns on the extra job validation described
+below, and `--output` names the JSON report file.
+
+### Through pytest
 
 ```bash
-# Run SLURM tests
+# Every SLURM test
 pytest tests/real_world/test_slurm_job_submission_real.py -v -m "real_world"
 
-# Run basic tests only
+# Basic tests only
 pytest tests/real_world/test_slurm_job_submission_real.py -v -m "real_world and not expensive"
 
-# Run expensive tests
+# Expensive tests only
 pytest tests/real_world/test_slurm_job_submission_real.py -v -m "expensive"
 ```
 
-## Test Examples
+## Test examples
 
-### Simple Function Test
+These are drawn from `tests/real_world/test_slurm_job_submission_real.py`. The
+backend comes from the `slurm_config` fixture, which calls
+`configure(cluster_type="slurm", ...)`. `cluster_type` is not a `@cluster`
+keyword, and passing it there is ignored with a warning.
+
+### Simple function
 
 ```python
 @pytest.mark.real_world
 def test_simple_function_slurm_submission(self, slurm_config):
-    """Test submitting a simple function to SLURM."""
-    
+    """Submit a simple function to SLURM."""
+
     @cluster(cores=1, memory="1GB", time="00:05:00")
     def add_numbers(x: int, y: int) -> int:
-        """Simple addition function for testing."""
         return x + y
-    
-    # Submit job and wait for result
+
     result = add_numbers(10, 32)
-    
-    # Validate result
+
     assert result == 42
     assert isinstance(result, int)
 ```
 
-### Environment Access Test
+### Environment access
 
 ```python
 @pytest.mark.real_world
-def test_function_with_slurm_environment(self, slurm_config):
-    """Test SLURM job that accesses environment variables."""
-    
+def test_function_with_environment_info_slurm(self, slurm_config):
+    """Read the SLURM environment from inside the job."""
+
     @cluster(cores=1, memory="1GB", time="00:05:00")
     def get_job_environment() -> Dict[str, str]:
-        """Get SLURM job environment variables."""
         import os
-        
+
         return {
             "SLURM_JOB_ID": os.getenv("SLURM_JOB_ID", "not_set"),
             "SLURM_JOB_NAME": os.getenv("SLURM_JOB_NAME", "not_set"),
             "SLURM_CPUS_PER_TASK": os.getenv("SLURM_CPUS_PER_TASK", "not_set"),
             "HOSTNAME": os.getenv("HOSTNAME", "not_set"),
-            "USER": os.getenv("USER", "not_set")
+            "USER": os.getenv("USER", "not_set"),
         }
-    
+
     result = get_job_environment()
-    
-    # Validate SLURM environment
+
     assert isinstance(result, dict)
     assert result["SLURM_JOB_ID"] != "not_set"
     assert result["USER"] != "not_set"
 ```
 
-### Parallel Processing Test
+### Loop parallelization
 
 ```python
 @pytest.mark.real_world
 def test_parallel_loop_slurm(self, slurm_config):
-    """Test parallel loop execution on SLURM."""
-    
+    """Run a loop-carrying function with parallel=True."""
+
     @cluster(cores=4, memory="4GB", time="00:10:00", parallel=True)
     def compute_squares(numbers: List[int]) -> List[int]:
-        """Compute squares of numbers (should be parallelized)."""
         import time
-        
+
         results = []
         for num in numbers:
-            # Simulate some work
             time.sleep(0.1)
             results.append(num * num)
-        
+
         return results
-    
-    # Submit job with test data
+
     test_numbers = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
     result = compute_squares(test_numbers)
-    
-    # Validate results
+
     assert isinstance(result, list)
-    assert len(result) == len(test_numbers)
-    expected = [num * num for num in test_numbers]
-    assert result == expected
+    assert result == [num * num for num in test_numbers]
 ```
 
-## Job Validation Framework
+The assertion here is on the answer, not on the loop having been split up.
+AST-based loop parallelization only fires for a loop over a literal `range()`
+whose body calls something that accepts the chunk keywords, so this particular
+loop runs sequentially inside one job. The test still earns its place: it shows
+`parallel=True` does not change the result.
 
-### ClusterJobValidator
+## The validation framework
 
-The `ClusterJobValidator` class provides comprehensive job monitoring:
+`ClusterJobValidator` wraps job monitoring:
 
 ```python
 from tests.real_world.cluster_job_validator import create_validator
 
-# Create validator for SLURM
-validator = create_validator("slurm", 
-                           cluster_host="cluster.example.com",
-                           username="user")
+validator = create_validator(
+    "slurm",
+    cluster_host="cluster.example.edu",
+    username="user",
+)
 
-# Validate job submission
+# Was the job accepted by the scheduler, and with the resources asked for?
 result = validator.validate_job_submission(job_id, "my_function", "args", {})
 
-# Monitor job execution
-execution_result = validator.monitor_job_execution(job_id, timeout=300)
+# Poll until the job leaves the queue, or until the timeout
+execution_result = validator.monitor_job_execution(job_id, timeout_seconds=300)
 
-# Validate job output
+# Compare the job's output against what was expected
 output_result = validator.validate_job_output(job_id, expected_output=42)
 ```
 
-### Validation Features
+`create_validator` passes its keyword arguments straight into `ClusterConfig`,
+so anything that class accepts works here.
 
-- **Job submission validation** - Verify job was submitted correctly
-- **Resource allocation validation** - Check requested vs allocated resources
-- **Execution monitoring** - Track job status changes
-- **Output validation** - Verify job results match expectations
-- **Error detection** - Identify and report job failures
-- **Metrics collection** - Gather performance and resource usage data
+What it checks: that the job was submitted, that allocated resources match
+requested ones, how the job status changes over time, whether the output
+matches expectations, what went wrong when it did not, and per-job metrics.
 
-## Cluster-Specific Testing
+## Cluster-specific coverage
 
-### SLURM Tests
+### SLURM
 
-Test SLURM-specific features:
+SLURM environment variables (`SLURM_JOB_ID`, `SLURM_CPUS_PER_TASK` and so on),
+resource allocation for cores, memory and time limits, partition selection,
+loop parallelization, and SLURM accounting metrics.
 
-- SLURM environment variables (`SLURM_JOB_ID`, `SLURM_CPUS_PER_TASK`, etc.)
-- Resource allocation (cores, memory, time limits)
-- Partition and queue specification
-- Job arrays and parallel execution
-- SLURM accounting and metrics
+### SSH
 
-### SSH Tests
+Remote environment access, system command execution, file operations, network
+reachability from the remote host, resource monitoring, and inspection of the
+remote Python environment.
 
-Test SSH-based execution:
-
-- Remote environment access
-- System command execution
-- File operations
-- Network connectivity
-- Resource monitoring
-- Python environment analysis
-
-## Test Results and Reporting
-
-### Automatic Reporting
-
-The test runner generates comprehensive reports:
+## Reports
 
 ```bash
-# Run tests with custom output file
 python -m tests.real_world.cluster_validation.run_cluster_job_tests --output my_test_results.json
 ```
 
-### Report Contents
+Each report carries session information (ID, timestamp, duration), pass/fail/skip
+counts, which clusters were reachable, per-test detail, error messages and
+tracebacks, performance metrics, and a description of the environment the run
+happened in.
 
-- **Session information** (ID, timestamp, duration)
-- **Test results** (passed, failed, skipped counts)
-- **Cluster availability** status
-- **Individual test details**
-- **Error messages** and stack traces
-- **Performance metrics**
-- **Environment information**
-
-### Sample Report Structure
+The shape is:
 
 ```json
 {
@@ -303,122 +270,80 @@ python -m tests.real_world.cluster_validation.run_cluster_job_tests --output my_
 
 ## Troubleshooting
 
-### Common Issues
-
-#### Job Submission Failures
-
-1. **Check cluster connectivity:**
-   ```bash
-   python -m tests.real_world.cluster_validation.run_cluster_job_tests --check-only
-   ```
-
-2. **Verify credentials:**
-   ```bash
-   python scripts/run_real_world_tests.py --check-creds
-   ```
-
-3. **Check cluster queue:**
-   ```bash
-   # SLURM
-   squeue -u $USER
-   ```
-
-#### Test Timeouts
-
-1. **Increase timeout:**
-   ```bash
-   python -m tests.real_world.cluster_validation.run_cluster_job_tests --timeout 600
-   ```
-
-2. **Run basic tests only:**
-   ```bash
-   python -m tests.real_world.cluster_validation.run_cluster_job_tests --tests basic
-   ```
-
-3. **Check cluster load:**
-   ```bash
-   # SLURM
-   sinfo
-   
-   # Check job queue
-   squeue
-   ```
-
-#### Permission Errors
-
-1. **Verify SSH key permissions:**
-   ```bash
-   ls -la ~/.ssh/
-   chmod 600 ~/.ssh/id_rsa
-   ```
-
-2. **Test SSH connection:**
-   ```bash
-   ssh -vvv user@cluster.example.com
-   ```
-
-3. **Check cluster account:**
-   ```bash
-   # SLURM
-   sacctmgr show user $USER
-   ```
-
-### Debug Mode
-
-Enable verbose output for debugging:
+### Jobs will not submit
 
 ```bash
-# Run with pytest verbose mode
-pytest tests/real_world/test_slurm_job_submission_real.py -v -s
+# Can the runner see the clusters at all?
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --check-only
 
-# Enable debug logging
-export CLUSTRIX_DEBUG=1
-python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster slurm
+# Are the credentials where the suite expects them?
+python scripts/run_real_world_tests.py --check-creds
+
+# Is the queue accepting work?
+squeue -u "$USER"
 ```
 
-## Best Practices
+### Tests time out
 
-### Test Development
+Raise the per-test budget, or cut the suite down:
 
-1. **Start with simple tests** - Validate basic functionality first
-2. **Use descriptive test names** - Make purpose clear
-3. **Test error conditions** - Verify error handling works
-4. **Include resource validation** - Check resource allocation
-5. **Test parallel execution** - Verify loop parallelization
+```bash
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --timeout 600
+python -m tests.real_world.cluster_validation.run_cluster_job_tests --tests basic
+```
 
-### Resource Management
+A busy cluster is the usual cause. `sinfo` and `squeue` will say so.
 
-1. **Use appropriate resources** - Don't over-allocate
-2. **Set reasonable timeouts** - Allow sufficient time
-3. **Clean up test artifacts** - Remove temporary files
-4. **Monitor cluster usage** - Be considerate of other users
+### Permission errors
 
-### Credential Security
+```bash
+ls -la ~/.ssh/
+chmod 600 ~/.ssh/id_rsa
 
-1. **Use secure credential storage** - Environment variables or GitHub secrets
-2. **Rotate credentials regularly** - Follow security best practices
-3. **Limit credential scope** - Use minimal required permissions
-4. **Never commit credentials** - Keep them out of version control
+ssh -vvv user@cluster.example.edu
 
-### Test Organization
+# Does the account exist on the SLURM side?
+sacctmgr show user "$USER"
+```
 
-1. **Group related tests** - Use test classes for organization
-2. **Use appropriate markers** - `@pytest.mark.real_world`, `@pytest.mark.expensive`
-3. **Document test purpose** - Clear docstrings and comments
-4. **Handle cluster unavailability** - Skip gracefully when clusters not available
+### Getting more output
 
-## Integration with CI/CD
+```bash
+pytest tests/real_world/test_slurm_job_submission_real.py -v -s
+```
 
-### GitHub Actions
+Clustrix logs through the standard `logging` module, so raising the level on
+the `clustrix` logger shows the submission and polling steps.
 
-The tests integrate with GitHub Actions:
+## Practices worth keeping
+
+Start from the simplest test that could fail, and add the complicated ones
+after that one passes. Name tests for what they establish. Cover the failure
+paths as well as the success ones, and assert on allocated resources rather
+than assuming the scheduler honoured the request.
+
+Ask for the resources the test needs and no more; other people are queueing
+behind you. Set timeouts that are generous enough not to be flaky but short
+enough to fail fast. Delete the files a test writes on the remote host.
+
+Keep credentials in environment variables or repository secrets, scoped to the
+least privilege that lets the tests pass, and rotate them on a schedule.
+
+Group related tests into classes, mark them with `@pytest.mark.real_world` and
+`@pytest.mark.expensive` as appropriate, and skip rather than fail when a
+cluster is unreachable.
+
+## Continuous integration
+
+`.github/workflows/real-world-tests.yml` runs these jobs. It has no `push:` or
+`pull_request:` trigger on purpose: the jobs use real credentials, so a pull
+request from a fork must not be able to start them. Use `workflow_dispatch`,
+and gate on secret presence:
 
 ```yaml
 name: Real Cluster Job Tests
 
 on:
-  push:
-    branches: [ main ]
   workflow_dispatch:
     inputs:
       cluster_type:
@@ -434,19 +359,19 @@ on:
 jobs:
   cluster-tests:
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.9'
-    
+
     - name: Install dependencies
       run: |
         pip install -e ".[test]"
-    
+
     - name: Run cluster job tests
       env:
         CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
@@ -454,7 +379,7 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         python -m tests.real_world.cluster_validation.run_cluster_job_tests --cluster ${{ inputs.cluster_type }}
-    
+
     - name: Upload test results
       uses: actions/upload-artifact@v4
       if: always()
@@ -463,43 +388,22 @@ jobs:
         path: test_results/
 ```
 
-### Local Development
+## Extending the suite
 
-For local development:
+To add tests for a cluster type, create
+`test_<cluster_type>_job_submission_real.py`, cover the environment and
+resource behaviour that is specific to it, teach `credential_manager.py` how to
+find its credentials, add the name to the runner's `--cluster` choices, and say
+so here. A backend clustrix does not implement cannot be tested this way; the
+backend has to land first.
 
-1. **Set up environment variables** - Follow credential setup guide
-2. **Configure cluster access** - Ensure SSH keys and permissions
-3. **Run tests incrementally** - Start with basic tests
-4. **Monitor resource usage** - Be mindful of cluster load
+For a new test case within an existing file: decide what behaviour you are
+pinning down, write the function with the right decorators, assert on the
+result rather than on the absence of an exception, and cover the failure path
+too.
 
-## Extending the Test Suite
+## Getting help
 
-### Adding New Cluster Types
-
-1. **Create test file** - `test_<cluster_type>_job_submission_real.py`
-2. **Implement cluster-specific tests** - Environment, resources, etc.
-3. **Update credential manager** - Add credential support
-4. **Update test runner** - Add cluster type support
-5. **Update documentation** - Document new cluster support
-
-### Adding New Test Cases
-
-1. **Identify test scenario** - What functionality to test
-2. **Create test function** - Use appropriate decorators
-3. **Add validation** - Verify expected behavior
-4. **Test error conditions** - Ensure robust error handling
-5. **Update documentation** - Document new test cases
-
-## Support and Troubleshooting
-
-For issues with real cluster job testing:
-
-1. **Check this documentation** - Review troubleshooting section
-2. **Verify cluster status** - Ensure clusters are operational
-3. **Test credentials** - Run credential validation tests
-4. **Check logs** - Review detailed test output
-5. **Report issues** - Include test results and error messages
-
----
-
-This comprehensive testing system ensures that Clustrix's `@cluster` decorator works correctly across all supported cluster types with real job submissions and validation.
+Read the troubleshooting section, confirm the clusters are actually up, run the
+credential check, read the run's JSON report, and include that report when you
+open an issue.

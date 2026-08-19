@@ -2,47 +2,33 @@
 
 ## Issue #57: Automate SSH key setup for cluster authentication
 
-### Document Version
-- **Version**: 1.1
-- **Date**: 2025-07-02  
-- **Author**: Clustrix Development Team
-- **Status**: ✅ **IMPLEMENTATION COMPLETE**
-
-### Implementation Status
-- **✅ COMPLETE**: All features implemented and tested on real infrastructure
-- **✅ VALIDATED**: Successfully tested on real HPC clusters (gpu, hpc2)
-- **✅ PRODUCTION READY**: 15/15 unit tests passing, comprehensive error handling
-- **📚 DOCUMENTED**: Complete tutorial and API documentation available
+**Status: implemented.** The architecture described here is in the codebase;
+see "What is built" at the end for the module-by-module mapping. The one
+proposed piece that was not built is `detect_cluster_requirements`, noted at
+the point it appears. `tests/test_ssh_automation.py` holds 14 unit tests for
+this path, and
+`tests/real_world/cluster_validation/test_ssh_key_automation_real_clusters.py`
+exercises it against real hosts.
 
 **📖 Try the interactive [SSH Key Automation Tutorial](ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
-> **Note added 2026-08-19:** the "Initial Connection" snippet under
-> "Secure Key Deployment Process" below calls
-> `client.set_missing_host_key_policy(paramiko.AutoAddPolicy())` directly.
-> That has since been identified as insecure (silently trusts unknown host
-> keys) and is now the one pattern `clustrix/ssh_security.py` says no call
-> site may use. Every real SSH connection in the current codebase goes
-> through `clustrix.ssh_security.configure_host_key_policy()` instead, which
-> defaults to rejecting unknown host keys. The snippet below is left as
-> originally written, for the historical record; do not copy it.
+## Summary
 
-## Executive Summary
+Clustrix sets up passwordless SSH to a cluster from a single button in the
+Jupyter widget, or a single command line. The user supplies a password once;
+after that, key-based authentication carries every connection.
 
-This document outlines the technical design for automating SSH key setup in Clustrix. The goal is to enable users to establish passwordless SSH authentication with remote clusters through a single button click in the Jupyter widget or CLI command, eliminating manual SSH key configuration.
+## What this replaces
 
-## Problem Statement
+Without it, a user generates a key pair by hand, copies the public half to the
+cluster, fixes permissions on both ends, and edits `~/.ssh/config`. Each of
+those steps has its own way of failing quietly — a key in the wrong file, a
+directory mode of 755, a config entry that names the wrong key — and the
+failure shows up much later as an unexplained password prompt. Clusters differ
+in what they will accept, so the correct sequence is not the same everywhere.
 
-### Current State
-- Users must manually generate SSH keys, copy them to remote clusters, and configure their SSH clients
-- This creates significant friction for new users
-- Manual setup is error-prone and time-consuming
-- Different clusters may have different SSH requirements
-
-### Desired State
-- One-click SSH key setup from Jupyter widget
-- Automatic key generation, deployment, and configuration
-- Seamless passwordless authentication after initial setup
-- Clear feedback and error handling
+The automated path does the same work, checks that it worked by opening a
+passwordless connection, and says what went wrong when it did not.
 
 ## User Workflow
 
@@ -124,7 +110,7 @@ def deploy_ssh_key(
     """Deploy public key to remote authorized_keys using password auth."""
 ```
 
-#### 5. Widget Integration (`clustrix/notebook_magic.py`)
+#### 5. Widget Integration (`clustrix/notebook_magic_widget.py`, `clustrix/modern_notebook_widget.py`)
 - Password input field (secure, masked)
 - "Setup SSH Keys" button
 - Progress indicator during setup
@@ -137,7 +123,8 @@ def deploy_ssh_key(
 
 #### 6. CLI Integration (`clustrix/cli.py`)
 ```bash
-clustrix ssh-setup --host cluster.edu --user jdoe [--alias mycluster]
+clustrix ssh-setup --host cluster.example.edu --user user \
+    [--port 22] [--alias mycluster] [--key-type ed25519|rsa] [--force-refresh]
 ```
 
 ## Implementation Details
@@ -161,11 +148,18 @@ clustrix ssh-setup --host cluster.edu --user jdoe [--alias mycluster]
 
 1. **Initial Connection**:
    ```python
-   # Use paramiko with password authentication
+   # paramiko with password authentication, host keys verified
    client = paramiko.SSHClient()
-   client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+   configure_host_key_policy(client, config)
    client.connect(hostname, username=username, password=password)
    ```
+
+   `clustrix.ssh_security.configure_host_key_policy` is the single
+   implementation every call site uses, and its default policy is to reject an
+   unknown host key. `client.set_missing_host_key_policy(paramiko.AutoAddPolicy())`
+   trusts whatever key is offered on first contact and must not appear
+   anywhere in the codebase; the opt-out, for someone who has decided they
+   want it, is `ClusterConfig(ssh_host_key_policy="auto_add")`.
 
 2. **Remote Setup Commands**:
    ```bash
@@ -255,6 +249,10 @@ def detect_cluster_requirements(hostname: str) -> Dict[str, Any]:
     }
 ```
 
+This piece was proposed and not built — there is no
+`detect_cluster_requirements` in `clustrix/`. Key type is chosen by the
+`key_type` argument rather than probed.
+
 ## Testing Strategy
 
 ### Unit Tests
@@ -263,9 +261,10 @@ def detect_cluster_requirements(hostname: str) -> Dict[str, Any]:
 - Error handling for various failure modes
 
 ### Integration Tests
-- Mock SSH server for deployment testing
-- Paramiko connection testing
-- Full workflow simulation
+- Deployment against the real SSH server container in
+  `tests/infrastructure/docker-compose.yml`
+- Paramiko connection testing against that container
+- The full workflow, end to end, with no step stubbed out
 
 ### Manual Testing Checklist
 1. Fresh setup (no existing keys)
@@ -278,7 +277,7 @@ def detect_cluster_requirements(hostname: str) -> Dict[str, Any]:
 
 ### Validation Script
 ```python
-# scripts/validation/test_ssh_key_automation_real_clusters.py
+# tests/real_world/cluster_validation/test_ssh_key_automation_real_clusters.py
 def validate_ssh_automation(cluster_configs: List[Dict]):
     """
     Test SSH key automation on real clusters:
@@ -298,73 +297,36 @@ def validate_ssh_automation(cluster_configs: List[Dict]):
 4. **Reliability**: Passwordless auth works consistently after setup
 5. **Error Handling**: Clear, actionable error messages for common failures
 
-## Implementation Phases
+## What is built
 
-### Phase 1: Core Functionality with Real Cluster Testing (Week 1)
-- Basic key generation and deployment
-- Password-based authentication
-- Simple success/failure detection
-- **Immediate testing on hpc2 (SLURM) and gpu (SSH)**
-- Fix issues discovered during real cluster testing
+Everything in "Technical Architecture" above, apart from
+`detect_cluster_requirements`, exists in `clustrix/`:
 
-### Phase 2: Robustness and Key Rotation (Week 2)
-- Comprehensive error handling
-- University cluster adaptations
-- Progress feedback and logging
-- Implement key rotation feature (force refresh option)
-- Add age-based key refresh recommendations
+| Piece | Where |
+|-|-|
+| `setup_ssh_keys(config, password, cluster_alias, key_type, force_refresh, auto_refresh_days)` | `clustrix/ssh_utils.py` |
+| `detect_working_ssh_key`, `validate_ssh_key`, `detect_existing_ssh_key` | `clustrix/ssh_utils.py` |
+| `generate_ssh_key_pair`, `generate_ssh_key` | `clustrix/ssh_utils.py` |
+| `deploy_ssh_key`, `deploy_public_key`, `update_ssh_config` | `clustrix/ssh_utils.py` |
+| `setup_ssh_keys_with_fallback` | `clustrix/ssh_utils.py` |
+| "Setup SSH Keys" button | `clustrix/notebook_magic_widget.py`, `clustrix/modern_notebook_widget.py` |
+| `clustrix ssh-setup` | `clustrix/cli.py` |
 
-### Phase 3: Integration and Polish (Week 3)
-- Widget UI improvements (including rotation checkbox)
-- CLI command implementation
-- Documentation and examples
-- Multi-user/multi-key support
+The public helpers each take an optional `config: ClusterConfig`, which is how
+the host key policy reaches paramiko.
 
-### Phase 4: Edge Cases and Optimization (Week 4)
-- Handle edge cases discovered during testing
-- Performance optimization
-- Fallback strategies for unusual cluster configurations
+## Design decisions
 
-## Design Decisions (from Open Questions)
+**Multiple keys.** Supported. Key names include the username, so one machine
+can hold distinct keys for distinct accounts on the same cluster.
 
-1. **Multiple Keys**: **Yes** - Support different keys for different users. Key naming will include username to differentiate.
+**Key rotation.** `force_refresh=True` discards the existing key and deploys a
+new one; `auto_refresh_days` sets an age past which the key is replaced
+without being asked. The widget exposes both.
 
-2. **Key Rotation**: **Yes** - Implement "force refresh" option that:
-   - Deletes existing keys and deploys new ones
-   - Widget checkbox for "Force key refresh"
-   - Option to auto-refresh keys older than X days (configurable in widget)
+**Backup and recovery.** Deliberately absent. A lost key is replaced by
+forcing a refresh, which is cheaper than any backup scheme worth maintaining.
 
-3. **Backup/Recovery**: **Keep it simple** - If keys are lost, users can force a refresh to set up new ones. No complex backup needed.
-
-4. **Team Environments**: **Solved by design** - SSH keys are stored in user home directories (`~/.ssh/authorized_keys`), so each user has their own keys. This naturally handles multi-user clusters.
-
-## Appendix: Current Implementation Analysis
-
-### What Works
-- Basic key generation using ssh-keygen
-- Widget UI with password field and button
-- SSH config file updates
-
-### What's Broken
-- Key deployment fails silently in some cases
-- No proper error handling for university clusters
-- Connection testing gives false positives
-- Password authentication fallback issues
-
-### Root Causes
-1. Incomplete error detection in deployment process
-2. Assumptions about server SSH configuration
-3. Insufficient testing on real university clusters
-4. Missing cluster-specific adaptations
-
-## Next Steps
-
-1. Review and approve this technical design
-2. Update GitHub issue #57 with design document
-3. Implement Phase 1 with focus on the test clusters
-4. Create comprehensive validation suite
-5. Iterate based on real-world testing
-
----
-
-**Note**: This design prioritizes user experience and reliability over advanced features. The goal is seamless, one-click SSH key setup that "just works" for the majority of users.
+**Team environments.** Handled by the filesystem: keys live in each user's own
+`~/.ssh/authorized_keys` on the cluster, so nothing is shared and nothing
+collides.

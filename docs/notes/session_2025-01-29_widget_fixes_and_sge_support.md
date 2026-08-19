@@ -1,4 +1,12 @@
 # Session Notes: Widget Fixes, SGE Support, and Code Quality
+
+> **Historical record.** This file documents work completed on the date below.
+> It is kept for provenance and does not describe current behaviour. Clustrix
+> does not support the SGE backend (tracked in
+> [#141](https://github.com/ContextLab/clustrix/issues/141)), so the SGE work
+> described here is not present in the code. For current behaviour see the
+> docs under `docs/source/`.
+
 **Date**: 2025-01-29
 **Commit Range**: f45f680..e22f7b2
 
