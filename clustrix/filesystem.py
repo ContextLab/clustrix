@@ -7,6 +7,7 @@ both locally and on remote clusters based on the ClusterConfig object.
 
 import logging
 import os
+import shlex
 import glob as glob_module
 from pathlib import Path
 from typing import List, Optional, Dict, Any
@@ -420,7 +421,7 @@ class ClusterFilesystem:
         full_path = self._get_full_path(path)
 
         # Use ls -1 for one file per line
-        cmd = f"ls -1 {full_path} 2>/dev/null || true"
+        cmd = f"ls -1 {shlex.quote(full_path)} 2>/dev/null || true"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -434,7 +435,7 @@ class ClusterFilesystem:
         full_path = self._get_full_path(path)
 
         # Use find command with name pattern
-        cmd = f"cd {full_path} && find . -name '{pattern}' -type f | sed 's|^\\./||' | sort"
+        cmd = f"cd {shlex.quote(full_path)} && find . -name {shlex.quote(pattern)} -type f | sed 's|^\\./||' | sort"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -449,7 +450,7 @@ class ClusterFilesystem:
 
         # Use stat command with portable format
         # %s = size, %Y = modification time, %f = file type/mode in hex
-        cmd = f"stat -c '%s %Y %f' {full_path} 2>/dev/null"
+        cmd = f"stat -c '%s %Y %f' {shlex.quote(full_path)} 2>/dev/null"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -480,7 +481,7 @@ class ClusterFilesystem:
         ssh_client = self._get_ssh_client()
         full_path = self._get_full_path(path)
 
-        cmd = f"test -e {full_path} && echo 'EXISTS' || echo 'NOT_EXISTS'"
+        cmd = f"test -e {shlex.quote(full_path)} && echo 'EXISTS' || echo 'NOT_EXISTS'"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -491,7 +492,7 @@ class ClusterFilesystem:
         ssh_client = self._get_ssh_client()
         full_path = self._get_full_path(path)
 
-        cmd = f"test -d {full_path} && echo 'DIR' || echo 'NOT_DIR'"
+        cmd = f"test -d {shlex.quote(full_path)} && echo 'DIR' || echo 'NOT_DIR'"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -502,7 +503,7 @@ class ClusterFilesystem:
         ssh_client = self._get_ssh_client()
         full_path = self._get_full_path(path)
 
-        cmd = f"test -f {full_path} && echo 'FILE' || echo 'NOT_FILE'"
+        cmd = f"test -f {shlex.quote(full_path)} && echo 'FILE' || echo 'NOT_FILE'"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -515,7 +516,7 @@ class ClusterFilesystem:
 
         # Use shell glob expansion with ls
         # The 2>/dev/null suppresses errors for no matches
-        cmd = f"cd {full_path} && ls -d {pattern} 2>/dev/null | sort || true"
+        cmd = f"cd {shlex.quote(full_path)} && ls -d {shlex.quote(pattern)} 2>/dev/null | sort || true"
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
 
@@ -529,12 +530,12 @@ class ClusterFilesystem:
         full_path = self._get_full_path(path)
 
         # Get total size in bytes
-        cmd1 = f"du -sb {full_path} 2>/dev/null | cut -f1"
+        cmd1 = f"du -sb {shlex.quote(full_path)} 2>/dev/null | cut -f1"
         stdin, stdout, stderr = ssh_client.exec_command(cmd1)
         size_output = stdout.read().decode().strip()
 
         # Count files
-        cmd2 = f"find {full_path} -type f 2>/dev/null | wc -l"
+        cmd2 = f"find {shlex.quote(full_path)} -type f 2>/dev/null | wc -l"
         stdin, stdout, stderr = ssh_client.exec_command(cmd2)
         count_output = stdout.read().decode().strip()
 
@@ -550,10 +551,10 @@ class ClusterFilesystem:
 
         if pattern == "*":
             # Count all files
-            cmd = f"find {full_path} -type f 2>/dev/null | wc -l"
+            cmd = f"find {shlex.quote(full_path)} -type f 2>/dev/null | wc -l"
         else:
             # Count files matching pattern
-            cmd = f"find {full_path} -name '{pattern}' -type f 2>/dev/null | wc -l"
+            cmd = f"find {shlex.quote(full_path)} -name {shlex.quote(pattern)} -type f 2>/dev/null | wc -l"
 
         stdin, stdout, stderr = ssh_client.exec_command(cmd)
         output = stdout.read().decode().strip()
