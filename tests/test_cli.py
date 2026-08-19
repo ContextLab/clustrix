@@ -2,7 +2,11 @@ import pytest
 from click.testing import CliRunner
 from unittest.mock import patch, Mock
 from clustrix.cli import cli
-from clustrix.config import ClusterConfig
+from clustrix.config import (
+    ClusterConfig,
+    REMOVED_CLUSTER_TYPES,
+    SUPPORTED_CLUSTER_TYPES,
+)
 
 
 class TestCLI:
@@ -85,6 +89,28 @@ class TestCLI:
     def test_config_invalid_cluster_type(self, mock_configure, runner):
         """Test setting invalid cluster type."""
         result = runner.invoke(cli, ["config", "--cluster-type", "invalid"])
+
+        assert result.exit_code == 2
+        assert "Invalid value for '--cluster-type'" in result.output
+
+    def test_cluster_type_choices_are_exactly_the_supported_types(self, runner):
+        """The CLI must offer the shipped tuple, not its own copy of it.
+
+        It once kept a hand-written list that omitted "huggingface", so a
+        backend that works could not be selected from the command line at
+        all. The same drift in the other direction would now advertise a
+        removed backend.
+        """
+        result = runner.invoke(cli, ["config", "--help"])
+
+        assert result.exit_code == 0
+        for supported in SUPPORTED_CLUSTER_TYPES:
+            assert supported in result.output
+        assert set(SUPPORTED_CLUSTER_TYPES) == {"local", "ssh", "slurm", "huggingface"}
+
+    @pytest.mark.parametrize("removed", sorted(REMOVED_CLUSTER_TYPES))
+    def test_a_removed_backend_cannot_be_selected_from_the_cli(self, removed, runner):
+        result = runner.invoke(cli, ["config", "--cluster-type", removed])
 
         assert result.exit_code == 2
         assert "Invalid value for '--cluster-type'" in result.output
