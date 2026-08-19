@@ -15,7 +15,12 @@ import socket
 import os
 
 hostname = socket.gethostname()
-target = "ndoli.dartmouth.edu"
+target = os.environ.get("CLUSTRIX_TEST_SLURM_HOST", "")
+if not target:
+    raise SystemExit(
+        "CLUSTRIX_TEST_SLURM_HOST is not set; nothing to compare the "
+        "hostname against, so this job has nothing to test."
+    )
 
 print(f"Current hostname: {hostname}")
 print(f"Target host: {target}")
@@ -40,7 +45,7 @@ except Exception as e:
     print(f"Filesystem test: FAILED - {e}")
 
 # Test shared filesystem access
-shared_paths = ["/dartfs-hpc/rc/home/b/f002d6b", "/tmp"]
+shared_paths = [os.environ.get("CLUSTRIX_TEST_SLURM_REMOTE_DIR", "/tmp"), "/tmp"]
 for path in shared_paths:
     try:
         if os.path.exists(path):

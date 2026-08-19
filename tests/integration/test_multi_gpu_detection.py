@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test multi-GPU detection on tensor01.
+Test multi-GPU detection on gpu_cluster.
 """
 
 from clustrix import cluster
@@ -12,16 +12,16 @@ def test_multi_gpu_detection():
     """Test detection of multiple GPUs."""
 
     # Load config and modify for multi-GPU access
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     # Configure with more GPUs visible
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         environment_variables={

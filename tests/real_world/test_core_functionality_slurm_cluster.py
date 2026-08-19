@@ -1,8 +1,8 @@
 """
-Test core ClustriX functionality on ndoli using proper configuration file.
+Test core ClustriX functionality on slurm_cluster using proper configuration file.
 
 This test validates that the ClustriX toolbox can:
-1. Load configuration from ndoli_config.yml
+1. Load configuration from slurm_cluster_config.yml
 2. Authenticate using 1Password or environment variables
 3. Submit SLURM jobs with module loads
 4. Execute functions on remote cluster
@@ -18,35 +18,35 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_ndoli_core_functionality():
-    """Test that core ClustriX functionality works on ndoli."""
+def test_slurm_cluster_core_functionality():
+    """Test that core ClustriX functionality works on slurm_cluster."""
 
-    # Load the ndoli configuration file
-    load_config("ndoli_config.yml")
+    # Load the slurm_cluster configuration file
+    load_config("slurm_cluster_config.yml")
 
     # Get credentials using the existing credential manager
     # This tests the same authentication path used by the toolbox
-    ndoli_creds = credentials.get_ndoli_credentials()
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
 
-    if not ndoli_creds:
+    if not slurm_cluster_creds:
         pytest.skip(
-            "No ndoli credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No slurm_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Override configuration with actual credentials
     # This mimics how the toolbox should handle authentication
     configure(
-        password=ndoli_creds.get("password"),
+        password=slurm_cluster_creds.get("password"),
         cleanup_on_success=False,  # Keep files for verification
         job_poll_interval=15,  # Poll every 15 seconds
     )
 
     @cluster(cores=2, memory="2GB", time="00:10:00", partition="standard")
-    def test_ndoli_computation(n: int) -> dict:
+    def test_slurm_cluster_computation(n: int) -> dict:
         """
-        Test function that validates ndoli environment and computation.
+        Test function that validates slurm_cluster environment and computation.
 
-        This function will be serialized, transferred to ndoli, executed in SLURM,
+        This function will be serialized, transferred to slurm_cluster, executed in SLURM,
         and results transferred back.
         """
         import os
@@ -112,8 +112,8 @@ def test_ndoli_core_functionality():
 
     # Execute the function using ClustriX core functionality
     # This tests the complete end-to-end workflow
-    print("Submitting job to ndoli using ClustriX core functionality...")
-    result = test_ndoli_computation(15)
+    print("Submitting job to slurm_cluster using ClustriX core functionality...")
+    result = test_slurm_cluster_computation(15)
 
     # Validate that the job executed successfully
     assert isinstance(result, dict), f"Expected dict result, got {type(result)}"
@@ -147,7 +147,7 @@ def test_ndoli_core_functionality():
     # Note: This might not be "module command available" on all systems, so we're lenient
     print(f"Module status: {result['modules_status']}")
 
-    print("SUCCESS: ClustriX core functionality works on ndoli!")
+    print("SUCCESS: ClustriX core functionality works on slurm_cluster!")
     print(f"✓ Job ID: {result['slurm_info']['job_id']}")
     print(f"✓ Hostname: {result['hostname']}")
     print(f"✓ Python: {result['python_info']['version']}")

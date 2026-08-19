@@ -11,16 +11,16 @@ from tests.real_world import credentials
 def test_bypass_gpu_parallel():
     """Test GPU detection with GPU parallelization disabled."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     # Configure with GPU parallelization explicitly disabled
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,  # Disable automatic GPU parallelization
@@ -70,7 +70,7 @@ if torch.cuda.is_available():
                 ][0]
                 gpu_count = int(gpu_count_line.split(":", 1)[1])
 
-                print(f"\n🎯 DETECTED {gpu_count} GPUs on tensor01")
+                print(f"\n🎯 DETECTED {gpu_count} GPUs on gpu_cluster")
 
                 if gpu_count == 8:
                     print("✅ PERFECT: All 8 GPUs detected as expected!")
@@ -97,4 +97,4 @@ if torch.cuda.is_available():
 
 if __name__ == "__main__":
     gpu_count = test_bypass_gpu_parallel()
-    print(f"\n📊 Final Result: {gpu_count} GPUs detected on tensor01")
+    print(f"\n📊 Final Result: {gpu_count} GPUs detected on gpu_cluster")

@@ -1,7 +1,8 @@
 """
 Real-world tests for GPU functionality on actual clusters.
 
-These tests create actual jobs on tensor01 and ndoli to validate:
+These tests create actual jobs on the SSH-GPU and SLURM clusters named by
+CLUSTRIX_TEST_SSH_HOST and CLUSTRIX_TEST_SLURM_HOST, to validate:
 - GPU detection and VENV setup
 - Remote execution of functions with nested helpers
 - GPU-enabled package installation
@@ -11,63 +12,89 @@ These tests create actual jobs on tensor01 and ndoli to validate:
 import pytest
 import time
 import logging
-import socket
 from typing import Dict, Any, List
 
 from clustrix import cluster
 from clustrix.config import ClusterConfig
 from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
+from tests.real_world.conftest import can_reach_configured_cluster
+from tests.real_world.credential_manager import (
+    HOST_ENV_VARS,
+    get_test_host,
+    get_test_username,
+)
 
 logger = logging.getLogger(__name__)
 
 
-# Check if we're on a Dartmouth network to enable real cluster tests
-def is_dartmouth_network():
-    """Check if we're on a Dartmouth network by examining hostname."""
-    try:
-        hostname = socket.gethostname()
-        return "dartmouth.edu" in hostname
-    except Exception:
-        return False
-
-
-# Skip real cluster tests if not on Dartmouth network
-requires_dartmouth = pytest.mark.skipif(
-    not is_dartmouth_network(),
-    reason="Real cluster tests require Dartmouth network access",
+# Targets come from the environment; this repository names no machine of its
+# own. With none configured every test below skips, saying which variable to
+# set.
+requires_cluster_network = pytest.mark.skipif(
+    not can_reach_configured_cluster(),
+    reason=(
+        "Real cluster tests require a reachable private cluster: set "
+        "CLUSTRIX_TEST_SSH_HOST / CLUSTRIX_TEST_SLURM_HOST and connect to "
+        "its network"
+    ),
 )
 
-# Test configurations for different clusters
+
+def _cluster_kwargs(role: str, cluster_type: str):
+    """@cluster kwargs for `role`, or None if it is not configured."""
+    host = get_test_host(role)
+    username = get_test_username()
+    if not host or not username:
+        return None
+    return {
+        "cluster_type": cluster_type,
+        "cluster_host": host,
+        "username": username,
+        "gpu_detection_enabled": True,
+        "auto_gpu_packages": True,
+        "use_two_venv": True,
+        "remote_work_dir": "/tmp/clustrix_gpu_tests",
+    }
+
+
+# Test configurations for different clusters. A value is None when the
+# developer has not pointed the suite at that cluster.
 TEST_CLUSTERS = {
-    "tensor01": {
-        "cluster_type": "ssh",
-        "cluster_host": "tensor01.csail.mit.edu",
-        "username": "jmanning",
-        "gpu_detection_enabled": True,
-        "auto_gpu_packages": True,
-        "use_two_venv": True,
-        "remote_work_dir": "/tmp/clustrix_gpu_tests",
-    },
-    "ndoli": {
-        "cluster_type": "slurm",
-        "cluster_host": "ndoli.csail.mit.edu",
-        "username": "jmanning",
-        "gpu_detection_enabled": True,
-        "auto_gpu_packages": True,
-        "use_two_venv": True,
-        "remote_work_dir": "/tmp/clustrix_gpu_tests",
-    },
+    "gpu_cluster": _cluster_kwargs("ssh", "ssh"),
+    "slurm_cluster": _cluster_kwargs("slurm", "slurm"),
 }
+
+#: Roles keyed the same way as TEST_CLUSTERS, for skip messages.
+_CLUSTER_ROLES = {"gpu_cluster": "ssh", "slurm_cluster": "slurm"}
+
+
+def _require_cluster(cluster_name: str):
+    """Config for `cluster_name`, or skip saying what to set."""
+    config_data = _require_cluster(cluster_name)
+    if config_data is None:
+        role = _CLUSTER_ROLES[cluster_name]
+        pytest.skip(
+            f"No {role} cluster configured: set {HOST_ENV_VARS[role][0]} and "
+            f"CLUSTRIX_TEST_USERNAME"
+        )
+    return config_data
+
+
+def _configured_clusters():
+    """The clusters that are actually configured, as (name, config) pairs."""
+    return [
+        (name, config) for name, config in TEST_CLUSTERS.items() if config is not None
+    ]
 
 
 class TestGPUFunctionalityRealWorld:
     """Real-world GPU functionality tests on actual clusters."""
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_gpu_detection_real_cluster(self, cluster_name):
         """Test GPU detection on real clusters."""
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
         config = ClusterConfig(**config_data)
 
         print(f"\n🧪 Testing GPU detection on {cluster_name}...")
@@ -119,11 +146,11 @@ class TestGPUFunctionalityRealWorld:
             else:
                 pytest.fail(f"GPU detection failed on {cluster_name}: {e}")
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_simple_function_execution(self, cluster_name):
         """Test simple function execution."""
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
 
         print(f"\n🧪 Testing simple function execution on {cluster_name}...")
 
@@ -155,15 +182,15 @@ class TestGPUFunctionalityRealWorld:
         print(f"   Result: {result['result']:.2f}")
         print(f"   Hostname: {result['cluster_info']['hostname']}")
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_nested_function_execution(self, cluster_name):
         """A function with nested helpers must execute correctly on the cluster.
 
         The nested helpers travel inside the serialized function; nothing is
         rewritten or substituted on the way out.
         """
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
 
         print(f"\n🧪 Testing nested function execution on {cluster_name}...")
 
@@ -225,11 +252,11 @@ class TestGPUFunctionalityRealWorld:
         print(f"   Total: {result['analysis']['total']:.2f}")
         print(f"   Hostname: {result['cluster_info']['hostname']}")
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_gpu_simulation_computation(self, cluster_name):
         """Test GPU simulation computation (complex nested functions)."""
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
 
         print(f"\n🧪 Testing GPU simulation computation on {cluster_name}...")
 
@@ -347,11 +374,11 @@ class TestGPUFunctionalityRealWorld:
         )
         print(f"   Hostname: {result['execution_info']['hostname']}")
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_inline_function_pattern(self, cluster_name):
         """Test inline function pattern commonly used in GPU code."""
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
 
         print(f"\n🧪 Testing inline function pattern on {cluster_name}...")
 
@@ -407,11 +434,11 @@ class TestGPUFunctionalityRealWorld:
         print(f"   Time: {result['computation_time']:.4f}s")
         print(f"   Hostname: {result['hostname']}")
 
-    @requires_dartmouth
-    @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
+    @requires_cluster_network
+    @pytest.mark.parametrize("cluster_name", ["gpu_cluster", "slurm_cluster"])
     def test_enhanced_venv_setup_integration(self, cluster_name):
         """Test enhanced VENV setup with mock GPU packages."""
-        config_data = TEST_CLUSTERS[cluster_name]
+        config_data = _require_cluster(cluster_name)
 
         print(f"\n🧪 Testing enhanced VENV setup on {cluster_name}...")
 
@@ -461,7 +488,7 @@ class TestGPUFunctionalityRealWorld:
         print(f"   Essential packages: {[k for k, v in packages.items() if v]}")
         print(f"   Hostname: {result['hostname']}")
 
-    @requires_dartmouth
+    @requires_cluster_network
     def test_cross_cluster_compatibility(self):
         """Test that the same complex function works across different clusters."""
         print(f"\n🧪 Testing cross-cluster compatibility...")
@@ -528,8 +555,15 @@ class TestGPUFunctionalityRealWorld:
 
         results = {}
 
-        # Test on each cluster
-        for cluster_name, config_data in TEST_CLUSTERS.items():
+        # Test on each configured cluster
+        configured = _configured_clusters()
+        if len(configured) < 2:
+            pytest.skip(
+                "Cross-cluster comparison needs both clusters: set "
+                "CLUSTRIX_TEST_SSH_HOST, CLUSTRIX_TEST_SLURM_HOST and "
+                "CLUSTRIX_TEST_USERNAME"
+            )
+        for cluster_name, config_data in configured:
             print(f"\n  Testing on {cluster_name}...")
 
             # Create cluster-specific function
@@ -573,15 +607,17 @@ class TestGPUFunctionalityRealWorld:
 
         return results
 
-    @requires_dartmouth
+    @requires_cluster_network
     def test_gpu_package_simulation(self):
         """Test GPU package simulation with mock PyTorch/TensorFlow usage."""
         print(f"\n🧪 Testing GPU package simulation...")
 
+        gpu_cluster = _require_cluster("gpu_cluster")
+
         @cluster(
             cluster_type="ssh",
-            cluster_host="tensor01.csail.mit.edu",
-            username="jmanning",
+            cluster_host=gpu_cluster["cluster_host"],
+            username=gpu_cluster["username"],
             gpu_detection_enabled=True,
             auto_gpu_packages=True,
             use_two_venv=True,

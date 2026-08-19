@@ -1,5 +1,5 @@
 """
-Check SLURM job logs on ndoli to debug failures.
+Check SLURM job logs on slurm_cluster to debug failures.
 """
 
 import pytest
@@ -11,18 +11,18 @@ from tests.real_world import credentials
 @pytest.mark.real_world
 def test_check_slurm_job_logs():
     """Check recent SLURM job logs to debug failures."""
-    ndoli_creds = credentials.get_ndoli_credentials()
-    if not ndoli_creds:
-        pytest.skip("No ndoli credentials available")
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+    if not slurm_cluster_creds:
+        pytest.skip("No slurm_cluster credentials available")
 
     # Connect via SSH
     ssh_client = paramiko.SSHClient()
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     ssh_client.connect(
-        hostname=ndoli_creds["host"],
-        username=ndoli_creds["username"],
-        password=ndoli_creds.get("password"),
+        hostname=slurm_cluster_creds["host"],
+        username=slurm_cluster_creds["username"],
+        password=slurm_cluster_creds.get("password"),
         port=22,
     )
 

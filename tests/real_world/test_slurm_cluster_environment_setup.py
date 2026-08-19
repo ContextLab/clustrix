@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test environment setup on ndoli cluster with cluster-specific configuration
+Test environment setup on slurm_cluster cluster with cluster-specific configuration
 """
 
 import sys
@@ -27,13 +27,13 @@ def simple_test():
     }
 
 
-def test_ndoli_environment_setup():
-    """Test environment setup with ndoli-specific configuration."""
-    print("🧪 Testing Ndoli Environment Setup")
+def test_slurm_cluster_environment_setup():
+    """Test environment setup with slurm_cluster-specific configuration."""
+    print("🧪 Testing SLURM cluster Environment Setup")
     print("=" * 50)
 
-    # Load ndoli-specific configuration
-    config_path = Path(__file__).parent.parent / "ndoli_config.yml"
+    # Load slurm_cluster-specific configuration
+    config_path = Path(__file__).parent.parent / "slurm_cluster_config.yml"
     config = ClusterConfig.load_from_file(str(config_path))
 
     # Get credentials for password
@@ -123,10 +123,12 @@ def test_ndoli_environment_setup():
 
 
 if __name__ == "__main__":
-    success = test_ndoli_environment_setup()
+    success = test_slurm_cluster_environment_setup()
     if success:
         print("\n🎉 Environment setup test PASSED!")
-        print("The ndoli-specific configuration resolved the environment issue.")
+        print(
+            "The slurm_cluster-specific configuration resolved the environment issue."
+        )
     else:
         print("\n❌ Environment setup test FAILED!")
         print("Need to investigate further or adjust configuration.")

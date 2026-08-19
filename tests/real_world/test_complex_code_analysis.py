@@ -15,16 +15,16 @@ from tests.real_world import credentials
 class TestSimpleCodePatterns:
     """Test simple code patterns that consistently work."""
 
-    def test_tensor01_simple_single_gpu(self):
-        """Simple function with single GPU on tensor01."""
-        load_config("tensor01_config.yml")
+    def test_gpu_cluster_simple_single_gpu(self):
+        """Simple function with single GPU on gpu_cluster."""
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             environment_variables={"CUDA_VISIBLE_DEVICES": "0"},
@@ -52,16 +52,16 @@ class TestSimpleCodePatterns:
         assert result["success"]
         assert "GPU:1" in result["output"]
 
-    def test_tensor01_simple_multi_gpu(self):
-        """Simple function with multiple GPUs on tensor01."""
-        load_config("tensor01_config.yml")
+    def test_gpu_cluster_simple_multi_gpu(self):
+        """Simple function with multiple GPUs on gpu_cluster."""
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             environment_variables={"CUDA_VISIBLE_DEVICES": "0,1"},
@@ -89,16 +89,16 @@ class TestSimpleCodePatterns:
         assert result["success"]
         assert "GPUS:2" in result["output"]
 
-    def test_ndoli_simple_slurm(self):
-        """Simple function on SLURM cluster (ndoli)."""
-        load_config("ndoli_config.yml")
+    def test_slurm_cluster_simple_slurm(self):
+        """Simple function on SLURM cluster (slurm_cluster)."""
+        load_config("slurm_cluster_config.yml")
 
-        ndoli_creds = credentials.get_ndoli_credentials()
-        if not ndoli_creds:
-            pytest.skip("No ndoli credentials available")
+        slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+        if not slurm_cluster_creds:
+            pytest.skip("No slurm_cluster credentials available")
 
         configure(
-            password=ndoli_creds.get("password"),
+            password=slurm_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
         )
@@ -126,16 +126,16 @@ class TestSimpleCodePatterns:
 class TestComplexCodePatterns:
     """Test complex code patterns that often fail."""
 
-    def test_tensor01_complex_single_gpu_expected_failure(self):
-        """Complex function with single GPU on tensor01 - EXPECTED TO FAIL."""
-        load_config("tensor01_config.yml")
+    def test_gpu_cluster_complex_single_gpu_expected_failure(self):
+        """Complex function with single GPU on gpu_cluster - EXPECTED TO FAIL."""
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             environment_variables={"CUDA_VISIBLE_DEVICES": "0"},
@@ -243,16 +243,16 @@ print(f'COMPUTATION:{result:.2f}')
         with pytest.raises(Exception, match="result_raw.pkl not found"):
             complex_single_gpu()
 
-    def test_tensor01_complex_multi_gpu_expected_failure(self):
-        """Complex function with multiple GPUs on tensor01 - EXPECTED TO FAIL."""
-        load_config("tensor01_config.yml")
+    def test_gpu_cluster_complex_multi_gpu_expected_failure(self):
+        """Complex function with multiple GPUs on gpu_cluster - EXPECTED TO FAIL."""
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             environment_variables={"CUDA_VISIBLE_DEVICES": "0,1,2,3"},
@@ -418,16 +418,16 @@ print(f'PERFORMANCE_TIMES:{times}')
         with pytest.raises(Exception, match="result_raw.pkl not found"):
             complex_multi_gpu()
 
-    def test_ndoli_complex_slurm_expected_failure(self):
-        """Complex function on SLURM cluster (ndoli) - EXPECTED TO FAIL."""
-        load_config("ndoli_config.yml")
+    def test_slurm_cluster_complex_slurm_expected_failure(self):
+        """Complex function on SLURM cluster (slurm_cluster) - EXPECTED TO FAIL."""
+        load_config("slurm_cluster_config.yml")
 
-        ndoli_creds = credentials.get_ndoli_credentials()
-        if not ndoli_creds:
-            pytest.skip("No ndoli credentials available")
+        slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+        if not slurm_cluster_creds:
+            pytest.skip("No slurm_cluster credentials available")
 
         configure(
-            password=ndoli_creds.get("password"),
+            password=slurm_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
         )
@@ -585,16 +585,16 @@ class TestComplexityThreshold:
     """Test to identify the exact complexity threshold."""
 
     @pytest.mark.parametrize("complexity_level", [1, 2, 3, 4, 5])
-    def test_tensor01_complexity_levels(self, complexity_level):
+    def test_gpu_cluster_complexity_levels(self, complexity_level):
         """Test different complexity levels to identify threshold."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             environment_variables={"CUDA_VISIBLE_DEVICES": "0"},

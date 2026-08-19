@@ -1,5 +1,5 @@
 """
-Simple GPU detection test for tensor01 to debug issues.
+Simple GPU detection test for gpu_cluster to debug issues.
 """
 
 import pytest
@@ -9,23 +9,23 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_tensor01_basic_gpu_detection():
-    """Test basic GPU detection on tensor01."""
+def test_gpu_cluster_basic_gpu_detection():
+    """Test basic GPU detection on gpu_cluster."""
 
-    # Load the tensor01 configuration file
-    load_config("tensor01_config.yml")
+    # Load the gpu_cluster configuration file
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials using the existing credential manager
-    tensor01_creds = credentials.get_tensor01_credentials()
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
 
-    if not tensor01_creds:
+    if not gpu_cluster_creds:
         pytest.skip(
-            "No tensor01 credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Override configuration with actual credentials
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,  # Keep files for verification
         job_poll_interval=10,
     )
@@ -127,7 +127,7 @@ def test_tensor01_basic_gpu_detection():
         return result
 
     # Execute the simple detection
-    print("Running simple GPU detection on tensor01...")
+    print("Running simple GPU detection on gpu_cluster...")
     result = simple_gpu_detection()
 
     # Validate results

@@ -11,16 +11,16 @@ from tests.real_world import credentials
 def test_all_gpus_simple():
     """Super simple detection of all GPUs."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     # No CUDA_VISIBLE_DEVICES restriction - detect all
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
     )
@@ -50,7 +50,7 @@ def test_all_gpus_simple():
 
         if "ALL_GPUS:" in result["output"]:
             gpu_count = int(result["output"].split("ALL_GPUS:", 1)[1].strip())
-            print(f"🎉 DETECTED ALL {gpu_count} GPUs on tensor01!")
+            print(f"🎉 DETECTED ALL {gpu_count} GPUs on gpu_cluster!")
 
             if gpu_count == 8:
                 print("✅ PERFECT: All 8 GPUs detected as expected!")
@@ -70,4 +70,4 @@ def test_all_gpus_simple():
 
 if __name__ == "__main__":
     gpu_count = test_all_gpus_simple()
-    print(f"\n📊 FINAL: {gpu_count} GPUs available on tensor01")
+    print(f"\n📊 FINAL: {gpu_count} GPUs available on gpu_cluster")

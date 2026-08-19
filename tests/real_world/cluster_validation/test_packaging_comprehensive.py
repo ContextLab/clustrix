@@ -27,6 +27,11 @@ from clustrix.config import ClusterConfig
 from clustrix.dependency_analysis import analyze_function_dependencies
 from clustrix.file_packaging import package_function_for_execution
 from clustrix.filesystem import cluster_ls, cluster_exists, cluster_stat
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_remote_work_dir,
+    require_test_username,
+)
 
 
 class PackagingTestSuite:
@@ -36,20 +41,25 @@ class PackagingTestSuite:
         self.test_results = []
         self.temp_dirs = []
 
+        # Targets come from CLUSTRIX_TEST_* (see credential_manager); this
+        # repository names no machine of its own.
+        username = require_test_username()
+        self.remote_work_dir = require_test_remote_work_dir()
+
         # SSH cluster config (direct execution)
         self.ssh_config = ClusterConfig(
             cluster_type="ssh",
-            cluster_host="tensor01.dartmouth.edu",
-            username="f002d6b",
-            remote_work_dir="/home/f002d6b/clustrix_test",
+            cluster_host=require_test_host("ssh"),
+            username=username,
+            remote_work_dir=f"{self.remote_work_dir}/clustrix_test",
         )
 
         # SLURM cluster config (job submission)
         self.slurm_config = ClusterConfig(
             cluster_type="slurm",
-            cluster_host="ndoli.dartmouth.edu",
-            username="f002d6b",
-            remote_work_dir="/dartfs-hpc/rc/home/b/f002d6b/clustrix",
+            cluster_host=require_test_host("slurm"),
+            username=username,
+            remote_work_dir=f"{self.remote_work_dir}/clustrix",
             module_loads=["python"],
             environment_variables={"OMP_NUM_THREADS": "1"},
         )
@@ -359,8 +369,8 @@ class PackagingTestSuite:
 
         script_content = f"""#!/bin/bash
 #SBATCH --job-name=clustrix_test_{test_name}
-#SBATCH --output=/dartfs-hpc/rc/home/b/f002d6b/clustrix/logs/clustrix_test_{test_name}_%j.out
-#SBATCH --error=/dartfs-hpc/rc/home/b/f002d6b/clustrix/logs/clustrix_test_{test_name}_%j.err
+#SBATCH --output={self.remote_work_dir}/clustrix/logs/clustrix_test_{test_name}_%j.out
+#SBATCH --error={self.remote_work_dir}/clustrix/logs/clustrix_test_{test_name}_%j.err
 #SBATCH --time=00:05:00
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
@@ -374,7 +384,7 @@ module load python
 export OMP_NUM_THREADS=1
 
 # Change to work directory
-cd /dartfs-hpc/rc/home/b/f002d6b/clustrix
+cd {self.remote_work_dir}/clustrix
 
 # Create test directory if it doesn't exist
 mkdir -p test_packages

@@ -2,7 +2,8 @@
 """
 Test script for SSH key automation on real clusters.
 
-This script validates the SSH key automation functionality on real Dartmouth clusters
+This script validates the SSH key automation functionality on the real
+clusters named by CLUSTRIX_TEST_SLURM_HOST / CLUSTRIX_TEST_SSH_HOST,
 following the technical design document.
 """
 
@@ -19,6 +20,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from clustrix.config import ClusterConfig
 from clustrix.ssh_utils import setup_ssh_keys, detect_working_ssh_key, validate_ssh_key
 from clustrix.secure_credentials import SecureCredentialManager
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_username,
+)
 
 
 def test_ssh_automation(cluster_configs: list) -> dict:
@@ -179,21 +184,22 @@ def main():
     )
     print()
 
-    # Define test clusters (Dartmouth infrastructure)
+    # Test clusters come from the environment; see credential_manager.
+    username = require_test_username()
     test_clusters = [
         {
-            "name": "ndoli_slurm",
+            "name": "slurm_cluster",
             "cluster_type": "slurm",
-            "host": "ndoli.dartmouth.edu",
-            "username": "f002d6b",
+            "host": require_test_host("slurm"),
+            "username": username,
             "port": 22,
             "credential_name": "clustrix-ssh-slurm",
         },
         {
-            "name": "tensor01_gpu",
+            "name": "gpu_cluster",
             "cluster_type": "ssh",
-            "host": "tensor01.dartmouth.edu",
-            "username": "f002d6b",
+            "host": require_test_host("ssh"),
+            "username": username,
             "port": 22,
             "credential_name": "clustrix-ssh-gpu",  # Separate GPU credentials
         },

@@ -9,8 +9,13 @@ import tempfile
 import functools
 import socket
 import threading
+import time
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
+from tests.real_world.credential_manager import (
+    HOST_ENV_VARS,
+    configured_test_hosts,
+)
 
 # Create global test manager instance
 test_manager = RealWorldTestManager()
@@ -18,12 +23,16 @@ test_manager = RealWorldTestManager()
 _THIS_DIR = Path(__file__).parent.resolve()
 
 
-#: Whole-detection budget. This only gates which tests run, so it must answer
-#: quickly and wrongly-but-safely rather than slowly and exactly. Off-network
-#: CI runners blackhole the lookups below: on a macOS runner each call took
-#: about seventy seconds, and three calls exhausted the job's fifteen-minute
-#: budget before the suite could finish.
+#: Whole-detection budget, shared across every host probed. This only gates
+#: which tests run, so it must answer quickly and wrongly-but-safely rather
+#: than slowly and exactly. Off-network CI runners blackhole the lookups
+#: below: on a macOS runner each call took about seventy seconds, and three
+#: calls exhausted the job's fifteen-minute budget before the suite could
+#: finish.
 NETWORK_DETECTION_TIMEOUT = 3.0
+
+#: Named in skip reasons so a reader knows what to set to make these run.
+CLUSTER_HOST_ENV_VARS = ", ".join(names[0] for names in HOST_ENV_VARS.values())
 
 
 def _within(seconds, func, *args):
@@ -61,20 +70,32 @@ def _within(seconds, func, *args):
 
 
 @functools.lru_cache(maxsize=1)
-def is_dartmouth_network():
-    """Whether the Dartmouth-only hosts are reachable from here.
+def can_reach_configured_cluster():
+    """Whether the configured private test clusters are reachable from here.
+
+    The hosts come from the CLUSTRIX_TEST_*_HOST environment variables (see
+    `credential_manager`), so this repository names no machine of its own.
+    With none of them set there is nothing to reach and the answer is False,
+    which is also the fast path: no lookup is attempted at all.
 
     Cached: this is consulted repeatedly to decide whether to skip, and the
     answer cannot change usefully within one test run.
     """
-    hostname = _within(NETWORK_DETECTION_TIMEOUT, socket.getfqdn)
-    if hostname and ".dartmouth.edu" in hostname:
-        return True
+    hosts = configured_test_hosts()
+    if not hosts:
+        return False
 
-    resolved = _within(
-        NETWORK_DETECTION_TIMEOUT, socket.gethostbyname, "tensor01.dartmouth.edu"
-    )
-    return bool(resolved)
+    # One budget for the whole detection, not one per host: the lookups
+    # blackhole rather than fail off-network, so N hosts must not cost N
+    # timeouts.
+    deadline = time.monotonic() + NETWORK_DETECTION_TIMEOUT
+    for host in hosts:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        if _within(remaining, socket.gethostbyname, host):
+            return True
+    return False
 
 
 @pytest.fixture(scope="session")
@@ -133,34 +154,38 @@ def ssh_credentials(test_credentials):
 
 
 @pytest.fixture
-def require_dartmouth_network():
+def require_cluster_network():
     """
-    Fixture that skips test if not on Dartmouth network.
+    Fixture that skips the test unless a configured cluster is reachable.
 
     Usage:
-        def test_something(require_dartmouth_network):
-            # Test will be skipped if not on Dartmouth VPN
+        def test_something(require_cluster_network):
+            # Skipped unless CLUSTRIX_TEST_*_HOST names a reachable machine
             pass
     """
-    if not is_dartmouth_network():
-        pytest.skip("Requires Dartmouth network access (VPN or on-campus)")
+    if not can_reach_configured_cluster():
+        pytest.skip(
+            "No reachable private test cluster: set one of "
+            f"{CLUSTER_HOST_ENV_VARS} and connect to its network (VPN or "
+            "on-site)"
+        )
 
 
 @pytest.fixture
-def tensor01_credentials(test_credentials, require_dartmouth_network):
-    """tensor01 credentials (requires Dartmouth network)."""
-    creds = test_credentials.get_tensor01_credentials()
+def gpu_cluster_credentials(test_credentials, require_cluster_network):
+    """SSH-GPU cluster credentials (requires the cluster network)."""
+    creds = test_credentials.get_gpu_cluster_credentials()
     if not creds:
-        pytest.skip("tensor01 credentials not available")
+        pytest.skip("SSH-GPU cluster credentials not available")
     return creds
 
 
 @pytest.fixture
-def ndoli_credentials(test_credentials, require_dartmouth_network):
-    """ndoli credentials (requires Dartmouth network)."""
-    creds = test_credentials.get_ndoli_credentials()
+def slurm_cluster_credentials(test_credentials, require_cluster_network):
+    """SSH-SLURM cluster credentials (requires the cluster network)."""
+    creds = test_credentials.get_slurm_cluster_credentials()
     if not creds:
-        pytest.skip("ndoli credentials not available")
+        pytest.skip("SSH-SLURM cluster credentials not available")
     return creds
 
 
@@ -226,10 +251,6 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "gcp_required: mark test as requiring GCP credentials"
     )
-    config.addinivalue_line(
-        "markers",
-        "dartmouth_network: mark test as requiring Dartmouth network access (VPN or on-campus)",
-    )
 
 
 def pytest_collection_modifyitems(config, items):
@@ -277,17 +298,24 @@ def pytest_collection_modifyitems(config, items):
             if "visual" in item.keywords:
                 item.add_marker(skip_visual)
 
-    # Skip Dartmouth network tests if not on Dartmouth network
-    if not is_dartmouth_network():
-        skip_dartmouth = pytest.mark.skip(
-            reason="Dartmouth network tests skipped (requires VPN or on-campus access)"
+    # Skip private-cluster tests unless a configured cluster is reachable
+    if not can_reach_configured_cluster():
+        skip_cluster_network = pytest.mark.skip(
+            reason=(
+                "No reachable private test cluster: set one of "
+                f"{CLUSTER_HOST_ENV_VARS} and connect to its network "
+                "(VPN or on-site)"
+            )
         )
         for item in items:
-            if "dartmouth_network" in item.keywords:
-                item.add_marker(skip_dartmouth)
-            # Also skip specific tensor01 and ndoli tests by name
-            if any(keyword in item.name.lower() for keyword in ["tensor01", "ndoli"]):
-                item.add_marker(skip_dartmouth)
+            if "cluster_network" in item.keywords:
+                item.add_marker(skip_cluster_network)
+            # Also skip tests named after the GPU / SLURM cluster roles
+            if any(
+                keyword in item.name.lower()
+                for keyword in ["gpu_cluster", "slurm_cluster"]
+            ):
+                item.add_marker(skip_cluster_network)
 
 
 def pytest_addoption(parser):

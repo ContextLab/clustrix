@@ -3,6 +3,8 @@
 Simple test to validate cluster detection without complex packaging.
 """
 
+from tests.real_world.credential_manager import require_test_host
+
 
 def test_simple_cluster_detection():
     """Simple test that just tests the cluster detection logic."""
@@ -11,11 +13,11 @@ def test_simple_cluster_detection():
 
     hostname = socket.gethostname()
 
-    # Simulate config setup
+    # Simulate config setup against the cluster this developer configured.
     class MockConfig:
         def __init__(self):
             self.cluster_type = "slurm"
-            self.cluster_host = "ndoli.dartmouth.edu"
+            self.cluster_host = require_test_host("slurm")
 
     config = MockConfig()
 

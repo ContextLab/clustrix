@@ -10,7 +10,7 @@ this was found, but that count only ever grows if nothing enforces it -- so
 ``-m "not real_world"`` did not exclude them. Those tests make real SSH
 connections and real cloud API calls. ``tests/real_world/conftest.py`` had a
 ``pytest_collection_modifyitems`` hook that added *skip* markers for
-expensive/visual/dartmouth-network tests, but it never applied the
+expensive/visual/private-cluster tests, but it never applied the
 ``real_world`` marker itself, so location under the directory was not
 sufficient to keep a forgetful new test out of the "safe" run.
 
@@ -45,7 +45,7 @@ _PREVIOUSLY_UNMARKED_FILES = (
     "test_credential_access.py",
     "test_filesystem_utilities.py",
     "test_field_mapping_fixes.py",
-    "test_ndoli_environment_setup.py",
+    "test_slurm_cluster_environment_setup.py",
     "test_real_world_credentials.py",
 )
 

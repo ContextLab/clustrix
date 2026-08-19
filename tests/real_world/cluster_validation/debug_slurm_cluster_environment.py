@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Debug environment setup on ndoli cluster step by step
+Debug environment setup on slurm_cluster cluster step by step
 """
 
 import sys
@@ -12,10 +12,12 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
+from tests.real_world.credential_manager import require_test_remote_work_dir
 
-def debug_ndoli_environment():
+
+def debug_slurm_cluster_environment():
     """Debug environment setup step by step."""
-    print("🔍 Debugging Ndoli Environment Setup")
+    print("🔍 Debugging SLURM cluster Environment Setup")
     print("=" * 50)
 
     # Get credentials
@@ -38,7 +40,7 @@ def debug_ndoli_environment():
         ssh.connect(hostname, username=username, password=password)
         print(f"✅ Connected to {hostname}")
 
-        work_dir = f"/dartfs-hpc/rc/home/b/{username}/clustrix_debug_{int(time.time())}"
+        work_dir = f"{require_test_remote_work_dir()}/clustrix_debug_{int(time.time())}"
 
         # Test each step individually
         steps = [
@@ -160,7 +162,7 @@ def debug_ndoli_environment():
 
 
 if __name__ == "__main__":
-    success = debug_ndoli_environment()
+    success = debug_slurm_cluster_environment()
     if success:
         print(
             "\n🎉 Debug completed - environment setup should work with proper configuration"

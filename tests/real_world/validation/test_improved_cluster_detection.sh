@@ -11,6 +11,7 @@ echo "SLURM_JOB_ID: $SLURM_JOB_ID"
 
 # Test improved cluster detection logic
 python3 << 'EOF'
+import os
 import socket
 
 def same_institution_domain(host1, host2):
@@ -19,7 +20,7 @@ def same_institution_domain(host1, host2):
         parts1 = host1.split('.')
         parts2 = host2.split('.')
         
-        # Check if they share institution domain (dartmouth.edu)
+        # Check if they share an institution domain (e.g. example.edu)
         if len(parts1) >= 2 and len(parts2) >= 2:
             institution1 = '.'.join(parts1[-2:])
             institution2 = '.'.join(parts2[-2:])
@@ -41,7 +42,12 @@ def same_institution_domain(host1, host2):
     return False
 
 hostname = socket.gethostname()
-target = "ndoli.dartmouth.edu"
+target = os.environ.get("CLUSTRIX_TEST_SLURM_HOST", "")
+if not target:
+    raise SystemExit(
+        "CLUSTRIX_TEST_SLURM_HOST is not set; nothing to compare the "
+        "hostname against, so this job has nothing to test."
+    )
 
 print(f"Current hostname: {hostname}")
 print(f"Target host: {target}")

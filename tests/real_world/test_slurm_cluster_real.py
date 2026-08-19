@@ -1,7 +1,7 @@
 """
-Real ndoli.dartmouth.edu cluster tests using @cluster decorator.
+Real SLURM cluster tests using @cluster decorator.
 
-These tests execute jobs on the ndoli server with both SSH and SLURM execution,
+These tests execute jobs on the slurm_cluster server with both SSH and SLURM execution,
 validating advanced authentication and job submission workflows.
 """
 
@@ -16,60 +16,60 @@ from clustrix.config import ClusterConfig
 from tests.real_world import TempResourceManager, credentials, test_manager
 
 
-class TestNdoliClusterExecution:
-    """Test real ndoli.dartmouth.edu cluster execution using @cluster decorator."""
+class TestSlurmClusterExecution:
+    """Test real SLURM cluster execution using @cluster decorator."""
 
     @pytest.fixture
-    def ndoli_ssh_config(self):
-        """Get ndoli SSH configuration for testing."""
-        ndoli_creds = credentials.get_ndoli_credentials()
-        if not ndoli_creds:
-            pytest.skip("No ndoli credentials available for testing")
+    def slurm_cluster_ssh_config(self):
+        """Get slurm_cluster SSH configuration for testing."""
+        slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+        if not slurm_cluster_creds:
+            pytest.skip("No slurm_cluster credentials available for testing")
 
-        # Configure clustrix for SSH-based execution on ndoli
+        # Configure clustrix for SSH-based execution on slurm_cluster
         configure(
             cluster_type="ssh",
-            cluster_host=ndoli_creds["host"],
-            username=ndoli_creds["username"],
-            password=ndoli_creds.get("password"),
-            key_file=ndoli_creds.get("private_key_path"),
-            remote_work_dir=f"/tmp/clustrix_ndoli_ssh_{uuid.uuid4().hex[:8]}",
+            cluster_host=slurm_cluster_creds["host"],
+            username=slurm_cluster_creds["username"],
+            password=slurm_cluster_creds.get("password"),
+            key_file=slurm_cluster_creds.get("private_key_path"),
+            remote_work_dir=f"/tmp/clustrix_slurm_cluster_ssh_{uuid.uuid4().hex[:8]}",
             python_executable="python3",
             cleanup_on_success=False,
             job_poll_interval=5,
         )
 
-        return ndoli_creds
+        return slurm_cluster_creds
 
     @pytest.fixture
-    def ndoli_slurm_config(self):
-        """Get ndoli SLURM configuration for testing."""
-        ndoli_creds = credentials.get_ndoli_credentials()
-        if not ndoli_creds:
-            pytest.skip("No ndoli credentials available for testing")
+    def slurm_cluster_slurm_config(self):
+        """Get slurm_cluster SLURM configuration for testing."""
+        slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+        if not slurm_cluster_creds:
+            pytest.skip("No slurm_cluster credentials available for testing")
 
-        # Configure clustrix for SLURM-based execution on ndoli
+        # Configure clustrix for SLURM-based execution on slurm_cluster
         configure(
             cluster_type="slurm",
-            cluster_host=ndoli_creds["host"],
-            username=ndoli_creds["username"],
-            password=ndoli_creds.get("password"),
-            key_file=ndoli_creds.get("private_key_path"),
-            remote_work_dir=f"/tmp/clustrix_ndoli_slurm_{uuid.uuid4().hex[:8]}",
+            cluster_host=slurm_cluster_creds["host"],
+            username=slurm_cluster_creds["username"],
+            password=slurm_cluster_creds.get("password"),
+            key_file=slurm_cluster_creds.get("private_key_path"),
+            remote_work_dir=f"/tmp/clustrix_slurm_cluster_slurm_{uuid.uuid4().hex[:8]}",
             python_executable="python3",
             cleanup_on_success=False,
             job_poll_interval=10,  # SLURM jobs may take longer
         )
 
-        return ndoli_creds
+        return slurm_cluster_creds
 
     @pytest.mark.real_world
-    def test_ndoli_ssh_advanced_auth(self, ndoli_ssh_config):
-        """Test SSH execution on ndoli with advanced authentication."""
+    def test_slurm_cluster_ssh_advanced_auth(self, slurm_cluster_ssh_config):
+        """Test SSH execution on slurm_cluster with advanced authentication."""
 
         @cluster(cores=1, memory="1GB")
-        def test_ndoli_ssh_environment() -> Dict[str, Any]:
-            """Test ndoli SSH environment with advanced authentication."""
+        def test_slurm_cluster_ssh_environment() -> Dict[str, Any]:
+            """Test slurm_cluster SSH environment with advanced authentication."""
             import os
             import platform
             import socket
@@ -142,9 +142,9 @@ class TestNdoliClusterExecution:
                 ),
             }
 
-        result = test_ndoli_ssh_environment()
+        result = test_slurm_cluster_ssh_environment()
 
-        # Validate ndoli SSH execution with advanced authentication
+        # Validate slurm_cluster SSH execution with advanced authentication
         assert isinstance(result, dict)
         assert "system_info" in result
         assert "auth_tests" in result
@@ -156,8 +156,8 @@ class TestNdoliClusterExecution:
         assert result["test_successful"] is True
 
     @pytest.mark.real_world
-    def test_ndoli_slurm_job_submission(self, ndoli_slurm_config):
-        """Test SLURM job submission on ndoli."""
+    def test_slurm_cluster_slurm_job_submission(self, slurm_cluster_slurm_config):
+        """Test SLURM job submission on slurm_cluster."""
 
         @cluster(
             cores=2,
@@ -165,8 +165,8 @@ class TestNdoliClusterExecution:
             time="00:15:00",
             partition="gpu",  # Use GPU partition if available
         )
-        def test_ndoli_slurm_job() -> Dict[str, Any]:
-            """Test SLURM job execution on ndoli."""
+        def test_slurm_cluster_slurm_job() -> Dict[str, Any]:
+            """Test SLURM job execution on slurm_cluster."""
             import os
             import time
             import platform
@@ -234,7 +234,7 @@ class TestNdoliClusterExecution:
                 "slurm_job_detected": slurm_env["job_id"] is not None,
             }
 
-        result = test_ndoli_slurm_job()
+        result = test_slurm_cluster_slurm_job()
 
         # Validate SLURM job execution
         assert isinstance(result, dict)
@@ -248,8 +248,8 @@ class TestNdoliClusterExecution:
         # assert result["slurm_job_detected"] is True
 
     @pytest.mark.real_world
-    def test_ndoli_parallel_slurm_execution(self, ndoli_slurm_config):
-        """Test parallel SLURM execution on ndoli."""
+    def test_slurm_cluster_parallel_slurm_execution(self, slurm_cluster_slurm_config):
+        """Test parallel SLURM execution on slurm_cluster."""
 
         @cluster(
             cores=4,
@@ -309,8 +309,8 @@ class TestNdoliClusterExecution:
         assert len(result["computation_results"]) == 4
 
     @pytest.mark.real_world
-    def test_ndoli_gpu_awareness(self, ndoli_slurm_config):
-        """Test GPU awareness on ndoli cluster."""
+    def test_slurm_cluster_gpu_awareness(self, slurm_cluster_slurm_config):
+        """Test GPU awareness on slurm_cluster cluster."""
 
         @cluster(
             cores=2,

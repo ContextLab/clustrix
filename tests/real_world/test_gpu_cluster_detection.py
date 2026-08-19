@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pytest tests for GPU detection on tensor01.
+Pytest tests for GPU detection on gpu_cluster.
 """
 
 import pytest
@@ -8,15 +8,15 @@ from clustrix import cluster
 from clustrix.config import load_config, configure
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_8_gpu_detection(tensor01_credentials):
-    """Test that tensor01 correctly detects all 8 GPUs."""
+def test_gpu_cluster_8_gpu_detection(gpu_cluster_credentials):
+    """Test that gpu_cluster correctly detects all 8 GPUs."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,  # Disable to avoid complexity issues
@@ -24,7 +24,7 @@ def test_tensor01_8_gpu_detection(tensor01_credentials):
 
     @cluster(cores=1, memory="4GB", auto_gpu_parallel=False)
     def detect_all_gpus():
-        """Detect all available GPUs on tensor01."""
+        """Detect all available GPUs on gpu_cluster."""
         import subprocess
 
         result = subprocess.run(
@@ -84,7 +84,7 @@ else:
     assert gpu_count == 8, f"Expected 8 GPUs, detected {gpu_count}"
 
     # Verify CUDA is available
-    assert "CUDA_AVAILABLE: True" in stdout, "CUDA not available on tensor01"
+    assert "CUDA_AVAILABLE: True" in stdout, "CUDA not available on gpu_cluster"
 
     # Verify we can see individual GPU details
     gpu_lines = [line for line in stdout.split("\n") if line.startswith("GPU_")]
@@ -92,18 +92,18 @@ else:
         len(gpu_lines) >= 8
     ), f"Expected at least 8 GPU detail lines, got {len(gpu_lines)}"
 
-    print(f"✅ Successfully detected {gpu_count} GPUs on tensor01")
+    print(f"✅ Successfully detected {gpu_count} GPUs on gpu_cluster")
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_gpu_accessibility(tensor01_credentials):
+def test_gpu_cluster_gpu_accessibility(gpu_cluster_credentials):
     """Test that we can actually access and use the GPUs."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,

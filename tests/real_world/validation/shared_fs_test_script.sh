@@ -9,13 +9,13 @@ echo "Starting shared filesystem test on $(hostname)"
 echo "SLURM_JOB_ID: $SLURM_JOB_ID"
 
 # Set working directory for results
-export CLUSTRIX_ORIGINAL_CWD=/dartfs-hpc/rc/home/b/f002d6b/clustrix
+export CLUSTRIX_ORIGINAL_CWD=${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix
 
 # Extract and run
 cd /tmp
 mkdir clustrix_test_$$
 cd clustrix_test_$$
-unzip -q /dartfs-hpc/rc/home/b/f002d6b/clustrix/shared_fs_test_1594df9e2880ce58.zip
+unzip -q ${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix/shared_fs_test_1594df9e2880ce58.zip
 python3 execute.py
 
 echo "Test completed"

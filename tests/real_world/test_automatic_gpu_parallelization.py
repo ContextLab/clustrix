@@ -25,14 +25,14 @@ class TestAutomaticGPUParallelization:
 
     def test_auto_gpu_parallel_detection(self):
         """Test that GPU parallelization is automatically detected and enabled."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,  # Enable automatic GPU parallelization
@@ -80,14 +80,14 @@ else:
 
     def test_auto_gpu_parallel_disabled(self):
         """Test that GPU parallelization can be disabled."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=False,  # Disable automatic GPU parallelization
@@ -119,14 +119,14 @@ class TestGPUParallelizationCorrectness:
 
     def test_parallel_matrix_multiplication_correctness(self):
         """Test that parallel matrix multiplication produces correct results."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -227,14 +227,14 @@ print(f'RESULTS:{json.dumps(results)}')
 
     def test_parallel_computation_determinism(self):
         """Test that parallel computation can be made deterministic when needed."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -325,14 +325,14 @@ class TestGPUParallelizationPerformance:
 
     def test_multi_gpu_performance_scaling(self):
         """Test that multi-GPU computation shows performance scaling."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -470,14 +470,14 @@ class TestGPUParallelizationEdgeCases:
 
     def test_insufficient_gpu_memory_handling(self):
         """Test handling of insufficient GPU memory scenarios."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -546,14 +546,14 @@ else:
 
     def test_mixed_gpu_types_handling(self):
         """Test handling of mixed GPU types (if available)."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -645,15 +645,15 @@ class TestGPUParallelizationFallbacks:
 
     def test_single_gpu_fallback(self):
         """Test fallback to single GPU when only one GPU is available."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         # Force single GPU environment
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,
@@ -716,15 +716,15 @@ else:
 
     def test_no_gpu_fallback(self):
         """Test fallback to CPU when no GPUs are available."""
-        load_config("tensor01_config.yml")
+        load_config("gpu_cluster_config.yml")
 
-        tensor01_creds = credentials.get_tensor01_credentials()
-        if not tensor01_creds:
-            pytest.skip("No tensor01 credentials available")
+        gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+        if not gpu_cluster_creds:
+            pytest.skip("No gpu_cluster credentials available")
 
         # Force CPU-only environment
         configure(
-            password=tensor01_creds.get("password"),
+            password=gpu_cluster_creds.get("password"),
             cleanup_on_success=False,
             job_poll_interval=5,
             auto_gpu_parallel=True,

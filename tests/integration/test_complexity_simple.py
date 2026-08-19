@@ -10,15 +10,15 @@ from tests.real_world import credentials
 
 def test_level1_simple():
     """Test level 1 complexity - should work."""
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         environment_variables={"CUDA_VISIBLE_DEVICES": "0"},
@@ -55,15 +55,15 @@ def test_level1_simple():
 
 def test_level3_complex():
     """Test level 3 complexity - should fail."""
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
         print("No credentials available")
         return False
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         environment_variables={"CUDA_VISIBLE_DEVICES": "0"},

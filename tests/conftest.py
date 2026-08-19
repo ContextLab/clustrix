@@ -105,6 +105,16 @@ def pytest_configure(config):
     where they do. In short: read the *effective* target list, and resolve
     relative paths against every plausible base.
     """
+    # Registered here rather than in pyproject.toml because the suite that
+    # uses it (tests/real_world) is routinely excluded from a run, and
+    # --strict-markers needs the name declared in *every* run for
+    # tests/unit/test_pytest_config.py to see it.
+    config.addinivalue_line(
+        "markers",
+        "cluster_network: mark test as requiring network access to a private "
+        "test cluster named by CLUSTRIX_TEST_*_HOST",
+    )
+
     if _billable_tests_enabled():
         return
     for candidate in _iter_candidate_targets(config):

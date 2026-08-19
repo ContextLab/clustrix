@@ -1,14 +1,14 @@
 """
-Test tensor01 GPU and CUDA functionality using ClustriX.
+Test gpu_cluster GPU and CUDA functionality using ClustriX.
 
 This test validates that ClustriX can:
-1. Detect CUDA and GPUs properly on tensor01
+1. Detect CUDA and GPUs properly on gpu_cluster
 2. Execute GPU computations using a single GPU
 3. Execute GPU computations using multiple GPUs
 4. Handle GPU memory management and allocation
 5. Verify CUDA environment and dependencies
 
-tensor01 has 8 GPUs total - we'll test with 1 GPU and 2 GPUs.
+gpu_cluster has 8 GPUs total - we'll test with 1 GPU and 2 GPUs.
 """
 
 import pytest
@@ -18,23 +18,23 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_tensor01_cuda_detection():
-    """Test comprehensive CUDA detection on tensor01."""
+def test_gpu_cluster_cuda_detection():
+    """Test comprehensive CUDA detection on gpu_cluster."""
 
-    # Load the tensor01 configuration file
-    load_config("tensor01_config.yml")
+    # Load the gpu_cluster configuration file
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials using the existing credential manager
-    tensor01_creds = credentials.get_tensor01_credentials()
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
 
-    if not tensor01_creds:
+    if not gpu_cluster_creds:
         pytest.skip(
-            "No tensor01 credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Override configuration with actual credentials
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,  # Keep files for verification
         job_poll_interval=10,
     )
@@ -258,7 +258,7 @@ def test_tensor01_cuda_detection():
         }
 
     # Execute the CUDA detection
-    print("Running comprehensive CUDA detection on tensor01...")
+    print("Running comprehensive CUDA detection on gpu_cluster...")
     result = detect_cuda_environment()
 
     # Validate CUDA detection results
@@ -267,16 +267,18 @@ def test_tensor01_cuda_detection():
 
     cuda_info = result["cuda_info"]
 
-    # tensor01 should have GPUs available
+    # gpu_cluster should have GPUs available
     assert (
         cuda_info["nvidia_smi_available"] is True
-    ), "nvidia-smi should be available on tensor01"
+    ), "nvidia-smi should be available on gpu_cluster"
     assert (
         cuda_info["gpu_count"] > 0
-    ), f"tensor01 should have GPUs, found {cuda_info['gpu_count']}"
-    assert cuda_info["cuda_available"] is True, "CUDA should be available on tensor01"
+    ), f"gpu_cluster should have GPUs, found {cuda_info['gpu_count']}"
+    assert (
+        cuda_info["cuda_available"] is True
+    ), "CUDA should be available on gpu_cluster"
 
-    print("SUCCESS: CUDA detection completed on tensor01!")
+    print("SUCCESS: CUDA detection completed on gpu_cluster!")
     print(f"✓ GPUs detected: {cuda_info['gpu_count']}")
     print(f"✓ Driver version: {cuda_info.get('driver_version', 'Unknown')}")
     print(f"✓ CUDA version: {cuda_info.get('cuda_version', 'Unknown')}")
@@ -299,23 +301,23 @@ def test_tensor01_cuda_detection():
 
 
 @pytest.mark.real_world
-def test_tensor01_single_gpu_computation():
-    """Test GPU computation using a single GPU on tensor01."""
+def test_gpu_cluster_single_gpu_computation():
+    """Test GPU computation using a single GPU on gpu_cluster."""
 
-    # Load the tensor01 configuration file
-    load_config("tensor01_config.yml")
+    # Load the gpu_cluster configuration file
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials
-    tensor01_creds = credentials.get_tensor01_credentials()
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
 
-    if not tensor01_creds:
+    if not gpu_cluster_creds:
         pytest.skip(
-            "No tensor01 credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Configure for single GPU usage
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=10,
     )
@@ -460,7 +462,7 @@ def test_tensor01_single_gpu_computation():
         return computation_results
 
     # Execute single GPU computation
-    print("Running single GPU computation on tensor01...")
+    print("Running single GPU computation on gpu_cluster...")
     result = single_gpu_computation(1000)
 
     # Validate results
@@ -492,23 +494,23 @@ def test_tensor01_single_gpu_computation():
 
 
 @pytest.mark.real_world
-def test_tensor01_dual_gpu_computation():
-    """Test GPU computation using 2 GPUs on tensor01."""
+def test_gpu_cluster_dual_gpu_computation():
+    """Test GPU computation using 2 GPUs on gpu_cluster."""
 
-    # Load the tensor01 configuration file
-    load_config("tensor01_config.yml")
+    # Load the gpu_cluster configuration file
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials
-    tensor01_creds = credentials.get_tensor01_credentials()
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
 
-    if not tensor01_creds:
+    if not gpu_cluster_creds:
         pytest.skip(
-            "No tensor01 credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Configure for dual GPU usage
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=10,
     )
@@ -660,7 +662,7 @@ def test_tensor01_dual_gpu_computation():
         return computation_results
 
     # Execute dual GPU computation
-    print("Running dual GPU computation on tensor01...")
+    print("Running dual GPU computation on gpu_cluster...")
     result = dual_gpu_computation(1500)
 
     # Validate results
@@ -691,6 +693,6 @@ def test_tensor01_dual_gpu_computation():
         print(
             f"⚠ Dual GPU computation failed: {result.get('torch_error', 'Unknown error')}"
         )
-        # This might not be a test failure if tensor01 doesn't have 2+ GPUs available
+        # This might not be a test failure if gpu_cluster doesn't have 2+ GPUs available
 
     return result

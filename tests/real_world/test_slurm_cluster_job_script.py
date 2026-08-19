@@ -1,5 +1,5 @@
 """
-Test SLURM job script generation for ndoli.
+Test SLURM job script generation for slurm_cluster.
 """
 
 import pytest
@@ -11,18 +11,18 @@ from clustrix.config import ClusterConfig
 
 
 @pytest.mark.real_world
-def test_generate_slurm_script_for_ndoli():
-    """Test generating SLURM job script for ndoli."""
-    ndoli_creds = credentials.get_ndoli_credentials()
-    if not ndoli_creds:
-        pytest.skip("No ndoli credentials available")
+def test_generate_slurm_script_for_slurm_cluster():
+    """Test generating SLURM job script for slurm_cluster."""
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+    if not slurm_cluster_creds:
+        pytest.skip("No slurm_cluster credentials available")
 
     # Create a test configuration
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host=ndoli_creds["host"],
-        username=ndoli_creds["username"],
-        password=ndoli_creds.get("password"),
+        cluster_host=slurm_cluster_creds["host"],
+        username=slurm_cluster_creds["username"],
+        password=slurm_cluster_creds.get("password"),
         remote_work_dir="/tmp/clustrix_slurm_test",
         python_executable="python3",
         cleanup_on_success=True,
@@ -63,9 +63,9 @@ def test_generate_slurm_script_for_ndoli():
     ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
     ssh_client.connect(
-        hostname=ndoli_creds["host"],
-        username=ndoli_creds["username"],
-        password=ndoli_creds.get("password"),
+        hostname=slurm_cluster_creds["host"],
+        username=slurm_cluster_creds["username"],
+        password=slurm_cluster_creds.get("password"),
         port=22,
     )
 

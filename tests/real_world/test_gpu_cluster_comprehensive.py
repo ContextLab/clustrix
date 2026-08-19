@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive pytest tests for GPU detection and automatic parallelization on tensor01.
+Comprehensive pytest tests for GPU detection and automatic parallelization on gpu_cluster.
 """
 
 import pytest
@@ -9,15 +9,15 @@ from clustrix import cluster
 from clustrix.config import load_config, configure
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_8_gpu_detection_simple(tensor01_credentials):
-    """Test that tensor01 correctly detects all 8 GPUs using simple pattern."""
+def test_gpu_cluster_8_gpu_detection_simple(gpu_cluster_credentials):
+    """Test that gpu_cluster correctly detects all 8 GPUs using simple pattern."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,  # Disable to avoid complexity issues
@@ -61,20 +61,20 @@ def test_tensor01_8_gpu_detection_simple(tensor01_credentials):
     assert gpu_count == 8, f"Expected 8 GPUs, detected {gpu_count}"
 
     # Verify CUDA is available
-    assert "CUDA_AVAILABLE:True" in stdout, "CUDA not available on tensor01"
+    assert "CUDA_AVAILABLE:True" in stdout, "CUDA not available on gpu_cluster"
 
-    print(f"✅ Successfully detected {gpu_count} GPUs on tensor01")
+    print(f"✅ Successfully detected {gpu_count} GPUs on gpu_cluster")
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_gpu_multi_access(tensor01_credentials):
+def test_gpu_cluster_gpu_multi_access(gpu_cluster_credentials):
     """Test that we can access multiple GPUs simultaneously."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,
@@ -154,15 +154,15 @@ else:
     print(f"✅ Successfully accessed {len(gpu_traces)} GPUs with valid computations")
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_auto_gpu_parallelization_simple(tensor01_credentials):
+def test_gpu_cluster_auto_gpu_parallelization_simple(gpu_cluster_credentials):
     """Test automatic GPU parallelization with simple function."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,  # Enable automatic GPU parallelization
@@ -236,15 +236,15 @@ def test_tensor01_auto_gpu_parallelization_simple(tensor01_credentials):
     print(f"✅ GPU computations produced {len(unique_traces)} unique trace values")
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_complex_function_execution(tensor01_credentials):
-    """A large, deeply nested function must execute correctly on tensor01."""
+def test_gpu_cluster_complex_function_execution(gpu_cluster_credentials):
+    """A large, deeply nested function must execute correctly on gpu_cluster."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,  # Exercise plain execution, no GPU parallelization
@@ -335,15 +335,15 @@ def test_tensor01_complex_function_execution(tensor01_credentials):
     )
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_gpu_parallel_with_verification(tensor01_credentials):
+def test_gpu_cluster_gpu_parallel_with_verification(gpu_cluster_credentials):
     """Test GPU parallelization with computation verification."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,

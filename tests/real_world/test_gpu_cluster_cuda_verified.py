@@ -1,7 +1,7 @@
 """
-Verified CUDA functionality tests for tensor01.
+Verified CUDA functionality tests for gpu_cluster.
 
-These tests demonstrate the working PyTorch CUDA integration on tensor01
+These tests demonstrate the working PyTorch CUDA integration on gpu_cluster
 using the conda-based two-venv system.
 """
 
@@ -12,19 +12,19 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_tensor01_gpu_detection_verified():
-    """Test verified GPU detection on tensor01."""
+def test_gpu_cluster_gpu_detection_verified():
+    """Test verified GPU detection on gpu_cluster."""
 
     # Load configuration
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
-        pytest.skip("No tensor01 credentials available")
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
+        pytest.skip("No gpu_cluster credentials available")
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
     )
@@ -86,19 +86,19 @@ def test_tensor01_gpu_detection_verified():
 
 
 @pytest.mark.real_world
-def test_tensor01_pytorch_cuda_verified():
-    """Test verified PyTorch CUDA functionality on tensor01."""
+def test_gpu_cluster_pytorch_cuda_verified():
+    """Test verified PyTorch CUDA functionality on gpu_cluster."""
 
     # Load configuration
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
-        pytest.skip("No tensor01 credentials available")
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
+        pytest.skip("No gpu_cluster credentials available")
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
     )
@@ -169,19 +169,19 @@ def test_tensor01_pytorch_cuda_verified():
 
 
 @pytest.mark.real_world
-def test_tensor01_simple_gpu_computation_verified():
-    """Test verified simple GPU computation on tensor01."""
+def test_gpu_cluster_simple_gpu_computation_verified():
+    """Test verified simple GPU computation on gpu_cluster."""
 
     # Load configuration
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials
-    tensor01_creds = credentials.get_tensor01_credentials()
-    if not tensor01_creds:
-        pytest.skip("No tensor01 credentials available")
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
+    if not gpu_cluster_creds:
+        pytest.skip("No gpu_cluster credentials available")
 
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
     )

@@ -1,8 +1,8 @@
 """
-Test core ClustriX functionality on tensor01 using proper configuration file.
+Test core ClustriX functionality on gpu_cluster using proper configuration file.
 
 This test validates that the ClustriX toolbox can:
-1. Load configuration from tensor01_config.yml
+1. Load configuration from gpu_cluster_config.yml
 2. Authenticate using 1Password or environment variables
 3. Submit SSH jobs with module loads
 4. Execute functions on remote cluster
@@ -18,35 +18,35 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_tensor01_core_functionality():
-    """Test that core ClustriX functionality works on tensor01."""
+def test_gpu_cluster_core_functionality():
+    """Test that core ClustriX functionality works on gpu_cluster."""
 
-    # Load the tensor01 configuration file
-    load_config("tensor01_config.yml")
+    # Load the gpu_cluster configuration file
+    load_config("gpu_cluster_config.yml")
 
     # Get credentials using the existing credential manager
     # This tests the same authentication path used by the toolbox
-    tensor01_creds = credentials.get_tensor01_credentials()
+    gpu_cluster_creds = credentials.get_gpu_cluster_credentials()
 
-    if not tensor01_creds:
+    if not gpu_cluster_creds:
         pytest.skip(
-            "No tensor01 credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
         )
 
     # Override configuration with actual credentials
     # This mimics how the toolbox should handle authentication
     configure(
-        password=tensor01_creds.get("password"),
+        password=gpu_cluster_creds.get("password"),
         cleanup_on_success=False,  # Keep files for verification
         job_poll_interval=10,  # Poll every 10 seconds for SSH
     )
 
     @cluster(cores=2, memory="4GB")
-    def test_tensor01_computation(n: int) -> dict:
+    def test_gpu_cluster_computation(n: int) -> dict:
         """
-        Test function that validates tensor01 environment and computation.
+        Test function that validates gpu_cluster environment and computation.
 
-        This function will be serialized, transferred to tensor01, executed via SSH,
+        This function will be serialized, transferred to gpu_cluster, executed via SSH,
         and results transferred back.
         """
         import os
@@ -85,7 +85,7 @@ def test_tensor01_core_functionality():
         except Exception:
             hostname = "subprocess_failed"
 
-        # Test GPU detection (tensor01 should have GPUs)
+        # Test GPU detection (gpu_cluster should have GPUs)
         try:
             nvidia_result = subprocess.run(
                 ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
@@ -128,8 +128,8 @@ def test_tensor01_core_functionality():
 
     # Execute the function using ClustriX core functionality
     # This tests the complete end-to-end workflow
-    print("Submitting job to tensor01 using ClustriX core functionality...")
-    result = test_tensor01_computation(12)
+    print("Submitting job to gpu_cluster using ClustriX core functionality...")
+    result = test_gpu_cluster_computation(12)
 
     # Validate that the job executed successfully
     assert isinstance(result, dict), f"Expected dict result, got {type(result)}"
@@ -152,12 +152,12 @@ def test_tensor01_core_functionality():
         "3." in result["python_info"]["version"]
     ), f"Python not properly loaded: {result['python_info']['version']}"
 
-    # Check if we're on tensor01 (should contain "tensor" in hostname, but subprocess might fail)
+    # Check if we're on gpu_cluster (should contain "tensor" in hostname, but subprocess might fail)
     if result["hostname"] != "subprocess_failed":
         print(f"Detected hostname: {result['hostname']}")
         # Note: hostname check disabled because subprocess might fail in restricted SSH environments
 
-    print("SUCCESS: ClustriX core functionality works on tensor01!")
+    print("SUCCESS: ClustriX core functionality works on gpu_cluster!")
     print(f"✓ Hostname: {result['hostname']}")
     print(f"✓ Python: {result['python_info']['version']}")
     print(f"✓ Computation result: {result['computation_result']}")

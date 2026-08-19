@@ -2,8 +2,9 @@
 """
 SSH cluster packaging test script.
 
-This script tests the packaging system on the SSH cluster (tensor01.dartmouth.edu)
-by creating packages, uploading them, and executing them directly via SSH.
+This script tests the packaging system on the SSH cluster named by
+CLUSTRIX_TEST_SSH_HOST by creating packages, uploading them, and executing
+them directly via SSH.
 """
 
 import os
@@ -18,6 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_remote_work_dir,
+    require_test_username,
+)
 import paramiko
 
 
@@ -27,9 +33,9 @@ class SSHPackagingValidator:
     def __init__(self):
         self.ssh_config = ClusterConfig(
             cluster_type="ssh",
-            cluster_host="tensor01.dartmouth.edu",
-            username="f002d6b",
-            remote_work_dir="/home/f002d6b/clustrix_test",
+            cluster_host=require_test_host("ssh"),
+            username=require_test_username(),
+            remote_work_dir=f"{require_test_remote_work_dir()}/clustrix_test",
         )
 
         self.ssh_client = None

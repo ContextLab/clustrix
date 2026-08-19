@@ -16,16 +16,16 @@ def test_actual_gpu_computation():
     print("🧪 Testing actual GPU computation with mathematical verification...")
 
     # Load config and credentials
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
     creds = TestCredentials()
-    tensor01_creds = creds.get_tensor01_credentials()
+    gpu_cluster_creds = creds.get_gpu_cluster_credentials()
 
     # Configure for reliable two-venv setup (no fallback)
     configure(
         cluster_type="ssh",
-        cluster_host=tensor01_creds["host"],
-        username=tensor01_creds["username"],
-        password=tensor01_creds["password"],
+        cluster_host=gpu_cluster_creds["host"],
+        username=gpu_cluster_creds["username"],
+        password=gpu_cluster_creds["password"],
         cleanup_on_success=False,  # Keep files for debugging if needed
         use_two_venv=True,  # Must use two-venv (no fallback for bread-and-butter)
         venv_setup_timeout=600,  # 10 minutes - generous timeout but should not fallback
@@ -180,16 +180,16 @@ def test_gpu_parallel_computation():
     print("\n🧪 Testing automatic GPU parallelization with real computation...")
 
     # Load config and credentials
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
     creds = TestCredentials()
-    tensor01_creds = creds.get_tensor01_credentials()
+    gpu_cluster_creds = creds.get_gpu_cluster_credentials()
 
     # Configure for GPU parallelization
     configure(
         cluster_type="ssh",
-        cluster_host=tensor01_creds["host"],
-        username=tensor01_creds["username"],
-        password=tensor01_creds["password"],
+        cluster_host=gpu_cluster_creds["host"],
+        username=gpu_cluster_creds["username"],
+        password=gpu_cluster_creds["password"],
         cleanup_on_success=False,
         use_two_venv=True,
         venv_setup_timeout=600,

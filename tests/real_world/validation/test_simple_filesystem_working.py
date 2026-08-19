@@ -3,6 +3,8 @@
 Simple test to validate paramiko installation and basic cluster detection.
 """
 
+from tests.real_world.credential_manager import require_test_host
+
 
 def test_simple_filesystem_working():
     """Simple test that validates the fix without complex imports."""
@@ -15,7 +17,7 @@ def test_simple_filesystem_working():
     slurm_job_id = os.environ.get("SLURM_JOB_ID", "not_set")
 
     # Test 1: Cluster detection logic (simplified)
-    target_host = "ndoli.dartmouth.edu"
+    target_host = require_test_host("slurm")
 
     # Simple institution domain check
     hostname_parts = hostname.split(".")

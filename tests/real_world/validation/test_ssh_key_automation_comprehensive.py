@@ -2,8 +2,9 @@
 """
 Comprehensive SSH Key Automation Validation Script for Issue 57
 
-Tests SSH key automation on real clusters (ndoli.dartmouth.edu and tensor01.dartmouth.edu)
-to validate the SSH key setup functionality works end-to-end.
+Tests SSH key automation on the real clusters named by
+CLUSTRIX_TEST_SLURM_HOST and CLUSTRIX_TEST_SSH_HOST to validate the SSH key
+setup functionality works end-to-end.
 
 Usage:
     python test_ssh_key_automation_comprehensive.py [--cluster CLUSTER] [--clean-keys]
@@ -18,6 +19,13 @@ import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+from tests.real_world.credential_manager import (
+    HOST_ENV_VARS,
+    get_test_host,
+    get_test_username,
+    require_test_remote_work_dir,
+)
 
 
 def run_command(
@@ -160,8 +168,8 @@ def test_clustrix_ssh_automation(hostname: str, username: str) -> Dict:
             cluster_host=hostname,
             username=username,
             remote_work_dir=(
-                f"/dartfs-hpc/rc/home/b/{username}"
-                if "ndoli" in hostname
+                require_test_remote_work_dir()
+                if "slurm_cluster" in hostname
                 else f"/home/{username}"
             ),
         )
@@ -320,7 +328,7 @@ def main():
     parser = argparse.ArgumentParser(description="Test SSH key automation for Issue 57")
     parser.add_argument(
         "--cluster",
-        choices=["ndoli", "tensor01", "both"],
+        choices=["slurm", "ssh", "both"],
         default="both",
         help="Which cluster to test",
     )
@@ -330,18 +338,31 @@ def main():
         help="Backup and remove existing SSH keys before testing",
     )
     parser.add_argument(
-        "--username", default="f002d6b", help="Username for cluster access"
+        "--username",
+        default=get_test_username(),
+        help="Username for cluster access (default: $CLUSTRIX_TEST_USERNAME)",
     )
 
     args = parser.parse_args()
 
-    # Define cluster configurations
-    clusters = {"ndoli": "ndoli.dartmouth.edu", "tensor01": "tensor01.dartmouth.edu"}
+    # Cluster hostnames come from the environment; see credential_manager.
+    clusters = {"slurm": get_test_host("slurm"), "ssh": get_test_host("ssh")}
 
     if args.cluster == "both":
-        test_clusters = ["ndoli", "tensor01"]
+        test_clusters = ["slurm", "ssh"]
     else:
         test_clusters = [args.cluster]
+
+    unconfigured = [name for name in test_clusters if not clusters[name]]
+    if unconfigured:
+        raise SystemExit(
+            "No host configured for: "
+            + ", ".join(unconfigured)
+            + ". Set "
+            + ", ".join(HOST_ENV_VARS[name][0] for name in unconfigured)
+        )
+    if not args.username:
+        raise SystemExit("No username configured. Set CLUSTRIX_TEST_USERNAME.")
 
     all_results = {}
 

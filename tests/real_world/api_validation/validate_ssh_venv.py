@@ -307,8 +307,8 @@ def main():
 
     # Test both clusters
     clusters = [
-        ("clustrix-ssh-slurm", "SLURM Cluster (ndoli)"),
-        ("clustrix-ssh-gpu", "GPU Server (tensor01)"),
+        ("clustrix-ssh-slurm", "SLURM Cluster (slurm_cluster)"),
+        ("clustrix-ssh-gpu", "GPU Server (gpu_cluster)"),
     ]
 
     results = {}

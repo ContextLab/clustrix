@@ -9,8 +9,8 @@ echo "Accessible test on $(hostname)"
 echo "Working in accessible directory: $(pwd)"
 
 # Work in the accessible directory
-cd /dartfs-hpc/rc/home/b/f002d6b/clustrix
-export CLUSTRIX_ORIGINAL_CWD=/dartfs-hpc/rc/home/b/f002d6b/clustrix
+cd ${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix
+export CLUSTRIX_ORIGINAL_CWD=${CLUSTRIX_TEST_SLURM_REMOTE_DIR:?set CLUSTRIX_TEST_SLURM_REMOTE_DIR to a writable path on the cluster}/clustrix
 
 # Create subdirectory for this job
 mkdir -p job_$SLURM_JOB_ID

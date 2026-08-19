@@ -24,6 +24,8 @@ from clustrix import (
 from clustrix.config import ClusterConfig
 from clustrix.secure_credentials import ValidationCredentials
 
+from tests.real_world.credential_manager import require_test_remote_work_dir
+
 
 def test_local_filesystem():
     """Test filesystem operations locally."""
@@ -162,7 +164,7 @@ def test_remote_filesystem():
         cluster_host=ssh_creds.get("hostname"),
         username=ssh_creds.get("username"),
         password=ssh_creds.get("password"),
-        remote_work_dir=f"/dartfs-hpc/rc/home/b/{ssh_creds.get('username')}/clustrix_test",
+        remote_work_dir=f"{require_test_remote_work_dir()}/clustrix_test",
     )
 
     print(f"🔗 Remote host: {config.cluster_host}")
@@ -241,7 +243,7 @@ def test_consistency():
             cluster_host=ssh_creds.get("hostname"),
             username=ssh_creds.get("username"),
             password=ssh_creds.get("password"),
-            remote_work_dir=f"/dartfs-hpc/rc/home/b/{ssh_creds.get('username')}",
+            remote_work_dir=require_test_remote_work_dir(),
         )
 
         print("\n🌐 Remote analysis:")

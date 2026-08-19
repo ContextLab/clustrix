@@ -297,7 +297,7 @@ class TestSharedFilesystemIntegration:
         # Test with cluster config that should trigger auto-detection
         cluster_config = ClusterConfig(
             cluster_type="slurm",
-            cluster_host="ndoli.dartmouth.edu",
+            cluster_host="hpc2.example.edu",
             username="testuser",
         )
 
@@ -321,7 +321,7 @@ class TestSharedFilesystemIntegration:
         """Test packaging with mocked cluster detection."""
 
         # Mock hostname to simulate being on cluster
-        mock_hostname.return_value = "s17.hpcc.dartmouth.edu"
+        mock_hostname.return_value = "s17.hpc2.example.edu"
 
         def cluster_aware_function():
             """Function that benefits from cluster detection."""
@@ -333,7 +333,7 @@ class TestSharedFilesystemIntegration:
 
             return {"total_files": file_count, "listed_files": len(files)}
 
-        config = ClusterConfig(cluster_type="slurm", cluster_host="ndoli.dartmouth.edu")
+        config = ClusterConfig(cluster_type="slurm", cluster_host="hpc2.example.edu")
 
         package_info = package_function_for_execution(
             func=cluster_aware_function,

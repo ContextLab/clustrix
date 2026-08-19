@@ -14,6 +14,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
 from clustrix.secure_credentials import ValidationCredentials
+from tests.real_world.credential_manager import (
+    require_test_host,
+    require_test_remote_work_dir,
+    require_test_username,
+)
 import tempfile
 import zipfile
 import json
@@ -94,7 +99,7 @@ def slurm_test_function(config):
 
     # Test 4: Try to access shared directories (if available)
     shared_dirs_test = {}
-    test_paths = ["/dartfs-hpc/rc/home/b/f002d6b/", "/dartfs-hpc/rc/lab/", "/tmp"]
+    test_paths = [os.environ.get("CLUSTRIX_TEST_SLURM_REMOTE_DIR", "/tmp"), "/tmp"]
 
     for test_path in test_paths:
         try:
@@ -163,10 +168,10 @@ def main():
     # Create cluster config
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host=ssh_creds.get("hostname", "ndoli.dartmouth.edu"),
-        username=ssh_creds.get("username", "f002d6b"),
+        cluster_host=ssh_creds.get("hostname") or require_test_host("slurm"),
+        username=ssh_creds.get("username") or require_test_username(),
         password=ssh_creds.get("password"),
-        remote_work_dir="/dartfs-hpc/rc/home/b/f002d6b/clustrix/shared_fs_tests",
+        remote_work_dir=(f"{require_test_remote_work_dir()}/clustrix/shared_fs_tests"),
     )
 
     print(f"📋 Cluster: {config.cluster_host}")

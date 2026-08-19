@@ -1,5 +1,5 @@
 """
-Test ndoli SLURM execution with proper module loads configuration.
+Test slurm_cluster SLURM execution with proper module loads configuration.
 """
 
 import pytest
@@ -10,21 +10,21 @@ from tests.real_world import credentials
 
 
 @pytest.mark.real_world
-def test_ndoli_slurm_with_module_loads():
-    """Test SLURM job execution on ndoli with proper module loads."""
-    ndoli_creds = credentials.get_ndoli_credentials()
-    if not ndoli_creds:
-        pytest.skip("No ndoli credentials available")
+def test_slurm_cluster_slurm_with_module_loads():
+    """Test SLURM job execution on slurm_cluster with proper module loads."""
+    slurm_cluster_creds = credentials.get_slurm_cluster_credentials()
+    if not slurm_cluster_creds:
+        pytest.skip("No slurm_cluster credentials available")
 
-    # Load the existing ndoli configuration that has module_loads
-    load_config("ndoli_config.yml")
+    # Load the existing slurm_cluster configuration that has module_loads
+    load_config("slurm_cluster_config.yml")
 
     # Override with credentials and some test-specific settings
     configure(
-        username=ndoli_creds["username"],
-        password=ndoli_creds.get("password"),
-        key_file=ndoli_creds.get("private_key_path"),
-        remote_work_dir=f"/tmp/clustrix_ndoli_slurm_modules_{uuid.uuid4().hex[:8]}",
+        username=slurm_cluster_creds["username"],
+        password=slurm_cluster_creds.get("password"),
+        key_file=slurm_cluster_creds.get("private_key_path"),
+        remote_work_dir=f"/tmp/clustrix_slurm_cluster_slurm_modules_{uuid.uuid4().hex[:8]}",
         cleanup_on_success=False,
         job_poll_interval=10,
         environment_variables={"PYTHONUNBUFFERED": "1", "CLUSTRIX_DEBUG": "1"},

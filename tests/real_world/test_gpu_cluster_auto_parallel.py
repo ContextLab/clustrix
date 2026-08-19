@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Pytest tests for automatic GPU parallelization on tensor01.
+Pytest tests for automatic GPU parallelization on gpu_cluster.
 """
 
 import pytest
@@ -9,15 +9,15 @@ from clustrix import cluster
 from clustrix.config import load_config, configure
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_auto_gpu_parallelization(tensor01_credentials):
-    """Test that automatic GPU parallelization works correctly on tensor01."""
+def test_gpu_cluster_auto_gpu_parallelization(gpu_cluster_credentials):
+    """Test that automatic GPU parallelization works correctly on gpu_cluster."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,  # Enable automatic GPU parallelization
@@ -112,15 +112,15 @@ def test_tensor01_auto_gpu_parallelization(tensor01_credentials):
     print("✅ Trace values are reasonable (not NaN/inf, mostly non-zero)")
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_gpu_parallel_verification(tensor01_credentials):
+def test_gpu_cluster_gpu_parallel_verification(gpu_cluster_credentials):
     """Test that verifies GPU parallelization by comparing with sequential execution."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=False,  # Start with parallelization disabled
@@ -205,15 +205,15 @@ def test_tensor01_gpu_parallel_verification(tensor01_credentials):
     )
 
 
-@pytest.mark.dartmouth_network
+@pytest.mark.cluster_network
 @pytest.mark.real_world
-def test_tensor01_gpu_environment_check(tensor01_credentials):
+def test_gpu_cluster_gpu_environment_check(gpu_cluster_credentials):
     """Test that verifies the GPU parallelization environment is correctly set up."""
 
-    load_config("tensor01_config.yml")
+    load_config("gpu_cluster_config.yml")
 
     configure(
-        password=tensor01_credentials.get("password"),
+        password=gpu_cluster_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
         auto_gpu_parallel=True,

@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
+from tests.real_world.credential_manager import require_test_remote_work_dir
+
 
 def test_basic_slurm_submission():
     """Test basic SLURM submission without Clustrix abstractions."""
@@ -39,7 +41,7 @@ def test_basic_slurm_submission():
         print(f"✅ Connected to {hostname}")
 
         # Create test directory
-        test_dir = f"/dartfs-hpc/rc/home/b/{username}/clustrix_test_{int(time.time())}"
+        test_dir = f"{require_test_remote_work_dir()}/clustrix_test_{int(time.time())}"
         stdin, stdout, stderr = ssh.exec_command(f"mkdir -p {test_dir}")
 
         # Create simple SLURM script

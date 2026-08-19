@@ -10,6 +10,11 @@ import logging
 from typing import Dict, Optional, Any
 from pathlib import Path
 
+# Only used by the require_* helpers below, which skip rather than fail when a
+# target is unconfigured. This module lives under tests/, so pytest is always
+# installed alongside it.
+import pytest
+
 # Try to import SecureCredentialManager
 try:
     from clustrix.secure_credentials import (
@@ -22,6 +27,119 @@ except ImportError:
     HAS_SECURE_CREDENTIALS = False
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Test cluster targets
+#
+# Nothing in this repository names a real machine. A developer points the
+# real-world suite at their own clusters by exporting the variables below;
+# with none of them set every test that needs a remote target skips, with the
+# variable name in the skip reason so it is obvious what did not run and why.
+#
+# This is the ONE place a hostname, username or remote directory is resolved.
+# Tests ask for a role ("ssh", "slurm", ...), never for a hostname.
+# ---------------------------------------------------------------------------
+
+#: Role -> environment variable naming the host that plays it. "ssh" is a
+#: plain SSH box (the GPU machine, in this project's setup) and "slurm" is a
+#: scheduler head node; the "_2" roles are second machines of the same kind.
+#: These are the same names scripts/verify_cluster_usecases.py and
+#: scripts/collect_execution_evidence.py read, deliberately -- one set of
+#: variables points the whole repository at one developer's clusters.
+#:
+#: Deliberately NOT falling back to the older bare TEST_SSH_HOST /
+#: TEST_SSH_USERNAME names: `setup_environment_variables()` writes those on
+#: import, defaulting the host to "localhost". Reading them here would make
+#: `configured_test_hosts()` always report a resolvable host, and every
+#: network gate below would open on a machine with no cluster access at all.
+#: Those names still work where they always did, in get_ssh_credentials().
+HOST_ENV_VARS = {
+    "ssh": ("CLUSTRIX_TEST_SSH_HOST",),
+    "ssh2": ("CLUSTRIX_TEST_SSH_HOST_2",),
+    "slurm": ("CLUSTRIX_TEST_SLURM_HOST",),
+    "slurm2": ("CLUSTRIX_TEST_SLURM_HOST_2",),
+}
+
+#: Account to log in as on any of the above.
+USERNAME_ENV_VARS = ("CLUSTRIX_TEST_USERNAME",)
+
+#: Writable directory on the cluster, e.g. a shared home or scratch space.
+REMOTE_WORK_DIR_ENV_VAR = "CLUSTRIX_TEST_SLURM_REMOTE_DIR"
+
+
+def _first_env(names) -> Optional[str]:
+    """First of `names` set to a non-empty value, else None."""
+    for name in names:
+        value = os.environ.get(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def get_test_host(role: str) -> Optional[str]:
+    """Hostname configured for `role`, or None if the developer set none."""
+    try:
+        names = HOST_ENV_VARS[role]
+    except KeyError:
+        raise ValueError(
+            f"unknown cluster role {role!r}; expected one of "
+            f"{sorted(HOST_ENV_VARS)}"
+        )
+    return _first_env(names)
+
+
+def get_test_username() -> Optional[str]:
+    """Account to use on the test clusters, or None if unset."""
+    return _first_env(USERNAME_ENV_VARS)
+
+
+def get_test_remote_work_dir(default: Optional[str] = None) -> Optional[str]:
+    """Writable directory on the test clusters, or `default` if unset."""
+    return _first_env((REMOTE_WORK_DIR_ENV_VAR,)) or default
+
+
+def configured_test_hosts():
+    """Every distinct host the developer has configured, in role order.
+
+    Used to decide whether the private cluster network is reachable at all.
+    """
+    seen = []
+    for role in HOST_ENV_VARS:
+        host = get_test_host(role)
+        if host and host not in seen:
+            seen.append(host)
+    return tuple(seen)
+
+
+def require_test_host(role: str) -> str:
+    """Hostname for `role`, or skip the test saying which variable to set."""
+    host = get_test_host(role)
+    if not host:
+        pytest.skip(
+            f"No {role} test cluster configured: set "
+            f"{HOST_ENV_VARS[role][0]} to a host you have access to"
+        )
+    return host
+
+
+def require_test_username() -> str:
+    """Username for the test clusters, or skip saying which variable to set."""
+    username = get_test_username()
+    if not username:
+        pytest.skip(f"No test cluster account configured: set {USERNAME_ENV_VARS[0]}")
+    return username
+
+
+def require_test_remote_work_dir() -> str:
+    """Remote work dir, or skip saying which variable to set."""
+    work_dir = get_test_remote_work_dir()
+    if not work_dir:
+        pytest.skip(
+            f"No remote work directory configured: set "
+            f"{REMOTE_WORK_DIR_ENV_VAR} to a writable path on the cluster"
+        )
+    return work_dir
 
 
 class RealWorldCredentialManager:
@@ -172,23 +290,24 @@ class RealWorldCredentialManager:
         # Try 1Password first (local development)
         if self.is_local_development and self._op_manager:
             try:
-                # Try to get tensor01 credentials first (SSH-GPU)
-                tensor01_notes = self._op_manager.get_credential(
+                # Try the SSH-GPU cluster first
+                gpu_notes = self._op_manager.get_credential(
                     "clustrix-ssh-gpu", "notesPlain"
                 )
-                if tensor01_notes:
-                    return self._parse_notes_credentials(tensor01_notes)
+                if gpu_notes:
+                    return self._parse_notes_credentials(gpu_notes)
             except Exception as e:
-                logger.debug(f"Failed to get tensor01 credentials from 1Password: {e}")
+                logger.debug(f"Failed to get SSH-GPU credentials from 1Password: {e}")
 
         # GitHub Actions: Use repository secrets
         if self.is_github_actions:
             username = os.getenv("CLUSTRIX_USERNAME")
             password = os.getenv("CLUSTRIX_PASSWORD")
+            host = get_test_host("ssh")
 
-            if username and password:
+            if username and password and host:
                 return {
-                    "host": "tensor01.dartmouth.edu",  # Default to tensor01 for GitHub Actions
+                    "host": host,
                     "username": username,
                     "password": password,
                     "port": "22",
@@ -209,27 +328,28 @@ class RealWorldCredentialManager:
             "port": port,
         }
 
-    def get_tensor01_credentials(self) -> Optional[Dict[str, str]]:
-        """Get tensor01 (SSH-GPU) credentials from available sources."""
+    def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
+        """Get SSH-GPU cluster credentials from available sources."""
         # Try 1Password first (local development)
         if self.is_local_development and self._op_manager:
             try:
-                tensor01_notes = self._op_manager.get_credential(
+                gpu_notes = self._op_manager.get_credential(
                     "clustrix-ssh-gpu", "notesPlain"
                 )
-                if tensor01_notes:
-                    return self._parse_notes_credentials(tensor01_notes)
+                if gpu_notes:
+                    return self._parse_notes_credentials(gpu_notes)
             except Exception as e:
-                logger.debug(f"Failed to get tensor01 credentials from 1Password: {e}")
+                logger.debug(f"Failed to get SSH-GPU credentials from 1Password: {e}")
 
         # GitHub Actions: Use repository secrets
         if self.is_github_actions:
             username = os.getenv("CLUSTRIX_USERNAME")
             password = os.getenv("CLUSTRIX_PASSWORD")
+            host = get_test_host("ssh")
 
-            if username and password:
+            if username and password and host:
                 return {
-                    "host": "tensor01.dartmouth.edu",
+                    "host": host,
                     "username": username,
                     "password": password,
                     "port": "22",
@@ -237,27 +357,28 @@ class RealWorldCredentialManager:
 
         return None
 
-    def get_ndoli_credentials(self) -> Optional[Dict[str, str]]:
-        """Get ndoli (SSH-SLURM) credentials from available sources."""
+    def get_slurm_cluster_credentials(self) -> Optional[Dict[str, str]]:
+        """Get SSH-SLURM cluster credentials from available sources."""
         # Try 1Password first (local development)
         if self.is_local_development and self._op_manager:
             try:
-                ndoli_notes = self._op_manager.get_credential(
+                slurm_notes = self._op_manager.get_credential(
                     "clustrix-ssh-slurm", "notesPlain"
                 )
-                if ndoli_notes:
-                    return self._parse_notes_credentials(ndoli_notes)
+                if slurm_notes:
+                    return self._parse_notes_credentials(slurm_notes)
             except Exception as e:
-                logger.debug(f"Failed to get ndoli credentials from 1Password: {e}")
+                logger.debug(f"Failed to get SSH-SLURM credentials from 1Password: {e}")
 
         # GitHub Actions: Use repository secrets
         if self.is_github_actions:
             username = os.getenv("CLUSTRIX_USERNAME")
             password = os.getenv("CLUSTRIX_PASSWORD")
+            host = get_test_host("slurm")
 
-            if username and password:
+            if username and password and host:
                 return {
-                    "host": "ndoli.dartmouth.edu",
+                    "host": host,
                     "username": username,
                     "password": password,
                     "port": "22",
@@ -316,9 +437,10 @@ class RealWorldCredentialManager:
             username = os.getenv("CLUSTRIX_USERNAME")
             password = os.getenv("CLUSTRIX_PASSWORD")
 
-            if username and password:
+            host = get_test_host("slurm")
+            if username and password and host:
                 return {
-                    "host": "slurm-server",  # Default SLURM server hostname
+                    "host": host,
                     "username": username,
                     "password": password,
                     "port": "22",
