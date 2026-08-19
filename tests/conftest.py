@@ -7,6 +7,7 @@ import shutil
 from dataclasses import fields as dataclass_fields
 from unittest.mock import Mock, patch
 import clustrix.config as config_module
+import clustrix.credential_manager as credential_manager_module
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig, configure
 
 _INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
@@ -249,3 +250,9 @@ def reset_config():
     config_module._config = config_object
     for name, value in before.items():
         setattr(config_object, name, value)
+
+    # Lazily-created module singletons cache the config directory at the moment
+    # they are first constructed. With a per-test config directory, one built
+    # during an earlier test hands a stale path to every test after it. Any new
+    # singleton of this shape belongs in this list.
+    credential_manager_module._credential_manager = None
