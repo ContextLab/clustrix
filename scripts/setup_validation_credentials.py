@@ -48,49 +48,8 @@ def guide_credential_setup():
 
     credentials_to_setup = [
         {
-            "name": "clustrix-aws-validation",
-            "description": "AWS credentials for pricing and compute validation",
-            "fields": {
-                "access_key_id": "AWS Access Key ID",
-                "secret_access_key": "AWS Secret Access Key",
-                "region": "AWS Region (e.g., us-east-1)",
-            },
-            "setup_notes": [
-                "Create IAM user with pricing:GetProducts permission",
-                "For compute testing: ec2:* permissions (use sandbox account)",
-                "Get credentials from AWS Console → IAM → Users → Security Credentials",
-            ],
-        },
-        {
-            "name": "clustrix-gcp-validation",
-            "description": "GCP credentials for pricing and compute validation",
-            "fields": {
-                "project_id": "GCP Project ID",
-                "service_account_json": "Service Account JSON key (full content)",
-                "region": "GCP Region (e.g., us-central1)",
-            },
-            "setup_notes": [
-                "Create service account with Cloud Billing Catalog Viewer role",
-                "For compute testing: Compute Engine Admin role",
-                "Download JSON key from GCP Console → IAM → Service Accounts",
-            ],
-        },
-        {
-            "name": "clustrix-lambda-cloud-validation",
-            "description": "Lambda Cloud credentials for GPU pricing validation",
-            "fields": {
-                "api_key": "Lambda Cloud API Key",
-                "endpoint": "API Endpoint (default: https://cloud.lambdalabs.com/api/v1)",
-            },
-            "setup_notes": [
-                "Sign up at https://lambdalabs.com/",
-                "Generate API key from account settings",
-                "Note: Lambda Cloud has limited free tier",
-            ],
-        },
-        {
             "name": "clustrix-huggingface-validation",
-            "description": "HuggingFace credentials for Spaces validation",
+            "description": "HuggingFace credentials for HuggingFace Jobs validation",
             "fields": {
                 "token": "HuggingFace API Token",
                 "username": "HuggingFace Username",
@@ -99,20 +58,6 @@ def guide_credential_setup():
                 "Create account at https://huggingface.co/",
                 "Generate token at https://huggingface.co/settings/tokens",
                 "Use 'Write' access for full testing capabilities",
-            ],
-        },
-        {
-            "name": "clustrix-docker-validation",
-            "description": "Docker registry credentials for container testing",
-            "fields": {
-                "username": "Docker Hub Username",
-                "password": "Docker Hub Password/Token",
-                "registry": "Registry URL (default: docker.io)",
-            },
-            "setup_notes": [
-                "Create Docker Hub account",
-                "Generate access token (recommended over password)",
-                "For testing: create temporary repository",
             ],
         },
         {
@@ -125,7 +70,7 @@ def guide_credential_setup():
                 "port": "SSH Port (default: 22)",
             },
             "setup_notes": [
-                "Set up test VM (AWS EC2, GCP Compute, etc.)",
+                "Use any SSH-accessible host (lab machine, cluster login node, VM)",
                 "Generate SSH key pair: ssh-keygen -t rsa -b 4096",
                 "Add public key to ~/.ssh/authorized_keys on target",
             ],
@@ -150,10 +95,8 @@ def guide_credential_setup():
         print()
 
     print("💡 Alternative: Use environment variables as fallback")
-    print("   AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY")
-    print("   GOOGLE_APPLICATION_CREDENTIALS, GOOGLE_CLOUD_PROJECT")
-    print("   LAMBDA_CLOUD_API_KEY")
-    print("   HUGGINGFACE_TOKEN")
+    print("   HUGGINGFACE_TOKEN (or HF_TOKEN), HUGGINGFACE_USERNAME")
+    print("   SSH_HOST, SSH_USERNAME, SSH_PASSWORD, SSH_PRIVATE_KEY_PATH")
     print()
 
 
@@ -167,11 +110,7 @@ def test_credential_access():
     creds = ValidationCredentials()
 
     tests = [
-        ("AWS", creds.get_aws_credentials),
-        ("GCP", creds.get_gcp_credentials),
-        ("Lambda Cloud", creds.get_lambda_cloud_credentials),
         ("HuggingFace", creds.get_huggingface_credentials),
-        ("Docker", creds.get_docker_credentials),
         ("SSH", creds.get_ssh_credentials),
     ]
 
@@ -219,9 +158,6 @@ def main():
     # Test access
     if test_credential_access():
         print("\n🎉 Credential setup validation completed!")
-        print("   You can now run validation scripts:")
-        print("   - python scripts/validate_lambda_cloud_pricing.py")
-        print("   - python scripts/validate_huggingface_pricing.py")
         return 0
     else:
         print("\n⚠️  Complete credential setup first, then re-run this script")

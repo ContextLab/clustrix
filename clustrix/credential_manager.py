@@ -68,22 +68,6 @@ class DotEnvCredentialSource(CredentialSource):
 
         # Map providers to their environment variable patterns
         provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "aws": {
-                "access_key_id": os.getenv("AWS_ACCESS_KEY_ID") or "",
-                "secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY") or "",
-                "region": os.getenv("AWS_REGION", "us-east-1"),
-            },
-            "azure": {
-                "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID"),
-                "tenant_id": os.getenv("AZURE_TENANT_ID"),
-                "client_id": os.getenv("AZURE_CLIENT_ID"),
-                "client_secret": os.getenv("AZURE_CLIENT_SECRET"),
-            },
-            "gcp": {
-                "project_id": os.getenv("GCP_PROJECT_ID"),
-                "service_account_path": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-                "service_account_json": os.getenv("GCP_SERVICE_ACCOUNT_JSON"),
-            },
             "ssh": {
                 "host": os.getenv("SSH_HOST"),
                 "username": os.getenv("SSH_USERNAME"),
@@ -91,20 +75,9 @@ class DotEnvCredentialSource(CredentialSource):
                 "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
                 "port": os.getenv("SSH_PORT", "22"),
             },
-            "kubernetes": {
-                "kubeconfig_path": os.getenv("KUBECONFIG"),
-                "namespace": os.getenv("K8S_NAMESPACE", "default"),
-                "context": os.getenv("K8S_CONTEXT"),
-            },
             "huggingface": {
                 "token": os.getenv("HF_TOKEN"),
                 "username": os.getenv("HF_USERNAME"),
-            },
-            "lambda_cloud": {
-                "api_key": os.getenv("LAMBDA_CLOUD_API_KEY"),
-                "endpoint": os.getenv(
-                    "LAMBDA_CLOUD_ENDPOINT", "https://cloud.lambdalabs.com/api/v1"
-                ),
             },
             "local": {
                 "type": "local",  # Local provider needs no real credentials
@@ -124,13 +97,8 @@ class DotEnvCredentialSource(CredentialSource):
         """List providers that have credentials available in .env file."""
         available = []
         providers = [
-            "aws",
-            "azure",
-            "gcp",
             "ssh",
-            "kubernetes",
             "huggingface",
-            "lambda_cloud",
             "local",
         ]
 
@@ -166,23 +134,6 @@ class EnvironmentCredentialSource(CredentialSource):
         """Get credentials from environment variables."""
         # Use same mapping as DotEnv but read directly from current environment
         provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "aws": {
-                "access_key_id": os.getenv("AWS_ACCESS_KEY_ID"),
-                "secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY"),
-                "region": os.getenv("AWS_REGION", "us-east-1"),
-            },
-            "azure": {
-                "subscription_id": os.getenv("AZURE_SUBSCRIPTION_ID"),
-                "tenant_id": os.getenv("AZURE_TENANT_ID"),
-                "client_id": os.getenv("AZURE_CLIENT_ID"),
-                "client_secret": os.getenv("AZURE_CLIENT_SECRET"),
-            },
-            "gcp": {
-                "project_id": os.getenv("GCP_PROJECT_ID")
-                or os.getenv("GOOGLE_CLOUD_PROJECT"),
-                "service_account_path": os.getenv("GOOGLE_APPLICATION_CREDENTIALS"),
-                "service_account_json": os.getenv("GCP_SERVICE_ACCOUNT_JSON"),
-            },
             "ssh": {
                 "host": os.getenv("SSH_HOST"),
                 "username": os.getenv("SSH_USERNAME"),
@@ -190,21 +141,10 @@ class EnvironmentCredentialSource(CredentialSource):
                 "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
                 "port": os.getenv("SSH_PORT", "22"),
             },
-            "kubernetes": {
-                "kubeconfig_path": os.getenv("KUBECONFIG"),
-                "namespace": os.getenv("K8S_NAMESPACE", "default"),
-                "context": os.getenv("K8S_CONTEXT"),
-            },
             "huggingface": {
                 "token": os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN"),
                 "username": os.getenv("HF_USERNAME")
                 or os.getenv("HUGGINGFACE_USERNAME"),
-            },
-            "lambda_cloud": {
-                "api_key": os.getenv("LAMBDA_CLOUD_API_KEY"),
-                "endpoint": os.getenv(
-                    "LAMBDA_CLOUD_ENDPOINT", "https://cloud.lambdalabs.com/api/v1"
-                ),
             },
             "local": {
                 "type": "local",  # Local provider needs no real credentials
@@ -224,13 +164,8 @@ class EnvironmentCredentialSource(CredentialSource):
         """List providers that have credentials available in environment."""
         available = []
         providers = [
-            "aws",
-            "azure",
-            "gcp",
             "ssh",
-            "kubernetes",
             "huggingface",
-            "lambda_cloud",
             "local",
         ]
 
@@ -254,24 +189,7 @@ class GitHubActionsCredentialSource(CredentialSource):
             return None
 
         # GitHub Actions specific environment variable patterns
-        if provider == "aws":
-            access_key = os.getenv("AWS_ACCESS_KEY_ID")
-            secret_key = os.getenv("AWS_ACCESS_KEY")  # GitHub secret name
-            if access_key and secret_key:
-                return {
-                    "access_key_id": access_key,
-                    "secret_access_key": secret_key,
-                    "region": os.getenv("AWS_REGION", "us-east-1"),
-                }
-        elif provider == "gcp":
-            project_id = os.getenv("GCP_PROJECT_ID")
-            service_account = os.getenv("GCP_JSON")
-            if project_id and service_account:
-                return {
-                    "project_id": project_id,
-                    "service_account_json": service_account,
-                }
-        elif provider == "huggingface":
+        if provider == "huggingface":
             token = os.getenv("HF_TOKEN")
             if token:
                 username = os.getenv("HF_USERNAME")
@@ -288,7 +206,7 @@ class GitHubActionsCredentialSource(CredentialSource):
             return []
 
         available = []
-        providers = ["aws", "gcp", "huggingface"]
+        providers = ["huggingface"]
 
         for provider in providers:
             if self.get_credentials(provider):
@@ -354,29 +272,7 @@ class FlexibleCredentialManager:
 # Priority order: .env file → environment variables → GitHub Actions
 
 # ============================================================================
-# AWS Credentials (for AWS EC2, Batch, pricing APIs)
-# ============================================================================
-# AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE
-# AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-# AWS_REGION=us-east-1
-
-# ============================================================================
-# Azure Credentials (for Azure VM, Container Instances)
-# ============================================================================
-# AZURE_SUBSCRIPTION_ID=12345678-1234-1234-1234-123456789012
-# AZURE_TENANT_ID=12345678-1234-1234-1234-123456789012
-# AZURE_CLIENT_ID=12345678-1234-1234-1234-123456789012
-# AZURE_CLIENT_SECRET=your-client-secret-here
-
-# ============================================================================
-# Google Cloud Credentials (for GCP Compute, Cloud Run, pricing APIs)
-# ============================================================================
-# GCP_PROJECT_ID=your-gcp-project-id
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-key.json
-# GCP_SERVICE_ACCOUNT_JSON={"type":"service_account",...}
-
-# ============================================================================
-# SSH Cluster Credentials (for SLURM, PBS, SGE clusters)
+# SSH Cluster Credentials (for ssh and slurm clusters)
 # ============================================================================
 # SSH_HOST=your-cluster.university.edu
 # SSH_USERNAME=your_username
@@ -385,23 +281,10 @@ class FlexibleCredentialManager:
 # SSH_PORT=22
 
 # ============================================================================
-# Kubernetes Credentials (for K8s job execution)
-# ============================================================================
-# KUBECONFIG=/path/to/your/kubeconfig
-# K8S_NAMESPACE=default
-# K8S_CONTEXT=your-cluster-context
-
-# ============================================================================
-# HuggingFace Credentials (for HF Spaces execution)
+# HuggingFace Credentials (for HuggingFace Jobs execution)
 # ============================================================================
 # HF_TOKEN=hf_your_token_here
 # HF_USERNAME=your-huggingface-username
-
-# ============================================================================
-# Lambda Cloud Credentials (for Lambda Labs GPU instances)
-# ============================================================================
-# LAMBDA_CLOUD_API_KEY=your-lambda-cloud-api-key
-# LAMBDA_CLOUD_ENDPOINT=https://cloud.lambdalabs.com/api/v1
 
 # ============================================================================
 # Additional Notes
@@ -443,15 +326,7 @@ class FlexibleCredentialManager:
                     )
         else:
             # Load all available credentials
-            all_providers = [
-                "aws",
-                "azure",
-                "gcp",
-                "ssh",
-                "kubernetes",
-                "huggingface",
-                "lambda_cloud",
-            ]
+            all_providers = ["ssh", "huggingface"]
 
             for prov in all_providers:
                 for source in self.sources:
@@ -474,7 +349,7 @@ class FlexibleCredentialManager:
         """Get credentials for a specific provider with detailed feedback.
 
         Args:
-            provider: Provider name (aws, azure, gcp, ssh, kubernetes, huggingface, lambda_cloud)
+            provider: Provider name (ssh, huggingface, local)
 
         Returns:
             Credentials dictionary or None if not available
@@ -506,15 +381,7 @@ class FlexibleCredentialManager:
         logger.warning(f"  ❌ No {provider} credentials found in any source")
 
         # Provide helpful guidance
-        if provider in [
-            "aws",
-            "azure",
-            "gcp",
-            "ssh",
-            "kubernetes",
-            "huggingface",
-            "lambda_cloud",
-        ]:
+        if provider in ["ssh", "huggingface"]:
             logger.info(f"  💡 Add {provider} credentials to: {self.env_file}")
             logger.info("  💡 Or use: clustrix credentials setup")
 
@@ -545,15 +412,7 @@ class FlexibleCredentialManager:
         """
         available = {}
 
-        for provider in [
-            "aws",
-            "azure",
-            "gcp",
-            "ssh",
-            "kubernetes",
-            "huggingface",
-            "lambda_cloud",
-        ]:
+        for provider in ["ssh", "huggingface"]:
             for source in self.sources:
                 try:
                     if source.is_available() and source.get_credentials(provider):
@@ -597,13 +456,8 @@ class FlexibleCredentialManager:
 
         # Check each provider
         providers = [
-            "aws",
-            "azure",
-            "gcp",
             "ssh",
-            "kubernetes",
             "huggingface",
-            "lambda_cloud",
             "local",
         ]
         for provider in providers:
@@ -634,99 +488,6 @@ class FlexibleCredentialManager:
                 status["providers"][provider] = empty_status
 
         return status
-
-    def ensure_kubernetes_provider_credentials(
-        self, k8s_provider: str
-    ) -> Optional[Dict[str, str]]:
-        """Get credentials for Kubernetes provisioning provider with provider-specific mapping.
-
-        Args:
-            k8s_provider: Kubernetes provider name (aws, gcp, azure, huggingface, lambda)
-
-        Returns:
-            Credentials dictionary with provider-specific keys or None
-        """
-        logger.info(f"🔑 Getting credentials for Kubernetes provider: {k8s_provider}")
-
-        # Handle local providers specially - no credentials needed
-        if k8s_provider in ["local", "local-docker"]:
-            logger.info("✅ Local provider - no external credentials required")
-            return {"type": "local"}
-
-        # Map k8s provider names to credential provider names
-        provider_mapping = {
-            "aws": "aws",
-            "gcp": "gcp",
-            "azure": "azure",
-            "huggingface": "huggingface",
-            "lambda": "lambda_cloud",
-        }
-
-        credential_provider = provider_mapping.get(k8s_provider)
-        if not credential_provider:
-            logger.error(f"❌ Unsupported Kubernetes provider: {k8s_provider}")
-            return None
-
-        # Get basic credentials
-        credentials = self.ensure_credential(credential_provider)
-        if not credentials:
-            logger.error(f"❌ No credentials found for {k8s_provider}")
-            return None
-
-        # Apply provider-specific transformations for Kubernetes provisioning
-        if k8s_provider == "aws":
-            # AWS EKS needs standard boto3 format
-            transformed = {
-                "access_key_id": credentials.get("access_key_id"),
-                "secret_access_key": credentials.get("secret_access_key"),
-                "region": credentials.get("region", "us-west-2"),
-            }
-        elif k8s_provider == "gcp":
-            # GCP GKE needs project ID and service account
-            transformed = {
-                "project_id": credentials.get("project_id"),
-                "service_account_path": credentials.get("service_account_path"),
-                "service_account_json": credentials.get("service_account_json"),
-            }
-        elif k8s_provider == "azure":
-            # Azure AKS needs full service principal
-            transformed = {
-                "subscription_id": credentials.get("subscription_id"),
-                "tenant_id": credentials.get("tenant_id"),
-                "client_id": credentials.get("client_id"),
-                "client_secret": credentials.get("client_secret"),
-            }
-        elif k8s_provider == "huggingface":
-            # HuggingFace Spaces needs token and username
-            transformed = {
-                "token": credentials.get("token"),
-                "username": credentials.get("username"),
-            }
-        elif k8s_provider == "lambda":
-            # Lambda Cloud needs API key
-            transformed = {
-                "api_key": credentials.get("api_key"),
-                "endpoint": credentials.get(
-                    "endpoint", "https://cloud.lambdalabs.com/api/v1"
-                ),
-            }
-        elif k8s_provider in ["local", "local-docker"]:
-            # Local provisioner needs no special credentials
-            transformed = {"type": "local"}
-        else:
-            transformed = dict(credentials)
-
-        # Filter out None values
-        filtered = {k: v for k, v in transformed.items() if v is not None}
-
-        if filtered:
-            logger.info(
-                f"✅ Credentials prepared for {k8s_provider} Kubernetes provisioning"
-            )
-            return filtered
-        else:
-            logger.error(f"❌ Missing required credential fields for {k8s_provider}")
-            return None
 
 
 # Global credential manager instance
@@ -772,11 +533,3 @@ def get_credential_status() -> Dict[str, Any]:
     """Get comprehensive credential system status."""
     manager = get_credential_manager()
     return manager.get_credential_status()
-
-
-def ensure_kubernetes_provider_credentials(
-    k8s_provider: str,
-) -> Optional[Dict[str, str]]:
-    """Get credentials for Kubernetes provisioning provider with provider-specific mapping."""
-    manager = get_credential_manager()
-    return manager.ensure_kubernetes_provider_credentials(k8s_provider)
