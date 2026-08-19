@@ -322,14 +322,6 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=half_layout,
         )
-        self.hf_sdk_field = widgets.Dropdown(
-            options=["gradio", "streamlit", "static"],
-            value="gradio",
-            description="SDK:",
-            tooltip="HuggingFace SDK to use",
-            style=style,
-            layout=half_layout,
-        )
 
     def _create_advanced_options(self):
         """Create advanced options accordion."""
@@ -515,7 +507,7 @@ class EnhancedClusterConfigWidget:
             [
                 widgets.HTML("<h5>HuggingFace Jobs Settings</h5>"),
                 self.hf_token_field,
-                widgets.HBox([self.hf_hardware_field, self.hf_sdk_field]),
+                self.hf_hardware_field,
             ],
             layout=widgets.Layout(
                 border="1px solid #ddd",
@@ -610,7 +602,6 @@ class EnhancedClusterConfigWidget:
         # HuggingFace Jobs fields
         self.hf_token_field.value = config.get("hf_token", "")
         self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
-        self._set_choice(self.hf_sdk_field, config.get("hf_sdk", "gradio"))
 
         # Advanced options
         self.package_manager.value = config.get("package_manager", "pip")
@@ -664,7 +655,6 @@ class EnhancedClusterConfigWidget:
             config.update(
                 {
                     "hf_hardware": self.hf_hardware_field.value,
-                    "hf_sdk": self.hf_sdk_field.value,
                 }
             )
             if self.hf_token_field.value:

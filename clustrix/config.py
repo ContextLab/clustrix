@@ -28,13 +28,13 @@ class ClusterConfig:
     cluster_host: Optional[str] = None
     cluster_port: int = 22
 
-    # HuggingFace Jobs settings. hf_hardware/hf_username/hf_sdk are the
-    # older widget-facing spellings; hf_jobs.py still reads them as fallbacks
-    # for hf_flavor/hf_namespace, so they are kept.
+    # HuggingFace Jobs settings. hf_hardware and hf_username are the older
+    # widget-facing spellings; hf_jobs.py still reads them as fallbacks for
+    # hf_flavor and hf_namespace, so they are kept. hf_sdk was a *Spaces*
+    # concept (gradio/streamlit/static) and went with that backend.
     hf_hardware: Optional[str] = None
     hf_token: Optional[str] = None  # Required for authentication
     hf_username: Optional[str] = None
-    hf_sdk: Optional[str] = None
     # HuggingFace Jobs backend (cluster_type="huggingface"). The namespace is
     # usually an org rather than the personal account, which is often not on a
     # plan that can run jobs.
@@ -282,6 +282,7 @@ _REMOVED_SETTINGS = (
     ("cloud_region", "the cloud VM backends", None),
     ("cloud_auto_configure", "the cloud VM backends", None),
     ("cost_monitoring", "cloud cost monitoring", None),
+    ("hf_sdk", "the HuggingFace Spaces SDK", None),
 )
 
 

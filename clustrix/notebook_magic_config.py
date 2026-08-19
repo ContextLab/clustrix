@@ -50,7 +50,6 @@ DEFAULT_CONFIGS = {
     "HuggingFace Jobs": {
         "cluster_type": "huggingface",
         "hf_hardware": "cpu-basic",
-        "hf_sdk": "gradio",
         "default_cores": 2,
         "default_memory": "16GB",
     },
