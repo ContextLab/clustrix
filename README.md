@@ -405,7 +405,9 @@ def sequential_computation(data):
 @cluster(parallel=True)   # Enable automatic loop parallelization
 def parallel_computation(data):
     results = []
-    for item in data:  # This loop will be automatically distributed
+    # Sequential. `data` is not a literal range() and this function takes
+    # no chunk keyword, so auto-parallelization declines it.
+    for item in data:
         results.append(expensive_operation(item))
     return results
 ```

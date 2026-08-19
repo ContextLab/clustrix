@@ -94,8 +94,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
 def get_clients(region: str):
     """Build real boto3 clients, failing loudly if no credentials."""
     # Imported here, not at module scope: --help must work on a machine
-    # with no AWS SDK installed. boto3 is not a clustrix dependency.
-    import boto3
+    # with no AWS SDK installed. boto3 is not a clustrix dependency, so a
+    # raw ImportError traceback is not an acceptable way to say it is
+    # absent -- these scripts delete cloud resources and every failure mode
+    # has to be legible.
+    try:
+        import boto3
+    except ImportError:
+        sys.exit(
+            "ERROR: this script needs the AWS SDK, which is not installed.\n"
+            "       Install it with:  pip install boto3\n"
+            "       (boto3 is not a clustrix dependency; these AWS utilities\n"
+            "        are the only thing in the project that needs it.)"
+        )
 
     manager = FlexibleCredentialManager()
     creds = manager.ensure_credential("aws")

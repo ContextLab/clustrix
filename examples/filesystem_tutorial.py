@@ -21,7 +21,7 @@ from clustrix import (
     cluster_isfile,
     cluster_glob,
     cluster_du,
-    cluster_count_files
+    cluster_count_files,
 )
 from clustrix.config import ClusterConfig
 
@@ -31,13 +31,12 @@ def tutorial_local_operations():
     print("=" * 60)
     print("LOCAL FILESYSTEM OPERATIONS")
     print("=" * 60)
-    
+
     # Configure for local operations
     config = ClusterConfig(
-        cluster_type="local",
-        local_work_dir="."  # Current directory
+        cluster_type="local", local_work_dir="."  # Current directory
     )
-    
+
     print("1. Listing directory contents:")
     files = cluster_ls(".", config)
     print(f"   Found {len(files)} items:")
@@ -45,19 +44,19 @@ def tutorial_local_operations():
         print(f"   - {file}")
     if len(files) > 5:
         print(f"   ... and {len(files) - 5} more")
-    
+
     print("\n2. Finding Python files:")
     py_files = cluster_find("*.py", ".", config)
     print(f"   Found {len(py_files)} Python files:")
     for file in py_files[:3]:
         print(f"   - {file}")
-    
+
     print("\n3. Checking file existence:")
     test_files = ["README.md", "setup.py", "nonexistent.txt"]
     for file in test_files:
         exists = cluster_exists(file, config)
         print(f"   {file}: {'EXISTS' if exists else 'NOT FOUND'}")
-    
+
     print("\n4. Getting file information:")
     if py_files:
         file_info = cluster_stat(py_files[0], config)
@@ -66,19 +65,19 @@ def tutorial_local_operations():
         print(f"   Type: {'Directory' if file_info.is_dir else 'File'}")
         print(f"   Permissions: {file_info.permissions}")
         print(f"   Modified: {file_info.modified_datetime}")
-    
+
     print("\n5. Using glob patterns:")
     patterns = ["*.py", "*.md", "*.txt", "test_*"]
     for pattern in patterns:
         matches = cluster_glob(pattern, ".", config)
         print(f"   Pattern '{pattern}': {len(matches)} matches")
-    
+
     print("\n6. Counting files by type:")
     total_files = cluster_count_files(".", "*", config)
     py_count = cluster_count_files(".", "*.py", config)
     print(f"   Total files: {total_files}")
     print(f"   Python files: {py_count}")
-    
+
     print("\n7. Directory usage:")
     usage = cluster_du(".", config)
     print(f"   Total size: {usage.total_mb:.1f} MB")
@@ -90,7 +89,7 @@ def tutorial_remote_operations():
     print("\n" + "=" * 60)
     print("REMOTE FILESYSTEM OPERATIONS")
     print("=" * 60)
-    
+
     # Example remote configuration (adjust for your cluster)
     config = ClusterConfig(
         cluster_type="slurm",
@@ -98,28 +97,28 @@ def tutorial_remote_operations():
         username="your-username",
         # For demo, we'll use key-based auth
         # password="your-password",  # or use SSH keys
-        remote_work_dir="/home/your-username"
+        remote_work_dir="/home/your-username",
     )
-    
+
     print("NOTE: This section requires actual cluster credentials.")
     print("Update the config above with your cluster details to test.\n")
-    
+
     print("Example remote operations (same API as local):")
-    
+
     print("1. List remote home directory:")
     print("   files = cluster_ls('.', config)")
-    
+
     print("\n2. Find data files on cluster:")
     print("   data_files = cluster_find('*.csv', 'data/', config)")
-    
+
     print("\n3. Check if dataset exists:")
     print("   if cluster_exists('large_dataset.h5', config):")
     print("       print('Dataset found!')")
-    
+
     print("\n4. Get remote file info:")
     print("   file_info = cluster_stat('results/output.txt', config)")
     print("   print(f'Output size: {file_info.size} bytes')")
-    
+
     print("\n5. Count processed files:")
     print("   processed = cluster_count_files('results/', '*.json', config)")
     print("   print(f'Processed {processed} files')")
@@ -130,10 +129,10 @@ def tutorial_data_workflow():
     print("\n" + "=" * 60)
     print("DATA PROCESSING WORKFLOW")
     print("=" * 60)
-    
+
     print("Example: Processing datasets with @cluster decorator")
     print()
-    
+
     # Show example code (not executed)
     workflow_code = '''
 from clustrix import cluster
@@ -153,7 +152,9 @@ def process_dataset(config):
     print(f"Dataset size: {usage.total_gb:.2f} GB")
     
     results = []
-    for filename in data_files:  # This loop gets parallelized automatically!
+    # Sequential: auto-parallelization needs a literal range() and a
+    # function that accepts the chunk keywords.
+    for filename in data_files:
         # 3. Check file size before processing
         file_info = cluster_stat(filename, config)
         
@@ -182,9 +183,9 @@ config = ClusterConfig(
 # This will run on the cluster with automatic loop parallelization
 results = process_dataset(config)
 '''
-    
+
     print(workflow_code)
-    
+
     print("\nKey benefits of filesystem utilities:")
     print("• Same API works locally and remotely")
     print("• Automatic SSH connection management")
@@ -197,8 +198,8 @@ def tutorial_advanced_patterns():
     print("\n" + "=" * 60)
     print("ADVANCED PATTERNS")
     print("=" * 60)
-    
-    advanced_code = '''
+
+    advanced_code = """
 # Pattern 1: Conditional processing based on file existence
 @cluster
 def smart_processing(config):
@@ -257,8 +258,8 @@ def validate_and_process(config):
     
     # 3. Process only valid files
     return process_files(valid_files, config)
-'''
-    
+"""
+
     print(advanced_code)
 
 
@@ -267,19 +268,19 @@ def main():
     print("CLUSTRIX FILESYSTEM UTILITIES TUTORIAL")
     print("This tutorial shows how to use unified filesystem operations")
     print("that work seamlessly with both local and remote clusters.\n")
-    
+
     # Run local examples (these will actually work)
     tutorial_local_operations()
-    
+
     # Show remote examples (documentation)
     tutorial_remote_operations()
-    
+
     # Show workflow examples
     tutorial_data_workflow()
-    
+
     # Show advanced patterns
     tutorial_advanced_patterns()
-    
+
     print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)

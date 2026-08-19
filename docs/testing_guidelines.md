@@ -212,13 +212,28 @@ Every test must include:
 
 Use pytest markers to categorize tests:
 
+`--strict-markers` is enabled, so an unregistered marker is a hard collection
+error, not a warning. These are the markers that actually exist — the full list
+is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
+
 ```python
-@pytest.mark.real_world  # Requires real infrastructure
-@pytest.mark.slow        # Takes >10 seconds
-@pytest.mark.integration # Tests multiple components
-@pytest.mark.kubernetes  # Requires Kubernetes
-@pytest.mark.ssh        # Requires SSH server
+@pytest.mark.real_world        # opens real SSH/cloud connections
+@pytest.mark.slow              # takes a long time
+@pytest.mark.unit              # a unit test
+@pytest.mark.integration       # exercises several components together
+@pytest.mark.expensive         # provisions billable resources
+@pytest.mark.dartmouth_network # needs the Dartmouth campus network
+@pytest.mark.performance       # a benchmark
 ```
+
+`real_world` is applied automatically to everything under `tests/real_world/`
+by that directory's `conftest.py`, so you do not need to add it by hand — and
+more importantly, forgetting it cannot silently expose a live-network test to
+the ordinary run.
+
+To add a marker, register it in `pyproject.toml` first. This document
+previously listed `kubernetes`, `ssh` and `flaky`; none were registered and no
+test used them, so following it produced a collection error.
 
 ## Running Tests
 
@@ -469,13 +484,16 @@ pytest --cache-clear
 
 #### 5. Flaky Tests
 
-```python
-# Add retries for flaky tests
-@pytest.mark.flaky(reruns=3, reruns_delay=2)
-def test_network_dependent():
-    pass
+`@pytest.mark.flaky` needs the `pytest-rerunfailures` plugin, which this
+project does not depend on — the marker is unavailable and unregistered.
 
-# Or handle in test
+Prefer removing the flakiness. Where a test genuinely depends on something
+external, gate it on that thing being present rather than retrying until it
+passes: a test that succeeds on the third attempt is telling you something
+real about the code.
+
+```python
+# Handle it in the test
 for attempt in range(3):
     try:
         result = flaky_operation()

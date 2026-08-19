@@ -133,8 +133,16 @@ simply is not distributed. :doc:`limitations` has the full contract.
         import math
 
         indices = range(50_000) if _parallel_i is None else _parallel_i
+
+        # This loop is what the analyser splits. It looks pointless and is
+        # load-bearing: the analyser needs a literal `range()` whose body has
+        # no dependency between iterations, and it is that loop -- not the
+        # comprehension below -- that defines the range being divided up.
+        # Delete it and parallelization silently stops while the printed
+        # answer stays the same.
         for i in range(50_000):
             pass
+
         return [math.sqrt(j) for j in indices]
 
     if __name__ == "__main__":
@@ -148,8 +156,21 @@ module, which is what the ``__main__`` guard is for::
     $ python roots.py
     50000 7453447.91
 
-That is 25 chunks executed across 4 workers, concatenated back into one list
-in the original order -- identical to what the undecorated function returns.
+The work is divided into chunks, executed across worker processes, and
+concatenated back into one list in the original order -- identical to what the
+undecorated function returns. The chunk count depends on your machine
+(``os.cpu_count() * 2``); on a 12-core machine it is 25.
+
+.. important::
+
+   Whether this runs locally at all depends on ``cluster_host``, **not** on
+   ``cluster_type``. ``_choose_execution_mode`` returns ``"local"`` only when
+   no host is configured. If a configuration file in ``~/.clustrix`` or the
+   working directory sets ``cluster_host`` -- and Step 8 writes one -- this
+   same code takes the *remote* path, which wants ``_chunk_range_i`` and
+   ``_chunk_index`` instead of ``_parallel_i``, and will decline to
+   parallelize while printing exactly the output above. :doc:`execution_model`
+   has the full rule.
 
 .. _quickstart-filesystem:
 
