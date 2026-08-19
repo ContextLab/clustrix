@@ -1,309 +1,95 @@
-# Function Dependency Resolution Design
+# Function flattening: a post-mortem
 
-## Overview
+**Status: abandoned. The code this document described was deleted in the 0.2.0
+cycle. Do not rebuild it without reading this first.**
 
-This document outlines the design for a comprehensive function dependency resolution system for ClustriX that can handle:
+The original version of this file proposed a "comprehensive function dependency
+resolution system" — hoisting nested functions to module level, resolving
+cross-file dependencies, distinguishing local from external code. Some of it was
+built, as `clustrix/function_flattening.py` (1,027 lines) and
+`clustrix/dependency_resolution.py` (445 lines). Both are gone.
 
-1. **Nested/inline functions** - Functions defined within other functions
-2. **Cross-file dependencies** - Functions imported from other local files
-3. **Local vs external distinction** - Differentiating between local code and external libraries
-4. **Complex edge cases** - Name reuse, recursion, circular dependencies
+## Why it was removed
 
-## Current State Analysis
+**It never produced a runnable function.** Both generators were exercised
+against every shape they were meant to handle. The basic flattener emitted a
+body dedented to column 0 with the `for` header dropped and statements
+reordered, and printed instead of returning. The advanced one emitted
+`import range` for a builtin. Live output on an ordinary function with one
+nested helper:
 
-### Existing Function Flattening (`clustrix/function_flattening.py`)
-
-**Strengths:**
-- Detects nested functions in AST analysis (`nested_functions > 0` triggers flattening)
-- Has framework for extracting nested functions (`_extract_nested_function`)
-- Complexity-based triggering system works
-
-**Limitations:**
-- Only does statement-level complexity reduction via subprocess wrapping
-- Doesn't actually hoist nested functions to module level
-- No cross-file dependency resolution
-- No distinction between local vs external functions
-- Generated flattened code uses subprocess pattern instead of true flattening
-
-## Proposed Architecture
-
-### 1. Function Dependency Analyzer
-
-```python
-class FunctionDependencyAnalyzer:
-    """Analyzes function dependencies across the entire codebase."""
-    
-    def __init__(self, root_dir: str, package_dirs: List[str] = None):
-        self.root_dir = root_dir
-        self.package_dirs = package_dirs or []
-        self.external_packages = set()  # Known external packages
-        self.local_modules = {}  # Cache of parsed local modules
-        self.dependency_graph = {}  # Function -> dependencies mapping
-        
-    def analyze_function_dependencies(self, func: Callable) -> DependencyInfo:
-        """Analyze all dependencies of a function."""
-        pass
-        
-    def is_local_function(self, func_name: str, module_path: str) -> bool:
-        """Determine if a function is local or external."""
-        pass
-        
-    def resolve_cross_file_dependencies(self, func: Callable) -> List[str]:
-        """Find all local functions this function depends on."""
-        pass
+```
+Generated flattened code did not execute: No module named 'range'
+Generated flattened code did not execute: name 'i' is not defined
 ```
 
-### 2. Function Dependency Graph
+**It was attempted precisely when it could not work.**
+`analyze_function_complexity` returned `complexity_score: 999` and
+`is_complex: True` from its `except` branch — that is, whenever
+`inspect.getsource()` failed. But flattening *requires* source. So the harder
+the case, the more confidently the system reached for the one tool guaranteed to
+fail on it.
+
+**Its failure was not visible.** `auto_flatten_if_needed` reported
+`success: True` even when it had fallen back to returning the original,
+unflattened function. Worse, when it reported failure, `_execute_single`
+substituted `create_simple_subprocess_fallback`, whose entire remote body was:
 
 ```python
-@dataclass
-class FunctionNode:
-    """Represents a function in the dependency graph."""
-    name: str
-    source_code: str
-    module_path: str
-    is_nested: bool
-    is_local: bool
-    dependencies: List[str]
-    closure_vars: List[str]  # Variables captured from outer scope
-    
-@dataclass 
-class DependencyInfo:
-    """Complete dependency information for a function."""
-    main_function: FunctionNode
-    dependencies: List[FunctionNode]  # All required functions
-    modules_to_import: List[str]      # External modules needed
-    global_variables: Dict[str, Any]  # Global vars to preserve
-    circular_dependencies: List[Tuple[str, str]]  # Detected cycles
+result = "Function execution completed"
 ```
 
-### 3. Function Flattening Engine
+The user's function was never called and no error was raised. For
+`def add(a, b): return a + b` the caller received that string instead of `5`.
+That is the most serious defect ever found in this project, and this machinery
+is where it lived.
 
-```python
-class AdvancedFunctionFlattener:
-    """Advanced function flattening with full dependency resolution."""
-    
-    def __init__(self, dependency_analyzer: FunctionDependencyAnalyzer):
-        self.analyzer = dependency_analyzer
-        
-    def flatten_with_dependencies(self, func: Callable) -> FlattenedFunction:
-        """Flatten function and all its local dependencies."""
-        
-        # 1. Analyze dependencies
-        dep_info = self.analyzer.analyze_function_dependencies(func)
-        
-        # 2. Detect and resolve circular dependencies
-        if dep_info.circular_dependencies:
-            return self._handle_circular_dependencies(dep_info)
-            
-        # 3. Topologically sort dependencies
-        sorted_deps = self._topological_sort(dep_info.dependencies)
-        
-        # 4. Generate flattened code
-        return self._generate_flattened_code(dep_info, sorted_deps)
-        
-    def _hoist_nested_functions(self, func_node: FunctionNode) -> List[FunctionNode]:
-        """Extract nested functions and hoist to module level."""
-        pass
-        
-    def _resolve_closure_variables(self, func_node: FunctionNode) -> str:
-        """Resolve closure variable dependencies."""
-        pass
+**The problem it solved had already been solved elsewhere.** Flattening was a
+workaround for a serialization layer that could not ship closures and nested
+functions. Since the by-value serialization work,
+`clustrix.utils.serialize_function` handles all of it. Verified in a fresh
+subprocess interpreter with the defining module off `sys.path`:
+
+```
+SUBPROCESS nested_fn           = 45 (direct=45) MATCH
+SUBPROCESS deep_nested         = 65 (direct=65) MATCH
+SUBPROCESS calls_module_helper = 19 (direct=19) MATCH
+SUBPROCESS uses_closure        = 40 (direct=40) MATCH
+SUBPROCESS exec_made           =  5 (direct=5)  MATCH
+SUBPROCESS with_args           = 21 (direct=21) MATCH
 ```
 
-## Implementation Strategy
+There is no function flattening helped that the serializer does not already
+handle.
 
-### Phase 1: Local vs External Function Detection
+## What the project lost
 
-**Approach:**
-- Use `inspect.getfile()` to get function source file
-- Compare against known external package locations (`site-packages`, etc.)
-- Build whitelist of known external packages (`torch`, `numpy`, etc.)
-- Build blacklist of local project directories
+Nothing that worked. The only real loss is the *aspiration* of rewriting
+functions whose source is unavailable — which was never achievable, because
+rewriting source requires source, and those are exactly the functions that do
+not have it.
 
-**Implementation:**
-```python
-def is_external_function(func: Callable) -> bool:
-    """Determine if function is from external package."""
-    try:
-        func_file = inspect.getfile(func)
-        
-        # Check if in site-packages or other external locations
-        external_indicators = [
-            'site-packages',
-            'dist-packages', 
-            '/usr/lib/python',
-            '/System/Library',
-            'conda/envs'
-        ]
-        
-        return any(indicator in func_file for indicator in external_indicators)
-    except (TypeError, OSError):
-        # Built-in functions, C extensions, etc.
-        return True
-```
+## If you are tempted to build this again
 
-### Phase 2: AST-Based Dependency Analysis
+Two questions to answer first, with evidence, before writing any code:
 
-**Function Call Detection:**
-```python
-class FunctionCallVisitor(ast.NodeVisitor):
-    """Find all function calls and imports in AST."""
-    
-    def visit_Call(self, node):
-        # Extract function name and module
-        if isinstance(node.func, ast.Name):
-            self.function_calls.append(node.func.id)
-        elif isinstance(node.func, ast.Attribute):
-            # Handle module.function calls
-            self.attribute_calls.append(self._extract_full_name(node.func))
-            
-    def visit_Import(self, node):
-        # Track imports for dependency resolution
-        pass
-        
-    def visit_ImportFrom(self, node):
-        # Track from imports
-        pass
-```
+1. **Name a function the serializer cannot ship.** Not a hypothetical — write
+   it, put it through `serialize_function`/`deserialize_function` in a fresh
+   interpreter that cannot import the defining module, and show the failure. If
+   you cannot produce one, there is no problem to solve.
+2. **Say how a rewritten function is proven equivalent to the original.**
+   Substituting a *different* function for the user's and returning its result
+   is only safe if equivalence is checked, and equivalence cannot be checked
+   without running the user's function — which is the thing you were trying to
+   avoid. The previous implementation never answered this, which is how it came
+   to return a hardcoded string.
 
-### Phase 3: Nested Function Hoisting
+Two related issues, #89 (extract global variables) and #90 (closure variable
+handling), were TODOs inside this machinery. They were closed by its removal
+rather than implemented: implementing them would have meant building on a
+foundation that had never held weight.
 
-**Strategy:**
-1. Parse function AST to find all nested function definitions
-2. Extract nested functions with their closure dependencies
-3. Convert closure variables to explicit parameters
-4. Hoist to module level with unique names
-5. Rewrite calling code to use hoisted functions
-
-**Example Transformation:**
-```python
-# Original
-def outer(x):
-    def inner(y):
-        return x + y  # Uses closure variable 'x'
-    return inner(5)
-
-# Flattened
-def outer_inner_hoisted(x, y):  # 'x' becomes parameter
-    return x + y
-
-def outer_flattened(x):
-    return outer_inner_hoisted(x, 5)  # Pass 'x' explicitly
-```
-
-### Phase 4: Cross-File Dependency Resolution
-
-**Module Discovery:**
-```python
-def find_local_modules(root_dir: str) -> Dict[str, ast.Module]:
-    """Find and parse all local Python modules."""
-    modules = {}
-    
-    for file_path in glob.glob(f"{root_dir}/**/*.py", recursive=True):
-        # Skip __pycache__, tests, etc.
-        if should_include_module(file_path):
-            try:
-                with open(file_path, 'r') as f:
-                    source = f.read()
-                modules[file_path] = ast.parse(source)
-            except SyntaxError:
-                continue  # Skip unparseable files
-                
-    return modules
-```
-
-**Function Resolution:**
-```python
-def resolve_function_definition(func_name: str, modules: Dict[str, ast.Module]) -> Optional[FunctionNode]:
-    """Find function definition across all local modules."""
-    
-    for module_path, module_ast in modules.items():
-        for node in ast.walk(module_ast):
-            if isinstance(node, ast.FunctionDef) and node.name == func_name:
-                return FunctionNode(
-                    name=func_name,
-                    source_code=ast.unparse(node),
-                    module_path=module_path,
-                    is_nested=False,
-                    is_local=True,
-                    dependencies=[],
-                    closure_vars=[]
-                )
-    return None
-```
-
-## Edge Cases and Solutions
-
-### 1. Name Reuse/Shadowing
-**Problem:** Same function name in different modules or scopes
-**Solution:** Use fully qualified names with module paths
-
-### 2. Circular Dependencies  
-**Problem:** Function A calls B, B calls A
-**Solution:** Detect cycles, merge into single flattened unit
-
-### 3. Dynamic Function Creation
-**Problem:** Functions created at runtime
-**Solution:** Conservative fallback to subprocess pattern
-
-### 4. Closure Variables
-**Problem:** Nested functions capture variables from outer scope
-**Solution:** Convert to explicit parameters, pass values through call chain
-
-### 5. Recursive Functions
-**Problem:** Function calls itself
-**Solution:** Preserve recursion in flattened form, no additional hoisting needed
-
-## Testing Strategy
-
-### Test Categories
-
-1. **Basic Nested Functions**
-   - Simple nested function
-   - Multiple nested functions
-   - Deeply nested (3+ levels)
-
-2. **Closure Variables**
-   - Simple closure capture
-   - Multiple closure variables
-   - Complex closure patterns
-
-3. **Cross-File Dependencies**
-   - Import from other local module
-   - Multiple cross-file dependencies
-   - Dependency chains across files
-
-4. **Edge Cases**
-   - Circular dependencies
-   - Name shadowing
-   - Recursive functions
-   - Dynamic imports
-
-5. **Integration Tests**
-   - Full end-to-end flattening
-   - GPU computation with flattening
-   - Performance benchmarks
-
-## Implementation Timeline
-
-**Week 1:** Core dependency analyzer and local vs external detection
-**Week 2:** Nested function hoisting and closure resolution  
-**Week 3:** Cross-file dependency resolution
-**Week 4:** Edge case handling and comprehensive testing
-**Week 5:** Integration with existing ClustriX system
-
-## Success Criteria
-
-1. **Functional:** All nested/inline functions can be automatically flattened
-2. **Correctness:** Flattened functions produce identical results to originals
-3. **Robustness:** Handles edge cases gracefully with clear error messages
-4. **Performance:** Flattening adds <1s overhead for typical functions
-5. **Maintainability:** Clean, well-tested code with comprehensive documentation
-
-## Open Questions
-
-1. **Scope:** Should we analyze entire project or just function's immediate module?
-2. **Caching:** How to cache dependency analysis results for performance?
-3. **Version Control:** How to handle code changes during long-running jobs?
-4. **Error Handling:** What level of fallback is acceptable when flattening fails?
+See also `COMPLEXITY_THRESHOLD_ANALYSIS.md`, which recorded the symptom that
+originally motivated flattening — jobs failing above a complexity threshold with
+`result_raw.pkl not found`. That symptom had a different cause, in the two-venv
+handoff, and was fixed there.
