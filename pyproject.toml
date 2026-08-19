@@ -224,6 +224,17 @@ omit = [
 ]
 
 [tool.coverage.report]
+# A floor, not a target. Measured coverage on the current tree is 68%
+# (7180 statements, 2311 missing); this sits two points under it so an
+# ordinary version-to-version difference across the 3.10/3.11/3.12 matrix
+# cannot turn a green run red, while a real regression still does.
+#
+# It is deliberately NOT 90. The previous `fail_under = 90` was set against
+# a coverage number nobody could reproduce, so it was removed -- and then
+# nothing replaced it, leaving the project measuring 68% and gating on
+# nothing at all (#115). Raise this as coverage rises; do not raise it
+# ahead of the tests.
+fail_under = 66
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",
