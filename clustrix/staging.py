@@ -642,6 +642,11 @@ class DataPackage:
         self._materialised = None
 
 
+def _is_rate_limited(exc: Exception) -> bool:
+    """Whether a hub error is "too many commits this hour"."""
+    return getattr(getattr(exc, "response", None), "status_code", None) == 429
+
+
 def _is_missing(exc: Exception) -> bool:
     """Whether a hub error means "already gone" rather than "failed"."""
     try:
@@ -937,12 +942,26 @@ def _upload(
         )
     )
 
-    api.create_commit(
-        repo_id=repo_id,
-        repo_type="dataset",
-        operations=operations,
-        commit_message=f"clustrix data package {package.name}",
-    )
+    try:
+        api.create_commit(
+            repo_id=repo_id,
+            repo_type="dataset",
+            operations=operations,
+            commit_message=f"clustrix data package {package.name}",
+        )
+    except Exception as exc:  # noqa: BLE001
+        if _is_rate_limited(exc):
+            raise StagingError(
+                f"HuggingFace is rate-limiting commits to {repo_id}, so data "
+                f"package {package.name!r} was not staged. The Hub allows a "
+                "fixed number of commits per hour per account; wait for the "
+                "window to roll over and try again. Nothing was uploaded -- a "
+                "package is one commit, so a refused commit leaves no partial "
+                "state to clean up."
+            ) from exc
+        raise StagingError(
+            f"Could not stage data package {package.name!r} to {repo_id}: {exc}"
+        ) from exc
 
     package.repo_id = repo_id
     package.path_in_repo = prefix

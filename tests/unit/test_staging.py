@@ -807,6 +807,29 @@ class TestNoSilentFallback:
             data_package(sample_tree, config=config)
 
 
+class TestErrorTranslation:
+    """A raw hub traceback tells the user nothing about what to do next."""
+
+    def test_a_rate_limited_commit_is_recognised(self):
+        from clustrix.staging import _is_rate_limited, _is_missing
+
+        class _Response:
+            def __init__(self, status_code):
+                self.status_code = status_code
+
+        class _HubError(Exception):
+            def __init__(self, status_code):
+                super().__init__("boom")
+                self.response = _Response(status_code)
+
+        assert _is_rate_limited(_HubError(429))
+        assert not _is_rate_limited(_HubError(404))
+        assert not _is_rate_limited(RuntimeError("boom"))
+
+        assert _is_missing(_HubError(404))
+        assert not _is_missing(_HubError(429))
+
+
 class TestNoTokenIsHonest:
     def test_the_error_says_how_to_supply_a_token(self, monkeypatch, tmp_path):
         """Never a silent fallback -- the remote path either works or raises."""
