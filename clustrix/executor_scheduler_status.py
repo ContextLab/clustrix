@@ -444,8 +444,6 @@ class SchedulerStatusManager:
             )
         return detail
 
-
-
     def _authenticated_error_payload(
         self, job_id: str, job_info: Dict[str, Any]
     ) -> Optional[bytes]:

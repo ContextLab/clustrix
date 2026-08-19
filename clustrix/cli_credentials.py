@@ -5,7 +5,6 @@ including interactive setup, validation, and migration from existing systems.
 """
 
 import os
-import sys
 import subprocess
 from pathlib import Path
 from typing import Dict

@@ -79,8 +79,6 @@ class ConnectionManager:
         self.ssh_client.connect(**connect_kwargs)
         self.sftp_client = self.ssh_client.open_sftp()
 
-
-
     def execute_remote_command(self, command: str, check: bool = False) -> tuple:
         """Execute command on remote cluster.
 
@@ -215,6 +213,3 @@ class ConnectionManager:
         if self.ssh_client:
             self.ssh_client.close()
             self.ssh_client = None
-
-
-

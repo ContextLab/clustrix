@@ -304,9 +304,6 @@ class ClusterExecutor:
         job_id = self.submit_job(func_data, job_config)
         return self.wait_for_result(job_id)
 
-
-
-
     def __del__(self):
         """Cleanup resources."""
         self.disconnect()
@@ -332,12 +329,9 @@ class ClusterExecutor:
         """Set SFTP client for backward compatibility."""
         self.connection_manager.sftp_client = value
 
-
-
     def _setup_ssh_connection(self):
         """Backward compatibility method."""
         return self.connection_manager.setup_ssh_connection()
-
 
     def _execute_remote_command(self, command: str) -> tuple:
         """Backward compatibility method."""
@@ -417,5 +411,3 @@ class ClusterExecutor:
         return self.scheduler_manager.status_manager._check_slurm_job_status_robust(
             job_id, self.scheduler_manager.active_jobs
         )
-
-
