@@ -136,8 +136,9 @@ PBS uses different resource syntax compared to SLURM:
 
 .. code-block:: python
 
+   # cluster-required: submits a real job to a live PBS cluster
    from clustrix import cluster
-   
+
    @cluster(
        cores=8,               # Number of CPU cores
        memory="16GB",         # Memory requirement
@@ -227,6 +228,7 @@ Array-style Processing
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live PBS cluster
    @cluster(cores=4, memory="8GB", queue="batch")
    def process_file(file_id, operation="mean"):
        """Process a single file."""
@@ -275,6 +277,7 @@ Bioinformatics Pipeline
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live PBS cluster
    @cluster(cores=8, memory="32GB", time="06:00:00", queue="bioqueue")
    def analyze_genome_sequence(sequence_id, analysis_params):
        """Analyze a genome sequence."""
@@ -337,6 +340,7 @@ Resource Monitoring
 
 .. code-block:: python
 
+   # cluster-required: submits a real job to a live PBS cluster
    @cluster(cores=4, memory="8GB", time="01:00:00")
    def resource_intensive_task():
        """Task that monitors its resource usage."""
@@ -385,6 +389,7 @@ Handling PBS-specific Errors
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live PBS cluster
    @cluster(cores=2, memory="4GB", queue="debug")
    def debug_function(test_case="success"):
        """Function for testing error handling."""
@@ -402,8 +407,12 @@ Handling PBS-specific Errors
            return "This took too long"
            
        elif test_case == "import_error":
-           # Missing package
-           import nonexistent_package
+           # Simulate a package missing from the remote environment. Written
+           # as importlib.import_module() rather than a literal `import`
+           # statement so the name doesn't have to resolve to a real,
+           # installed package just to demonstrate the failure mode.
+           import importlib
+           importlib.import_module("nonexistent_package")
            return "This package doesn't exist"
            
        else:
@@ -425,11 +434,12 @@ Debugging with Logs
 
 .. code-block:: python
 
+   # cluster-required: submits a real job to a live PBS cluster
    import logging
    logging.basicConfig(level=logging.DEBUG)
-   
+
    from clustrix import configure, cluster
-   
+
    # Enable detailed logging
    configure(
        cluster_type="pbs",
@@ -466,6 +476,8 @@ Queue Selection Strategy
 
 .. code-block:: python
 
+   from clustrix import cluster
+
    def select_pbs_queue(cores, memory_gb, time_hours):
        """Select appropriate PBS queue based on resources."""
        
@@ -497,6 +509,7 @@ Efficient Data Handling
 
 .. code-block:: python
 
+   # cluster-required: submits a real job to a live PBS cluster
    @cluster(cores=4, memory="16GB", time="03:00:00")
    def efficient_data_processing(chunk_size=1000):
        """Process data in chunks to manage memory."""
@@ -538,9 +551,10 @@ Scientific Computing Workflow
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live PBS cluster
    from clustrix import configure, cluster
    import numpy as np
-   
+
    # Configure PBS cluster
    configure(
        cluster_type="pbs",

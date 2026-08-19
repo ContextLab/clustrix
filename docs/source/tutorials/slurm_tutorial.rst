@@ -188,8 +188,9 @@ Execute a basic function on the SLURM cluster:
 
 .. code-block:: python
 
+   # cluster-required: submits a real job to a live SLURM cluster
    from clustrix import cluster
-   
+
    @cluster(cores=4, memory="8GB", time="01:00:00")
    def compute_pi(n_samples):
        """Monte Carlo estimation of pi."""
@@ -213,6 +214,8 @@ Resource Specification
 SLURM-specific resource options:
 
 .. code-block:: python
+
+   from clustrix import cluster
 
    @cluster(
        cores=16,              # Number of CPU cores
@@ -310,6 +313,7 @@ Process multiple datasets in parallel:
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live SLURM cluster
    @cluster(cores=4, memory="8GB", parallel=True)
    def process_dataset(dataset_id, analysis_type="standard"):
        """Process a single dataset."""
@@ -350,6 +354,7 @@ Distributed hyperparameter tuning:
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live SLURM cluster
    @cluster(cores=8, memory="16GB", time="03:00:00")
    def train_model(params):
        """Train ML model with given hyperparameters."""
@@ -410,6 +415,7 @@ Job Status Monitoring
 
 .. code-block:: python
 
+   # cluster-required: connects to and submits a job on a live SLURM cluster
    from clustrix.executor import ClusterExecutor
    from clustrix.config import get_config
    
@@ -434,6 +440,7 @@ Error Handling
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live SLURM cluster
    @cluster(cores=2, memory="4GB")
    def error_prone_function(divide_by_zero=False):
        """Function that may raise errors."""
@@ -463,6 +470,8 @@ Resource Estimation
 ~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python
+
+   from clustrix import cluster
 
    # Estimate resources based on problem size
    def estimate_resources(data_size_gb):
@@ -556,9 +565,10 @@ Here's a complete scientific computing example:
 
 .. code-block:: python
 
+   # cluster-required: submits real jobs to a live SLURM cluster
    from clustrix import configure, cluster
    import numpy as np
-   
+
    # Configure SLURM cluster
    configure(
        cluster_type="slurm",

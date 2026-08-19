@@ -51,9 +51,10 @@ Method 3: Python API
 
 .. code-block:: python
 
+   # cluster-required: connects to and deploys a key on a live host
    from clustrix import setup_ssh_keys_with_fallback
    from clustrix.config import ClusterConfig
-   
+
    config = ClusterConfig(
        cluster_type="slurm",
        cluster_host="cluster.university.edu", 
@@ -191,6 +192,8 @@ Key Rotation and Management
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Force generation of new keys (for security rotation)
    result = setup_ssh_keys_with_fallback(
        config, 
@@ -279,10 +282,11 @@ Here's a complete end-to-end example:
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host and submits a real job
    import clustrix
    from clustrix import setup_ssh_keys_with_fallback, cluster
    from clustrix.config import ClusterConfig
-   
+
    # Step 1: Automated SSH setup
    config = ClusterConfig(
        cluster_type="slurm",
@@ -377,10 +381,12 @@ Common Issues and Solutions
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Enable debug logging
    import logging
    logging.basicConfig(level=logging.DEBUG)
-   
+
    # Try setup with detailed output
    result = setup_ssh_keys_with_fallback(config)
    print(f"Detailed result: {result}")
@@ -397,6 +403,8 @@ Common Issues and Solutions
 
 .. code-block:: python
 
+   # cluster-required: connects to a live host (also assumes `config` from
+   # the Method 3 example above)
    # Try force refresh to clean up old keys
    result = setup_ssh_keys_with_fallback(
        config, 
