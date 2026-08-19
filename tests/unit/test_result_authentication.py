@@ -392,7 +392,9 @@ class TestSerializerRequirementIsExplicit:
         # Python 3.12, so a find_module-based blocker is simply ignored there
         # and the child imports dill perfectly well -- the test then passes
         # vacuously on <=3.11 and fails on 3.12 for the wrong reason.
-        (blocker / "sitecustomize.py").write_text(textwrap.dedent("""
+        (blocker / "sitecustomize.py").write_text(
+            textwrap.dedent(
+                """
                 import sys
                 class _Block:
                     def find_spec(self, name, path=None, target=None):
@@ -400,7 +402,9 @@ class TestSerializerRequirementIsExplicit:
                             raise ImportError(name)
                         return None
                 sys.meta_path.insert(0, _Block())
-                """))
+                """
+            )
+        )
         env = dict(os.environ, CLUSTRIX_RESULT_KEY=KEY, PYTHONPATH=str(blocker))
         result = subprocess.run(
             [sys.executable, "-c", program],
