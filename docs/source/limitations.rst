@@ -22,13 +22,8 @@ Functions whose source cannot be read
 value -- they embed the code object -- so the worker never needs the source
 text.
 
-Older versions of this documentation said such functions "cannot be
-serialized". That was wrong, and it mattered: the claim was paired with
-machinery that substituted a rewritten or hardcoded function whenever
-``inspect.getsource`` failed, which at one point returned the literal string
-``"Function execution completed"`` as your result. That machinery has been
-deleted (issues #89, #90). The function you wrote is the function that gets
-serialized. Nothing is substituted for it, ever.
+The function you wrote is the function that gets serialized. Nothing is
+substituted for it, ever, and no code path rewrites it.
 
 **What is actually lost** is everything that reads source text:
 
@@ -131,6 +126,65 @@ really is in site-packages but the metadata is unreproducible, notably VCS
 installs.
 
 
+.. _limitation-local-cores:
+
+``cores`` does nothing on the local backend
+--------------------------------------------
+
+With no cluster configured, ``@cluster(cores=8)`` runs your function in the
+process that called it, on one core. The number you passed is not a hint that
+was ignored under load; it is not consulted at all. Nothing forks, nothing
+spawns, and the call returns when the function returns.
+
+.. code-block:: python
+
+   import os
+   import clustrix
+
+   clustrix.configure(cluster_type="local")
+
+   @clustrix.cluster(cores=8)
+   def where_did_it_run(n):
+       return os.getpid(), sum(i * i for i in range(n))
+
+   pid, _ = where_did_it_run(200_000)
+   print("this interpreter:", os.getpid())
+   print("the job ran in:  ", pid)
+   print("same process?    ", pid == os.getpid())
+
+.. code-block:: text
+
+   this interpreter: 44824
+   the job ran in:   44824
+   same process?     True
+
+This is `issue #152 <https://github.com/ContextLab/clustrix/issues/152>`_ and it
+is a defect rather than a design position. It matters most to the person
+sizing up the library, since the local backend is what the quickstart reaches
+for first and "eight cores" is a reasonable thing to believe you asked for.
+
+The parallel machinery underneath is real. :class:`clustrix.local_executor.LocalExecutor`
+builds a ``ProcessPoolExecutor`` or a ``ThreadPoolExecutor`` and gives the
+speedups you would expect; what is missing is the wire from ``@cluster`` to it.
+:func:`clustrix.local_executor.choose_executor_type` decides which pool you
+get, in two steps. First it calls ``pickle.dumps`` on your function and on
+every argument, and any failure selects threads, because a process pool has no
+way to send an unpicklable object to a worker. Then it reads
+``inspect.getsource`` and scans the text for ``open(``, ``requests.``,
+``urllib.``, ``http.``, ``ftp.``, ``sql``, ``database``, ``time.sleep`` and
+``threading.``; a hit selects threads on the theory that the work releases the
+GIL. Otherwise you get processes. That second step is a substring scan over
+source text, so it is fooled by a variable called ``sqlite_path`` and blind to
+I/O reached through a helper. Pass ``use_threads=True`` or ``use_threads=False``
+to say what you meant.
+
+**Workarounds:** drive :class:`~clustrix.local_executor.LocalExecutor` yourself,
+or use ``joblib`` or ``concurrent.futures``, which is what the local backend
+would be wrapping anyway. The
+:doc:`local-parallelism notebook <notebooks/local_parallel_comparison>`
+measures both the gap and what the pools are worth.
+
+
 Loop detection is much narrower than it looks
 ---------------------------------------------
 
@@ -225,21 +279,17 @@ The two paths use **different keyword names**, which is easy to trip over:
      - ``_chunk_range_<loop variable>`` **and** ``_chunk_index``
 
 Either path declines, and logs at ``INFO``, when the function cannot accept
-its chunk. Neither injects the argument any more: doing so used to raise
-``TypeError: ... got an unexpected keyword argument '_chunk_range_i'`` on the
-remote path, and on the local path the ``TypeError`` was swallowed into a
-silent sequential run.
+its chunk. Neither injects the keyword regardless; a function that declares
+neither the parameter nor ``**kwargs`` simply runs whole.
 
 Both paths also require the loop's range to be a **literal** ``range(<int>)``.
 A range whose bound is only known at run time -- ``range(n)``,
-``range(len(data))`` -- is declined. It used to be guessed as ``range(10)``,
-which meant the caller silently received a tenth of the work.
+``range(len(data))`` -- is declined, because there is no way to split a bound
+the analysis cannot read.
 
 When ``_create_local_work_chunks`` splits a loop, it hands each chunk to your
 function as a keyword argument named ``_parallel_<loop variable>``. A function
-that neither declares that parameter nor collects ``**kwargs`` cannot receive
-it, so clustrix declines to parallelize and runs the function sequentially --
-and, since this was previously silent, it now says so:
+that cannot receive it is run sequentially, and clustrix says so:
 
 .. code-block:: text
 
@@ -441,27 +491,28 @@ database -- and return only a path or a summary.
 
 .. _removed-backends:
 
-Backends removed in v0.2.0
---------------------------
+Backends Clustrix does not support
+----------------------------------
 
-Clustrix once shipped seven more execution backends. All seven were implemented
-in full, and not one of them had ever been shown to run a job end to end
-against real hardware. Rather than keep publishing them as if they worked, they
-were removed in v0.2.0.
+Seven schedulers and cloud providers you might expect to find are absent. If
+you came here looking for one of them, this is the list, and each row links to
+the issue tracking its arrival.
 
-Nothing about them was deprecated gently first, and that is deliberate: a
-backend that has never completed a job is not a feature with rough edges, it is
-an untested code path with a plausible-looking API in front of it. The failure
-mode is that you write against it, it appears to submit, and you find out much
-later that no result was ever produced.
+The gate for admitting any of them is the same gate the four supported backends
+have already passed: a real job, on real hardware, whose result comes back and
+is checked in as evidence under ``docs/evidence/``. Clustrix will not publish a
+backend on the strength of code that compiles. A backend that has never
+completed a job is not a feature with rough edges; it is an untested code path
+with a plausible-looking API in front of it, and the failure mode is that you
+write against it, it appears to submit, and you learn much later that no result
+was ever produced.
 
-Each removed backend has a tracking issue. They are planned for a future
-release, and the gate for each one is the same as the gate the surviving
-backends already passed: a real job, on real hardware, whose result comes back
-and is checked in as evidence.
+Setting ``cluster_type`` to any of these names raises a ``ValueError`` that
+names the backend and its issue, so you find out at configuration time rather
+than three stages into a submission.
 
 =================  =============  ====================================================
-Backend            Issue          What it was
+Backend            Issue          What the name would select
 =================  =============  ====================================================
 PBS                `#140`_        ``cluster_type="pbs"`` -- the PBS/Torque scheduler.
 SGE                `#141`_        ``cluster_type="sge"`` -- Sun/Son of Grid Engine.
@@ -481,17 +532,15 @@ Lambda Cloud       `#146`_        ``provider="lambda"`` -- Lambda Labs GPU cloud
 .. _#145: https://github.com/ContextLab/clustrix/issues/145
 .. _#146: https://github.com/ContextLab/clustrix/issues/146
 
-Two more things went with them:
+Two adjacent things are absent for the same reason:
 
-* **The HuggingFace Spaces provider** (``provider="huggingface"``). This is a
-  different thing from ``cluster_type="huggingface"``, which is HuggingFace
-  **Jobs** and is verified working and fully supported. Only Spaces was
-  removed.
-* **The cost monitoring and cloud pricing API** --
+* **A HuggingFace Spaces provider.** Take care with the name: HuggingFace
+  *Jobs* is ``cluster_type="huggingface"``, and that one is supported and
+  verified. Spaces is a different product and Clustrix has no backend for it.
+* **A cost monitoring and cloud pricing API** -- no
   ``cost_tracking_decorator``, ``get_cost_monitor``, ``start_cost_monitoring``,
-  ``generate_cost_report`` and ``get_pricing_info``. These estimated the cost
-  of running on the cloud VM backends, so with those backends gone the API had
-  nothing left to price.
+  ``generate_cost_report`` or ``get_pricing_info``. Those priced the cloud VM
+  backends, which are not here to be priced.
 
 What to do instead
 ~~~~~~~~~~~~~~~~~~
@@ -503,8 +552,8 @@ What to do instead
   which runs your function in a container on rented GPUs and is verified end to
   end. Otherwise, bring up a VM yourself and use ``cluster_type="ssh"``, which
   is also verified.
-* **Cost estimates**: use your provider's own pricing calculator. Clustrix no
-  longer ships one.
+* **Cost estimates**: use your provider's own pricing calculator. Clustrix
+  does not ship one.
 
 
 Windows clients: config and credential files are not permission-restricted
@@ -573,9 +622,12 @@ Smaller sharp edges
   keys *are* validated and will refuse metacharacters.
 * **``cores=0`` falls back to the default.** The merge is written as
   ``cores or config.default_cores``, so any falsy value takes the default.
-* **Unknown ``@cluster`` keywords are warned about, not rejected**, and only on
-  the first call -- so a typo in a keyword name is easy to miss if you are not
-  watching the log.
+* **Unknown ``@cluster`` keywords are warned about, not rejected.** The
+  warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
+  a keyword name is easy to miss if nothing is watching that logger. This is
+  how ``@cluster(cluster_type="local")`` fails: ``cluster_type`` is a
+  *configuration* setting, not a decorator keyword, so the decorator warns and
+  ignores it. Use ``configure(cluster_type="local")``.
 * **Some recognised ``@cluster`` keywords are still ignored by their backend.**
   ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted and placed in
   ``job_config``, but ``HFJobsManager`` resolves them from configuration

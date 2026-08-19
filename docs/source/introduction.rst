@@ -78,13 +78,14 @@ and Clustrix polls it. On success it downloads ``result.pkl``; on failure it
 downloads ``error.pkl`` and re-raises. :doc:`execution_model` describes each
 of those stages in detail.
 
-One consequence worth stating up front, because older documentation claimed
-the opposite: **serialization does not need your function's source code.**
-A function defined in a REPL, a notebook cell, or by ``exec`` serializes and
-runs correctly. Only the *source-based* features need
-``inspect.getsource()`` -- automatic loop parallelization
-(``@cluster(parallel=True)``) parses the function body with ``ast``, and
-quietly does nothing when the source is unavailable.
+One consequence is worth stating up front: **serialization does not need your
+function's source code.** In other words, a function you typed into a REPL, a
+notebook cell, or built with ``exec`` serializes and runs correctly, because
+dill and cloudpickle work from the compiled code object rather than from text.
+Only the *source-based* features need ``inspect.getsource()``. Automatic loop
+parallelization (``@cluster(parallel=True)``) is the one that matters here: it
+parses the function body with ``ast``, and quietly does nothing when there is
+no source to parse.
 
 .. _what-clustrix-is-not:
 
@@ -112,11 +113,22 @@ queue time, and a download. That is seconds at best, and on a busy HPC queue
 it is however long the queue is. Sending a millisecond of work through it is
 pure loss.
 
-**It is not a data mover.** Clustrix ships your *code and arguments*, not your
-dataset. If your function needs a 200 GB file, that file has to already be
-reachable from the worker. The
-:doc:`filesystem utilities <tutorials/filesystem_tutorial>` help you inspect
-and locate remote data, but they are not a transfer service for bulk inputs.
+**It does not stage your data for you.** What travels to the worker is the
+pickled function and its pickled arguments, and nothing else. A dataset your
+function opens by path has to already be reachable from the worker -- on a
+shared filesystem, in object storage it can authenticate to, or somewhere you
+put it yourself with ``scp`` or ``rsync`` beforehand. The
+:doc:`filesystem utilities <tutorials/filesystem_tutorial>` are read-only:
+``cluster_ls``, ``cluster_glob``, ``cluster_stat`` and their siblings let you
+inspect and locate remote data, and they are not a transfer service for bulk
+inputs. Passing a 200 GB array as an *argument* is worse still, since it would
+be pickled into the payload.
+
+Explicit input and output staging -- declaring the files a call needs and the
+files it produces, and having Clustrix move them -- is planned rather than
+present. `Issue #151
+<https://github.com/ContextLab/clustrix/issues/151>`_ carries the design.
+Until it lands, treat the paragraph above as the working rule.
 
 .. _alternatives:
 
@@ -179,13 +191,19 @@ joblib
 ~~~~~~
 
 ``joblib.Parallel`` is the closest thing in spirit -- parallelize a loop with
-minimal ceremony -- and for multi-core work on one machine it is the simpler
-tool. Clustrix's ``prefer_local_parallel`` / ``parallel=True`` local path is
-solving the same problem and does not replace joblib.
+minimal ceremony -- and for multi-core work on one machine it is the better
+tool by a wide margin. Reach for joblib there. Clustrix's own local path does
+not compete with it: ``@cluster(cores=N)`` with no cluster configured runs your
+function in the calling process, one core, and ``cores`` is ignored
+(`issue #152 <https://github.com/ContextLab/clustrix/issues/152>`_). The
+in-process pools that :class:`clustrix.local_executor.LocalExecutor` builds are
+real and do give a speedup, but you have to drive them yourself; see
+:doc:`the local-parallelism notebook <notebooks/local_parallel_comparison>`.
 
-The difference is reach. joblib's backends are processes and threads on the
-current machine (its distributed backends require Dask or Ray underneath).
-Clustrix's target is a machine you do not have a shell on right now.
+The difference that does favour Clustrix is reach. joblib's backends are
+processes and threads on the current machine, and its distributed backends
+require Dask or Ray underneath. Clustrix's target is a machine you do not have
+a shell on right now.
 
 Plain SSH + rsync
 ~~~~~~~~~~~~~~~~~
@@ -230,17 +248,17 @@ Do not use it if:
 Backend maturity
 ----------------
 
-Clustrix is at version 0.2.0 and ships exactly four backends, each of which
-has been exercised against the real thing. This is tracked in
-:ref:`supported-cluster-types` on the front page: ``slurm``, ``ssh`` and
-``huggingface`` have each run a real job on real infrastructure and returned
-its result, and ``local`` runs in-process.
+Clustrix ships exactly four backends, and each one has been exercised against
+the real thing. ``slurm``, ``ssh`` and ``huggingface`` have each submitted a
+real job to real infrastructure and returned its result; ``local`` runs
+in-process. :ref:`supported-cluster-types` on the front page is the
+authoritative list, and ``cluster_type`` accepts nothing outside it.
 
 PBS, SGE, Kubernetes and the AWS / GCP / Azure / Lambda Cloud VM providers are
-**not currently supported**. They were implemented but never shown to run a job
-end to end, so they were removed in v0.2.0 rather than published as if they
-worked. Each is planned for a future release and has a tracking issue --
-see :ref:`removed-backends`.
+**not supported**. Setting ``cluster_type`` to any of them raises a
+``ValueError`` that names the backend and its tracking issue rather than
+failing somewhere deeper. Each is planned for a future release -- see
+:ref:`removed-backends`.
 
 Where to go next
 ----------------
