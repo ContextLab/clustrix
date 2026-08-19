@@ -57,18 +57,19 @@ end it::
     clustrix.delete_data_package("<id>")   # a way out without the object
 
 **Nothing is ever cleaned up automatically.** There is no TTL, no reaper, no
-eviction, and no deletion when a job finishes or a ``with`` block ends.
-``cleanup_on_success`` governs the job directory and does not touch staged
-data. Whether a dataset is still needed is the user's call, and the only way it
-goes away is an explicit :meth:`DataPackage.delete` or
-:func:`delete_data_package`.
+eviction, and no deletion when a job finishes. ``cleanup_on_success`` governs
+the job directory and does not touch staged data. Whether a dataset is still
+needed is the user's call, and the only way it goes away is an explicit
+:meth:`DataPackage.delete` or :func:`delete_data_package`. There is
+deliberately no context-manager form, because a ``with`` block that quietly
+deleted the upload on the way out would be exactly the automatic cleanup this
+design rejects.
 
 ``delete`` never touches the files you packaged. It removes the package's
 folder in the remote store and any copy clustrix itself materialised into its
 own cache. An upload is a single atomic commit, so there is no half-finished
-package to clean up in the first place. Deleting
-something that is already gone is not an error; failing to delete something
-that is there raises.
+package to clean up in the first place. Deleting something that is already gone
+is not an error; failing to delete something that is there raises.
 
 The package object is the durable handle. It is plain data -- no client, no
 socket, no credential -- so the way to keep a dataset across sessions is to

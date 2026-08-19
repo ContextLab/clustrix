@@ -539,11 +539,11 @@ class TestTravellingOverRealSFTP:
     def _isolated_known_hosts(self, tmp_path, monkeypatch):
         """Keep ``auto_add`` away from the real ``~/.ssh/known_hosts``.
 
-        ``ssh_security._load_known_hosts`` expanduser's that path, and paramiko's
-        AutoAddPolicy then *saves* back to whatever file was loaded -- rewriting
-        the whole thing, not appending. Pointing HOME at tmp_path means these
-        tests cannot add to, or truncate, the developer's real file. See the
-        defect reported alongside this work.
+        ``ssh_security._load_known_hosts`` expanduser's that path, and the
+        auto-add policy paramiko installs then *saves* back to whatever file was
+        loaded -- rewriting the whole thing, not appending. Pointing HOME at
+        tmp_path means these tests cannot add to, or truncate, the developer's
+        real file. See issue #157.
         """
         home = tmp_path / "home"
         (home / ".ssh").mkdir(parents=True)
