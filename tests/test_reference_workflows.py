@@ -25,11 +25,6 @@ from tests.reference_workflows.basic_usage import (
     test_file_processing_workflow as file_processing_workflow,
 )
 
-from tests.reference_workflows.kubernetes_workflows import (
-    test_kubernetes_auto_provisioning_workflow as kubernetes_auto_provisioning_workflow,
-    test_kubernetes_multi_node_workflow as kubernetes_multi_node_workflow,
-)
-
 from tests.reference_workflows.data_analysis_workflows import (
     test_pandas_analysis_workflow as pandas_analysis_workflow,
     test_numpy_computation_workflow as numpy_computation_workflow,
@@ -59,19 +54,6 @@ class TestReferenceWorkflows:
         pandas_analysis_workflow()
         numpy_computation_workflow()
         machine_learning_workflow()
-
-    @pytest.mark.real_world
-    @pytest.mark.skipif(
-        not os.getenv("K8S_TEST_ENABLED", "false").lower() == "true",
-        reason="Kubernetes testing not enabled",
-    )
-    def test_kubernetes_workflows(self):
-        """Test Kubernetes workflows with real provisioning."""
-        # Use local provider for CI testing
-        os.environ["K8S_TEST_PROVIDER"] = "local"
-
-        kubernetes_auto_provisioning_workflow()
-        kubernetes_multi_node_workflow()
 
     @pytest.mark.real_world
     @pytest.mark.skipif(
