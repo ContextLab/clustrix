@@ -138,6 +138,39 @@ def validate_env_var_name(name: str) -> str:
     return str(name)
 
 
+def _evaluate_literal_range(range_expression: str):
+    """Evaluate a ``range(...)`` expression, but only from literal arguments.
+
+    The previous implementation called ``eval()`` on text sliced out of the
+    user's source, with a comment admitting it was dangerous. It also could not
+    tell "this range is range(0, 10)" from "I could not work this out", because
+    failure fell through to a hardcoded ``range(10)``.
+
+    Returns the range when every argument is a literal integer, and ``None``
+    when the expression depends on anything only known at run time (a variable,
+    ``len(data)``, an attribute). ``None`` means "do not parallelize", never
+    "assume ten".
+    """
+    tree = ast.parse(range_expression, mode="eval")
+    call = tree.body
+    if not isinstance(call, ast.Call):
+        return None
+    if not isinstance(call.func, ast.Name) or call.func.id != "range":
+        return None
+    if call.keywords:
+        return None
+
+    bounds = []
+    for argument in call.args:
+        value = ast.literal_eval(argument)
+        if not isinstance(value, int) or isinstance(value, bool):
+            return None
+        bounds.append(value)
+    if not 1 <= len(bounds) <= 3:
+        return None
+    return range(*bounds)
+
+
 def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str, Any]]:
     """
     Analyze function to detect parallelizable loops.
@@ -193,23 +226,31 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
             # In practice, you'd want more sophisticated analysis
             loop = visitor.loops[0]
             if loop["type"] == "for" and "range(" in loop["iterable"]:
-                # Try to extract range information
+                # The range has to be known exactly, because it decides how the
+                # work is split. Guessing it silently changes the answer: the
+                # previous fallback here substituted range(10), so a loop over
+                # range(1000) whose bounds could not be read was chunked as ten
+                # iterations and the caller got a tenth of the work back with no
+                # error. If the range cannot be determined, refuse to
+                # parallelize -- running the loop whole is always correct.
+                range_str = loop["iterable"]
+                start = range_str.find("range(")
+                end = range_str.find(")", start)
+                if start == -1 or end == -1:
+                    return None
+                range_part = range_str[start : end + 1]
                 try:
-                    # This is a simplified extraction
-                    range_str = loop["iterable"]
-                    if "range(" in range_str:
-                        range_part = range_str[
-                            range_str.find("range(") : range_str.find(
-                                ")", range_str.find("range(")
-                            )
-                            + 1
-                        ]
-                        range_obj = eval(
-                            range_part
-                        )  # Dangerous in practice, needs safer evaluation
-                        loop["range"] = range_obj
+                    range_obj = _evaluate_literal_range(range_part)
                 except Exception:
-                    loop["range"] = range(10)  # Default fallback
+                    logger.info(
+                        "Not parallelizing this loop: its range %r could not be "
+                        "evaluated without running the function.",
+                        range_part,
+                    )
+                    return None
+                if range_obj is None:
+                    return None
+                loop["range"] = range_obj
 
                 return loop
 
