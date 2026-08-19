@@ -251,7 +251,7 @@ class TestRemovedBackendsAreExplained:
 
         message = str(excinfo.value)
         assert cluster_type in message
-        assert "no longer implements" in message
+        assert "no longer implemented" in message
         assert "never been verified against real hardware" in message
         assert f"#{issue}" in message
         for supported in SUPPORTED_CLUSTER_TYPES:

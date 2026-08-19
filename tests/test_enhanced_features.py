@@ -416,9 +416,21 @@ class TestConfigurationEnhancements:
         assert config.package_manager == "uv"
 
     def test_configure_rejects_a_setting_from_a_removed_backend(self):
-        """configure() must not silently accept a field that no longer exists."""
-        with pytest.raises(ValueError, match="Unknown configuration parameter"):
+        """configure() must not silently accept a field that no longer exists.
+
+        The message has to name the backend and its tracking issue. It used
+        to come back through difflib as "did you mean ...?" pointed at an
+        unrelated field, which sent the reader after the wrong thing.
+        """
+        with pytest.raises(ValueError) as excinfo:
             configure(k8s_namespace="production")
+
+        message = str(excinfo.value)
+        assert "k8s_namespace" in message
+        assert "Kubernetes" in message
+        assert "removed" in message
+        assert "#142" in message
+        assert "did you mean" not in message
 
 
 class TestBackwardCompatibility:

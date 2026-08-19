@@ -429,7 +429,7 @@ class TestJobSubmissionEdgeCases:
         func_data = {"function": b"test", "args": b"test", "kwargs": b"test"}
         job_config = {"cores": 2}
 
-        with pytest.raises(ValueError, match="Unsupported cluster type"):
+        with pytest.raises(ValueError, match="is not a supported cluster type"):
             mock_executor.submit_job(func_data, job_config)
 
 
