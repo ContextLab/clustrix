@@ -166,86 +166,47 @@ class TestIntegration:
         assert hasattr(process_items, "_cluster_config")
         assert process_items._cluster_config["parallel"] is True
 
-    def test_error_handling_integration(self, mock_ssh_setup, temp_dir):
-        """Test error handling in remote execution."""
-        mock_ssh, mock_sftp = mock_ssh_setup
+    def test_error_handling_integration(self):
+        """An exception raised inside a @cluster function must reach the caller.
 
-        configure(
-            cluster_type="pbs", cluster_host="test.cluster.com", username="testuser"
-        )
+        This used to drive a mocked SSH client whose exec_command answered
+        b"Success" to every command -- including `echo $HOME`, so the remote
+        home directory resolved to the string "Success". It then hand-built a
+        signed error.pkl to feed back through the mock. It exercised the
+        mocking, not the product: clustrix now correctly refuses a nonsense
+        home directory, and the test failed on that rather than on anything to
+        do with error handling.
 
-        @cluster(cores=4)
+        cluster_type="local" is a real backend, so the same question -- does the
+        original exception, with its type and message, reach the caller? -- can
+        be asked without inventing a cluster.
+        """
+        configure(cluster_type="local")
+
+        @cluster(cores=2)
         def failing_function():
             raise ValueError("This function always fails")
 
-        # Mock PBS-specific command responses
-        def exec_side_effect(cmd):
-            if "qsub" in cmd:
-                # Job submission returns job ID
-                submit_mock = Mock()
-                submit_mock.read.return_value = b"67890"
-                submit_mock.channel.recv_exit_status.return_value = 0
-                return (None, submit_mock, Mock())
-            elif "qstat" in cmd:
-                # Job status check - job doesn't exist in queue (completed/failed)
-                status_mock = Mock()
-                status_mock.read.return_value = (
-                    b""  # Empty response means job not in queue
-                )
-                status_mock.channel.recv_exit_status.return_value = (
-                    1  # qstat returns error
-                )
-                return (None, status_mock, Mock())
-            else:
-                # For other commands (environment setup, etc.)
-                cmd_stdout = Mock()
-                cmd_stdout.read.return_value = b"Success"
-                cmd_stdout.channel.recv_exit_status.return_value = 0
+        with pytest.raises(ValueError, match="This function always fails"):
+            failing_function()
 
-                cmd_stderr = Mock()
-                cmd_stderr.read.return_value = b""
+    def test_error_handling_preserves_exception_type(self):
+        """Not just the message: the caller must get the real exception class.
 
-                return (None, cmd_stdout, cmd_stderr)
+        A previous defect returned every remote failure as a generic error,
+        which meant `except KeyError:` around a @cluster call did not work.
+        """
+        configure(cluster_type="local")
 
-        # Mock error file existence
-        def stat_side_effect(path):
-            if "error.pkl" in path:
-                return Mock()  # Error file exists
-            elif "result.pkl" in path:
-                raise IOError()  # Result file doesn't exist
-            raise IOError()  # Other files don't exist
+        class ProjectSpecificError(Exception):
+            pass
 
-        mock_sftp.stat.side_effect = stat_side_effect
+        @cluster(cores=1)
+        def raises_keyerror():
+            raise KeyError("missing-key")
 
-        # Mock error retrieval
-        error_data = ValueError("This function always fails")
-        error_file = Path(temp_dir) / "error.pkl"
-        with open(error_file, "wb") as f:
-            pickle.dump(error_data, f)
-        error_signature = _sign(error_file.read_bytes())
-
-        def exec_side_effect_signed(cmd):
-            if "error.pkl.hmac" in cmd:
-                tag_stdout = Mock()
-                tag_stdout.read.return_value = error_signature.encode()
-                tag_stdout.channel.recv_exit_status.return_value = 0
-                return (None, tag_stdout, Mock(read=lambda: b""))
-            return exec_side_effect(cmd)
-
-        mock_ssh.exec_command.side_effect = exec_side_effect_signed
-
-        def get_side_effect(remote_path, local_path):
-            if "error.pkl" in remote_path:
-                import shutil
-
-                shutil.copy(error_file, local_path)
-
-        mock_sftp.get.side_effect = get_side_effect
-
-        # Execute function and expect error
-        with _patch_result_key():
-            with pytest.raises(ValueError, match="This function always fails"):
-                failing_function()
+        with pytest.raises(KeyError):
+            raises_keyerror()
 
     def test_configuration_persistence(self, temp_dir):
         """Test configuration loading and persistence."""

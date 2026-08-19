@@ -38,13 +38,6 @@ def temp_config_dir():
 class TestClusterConfigReal:
     """Test ClusterConfig with real configurations."""
 
-    @pytest.fixture
-    def reset_config(self):
-        """Reset global configuration after test."""
-        original = config_module._config
-        yield
-        config_module._config = original
-
     def test_default_initialization_real(self):
         """
         Test default configuration values without mocks.

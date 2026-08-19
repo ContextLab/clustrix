@@ -1,9 +1,12 @@
+import copy
 import os
 import pathlib
 import pytest
 import tempfile
 import shutil
+from dataclasses import fields as dataclass_fields
 from unittest.mock import Mock, patch
+import clustrix.config as config_module
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig, configure
 
 _INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
@@ -184,9 +187,16 @@ def sample_loop_function():
     return loop_func
 
 
-@pytest.fixture(autouse=True, scope="session")
+@pytest.fixture(autouse=True)
 def isolate_config_dir():
     """Point clustrix's config directory at a throwaway for the whole run.
+
+    Function-scoped, not session-scoped. A single directory shared by the
+    whole run is enough to stop the suite writing into the developer's real
+    ~/.clustrix, but it still lets tests leak to each other through it: a
+    profiles.yml written by one test changed which profile the notebook
+    widget considered active in a later one, so eleven widget tests passed
+    alone and failed in a full run.
 
     Without this the suite writes into whoever is running it. Observed on a
     developer machine: an `integration_test` profile appended to the real
@@ -209,16 +219,33 @@ def isolate_config_dir():
 
 @pytest.fixture(autouse=True)
 def reset_config():
-    """Reset configuration after each test."""
+    """Restore the global configuration singleton after every test.
+
+    This used to reset eight hand-listed fields. Everything else a test set
+    -- k8s_namespace, remote_work_dir, package_manager, environment_variables,
+    ssh_host_key_policy -- leaked into every test that ran afterwards, and
+    ClusterConfig has over a hundred fields. The notebook widget reads the
+    live config to populate itself, so it inherited whatever the previous
+    test happened to leave behind: eleven widget tests passed on their own
+    and failed in a full run, purely on ordering.
+
+    Snapshotting every field by name means a newly added field is covered
+    automatically, rather than silently joining the set of things that leak.
+    The same object is restored in place, so anything holding a reference to
+    the singleton sees the restored values.
+    """
+    config_object = config_module._config
+    before = {
+        field_def.name: copy.deepcopy(getattr(config_object, field_def.name))
+        for field_def in dataclass_fields(config_object)
+    }
     yield
-    # Reset to default config
-    configure(
-        cluster_type="slurm",
-        cluster_host=None,
-        username=None,
-        password=None,
-        key_file=None,
-        default_cores=4,
-        default_memory="8GB",
-        default_time="01:00:00",
-    )
+    # Two things have to be undone, because there are two ways to change the
+    # configuration: mutating the singleton's fields, and rebinding the module
+    # attribute to a different ClusterConfig entirely (monkeypatch.setattr on
+    # clustrix.config._config, or load_config() building a fresh one). Restoring
+    # only the fields left the module pointing at the test's object; restoring
+    # only the binding left a mutated object in place.
+    config_module._config = config_object
+    for name, value in before.items():
+        setattr(config_object, name, value)
