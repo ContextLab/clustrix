@@ -10,24 +10,40 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.
+Clustrix runs an ordinary Python function somewhere else. Put `@cluster` on
+the function, call it the way you always would, and Clustrix serializes it
+along with its arguments, ships it to the compute resource you configured, runs
+it there, and hands you back the return value.
 
-## Features
+## What it does
 
-- **Simple Decorator Interface**: Just add `@cluster` to any function
-- **Automated SSH Key Setup**: Create and deploy SSH keys to enable secure passwordless authentication with one click or API call
-- **Interactive Jupyter Widget**: `%%remote` magic command with GUI configuration manager
-- **Multiple Cluster Backends**: local, SSH, SLURM and HuggingFace Jobs -- every backend Clustrix ships has been run end to end (see [Supported Cluster Types](#supported-cluster-types))
-- **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
-- **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Loop Parallelization**: distributes a loop across nodes when its body has no
-  dependencies between iterations. The analysis is conservative and declines
-  most real loops — see [Limitations](https://clustrix.readthedocs.io/en/latest/limitations.html)
-- **Flexible Configuration**: config files, `configure()`, or the interactive
-  widget. Note there is no general "override any field from the environment"
-  mechanism — only `CLUSTRIX_CONFIG_DIR` and the password variable named by
-  `password_env_var`
-- **Error Handling**: Comprehensive error reporting and job monitoring
+- **One decorator.** `@cluster` on a function is the whole interface.
+- **Four backends**: local, SSH, SLURM and HuggingFace Jobs. Each has been run
+  end to end against the real thing — see
+  [Supported Cluster Types](#supported-cluster-types).
+- **SSH key setup.** One call generates a key, deploys it to the cluster, and
+  writes the matching `~/.ssh/config` entry.
+- **A Jupyter widget.** `%%remote` opens a configuration panel in the notebook.
+- **Read-only filesystem utilities.** `cluster_ls`, `cluster_glob`,
+  `cluster_stat` and their siblings answer the same questions about a local
+  path or a remote one, from the same code.
+- **Environment replication.** The remote environment is rebuilt from the
+  package metadata of your local one.
+- **Loop parallelization**, for a loop whose body carries no dependency between
+  iterations. The analysis is conservative and declines most real loops — see
+  [Limitations](https://clustrix.readthedocs.io/en/latest/limitations.html).
+- **Configuration** from a config file, from `configure()`, or from the widget.
+  There is no general "override any field from the environment" mechanism; the
+  only two variables read are `CLUSTRIX_CONFIG_DIR` and whatever
+  `password_env_var` names.
+- **Remote tracebacks come home.** A job that raises raises in your process,
+  rather than leaving a log file on the cluster for you to find.
+
+Two things that sound like they are on that list and are not. `@cluster(cores=N)`
+with no cluster configured does **not** give you N cores: the function runs in
+your own process, sequentially
+([#152](https://github.com/ContextLab/clustrix/issues/152)). And Clustrix does
+not move your data — see [Data](#data).
 
 Read [Supported Cluster Types](#supported-cluster-types) before relying on a
 backend. Not everything in this package works, and the sections below say which
@@ -37,11 +53,12 @@ parts do.
 
 ### Installation
 
-> **⚠️ PyPI is behind this README.** `pip install clustrix` installs **0.1.1**;
-> this document describes **0.2.0**. 0.1.1 predates the fixes for two real
-> defects: `@cluster` could return a fabricated string instead of your result,
-> and remote results were unpickled without authentication (a remote-to-local
-> code execution path). Until 0.2.0 is published, install from the repository.
+> **⚠️ Install from the repository, not from PyPI.** `pip install clustrix`
+> gives you **0.1.1**; this document describes **0.2.0**, which is what the
+> repository holds. Two defects fixed between them are worth the trouble of
+> installing from git: `@cluster` returning a fabricated string in place of
+> your result, and remote results being unpickled without authentication —
+> which is a remote-to-local code execution path.
 
 ```bash
 pip install "git+https://github.com/ContextLab/clustrix.git@master"
@@ -103,9 +120,10 @@ Importing `clustrix` registers the magic but does **not** display the widget --
 a library should not inject UI as a side effect of being imported. Run
 `%%remote` in a cell when you want the widget, or call
 `clustrix.notebook_magic.display_config_widget()`. Setting
-`CLUSTRIX_AUTO_WIDGET=1` restores the old display-on-import behaviour.
+`CLUSTRIX_AUTO_WIDGET=1` makes it display on import instead.
 
-`%%clusterfy` still works as a deprecated alias and emits a `DeprecationWarning`.
+`%%clusterfy` is an alias for `%%remote`. It works, and it emits a
+`DeprecationWarning`.
 
 #### Interactive Configuration Widget
 
@@ -139,7 +157,7 @@ the contents of `clustrix.config.SUPPORTED_CLUSTER_TYPES`.
 
 There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries, and
 no `k8s_*` settings: those backends are not currently supported (see
-[Backends that are not currently supported](#backends-that-are-not-currently-supported)).
+[Backends that are not supported](#backends-that-are-not-supported)).
 
 ##### Using the widget
 
@@ -249,25 +267,26 @@ config = ClusterConfig(
 
 result = setup_ssh_keys_with_fallback(config)
 if result["success"]:
-    print("✅ SSH keys setup successfully!")
+    print("SSH keys installed.")
 ```
 
-### Key Features
+### What the setup does
 
-- **🔒 Secure**: Ed25519 keys with proper permissions (600/644)
-- **🧹 Smart Cleanup**: Automatically removes conflicting old keys
-- **🔄 Key Rotation**: Force refresh to generate new keys
-- **🌐 Cross-platform**: Works on Windows, macOS, Linux  
-- **🏢 Enterprise Ready**: Handles Kerberos clusters gracefully
-- **💡 Smart Fallbacks**: Environment-specific password retrieval
+Ed25519 keys, written with mode 600 for the private half and 644 for the
+public. Conflicting entries for the same host are removed rather than appended
+to, and a forced refresh generates a new pair. The client side runs on Windows,
+macOS and Linux.
 
-### Password Fallback System
+On a Kerberos cluster the key deploys, and authentication still goes through
+Kerberos afterwards — see [Enterprise Cluster Support](#enterprise-cluster-support).
 
-No need to enter passwords manually! Clustrix automatically retrieves passwords from:
+### Where the password comes from
 
-- **Google Colab**: Colab secrets (stored securely)
-- **Environment Variables**: `CLUSTRIX_PASSWORD_*` or `CLUSTER_PASSWORD`
-- **Interactive Prompts**: GUI popups in notebooks, terminal prompts in CLI
+`setup_ssh_keys_with_fallback()` needs a password once, to install the key. It
+looks in three places, in order: Colab secrets when running under Colab; the
+environment, via `CLUSTRIX_PASSWORD_<HOST>`, `CLUSTER_PASSWORD_<HOST>`,
+`<HOST>_PASSWORD`, `CLUSTRIX_DEFAULT_PASSWORD` or `CLUSTER_PASSWORD`; and
+failing both, a prompt — a dialog in a notebook, a terminal prompt in the CLI.
 
 ### Enterprise Cluster Support
 
@@ -278,7 +297,7 @@ kinit your_netid@UNIVERSITY.EDU
 ssh your_netid@cluster.university.edu
 ```
 
-**📖 For complete details, try the interactive [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
+A runnable walkthrough is in the [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
 ## Advanced Usage
 
@@ -345,16 +364,32 @@ def process_datasets(config):
 - `cluster_du()` - Directory usage information
 - `cluster_count_files()` - Count files matching pattern
 
-### Cost monitoring: removed in v0.2.0
+### Data
 
-The cost monitoring and cloud pricing API is gone, along with all five of its
-public functions -- `cost_tracking_decorator`, `get_cost_monitor`,
-`start_cost_monitoring`, `generate_cost_report` and `get_pricing_info`.
-Importing any of them now raises `ImportError`. They priced the cloud VM
-backends, and those backends were removed too (see
-[Backends that are not currently supported](#backends-that-are-not-currently-supported)),
-so the API had nothing left to price. Use your provider's own pricing
-calculator instead.
+What travels to the worker is the pickled function and its pickled arguments.
+Nothing else. A dataset your function opens by path has to already be reachable
+from the worker — on a shared filesystem, in object storage it can authenticate
+to, or somewhere you put it yourself with `scp` or `rsync` beforehand.
+
+The `cluster_*` utilities above are read-only, which is the part people are
+most often surprised by. They list, match and measure; there is no
+`cluster_put` and no `cluster_get`. Passing a large array as an *argument* is
+worse than useless, since it gets pickled into the payload and the HuggingFace
+backend caps that at 256 KB.
+
+Declaring the files a call needs and the files it produces, and having Clustrix
+stage them, is planned rather than present:
+[#151](https://github.com/ContextLab/clustrix/issues/151) carries the design.
+Until it lands, move your own data.
+
+### Cost monitoring
+
+There is none. `cost_tracking_decorator`, `get_cost_monitor`,
+`start_cost_monitoring`, `generate_cost_report` and `get_pricing_info` do not
+exist, and importing any of them raises `ImportError`. They priced the cloud VM
+backends, which Clustrix does not have either (see
+[Backends that are not supported](#backends-that-are-not-supported)). Use your
+provider's own pricing calculator.
 
 ### Custom Resource Requirements
 
@@ -410,8 +445,8 @@ clustrix.configure(cluster_type='huggingface', hf_namespace='my-org')
 clustrix.configure(cluster_type='local')
 
 # Those four are the whole list. Anything else -- 'pbs', 'sge', 'kubernetes'
-# -- raises ValueError: Unsupported cluster type. See "Backends that are not
-# currently supported" below.
+# -- raises a ValueError naming the backend and its tracking issue. See
+# "Backends that are not supported" below.
 ```
 
 ### HuggingFace Jobs
@@ -475,19 +510,17 @@ container prints an HMAC-SHA256 of the bytes it emitted, and clustrix refuses
 to unpickle anything whose tag does not verify. The SSH and scheduler paths
 verify their results the same way.
 
-### Backends that are not currently supported
+### Backends that are not supported
 
-Clustrix once shipped seven more execution backends. All seven were implemented
-in full, and not one had ever been shown to run a job end to end against real
-hardware. Rather than keep publishing them as if they worked, they were removed
-in v0.2.0.
+Seven schedulers and cloud providers you might expect to find are absent.
+Setting `cluster_type` to any of them raises a `ValueError` that names the
+backend and its tracking issue, so you find out at configuration time.
 
-They are planned for a future update. Each has a tracking issue, and the gate
-for restoring one is the gate the surviving four already passed: a real job, on
-real hardware, whose result comes back and is checked in as evidence. No date is
-promised.
+Each is planned for a future update. The gate for admitting one is the gate the
+four supported backends already passed: a real job, on real hardware, whose
+result comes back and is checked in as evidence. No date is promised.
 
-| Not supported | Issue | What it was |
+| Not supported | Issue | What the name would select |
 |-|-|-|
 | PBS | [#140](https://github.com/ContextLab/clustrix/issues/140) | `cluster_type="pbs"` -- the PBS/Torque scheduler |
 | SGE | [#141](https://github.com/ContextLab/clustrix/issues/141) | `cluster_type="sge"` -- Sun/Son of Grid Engine |
@@ -497,10 +530,10 @@ promised.
 | Azure | [#145](https://github.com/ContextLab/clustrix/issues/145) | `provider="azure"` -- Azure VMs |
 | Lambda Cloud | [#146](https://github.com/ContextLab/clustrix/issues/146) | `provider="lambda"` -- Lambda Labs GPU cloud |
 
-The HuggingFace **Spaces** provider (`provider="huggingface"`) went with them.
-That is a different thing from `cluster_type="huggingface"`, which is
-HuggingFace **Jobs** -- verified end to end and fully supported. The cost
-monitoring and cloud pricing API was removed too.
+There is no HuggingFace **Spaces** provider (`provider="huggingface"`) either.
+Mind the name: `cluster_type="huggingface"` is HuggingFace **Jobs**, and that
+one is verified end to end and fully supported. Cost monitoring and cloud
+pricing are absent for the same reason as the VM backends.
 
 **What to do instead.** For a rented GPU without owning hardware, use
 `cluster_type="huggingface"`. For a machine you brought up yourself through
@@ -531,40 +564,42 @@ clustrix credentials --help
 
 ## How It Works
 
-1. **Function Serialization**: Clustrix captures your function, arguments, and dependencies using advanced serialization
-2. **Environment Replication**: Creates an identical Python environment on the cluster with all required packages
-3. **Job Submission**: Submits your function as a job to the cluster scheduler
-4. **Execution**: Runs your function on cluster resources with specified requirements
-5. **Result Collection**: Automatically retrieves results once execution completes
-6. **Cleanup**: Optionally cleans up temporary files and environments
+1. **Serialization.** Your function and its arguments are pickled *by value*
+   with `dill(recurse=True)`, falling back to `cloudpickle`, so closures,
+   nested functions and project-local modules travel with the call.
+2. **Environment replication.** The remote virtualenv is built from your local
+   installed-package metadata.
+3. **Submission.** A scheduler script is generated for your `cluster_type` and
+   submitted.
+4. **Polling.** Clustrix watches the job until it finishes or dies.
+5. **Result collection.** `result.pkl` comes back, its HMAC is checked, and
+   only then is it unpickled. A job that raised gives you the exception in your
+   own process.
+6. **Cleanup**, unless you set `cleanup_on_success=False`.
 
-### Important Notes
+### A function whose source cannot be read
 
-**⚠️ REPL/Interactive Python Limitation**: Functions defined interactively in the Python REPL (command line `python` interpreter) lose the *source-based* features — automatic loop parallelization and complexity analysis — because those parse the function's source with `ast` and `inspect.getsource()` cannot recover it.
+Serialization does not need source text. `serialize_function` and
+`deserialize_function` work from the compiled code object, so a function you
+typed into the REPL, or built with `exec`, ships and returns the right answer.
 
-Serialization itself does **not** need the source. `clustrix.utils.serialize_function` / `deserialize_function` work from the code object and round-trip such a function correctly, so it still runs remotely and returns the right answer. This affects:
-- Interactive Python sessions (`python` command)
-- Some notebook environments that don't preserve function source
-
-**✅ Recommended Approach**: Define functions in:
-- Python files (`.py` scripts)
-- Jupyter notebooks 
-- IPython environments
-- Any environment where `inspect.getsource()` can access the function source code
+What it loses is loop parallelization, which parses the body with `ast` and
+therefore needs `inspect.getsource()` to succeed. Nothing else depends on
+source, and nothing is substituted for your function when the source is
+missing.
 
 ```pycon
-# In the interactive REPL this still runs and returns the right answer, but no
-# loop parallelization is applied, because that
-# need the source.
+# In the interactive REPL this runs and returns the right answer. No loop
+# parallelization is applied, because that step needs the source.
 >>> @cluster(cores=2)
 ... def my_function(x):
 ...     return x * 2
->>> my_function(5)  # -> 10, executed remotely, analysed features skipped
+>>> my_function(5)  # -> 10, executed remotely
 10
 ```
 
-In a `.py` file or a notebook you get everything, including the source-based
-features:
+Define the function in a `.py` file or a notebook and the source-based step
+works too:
 
 ```python
 # cluster-required: needs a configured cluster to execute
@@ -584,12 +619,12 @@ result = my_function(5)
 | `slurm` | Verified. A real job ran on a production SLURM cluster and returned its result. |
 | `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
 | `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
-| `local` | Runs in local processes. Used for development and the fast tests. |
+| `local` | Runs in the calling process. Used for development and the fast tests. |
 
 Those four are the whole list -- the contents of
 `clustrix.config.SUPPORTED_CLUSTER_TYPES`. PBS, SGE, Kubernetes and the
-AWS / GCP / Azure / Lambda Cloud VM backends are **not currently supported**;
-see [Backends that are not currently supported](#backends-that-are-not-currently-supported).
+AWS / GCP / Azure / Lambda Cloud VM backends are **not supported**;
+see [Backends that are not supported](#backends-that-are-not-supported).
 
 The three "Verified" rows are the backends exercised by
 `scripts/collect_execution_evidence.py`, which submits a genuine job to each
@@ -656,9 +691,10 @@ clustrix/
 Clustrix automatically handles dependency management by:
 
 - Capturing your current Python environment by reading installed package
-  metadata directly (`importlib.metadata`), not by shelling out to `pip freeze`
-  -- the freeze output renders conda-built packages as unusable local paths,
-  which silently dropped a third of the environment
+  metadata directly (`importlib.metadata`) rather than by shelling out to `pip
+  freeze`. Freeze output renders conda-built packages as local paths that no
+  index can resolve, which would drop roughly a third of a conda environment on
+  the floor
 - Creating virtual environments on cluster nodes
 - Installing exact package versions to match your local environment
 - Supporting conda environments for complex scientific software stacks
@@ -763,18 +799,21 @@ command. `scripts/collect_execution_evidence.py` is that command, and
 The existing test suite does not meet that goal yet. It is being worked
 towards, and the README should not be read as saying it has been reached:
 
-- 42 of 215 test modules (20%) still use `unittest.mock`. (Count: files
-  named `test_*.py` under `tests/`, via
-  `find tests -name "test_*.py" | wc -l` and
-  `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`.)
-  Migrating them is in progress; the claim that this project uses zero
-  mocks was not true.
+- 20 of 152 test modules (13%) use `unittest.mock`. Count it yourself:
+
+  ```bash
+  find tests -name "test_*.py" | wc -l
+  grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l
+  ```
+
+  Migrating them is in progress. This project does not use zero mocks, whatever
+  else you may read.
 - The main CI workflow runs `tests/unit/` plus a local-only slice of the
   integration tests. The SSH, scheduler and cloud tests need credentials CI
   does not have.
-- No trustworthy coverage figure has been measured. Several conflicting numbers
-  exist in old artifacts; none of them is reproducible, which is why this README
-  no longer carries a coverage badge.
+- No trustworthy coverage figure exists. Several conflicting numbers are
+  floating around in build artifacts and none of them is reproducible, so this
+  README carries no coverage badge.
 
 ### Running Tests
 
@@ -820,12 +859,9 @@ Clustrix provides Docker-based local test infrastructure for cost-free testing:
 
 ## Code Quality
 
-Clustrix maintains high code quality standards:
-
-- **Code Style**: Enforced with Black formatter
-- **Linting**: Checked with flake8
-- **Type Checking**: Validated with mypy
-- **CI/CD**: GitHub Actions for automated testing
+Formatting is Black, linting is flake8, type checking is mypy, and GitHub
+Actions runs all three plus the test suite on every push. A commit that fails
+any of them is blocked by a pre-commit hook before it reaches CI.
 
 To check code quality locally:
 
@@ -859,11 +895,11 @@ For more detailed information on specific topics, see the organized documentatio
 ### AWS operator tooling
 
 Clustrix has no AWS *execution* backend -- see
-[Backends that are not currently supported](#backends-that-are-not-currently-supported).
+[Backends that are not supported](#backends-that-are-not-supported).
 `scripts/aws/` is separate: cleanup and teardown utilities for AWS resources
-tagged `clustrix:managed=true`, kept so that anything left behind by the
-removed provisioning code can still be reclaimed. The IAM guides below are
-historical records of the permissions that tooling needed.
+tagged `clustrix:managed=true`, so that anything holding such a tag in your
+account can still be found and reclaimed. The IAM guides below are historical
+records of the permissions that tooling needs.
 
 - **[AWS Setup Guide](docs/aws/AWS_PERMISSIONS_SETUP_GUIDE.md)** - AWS permissions configuration
 - **[AWS Console Quick Steps](docs/aws/AWS_CONSOLE_QUICK_STEPS.md)** - Fast AWS setup guide
