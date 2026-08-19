@@ -207,18 +207,29 @@ class TestDeployPublicKey:
             result = deploy_public_key("test.host.com", "testuser", pub_key_path)
             assert result is True
 
-            # Verify ssh-copy-id was called with StrictHostKeyChecking option
+            # ssh-copy-id must be told which known_hosts to use. OpenSSH
+            # resolves "~" from the passwd database rather than $HOME, so
+            # without -o UserKnownHostsFile it appends to a different file
+            # from the one this module reads -- which is how the test suite
+            # came to leave 1,191 loopback entries in a developer's real
+            # known_hosts.
+            from clustrix.ssh_utils import _user_known_hosts_path
+
             expected_cmd = [
                 "ssh-copy-id",
                 "-i",
                 pub_key_path,
                 "-o",
                 "StrictHostKeyChecking=accept-new",
+                "-o",
+                f"UserKnownHostsFile={_user_known_hosts_path()}",
                 "testuser@test.host.com",
             ]
             mock_run.assert_called_with(
                 expected_cmd, capture_output=True, text=True, input=None, timeout=30
             )
+            # The path has to follow $HOME, or the isolation is nominal.
+            assert str(_user_known_hosts_path()).startswith(os.path.expanduser("~"))
         finally:
             os.unlink(pub_key_path)
 

@@ -200,6 +200,48 @@ def sample_loop_function():
 
 
 @pytest.fixture(autouse=True)
+def isolate_home():
+    """Give every test its own ``$HOME``, so none can touch the real ~/.ssh.
+
+    ``ssh_host_key_policy="auto_add"`` makes paramiko *write* the host key it
+    just accepted into ``~/.ssh/known_hosts``. The in-process test server in
+    ``tests/ssh_server.py`` generates a fresh key per run and binds a new
+    ephemeral port per test, so every one of those writes is a new line that
+    will never match anything again.
+
+    Measured on a developer machine before this fixture existed: 1,191 of the
+    1,223 entries in the real known_hosts were loopback junk from test runs,
+    leaving 32 genuine ones. Two runs at once interleave their appends and
+    corrupt the file, after which unrelated tests fail with ``InvalidHostKey``
+    -- and so does the developer's own ssh.
+
+    Individual test files had begun growing their own ``isolated_home``
+    fixtures. One autouse fixture here covers every test that exists and
+    every test anyone writes later, which is the only version of this that
+    stays true.
+
+    ``USERPROFILE`` is set alongside ``HOME`` because that is what
+    ``Path.home()`` reads on Windows.
+    """
+    with tempfile.TemporaryDirectory(prefix="clustrix-test-home-") as tmp:
+        ssh_dir = os.path.join(tmp, ".ssh")
+        os.makedirs(ssh_dir, exist_ok=True)
+        os.chmod(ssh_dir, 0o700)
+
+        saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        os.environ["HOME"] = tmp
+        os.environ["USERPROFILE"] = tmp
+        try:
+            yield tmp
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
 def isolate_config_dir():
     """Point clustrix's config directory at a throwaway for the whole run.
 

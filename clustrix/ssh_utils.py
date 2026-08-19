@@ -273,6 +273,17 @@ def generate_ssh_key(
         raise SSHKeyGenerationError(f"Failed to generate SSH key: {e.stderr}")
 
 
+def _user_known_hosts_path() -> Path:
+    """The known_hosts file this module reads and writes.
+
+    Derived from ``$HOME`` so that a test, a container or a relocated home
+    can redirect it. Every OpenSSH subprocess must be told this path
+    explicitly, because OpenSSH itself resolves ``~`` from the passwd
+    database and would otherwise use a different file.
+    """
+    return Path(os.path.expanduser("~")) / ".ssh" / "known_hosts"
+
+
 def add_host_key(hostname: str, port: int = 22) -> bool:
     """
     Add host key to known_hosts file to avoid verification prompts.
@@ -293,7 +304,7 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
         if result.returncode == 0 and result.stdout.strip():
             # Append to known_hosts file
-            known_hosts_path = Path.home() / ".ssh" / "known_hosts"
+            known_hosts_path = _user_known_hosts_path()
             known_hosts_path.parent.mkdir(mode=0o700, exist_ok=True)
 
             with open(known_hosts_path, "a") as f:
@@ -362,6 +373,15 @@ def deploy_public_key(
         cmd = ["ssh-copy-id", "-i", public_key_path]
         # Add SSH options to automatically accept new host keys
         cmd.extend(["-o", "StrictHostKeyChecking=accept-new"])
+        # Point OpenSSH at the same known_hosts this module reads. It does
+        # NOT resolve "~" from $HOME -- it reads the passwd database -- so
+        # without this the Python half of clustrix loads one file while
+        # ssh-copy-id appends to another. Anywhere the two differ (a
+        # container, `sudo -u`, a login node with a relocated home) clustrix
+        # verifies against a file it is not writing to. Verified with
+        # `ssh -G`: with HOME set to a temporary directory it still reported
+        # `userknownhostsfile /Users/<me>/.ssh/known_hosts`.
+        cmd.extend(["-o", f"UserKnownHostsFile={_user_known_hosts_path()}"])
         if port != 22:
             cmd.extend(["-p", str(port)])
         cmd.append(f"{username}@{hostname}")
