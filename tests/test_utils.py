@@ -5,6 +5,7 @@ from clustrix.utils import (
     serialize_function,
     deserialize_function,
     get_environment_requirements,
+    get_unreproducible_requirements,
     detect_loops,
     create_job_script,
     setup_remote_environment,
@@ -80,54 +81,63 @@ class TestSerialization:
 
         result = serialize_function(test_func, (), {})
 
-        # The result should be a dict containing the cloudpickle data
+        # All three payloads must fall through to cloudpickle, not just the
+        # function: args and kwargs are serialized by the same helper.
         assert result["function"] == b"cloudpickle_data"
-        mock_dill.assert_called_once()
-        mock_cloudpickle.assert_called_once()
+        assert result["args"] == b"cloudpickle_data"
+        assert result["kwargs"] == b"cloudpickle_data"
+        # dill is tried first for anything not carrying project-local code.
+        assert mock_dill.called
+        assert mock_cloudpickle.called
 
 
 class TestEnvironmentInfo:
     """Test environment information utilities."""
 
-    @patch("subprocess.run")
-    def test_get_environment_requirements(self, mock_run):
-        """Test getting environment requirements using pip list --format=freeze."""
-        mock_run.return_value = Mock(
-            stdout="package1==1.0.0\npackage2==2.0.0\nnumpy==1.21.5\n-e /path/to/editable\n",
-            returncode=0,
-        )
+    def test_get_environment_requirements(self):
+        """Every reinstallable distribution is pinned; nothing else is.
 
+        Run against the REAL environment. Faking freeze output is how the
+        uv/pip divergence went unnoticed: a fabricated `pip list` never shows
+        the `name @ file:///...` lines uv emits for conda-built packages, and
+        those were being dropped.
+        """
         requirements = get_environment_requirements()
 
         assert isinstance(requirements, dict)
-        # Should contain specific packages from mock output
-        assert requirements["package1"] == "1.0.0"
-        assert requirements["package2"] == "2.0.0"
-        assert requirements["numpy"] == "1.21.5"
-        # Should not include editable packages (those starting with -e)
-        assert "-e" not in str(requirements)
-        # Verify subprocess.run was called
-        mock_run.assert_called_once()
+        # The serialization stack always has to reach the worker.
+        assert "cloudpickle" in requirements
+        assert "dill" in requirements
+        # Nothing that cannot be reinstalled on another host may be pinned.
+        unreproducible = get_unreproducible_requirements()
+        assert not (set(requirements) & set(unreproducible))
+        for package, version in requirements.items():
+            assert not package.startswith("-e")
+            assert "@" not in package
+            assert "@" not in version
 
-    @patch("subprocess.run")
-    def test_get_environment_requirements_failure(self, mock_run):
-        """Test environment requirements when pip list --format=freeze fails."""
-        mock_run.return_value = Mock(stdout="", returncode=1)  # Failure
+    def test_get_environment_requirements_is_deterministic(self):
+        """Two calls on an unchanged environment must agree exactly."""
+        assert get_environment_requirements() == get_environment_requirements()
 
+    def test_get_environment_requirements_covers_conda_built_packages(self):
+        """conda-built distributions are ordinary installs and must be pinned.
+
+        uv renders them as ``name @ file:///.../work``; skipping those lines
+        dropped a third of a conda environment from the worker.
+        """
+        from clustrix.utils import _distribution_records
+
+        conda_built = [
+            record["name"]
+            for record in _distribution_records().values()
+            if not record["reason"]
+            and (record["dist"].read_text("direct_url.json") or "").find("file://") >= 0
+        ]
+        if not conda_built:
+            pytest.skip("no locally-built distributions installed here")
         requirements = get_environment_requirements()
-
-        # Should still return a dict, but might be empty or have essential packages only
-        assert isinstance(requirements, dict)
-
-    @patch("subprocess.run")
-    def test_get_environment_requirements_empty_output(self, mock_run):
-        """Test environment requirements with empty pip list output."""
-        mock_run.return_value = Mock(stdout="", returncode=0)
-
-        requirements = get_environment_requirements()
-
-        # Should handle empty output gracefully
-        assert isinstance(requirements, dict)
+        assert all(name in requirements for name in conda_built)
 
     def test_get_environment_requirements_format(self):
         """Test environment requirements format."""
@@ -567,9 +577,16 @@ class TestSerializationEdgeCases:
         def test_func(x):
             return x * 3
 
+        def dill_loads(payload):
+            # Only the function payload is the unloadable one; args and kwargs
+            # are ordinary pickles and must come back as themselves.
+            if payload == b"invalid_cloudpickle_data":
+                return test_func
+            return pickle.loads(payload)
+
         with (
             patch("cloudpickle.loads", side_effect=Exception("Cloudpickle failed")),
-            patch("dill.loads", return_value=test_func),
+            patch("dill.loads", side_effect=dill_loads),
         ):
             result_func, args, kwargs = deserialize_function(mock_data)
             assert result_func(5) == 15
