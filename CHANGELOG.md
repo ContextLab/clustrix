@@ -138,6 +138,17 @@ backends now work.
 - CI's flake8 step passed `--exit-zero` and could not fail; its mypy step carried
   `continue-on-error: true`; and it ran only `tests/unit/` — about 350 of the
   ~1,750 non-billable tests that exist.
+- **The pre-push hook could not block a push** (#147). `scripts/run_real_world_tests.py`
+  discarded every `runner.run_*_tests()` return value and never called `sys.exit`,
+  so it exited 0 whatever happened. All four categories printed `❌ ... failed`
+  and the hook then printed `✅ All real-world tests passed!` and allowed the
+  push. Its failure message also printed only `stdout`, which was empty in every
+  observed case because a pytest collection error goes to `stderr` — so an
+  operator was told something failed and not what.
+- **The host-key tests wrote into the developer's real `~/.ssh/known_hosts`**,
+  where 83 stale `[127.0.0.1]:<ephemeral port>` entries had accumulated. Port
+  reuse against a fresh server key then raised `BadHostKeyException` and failed
+  the reject test. The fixture now redirects `~`.
 
 ### Added
 
@@ -167,8 +178,34 @@ Seven execution backends were implemented in full and not one of them had ever
 been shown to run a job end to end against real hardware. Rather than keep
 publishing them as if they worked, they were removed. `SUPPORTED_CLUSTER_TYPES`
 is now exactly `local`, `ssh`, `slurm`, `huggingface` — the four backends that
-have each run a real job and returned the right answer. Anything else raises
-`ValueError: Unsupported cluster type` at submit time.
+have each run a real job and returned the right answer.
+
+Asking for one of the removed backends is refused where you can act on it, and
+the message says which kind of wrong it is. A removed backend is named, with
+why it went and its tracking issue; an ordinary typo still gets the
+did-you-mean hint:
+
+```
+ClusterConfig(cluster_type="pbs")
+  ValueError: cluster_type='pbs' is no longer implemented. It was removed in
+  v0.2.0 because it had never been verified against real hardware. Its return
+  is tracked in issue #140. Supported types are: local, ssh, slurm, huggingface.
+
+load_config, file containing `k8s_namespace: compute`
+  ValueError: <path> contains unknown setting(s): k8s_namespace configured
+  Kubernetes, which has been removed (see issue #142)
+
+load_config, file containing a genuine typo `cluster_hostt`
+  ValueError: <path> contains unknown setting(s): cluster_hostt
+  (did you mean cluster_host?)
+```
+
+`validate_cluster_type()` is the single check, called from
+`ClusterConfig.__post_init__`, `configure()`, `load_config()` and the executor.
+Previously only `load_config` checked, so every other route carried a dead
+backend to `ClusterExecutor.submit_job` — which tested the type *after*
+`self.connect()`, spending an SSH round trip on a host that was never going to
+be used, and then saying only `Unsupported cluster type: pbs`.
 
 Each removed backend has a tracking issue and is planned for a future release.
 The gate for restoring one is the gate the surviving four already passed: a
@@ -188,7 +225,23 @@ evidence. No date is promised.
 The HuggingFace **Spaces** provider (`provider="huggingface"`) was removed with
 them. This is a different thing from `cluster_type="huggingface"`, which is
 HuggingFace **Jobs**: that backend is verified end to end and is fully
-supported.
+supported. Note that `hf_hardware` and `hf_username` sat under a comment
+labelling them Spaces settings but are read by `hf_jobs.py`, so they stay;
+`hf_sdk` was genuinely Spaces-only and is gone.
+
+Removed with the backends:
+
+- **`configure(auto_install_deps=...)`** — it installed cloud provider
+  dependencies.
+- **Ten `@cluster` parameters**: `provider`, `instance_type`, `region`,
+  `platform`, `auto_provision`, `cluster_name`, `node_count`, `node_type`,
+  `kubernetes_version`, `from_scratch`.
+- **Every `k8s_*`, `aws_*`, `azure_*`, `gcp_*`, `lambda_*`, `cloud_*`,
+  `cost_monitoring` and `hf_sdk` field** on `ClusterConfig`.
+
+`configure()` also now validates every keyword before applying any of them. It
+used to `setattr` its way through and raise partway, so a call that *failed*
+had still changed the live configuration.
 
 ### Removed — cost monitoring API (BREAKING)
 
