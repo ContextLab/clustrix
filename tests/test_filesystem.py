@@ -512,5 +512,203 @@ class TestErrorHandling:
             fs.ls(".")
 
 
+class TestLocalAndRemoteAgree:
+    """The two implementations must answer the same question the same way.
+
+    ``_local_glob`` and ``_local_du`` are thin wrappers around ``glob.glob``
+    and ``os.walk``, so they are the oracle: where the two sides differ, the
+    remote one is wrong. Both filesystems below are pointed at the *same*
+    directory -- the real one the SSH server serves -- so the comparison is
+    between two implementations, not between two trees.
+
+    This class exists because the asymmetry keeps coming back. ``glob("*/")``
+    used to mean "directories only" (the old ``ls -d */``); after the shell
+    was removed it started matching files, while local still returned
+    directories.
+    """
+
+    @pytest.fixture
+    def tree(self, ssh_server):
+        root = ssh_server.root_path
+        (root / "alpha.csv").write_text("1")
+        (root / "beta.csv").write_text("22")
+        (root / "notes.txt").write_text("333")
+        (root / ".hidden.csv").write_text("4")
+        # A *directory* whose name ends in .csv: the only thing that tells
+        # "*.csv" and "*.csv/" apart.
+        (root / "dir.csv").mkdir()
+        (root / "data").mkdir()
+        (root / "data" / "gamma.csv").write_text("55")
+        (root / "data" / "deep").mkdir()
+        (root / "data" / "deep" / "delta.csv").write_text("666")
+        return root
+
+    @pytest.fixture
+    def both(self, ssh_server, tree):
+        """A remote filesystem and a local one over the same directory."""
+        remote = _remote_filesystem(ssh_server)
+        local = ClusterFilesystem(
+            ClusterConfig(cluster_type="local", local_work_dir=str(tree))
+        )
+        return local, remote
+
+    @pytest.mark.parametrize(
+        "pattern",
+        [
+            "*",
+            "*.csv",
+            # The regression: a trailing slash means directories only.
+            "*/",
+            "dir.csv/",
+            "alpha.csv/",
+            "*/*",
+            "*/*.csv",
+            "data/*.csv",
+            "?lpha.csv",
+            "[ab]*.csv",
+            ".*.csv",
+            "alpha.csv",
+            "absent.csv",
+            "absent*",
+            # An empty pattern and a bare dot both name the directory itself.
+            "",
+            ".",
+            "./*.csv",
+            # Paths that need normalising on the way out.
+            "data/../*.csv",
+            "*/../*.csv",
+            "data/deep/../*.csv",
+            "**",
+            "data/**",
+        ],
+    )
+    def test_glob_agrees_with_the_local_oracle(self, both, pattern):
+        local, remote = both
+        assert remote.glob(pattern) == local.glob(pattern)
+
+    def test_an_absolute_pattern_ignores_the_working_directory(self, both, tree):
+        """``glob.glob`` honours an absolute pattern; so must the remote."""
+        local, remote = both
+        pattern = str(tree / "data" / "*.csv")
+
+        assert local.glob(pattern) == ["data/gamma.csv"]
+        assert remote.glob(pattern) == local.glob(pattern)
+
+    def test_a_trailing_slash_selects_directories_only(self, both):
+        """Not just "the two agree" -- this is the answer they must give."""
+        local, remote = both
+
+        assert local.glob("*/") == ["data", "dir.csv"]
+        assert remote.glob("*/") == ["data", "dir.csv"]
+        # ...and a file with a trailing slash matches nothing at all.
+        assert remote.glob("alpha.csv/") == []
+
+    def test_glob_agrees_about_a_subdirectory(self, both):
+        local, remote = both
+        assert remote.glob("*.csv", "data") == local.glob("*.csv", "data")
+
+    def test_du_agrees_with_the_local_oracle(self, both):
+        local, remote = both
+        assert remote.du(".") == local.du(".")
+
+    def test_du_counts_a_symlink_to_a_file_the_way_os_walk_does(self, both, tree):
+        """``os.path.getsize`` follows the link, so the target counts twice."""
+        local, remote = both
+        (tree / "payload.bin").write_bytes(b"x" * 100)
+        os.symlink(tree / "payload.bin", tree / "link_to_file")
+
+        # Six real files of 1, 2, 3, 1, 2 and 3 bytes, then the payload and
+        # the link that points at it.
+        assert local.du(".") == DiskUsage(total_bytes=12 + 200, file_count=8)
+        assert remote.du(".") == local.du(".")
+
+    def test_du_does_not_descend_into_a_symlinked_directory(self, both, tree):
+        """``os.walk`` lists a directory symlink and then steps over it."""
+        local, remote = both
+        os.symlink(tree / "data", tree / "link_to_data")
+
+        # The link adds nothing: data/ was already counted through its real
+        # name, and the link is not followed.
+        assert local.du(".").file_count == 6
+        assert remote.du(".") == local.du(".")
+
+    def test_du_terminates_on_a_symlink_loop(self, both, tree):
+        """A link back to an ancestor used to be an unbounded walk.
+
+        With no visited set and no way to tell a symlink from its target,
+        ``_remote_du`` descended through ``data/loop/data/loop/...`` until
+        the server refused the path length -- 32 phantom files on this tree.
+        """
+        local, remote = both
+        os.symlink(tree, tree / "data" / "loop")
+
+        assert local.du(".") == DiskUsage(total_bytes=12, file_count=6)
+        assert remote.du(".") == local.du(".")
+
+    def test_a_symlink_is_sized_by_its_target(self, both, tree):
+        """The branch that a readdir answering with ``lstat`` attributes hits.
+
+        ``tests/ssh_server.py`` answers a readdir with ``stat`` attributes,
+        which resolve the link before ``_remote_du`` ever sees it; OpenSSH's
+        sftp-server answers with ``lstat`` attributes, so on a real cluster
+        the link arrives unresolved and its target has to be looked up. The
+        lookup is exercised here directly, against real symlinks on the real
+        server, because this server cannot produce that shape.
+        """
+        _, remote = both
+        (tree / "payload.bin").write_bytes(b"x" * 100)
+        os.symlink(tree / "payload.bin", tree / "link_to_file")
+        os.symlink(tree / "data", tree / "link_to_data")
+        os.symlink(tree / "never_created.bin", tree / "dangling")
+
+        assert remote._remote_link_target_size(str(tree / "link_to_file")) == 100
+        # A directory is not a file, and a dangling link has no size at all --
+        # ``_local_du`` reaches the same answer by letting ``getsize`` raise.
+        assert remote._remote_link_target_size(str(tree / "link_to_data")) is None
+        assert remote._remote_link_target_size(str(tree / "dangling")) is None
+
+        # The dangling link cannot be checked through ``du`` here: this test
+        # server answers a readdir by calling ``os.stat`` on every entry, so
+        # one broken link fails the whole listing. OpenSSH's sftp-server uses
+        # ``lstat`` and lists it. That is a fidelity gap in
+        # ``tests/ssh_server.py``, not in the code under test.
+
+    @pytest.mark.parametrize("mode", [0o000, 0o007, 0o077, 0o644, 0o755, 0o600])
+    def test_permissions_agree(self, both, tree, mode):
+        """``oct(mode & 0o777)[-3:]`` gave "0o0", "0o7" and "o77".
+
+        ``_local_stat`` slices an *unmasked* ``st_mode``, whose file-type bits
+        always supply enough digits, so only the remote side was malformed.
+        """
+        local, remote = both
+        target = tree / "modes.bin"
+        target.write_text("x")
+        os.chmod(target, mode)
+        try:
+            expected = format(mode, "03o")
+            assert local.stat("modes.bin").permissions == expected
+            assert remote.stat("modes.bin").permissions == expected
+        finally:
+            # Leave the file readable so the temporary directory can be
+            # removed.
+            os.chmod(target, 0o644)
+
+    def test_stat_agrees_about_files_and_directories(self, both):
+        """Everything but the fractional part of the modification time.
+
+        SFTP carries mtime as whole seconds, so the remote side cannot report
+        the sub-second precision ``os.stat`` gives. That is the protocol, not
+        a divergence to fix, and it is the only field the two disagree on.
+        """
+        local, remote = both
+        for path in ("alpha.csv", "data", "data/deep/delta.csv"):
+            here, there = local.stat(path), remote.stat(path)
+            assert there.name == here.name
+            assert there.size == here.size
+            assert there.is_dir == here.is_dir
+            assert there.permissions == here.permissions
+            assert int(there.modified) == int(here.modified)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

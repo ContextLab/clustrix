@@ -13,7 +13,7 @@ import shlex
 import stat as stat_module
 import glob as glob_module
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import paramiko
 
@@ -545,7 +545,12 @@ class ClusterFilesystem:
             size=int(attrs.st_size or 0),
             modified=float(attrs.st_mtime or 0),
             is_dir=stat_module.S_ISDIR(mode),
-            permissions=oct(mode & 0o777)[-3:],
+            # ``oct(mode & 0o777)[-3:]`` is only three digits when the value
+            # needs three: 0o000 renders "0o0", 0o007 "0o7", 0o077 "o77".
+            # ``_local_stat`` never showed this because it slices an
+            # unmasked ``st_mode``, whose file-type bits guarantee enough
+            # digits. Formatting to a fixed width says what was meant.
+            permissions=format(mode & 0o777, "03o"),
             name=os.path.basename(path),
         )
 
@@ -563,67 +568,149 @@ class ClusterFilesystem:
         attrs = self._remote_attrs_for_predicate(path)
         return attrs is not None and stat_module.S_ISREG(attrs.st_mode or 0)
 
+    # ``glob.glob`` is the contract for pattern matching, and ``_local_glob``
+    # is a thin wrapper around it. The only way the two sides can agree is for
+    # the remote side to run the same algorithm over remote directory
+    # entries, so the helpers below mirror ``glob._iglob``, ``_glob0``,
+    # ``_glob1`` and ``_iterdir`` one for one, with SFTP where the stdlib uses
+    # ``os``. A cheaper hand-rolled component split is what caused the last
+    # divergence: it discarded the empty trailing component of ``*/``, so a
+    # pattern that means "directories only" started matching files as well.
+
+    @staticmethod
+    def _has_magic(text: str) -> bool:
+        """``glob.has_magic``: does this string need expanding at all?"""
+        return any(char in text for char in "*?[")
+
+    def _remote_lexists(self, full_path: str) -> bool:
+        """``os.path.lexists`` over SFTP -- a broken symlink still exists."""
+        sftp = self._get_sftp_client()
+        try:
+            sftp.lstat(full_path)
+        except OSError:
+            return False
+        return True
+
+    def _remote_path_isdir(self, full_path: str) -> bool:
+        """``os.path.isdir`` over SFTP, following symlinks as it does."""
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.stat(full_path)
+        except OSError:
+            return False
+        return stat_module.S_ISDIR(attrs.st_mode or 0)
+
+    def _remote_is_symlink(self, full_path: str) -> bool:
+        """Is this path a symlink itself, whatever it points at?"""
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.lstat(full_path)
+        except OSError as exc:
+            logger.debug("Cannot lstat remote path %s: %s", full_path, exc)
+            return False
+        return stat_module.S_ISLNK(attrs.st_mode or 0)
+
+    def _remote_entry_is_dir(self, directory: str, entry: Any) -> bool:
+        """``os.DirEntry.is_dir()``: a symlink is judged by its target.
+
+        OpenSSH answers a readdir with ``lstat`` attributes, so a symlink
+        arrives here as one and its target has to be looked up. A server
+        that answers with ``stat`` attributes has already resolved it.
+        """
+        mode = entry.st_mode or 0
+        if stat_module.S_ISLNK(mode):
+            return self._remote_path_isdir(
+                posixpath.join(directory or ".", entry.filename)
+            )
+        return stat_module.S_ISDIR(mode)
+
+    def _remote_iterdir(self, directory: str, dironly: bool) -> List[str]:
+        """``glob._iterdir``: entry names, or only the directory ones."""
+        sftp = self._get_sftp_client()
+        try:
+            entries = sftp.listdir_attr(directory or ".")
+        except OSError as exc:
+            logger.debug("Cannot list remote directory %s: %s", directory, exc)
+            return []
+
+        names = []
+        for entry in entries:
+            if dironly and not self._remote_entry_is_dir(directory, entry):
+                continue
+            names.append(entry.filename)
+        return names
+
+    def _remote_glob1(self, directory: str, pattern: str, dironly: bool) -> List[str]:
+        """``glob._glob1``: expand a wildcard component in one directory."""
+        names = self._remote_iterdir(directory, dironly)
+        if not pattern.startswith("."):
+            names = [name for name in names if not name.startswith(".")]
+        return fnmatch.filter(names, pattern)
+
+    def _remote_glob0(self, directory: str, basename: str, dironly: bool) -> List[str]:
+        """``glob._glob0``: a literal component only has to exist.
+
+        ``dironly`` is unused here, exactly as it is in the stdlib, and the
+        parameter stays so this and ``_remote_glob1`` remain interchangeable.
+        """
+        del dironly
+        if not basename:
+            # ``posixpath.split`` gives an empty basename for a pattern that
+            # ends in a separator, and "a*/" must match only directories.
+            if self._remote_path_isdir(directory):
+                return [basename]
+        elif self._remote_lexists(posixpath.join(directory, basename)):
+            return [basename]
+        return []
+
+    def _remote_iglob(self, pattern: str, dironly: bool) -> Iterator[str]:
+        """``glob._iglob``: the recursive component-by-component expansion."""
+        directory, basename = posixpath.split(pattern)
+        if not self._has_magic(pattern):
+            if basename:
+                if self._remote_lexists(pattern):
+                    yield pattern
+            elif self._remote_path_isdir(directory):
+                yield pattern
+            return
+        if not directory:
+            yield from self._remote_glob1(directory, basename, dironly)
+            return
+        directories: Iterable[str]
+        if directory != pattern and self._has_magic(directory):
+            directories = self._remote_iglob(directory, True)
+        else:
+            directories = [directory]
+        expand = self._remote_glob1 if self._has_magic(basename) else self._remote_glob0
+        for parent in directories:
+            for name in expand(parent, basename, dironly):
+                yield posixpath.join(parent, name)
+
     def _remote_glob(self, pattern: str, path: str) -> List[str]:
         """Remote pattern matching, expanded here rather than by a shell.
 
         The old implementation ran ``ls -d {pattern}`` and relied on the
         remote shell to expand it, which is why the pattern could not simply
         be quoted: quoting it would have stopped it being a pattern at all.
-        Expanding it locally against real directory entries removes the
+        Expanding it here against real directory entries removes the
         dilemma -- globbing still works, and nothing reaches a shell.
 
-        Wildcards are honoured in every component ("logs/*/out.txt"), and a
-        leading dot is only matched by a pattern that has one, both matching
-        ``glob.glob`` in ``_local_glob``.
+        The expansion is ``glob.glob``'s, so every rule ``_local_glob`` obeys
+        holds here too: a trailing slash matches directories only, a leading
+        dot is matched only by a pattern that has one, an absolute pattern
+        ignores the working directory, and the returned paths are normalised
+        by ``relpath`` the same way.
         """
-        sftp = self._get_sftp_client()
         full_path = self._get_full_path(path)
+        search_pattern = posixpath.join(full_path, pattern)
 
-        components = [part for part in pattern.split("/") if part not in ("", ".")]
-        if not components:
-            return []
-
-        matches = [""]
-        for index, component in enumerate(components):
-            is_last = index == len(components) - 1
-            expanded: List[str] = []
-            for relative in matches:
-                directory = posixpath.join(full_path, relative)
-                if any(char in component for char in "*?["):
-                    try:
-                        names = sftp.listdir(directory)
-                    except OSError as exc:
-                        logger.debug(
-                            "Cannot list remote directory %s: %s", directory, exc
-                        )
-                        continue
-                    for name in names:
-                        if name.startswith(".") and not component.startswith("."):
-                            continue
-                        if fnmatch.fnmatch(name, component):
-                            expanded.append(posixpath.join(relative, name))
-                else:
-                    candidate = posixpath.join(relative, component)
-                    # A literal trailing component still has to exist, the
-                    # way glob.glob("data.csv") returns nothing when it does
-                    # not. Intermediate ones are checked by the listdir of
-                    # the component after them.
-                    if is_last:
-                        try:
-                            if (
-                                self._remote_attrs(posixpath.join(full_path, candidate))
-                                is None
-                            ):
-                                continue
-                        except OSError as exc:
-                            logger.debug(
-                                "Cannot stat remote path %s: %s", candidate, exc
-                            )
-                            continue
-                    expanded.append(candidate)
-            matches = expanded
-
-        return sorted(matches)
+        results = []
+        for match in self._remote_iglob(search_pattern, False):
+            try:
+                results.append(posixpath.relpath(match, full_path))
+            except ValueError:
+                results.append(match)
+        return sorted(results)
 
     def _remote_du(self, path: str) -> DiskUsage:
         """Remote disk usage, walked over SFTP.
@@ -635,6 +722,16 @@ class ClusterFilesystem:
         regular files underneath ``path``. Walking over SFTP costs a round
         trip per directory but is portable, needs no quoting, and counts
         exactly what the local implementation counts.
+
+        Symlinks are counted the way ``_local_du`` counts them, which is the
+        way ``os.walk(followlinks=False)`` plus ``os.path.getsize`` do: a link
+        to a file contributes its *target's* size, once, and a link to a
+        directory contributes nothing and is not descended into. That last
+        rule is also why this loop terminates. The only way to build a cycle
+        out of POSIX directories is a symlink, and no symlink is followed, so
+        no directory can be reached twice -- which is exactly why ``os.walk``
+        needs no visited set either. A link back to an ancestor used to make
+        this an endless walk.
         """
         sftp = self._get_sftp_client()
         full_path = self._get_full_path(path)
@@ -652,13 +749,43 @@ class ClusterFilesystem:
             for entry in entries:
                 mode = entry.st_mode or 0
                 child = posixpath.join(directory, entry.filename)
-                if stat_module.S_ISDIR(mode):
-                    pending.append(child)
+                if stat_module.S_ISLNK(mode):
+                    # readdir answered with lstat attributes, so this is
+                    # known to be a link and only its target matters.
+                    size = self._remote_link_target_size(child)
+                    if size is not None:
+                        total_size += size
+                        file_count += 1
+                elif stat_module.S_ISDIR(mode):
+                    # readdir may have answered with stat attributes, in
+                    # which case a link to a directory is indistinguishable
+                    # from the directory here, and descending into it is the
+                    # endless walk. One lstat settles it.
+                    if not self._remote_is_symlink(child):
+                        pending.append(child)
                 elif stat_module.S_ISREG(mode):
-                    total_size += entry.st_size or 0
+                    total_size += int(entry.st_size or 0)
                     file_count += 1
 
         return DiskUsage(total_bytes=total_size, file_count=file_count)
+
+    def _remote_link_target_size(self, full_path: str) -> Optional[int]:
+        """What ``os.path.getsize`` would report for a symlink, or None.
+
+        ``getsize`` follows the link, so a link to a regular file counts at
+        the target's size. A link to a directory is not a file and a broken
+        link raises -- ``_local_du`` catches that ``OSError`` and skips the
+        entry, so both come back as None.
+        """
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.stat(full_path)
+        except OSError as exc:
+            logger.debug("Cannot stat remote symlink %s: %s", full_path, exc)
+            return None
+        if stat_module.S_ISREG(attrs.st_mode or 0):
+            return int(attrs.st_size or 0)
+        return None
 
     def _remote_count_files(self, path: str, pattern: str) -> int:
         """Count remote files matching ``pattern``.

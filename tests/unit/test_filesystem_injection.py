@@ -26,8 +26,11 @@ Three things are proved:
   ``_remote_glob`` expands patterns itself over SFTP and ``_remote_find``
   hands its pattern to ``find``, which does its own matching.
 
-The last test is a source guard: it parses ``filesystem.py`` and fails if any
-shell command interpolates a value that did not come from ``shlex.quote``.
+The last section is a source guard. It parses ``filesystem.py``, works out
+which argument positions end up being run by a shell -- following the
+module's own helpers to a fixpoint rather than matching on names -- and fails
+if any value that a caller could control reaches one of them without passing
+through ``shlex.quote``.
 """
 
 import ast
@@ -374,69 +377,243 @@ class TestThePayloadsReallyDidExecuteBeforeTheFix:
         assert fs.stat("-rf").size == 10
 
 
-class TestNoUnquotedInterpolationSurvivesInTheSource:
-    """A guard, so the next shell command added here cannot skip quoting."""
+class TestNoTaintedValueReachesAShell:
+    """The anti-regression guard, and proof that it can actually fail.
 
-    def test_the_shipped_module_has_no_unquoted_interpolation(self):
+    The property is *not* "variables called ``cmd`` are quoted". It is: no
+    value a caller controls reaches a shell without going through
+    ``shlex.quote``, however the command is spelled and whatever it is handed
+    to. The previous guard inspected assignments to ``cmd``-prefixed names
+    and arguments to ``exec_command``, and so reported nothing at all for
+    ``self._run_remote(f"ls -1 {full_path}")`` -- the module's own primary
+    helper, and fully exploitable. Seven other spellings walked past it too.
+    A guard that misses the main path is worse than no guard, because it is
+    believed.
+    """
+
+    def test_the_shipped_module_is_clean(self):
         source = Path(_filesystem_source_path()).read_text()
-        commands = _shell_command_expressions(ast.parse(source))
+        assert _shell_injection_violations(source) == []
 
-        # Not vacuous: there really are shell commands to check.
-        assert commands, "the guard found no shell commands to check"
-        assert _unquoted_interpolations(commands) == []
+    def test_the_guard_is_not_vacuous(self):
+        """It has to be looking at real shell commands to mean anything."""
+        tree = ast.parse(Path(_filesystem_source_path()).read_text())
+        assert _shell_sites(tree), "the guard found no shell commands to check"
 
-    def test_every_exec_command_call_is_covered_by_the_guard(self):
-        """A command built somewhere the guard does not look would slip by."""
-        source = Path(_filesystem_source_path()).read_text()
-        tree = ast.parse(source)
+    def test_the_sink_is_discovered_not_hard_coded(self):
+        """``_run_remote`` is a sink because it forwards to exec_command.
 
-        for node in ast.walk(tree):
-            if not _is_exec_command(node):
-                continue
-            argument = node.args[0]
-            assert isinstance(argument, (ast.Name, ast.Constant)), (
-                "exec_command is being handed an expression the guard cannot "
-                f"trace (line {argument.lineno}); assign it to a `cmd` "
-                "variable so the guard checks it"
-            )
+        Nothing names it in the guard. It is found by following its
+        parameter into ``exec_command`` and taking the fixpoint, which is
+        what lets the guard cover a helper that does not exist yet.
+        """
+        tree = ast.parse(Path(_filesystem_source_path()).read_text())
+        positional, keyword = _sink_table(tree)
+        assert 0 in positional.get("_run_remote", set())
+        assert "cmd" in keyword.get("_run_remote", set())
 
+    def test_a_chain_of_helpers_is_followed(self):
+        """Taint has to survive however many helpers stand in the way."""
+        source = (
+            "class Filesystem:\n"
+            "    def _exec(self, cmd):\n"
+            "        self._get_ssh_client().exec_command(cmd)\n"
+            "\n"
+            "    def _run_remote(self, cmd):\n"
+            "        return self._exec(cmd)\n"
+            "\n"
+            "    def _listing(self, cmd):\n"
+            "        return self._run_remote(cmd)\n"
+            "\n"
+            "    def operation(self, full_path):\n"
+            '        self._listing(f"ls -1 {full_path}")\n'
+        )
+        positional, _ = _sink_table(ast.parse(source))
+        assert 0 in positional["_listing"]
+        assert _shell_injection_violations(source)
+
+    #: Every spelling a reviewer got past the old guard, plus the ones it did
+    #: catch. Each is a whole miniature module, so the sink really has to be
+    #: discovered rather than assumed.
     @pytest.mark.parametrize(
-        "bad_source",
+        "label,body",
         [
-            # The original defect.
-            'cmd = f"ls -1 {full_path} 2>/dev/null || true"',
-            # Quoted next to unquoted.
-            'cmd = f"find {shlex.quote(d)} -name {pattern}"',
-            # Single quotes are not quoting.
-            "cmd = f\"find . -name '{pattern}'\"",
-            # Some other function that is not shlex.quote.
-            'cmd = f"ls {escape(full_path)}"',
-            # Concatenation instead of an f-string.
-            'cmd = "ls -1 " + full_path',
-            # Straight to exec_command, never assigned.
-            'client.exec_command(f"stat {full_path}")',
-            # printf-style.
-            'cmd = "ls -1 %s" % full_path',
+            # --- the eight the old guard missed -----------------------------
+            (
+                "the module's own primary helper, called directly",
+                'self._run_remote(f"ls -1 {full_path}")',
+            ),
+            (
+                "a variable that is not called cmd",
+                'command = f"ls -1 {full_path}"\nself._run_remote(command)',
+            ),
+            (
+                "an annotated assignment",
+                'cmd: str = f"ls -1 {full_path}"\nself._run_remote(cmd)',
+            ),
+            (
+                "an augmented assignment",
+                'cmd = "ls -1 "\ncmd += full_path\nself._run_remote(cmd)',
+            ),
+            (
+                "a tuple assignment",
+                'cmd, extra = f"ls -1 {full_path}", 0\nself._run_remote(cmd)',
+            ),
+            (
+                "an attribute assignment",
+                'self.cmd = f"ls -1 {full_path}"\nself._run_remote(self.cmd)',
+            ),
+            (
+                "a walrus",
+                'self._run_remote(cmd := f"ls -1 {full_path}")',
+            ),
+            # --- and the ones it did catch, which must keep failing ---------
+            (
+                "the original defect",
+                'cmd = f"ls -1 {full_path} 2>/dev/null || true"\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "quoted next to unquoted",
+                'cmd = f"find {shlex.quote(full_path)} -name {pattern}"\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "single quotes are not quoting",
+                "cmd = f\"find . -name '{pattern}'\"\nself._run_remote(cmd)",
+            ),
+            (
+                "some other function that is not shlex.quote",
+                'cmd = f"ls {escape(full_path)}"\nself._run_remote(cmd)',
+            ),
+            (
+                "concatenation instead of an f-string",
+                'cmd = "ls -1 " + full_path\nself._run_remote(cmd)',
+            ),
+            (
+                "straight to exec_command, never assigned",
+                'self._get_ssh_client().exec_command(f"stat {full_path}")',
+            ),
+            (
+                "printf-style",
+                'cmd = "ls -1 %s" % full_path\nself._run_remote(cmd)',
+            ),
+            (
+                "str.format",
+                'cmd = "ls -1 {}".format(full_path)\nself._run_remote(cmd)',
+            ),
+            (
+                "str.join",
+                'cmd = " ".join(["ls", "-1", full_path])\nself._run_remote(cmd)',
+            ),
+            (
+                "a helper that builds the command",
+                "cmd = build_listing_command(full_path)\nself._run_remote(cmd)",
+            ),
+            (
+                "a keyword argument",
+                'self._run_remote(cmd=f"ls -1 {full_path}")',
+            ),
+            (
+                "positional unpacking",
+                'parts = [f"ls -1 {full_path}"]\nself._run_remote(*parts)',
+            ),
+            (
+                "keyword unpacking",
+                'parts = {"cmd": f"ls -1 {full_path}"}\nself._run_remote(**parts)',
+            ),
+            (
+                "a value taken out of a container",
+                'cmd = commands[f"ls {full_path}"]\nself._run_remote(cmd)',
+            ),
+            (
+                "a loop variable",
+                'for cmd in [f"ls {full_path}"]:\n    self._run_remote(cmd)',
+            ),
         ],
     )
-    def test_the_guard_fails_when_it_should(self, bad_source):
-        tree = ast.parse(bad_source)
-        commands = _shell_command_expressions(tree)
-        violations = _unquoted_interpolations(commands)
-        exec_calls = [node for node in ast.walk(tree) if _is_exec_command(node)]
-        traceable = all(
-            isinstance(call.args[0], (ast.Name, ast.Constant)) for call in exec_calls
-        )
-        assert (
-            violations or not traceable
-        ), f"the guard passed source it must reject: {bad_source!r}"
+    def test_the_guard_fails_when_it_should(self, label, body):
+        violations = _shell_injection_violations(_miniature_module(body))
+        assert violations, f"the guard passed source it must reject: {label}"
 
-    def test_the_guard_passes_a_correctly_quoted_command(self):
-        """The negative control: the guard is not simply always failing."""
-        good = 'cmd = f"cd -- {shlex.quote(d)} && find . -name {shlex.quote(p)}"'
-        commands = _shell_command_expressions(ast.parse(good))
-        assert commands
-        assert _unquoted_interpolations(commands) == []
+    def test_shadowing_shlex_is_a_violation(self):
+        """``shlex.quote`` only sanitises while ``shlex`` is really shlex.
+
+        Every other check in the guard treats a ``shlex.quote(...)`` call as
+        proof of safety, so rebinding the name would launder anything.
+        """
+        source = (
+            "import shlex\n"
+            "\n"
+            "class _Passthrough:\n"
+            "    def quote(self, text):\n"
+            "        return text\n"
+            "\n"
+            "shlex = _Passthrough()\n"
+            "\n"
+            "class Filesystem:\n"
+            "    def _run_remote(self, cmd):\n"
+            "        self._get_ssh_client().exec_command(cmd)\n"
+            "\n"
+            "    def operation(self, full_path):\n"
+            '        cmd = f"ls -1 {shlex.quote(full_path)}"\n'
+            "        self._run_remote(cmd)\n"
+        )
+        assert _shell_injection_violations(source)
+
+    def test_importing_something_else_as_shlex_is_a_violation(self):
+        source = (
+            "import lenient_shlex as shlex\n"
+            "\n"
+            "class Filesystem:\n"
+            "    def _run_remote(self, cmd):\n"
+            "        self._get_ssh_client().exec_command(cmd)\n"
+            "\n"
+            "    def operation(self, full_path):\n"
+            "        self._run_remote(shlex.quote(full_path))\n"
+        )
+        assert _shell_injection_violations(source)
+
+    #: The negative controls. A guard that always fails proves nothing
+    #: either, and quoted code must stay writable in more than one style.
+    @pytest.mark.parametrize(
+        "label,body",
+        [
+            (
+                "quoted inline, the shipped shape",
+                'cmd = f"cd -- {shlex.quote(full_path)} && '
+                'find . -name {shlex.quote(pattern)} -type f -print0"\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "quoted through an intermediate variable",
+                "quoted = shlex.quote(full_path)\n"
+                'cmd = f"ls -1 {quoted}"\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "quoted and concatenated",
+                'cmd = "ls -1 " + shlex.quote(full_path)\nself._run_remote(cmd)',
+            ),
+            (
+                "quoted and joined",
+                'cmd = " ".join(["ls", "-1", shlex.quote(full_path)])\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "quoted and formatted",
+                'cmd = "ls -1 {}".format(shlex.quote(full_path))\n'
+                "self._run_remote(cmd)",
+            ),
+            (
+                "a command with nothing interpolated at all",
+                'self._run_remote("uname -a")',
+            ),
+        ],
+    )
+    def test_the_guard_passes_quoted_code(self, label, body):
+        violations = _shell_injection_violations(_miniature_module(body))
+        assert violations == [], f"the guard rejected safe source: {label}"
 
 
 def _filesystem_source_path() -> str:
@@ -445,60 +622,269 @@ def _filesystem_source_path() -> str:
     return clustrix.filesystem.__file__
 
 
-def _is_exec_command(node) -> bool:
+def _miniature_module(body: str) -> str:
+    """A stand-in for ``filesystem.py``: the sink helper plus one method.
+
+    The helper is spelled out rather than assumed so that every case below
+    exercises the guard's discovery of ``_run_remote`` as a shell sink, not a
+    hard-coded name.
+    """
+    indented = "\n".join("        " + line for line in body.splitlines())
     return (
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr == "exec_command"
-        and bool(node.args)
+        "import shlex\n"
+        "\n"
+        "class Filesystem:\n"
+        "    def _run_remote(self, cmd):\n"
+        "        self._get_ssh_client().exec_command(cmd)\n"
+        "\n"
+        "    def operation(self, full_path, pattern):\n"
+        f"{indented}\n"
     )
 
 
-def _shell_command_expressions(tree):
-    """Every expression that becomes a remote shell command.
+# ===========================================================================
+# The guard itself.
+#
+# Three ideas, and nothing about variable names:
+#
+#   * a *sink* is an argument position whose value ends up being run by a
+#     shell. ``exec_command`` and ``os.system`` are sinks by definition; any
+#     function that forwards one of its own parameters into a sink becomes a
+#     sink in turn, taken to a fixpoint. That is how ``_run_remote`` is
+#     discovered rather than listed;
+#   * a value is *clean* if it is a literal, the result of ``shlex.quote``,
+#     or built out of clean values. A parameter, an attribute, a subscript, a
+#     loop variable, or any other call is tainted;
+#   * a violation is a tainted value reaching a sink.
+#
+# Since ``shlex.quote`` is the only thing that launders a value, the name
+# ``shlex`` is checked separately for rebinding.
+# ===========================================================================
 
-    Two shapes count: the value assigned to a ``cmd``-named variable, and the
-    first argument of an ``exec_command`` call.
+#: The calls that hand an argument to a shell before any propagation.
+_BASE_POSITIONAL_SINKS = {"exec_command": {0}, "system": {0}}
+_BASE_KEYWORD_SINKS = {"exec_command": {"command"}}
+
+
+def _called_name(call: ast.Call):
+    if isinstance(call.func, ast.Attribute):
+        return call.func.attr
+    if isinstance(call.func, ast.Name):
+        return call.func.id
+    return None
+
+
+def _positional_parameters(function) -> list:
+    return [argument.arg for argument in function.args.posonlyargs + function.args.args]
+
+
+def _receiver_offset(function) -> int:
+    """``self._run_remote(cmd)`` passes ``cmd`` at call-site index 0."""
+    parameters = _positional_parameters(function)
+    return 1 if parameters and parameters[0] in ("self", "cls") else 0
+
+
+def _all_parameter_names(function) -> set:
+    arguments = function.args
+    names = {
+        argument.arg
+        for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs
+    }
+    if arguments.vararg:
+        names.add(arguments.vararg.arg)
+    if arguments.kwarg:
+        names.add(arguments.kwarg.arg)
+    return names
+
+
+def _sink_arguments(call: ast.Call, positional, keyword) -> list:
+    """Every argument of this call that a shell will run.
+
+    ``*args`` and ``**kwargs`` are included whole rather than skipped: which
+    parameter they land on cannot be read off the syntax, so an unpacked call
+    to a sink is reported unless what it unpacks is itself clean.
     """
-    expressions = []
+    name = _called_name(call)
+    if name is None or not (positional.get(name) or keyword.get(name)):
+        return []
+
+    arguments = []
+    for index, argument in enumerate(call.args):
+        if isinstance(argument, ast.Starred) or index in positional.get(name, ()):
+            arguments.append(argument)
+    for keyword_argument in call.keywords:
+        if keyword_argument.arg is None or keyword_argument.arg in keyword.get(
+            name, ()
+        ):
+            arguments.append(keyword_argument.value)
+    return arguments
+
+
+def _is_scope(node) -> bool:
+    return isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+
+
+def _scopes(tree):
+    """The module, then every function and class body in it."""
+    yield tree
     for node in ast.walk(tree):
+        if _is_scope(node):
+            yield node
+
+
+def _scope_body(scope) -> list:
+    """Every node belonging to this scope, not to a nested one."""
+    nodes = []
+    stack = list(ast.iter_child_nodes(scope))
+    while stack:
+        node = stack.pop()
+        if _is_scope(node) or isinstance(node, ast.Lambda):
+            continue
+        nodes.append(node)
+        stack.extend(ast.iter_child_nodes(node))
+    return nodes
+
+
+def _sink_table(tree):
+    """Which argument of which callable reaches a shell, to a fixpoint."""
+    positional = {name: set(value) for name, value in _BASE_POSITIONAL_SINKS.items()}
+    keyword = {name: set(value) for name, value in _BASE_KEYWORD_SINKS.items()}
+
+    functions = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+
+    changed = True
+    while changed:
+        changed = False
+        for function in functions:
+            parameters = _positional_parameters(function)
+            keyword_only = {argument.arg for argument in function.args.kwonlyargs}
+            offset = _receiver_offset(function)
+            for node in _scope_body(function):
+                if not isinstance(node, ast.Call):
+                    continue
+                for argument in _sink_arguments(node, positional, keyword):
+                    if not isinstance(argument, ast.Name):
+                        continue
+                    if argument.id in parameters:
+                        index = parameters.index(argument.id) - offset
+                        if index >= 0:
+                            forwarded = positional.setdefault(function.name, set())
+                            if index not in forwarded:
+                                forwarded.add(index)
+                                changed = True
+                    if argument.id in parameters or argument.id in keyword_only:
+                        forwarded_keywords = keyword.setdefault(function.name, set())
+                        if argument.id not in forwarded_keywords:
+                            forwarded_keywords.add(argument.id)
+                            changed = True
+    return positional, keyword
+
+
+def _sink_parameters(scope, positional, keyword) -> set:
+    """The parameters of ``scope`` that are themselves shell sinks.
+
+    Inside such a function the parameter counts as clean: forwarding it is
+    what made the function a sink, and the obligation to quote moves to
+    everyone who calls it.
+    """
+    if not isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return set()
+
+    names = set(keyword.get(scope.name, ()))
+    parameters = _positional_parameters(scope)
+    offset = _receiver_offset(scope)
+    for index in positional.get(scope.name, ()):
+        position = index + offset
+        if 0 <= position < len(parameters):
+            names.add(parameters[position])
+    return names
+
+
+def _bindings(scope):
+    """Every value bound to a name in this scope.
+
+    A binding with no expression behind it -- a loop variable, a ``with``
+    target, an ``except`` name, an import -- is recorded as ``None``, which
+    is never clean. Attribute and subscript targets bind no local name at
+    all, and reading one back is tainted anyway.
+    """
+    from collections import defaultdict
+
+    bindings = defaultdict(list)
+
+    def record(target, value):
+        if isinstance(target, ast.Name):
+            bindings[target.id].append(value)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            elements = None
+            if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(
+                target.elts
+            ):
+                elements = value.elts
+            for index, element in enumerate(target.elts):
+                record(element, elements[index] if elements else None)
+        elif isinstance(target, ast.Starred):
+            record(target.value, None)
+
+    for node in _scope_body(scope):
         if isinstance(node, ast.Assign):
-            names = [t.id for t in node.targets if isinstance(t, ast.Name)]
-            if any(name == "cmd" or name.startswith("cmd") for name in names):
-                expressions.append(node.value)
-        elif _is_exec_command(node):
-            expressions.append(node.args[0])
-    return expressions
+            for target in node.targets:
+                record(target, node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+            # ``cmd: str = ...``, ``cmd += path`` and ``(cmd := ...)`` are all
+            # assignments; ``+=`` folds the old value in, and both halves have
+            # to be clean for the result to be.
+            record(node.target, node.value)
+        elif isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+            record(node.target, None)
+        elif isinstance(node, ast.withitem):
+            if node.optional_vars is not None:
+                record(node.optional_vars, None)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                bindings[node.name].append(None)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                bindings[alias.asname or alias.name.split(".")[0]].append(None)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                bindings[name].append(None)
+    return bindings
 
 
-def _unquoted_interpolations(expressions):
-    """Describe every interpolation that did not come from ``shlex.quote``."""
-    violations = []
-    for expression in expressions:
-        if isinstance(expression, (ast.Name, ast.Constant)):
-            # A plain constant is not interpolated; a bare name was checked
-            # where it was assigned.
-            continue
-        if not isinstance(expression, ast.JoinedStr):
-            violations.append(
-                f"line {expression.lineno}: a shell command is built by "
-                f"{type(expression).__name__} rather than by an f-string of "
-                "shlex.quote() values"
-            )
-            continue
-        for part in expression.values:
-            if not isinstance(part, ast.FormattedValue):
+def _clean_names(scope, sink_parameters) -> set:
+    """The names in this scope whose every binding is a sanitised value."""
+    bindings = _bindings(scope)
+    parameters = (
+        _all_parameter_names(scope)
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef))
+        else set()
+    )
+
+    # Start optimistic and demote, so that ``a = b`` followed by
+    # ``b = shlex.quote(x)`` settles on the right answer whatever the order.
+    clean = set(bindings) | set(sink_parameters)
+    while True:
+        demoted = set()
+        for name in clean:
+            if name in parameters and name not in sink_parameters:
+                demoted.add(name)
                 continue
-            if not _is_shlex_quote_call(part.value):
-                violations.append(
-                    f"line {part.lineno}: "
-                    f"{ast.unparse(part.value)!r} is interpolated into a "
-                    "shell command without shlex.quote()"
-                )
-    return violations
+            values = bindings.get(name)
+            if values is None:
+                continue
+            if any(not _is_clean(value, clean) for value in values):
+                demoted.add(name)
+        if not demoted:
+            return clean
+        clean -= demoted
 
 
-def _is_shlex_quote_call(node) -> bool:
+def _is_shlex_quote(node) -> bool:
     return (
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Attribute)
@@ -506,6 +892,114 @@ def _is_shlex_quote_call(node) -> bool:
         and isinstance(node.func.value, ast.Name)
         and node.func.value.id == "shlex"
     )
+
+
+def _is_clean(node, clean) -> bool:
+    """Is this expression free of any value a caller could have supplied?"""
+    if node is None:
+        return False
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in clean
+    if isinstance(node, ast.NamedExpr):
+        return _is_clean(node.value, clean)
+    if isinstance(node, ast.IfExp):
+        return _is_clean(node.body, clean) and _is_clean(node.orelse, clean)
+    if isinstance(node, ast.JoinedStr):
+        return all(_is_clean(part, clean) for part in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _is_clean(node.value, clean)
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_is_clean(element, clean) for element in node.elts)
+    if isinstance(node, ast.BinOp):
+        # Covers both ``"a" + x`` and ``"a %s" % x``.
+        return _is_clean(node.left, clean) and _is_clean(node.right, clean)
+    if isinstance(node, ast.Call):
+        if _is_shlex_quote(node):
+            return True
+        if isinstance(node.func, ast.Attribute) and node.func.attr in (
+            "join",
+            "format",
+        ):
+            parts = [node.func.value, *node.args]
+            parts += [keyword.value for keyword in node.keywords]
+            return all(_is_clean(part, clean) for part in parts)
+        return False
+    return False
+
+
+def _shlex_rebinding_violations(tree) -> list:
+    """Anything that could make ``shlex.quote`` not be ``shlex.quote``."""
+    violations = []
+    complaint = (
+        "the name `shlex` is rebound, so `shlex.quote()` is no longer proof "
+        "that a value was quoted"
+    )
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname == "shlex" and alias.name != "shlex":
+                    violations.append(f"line {node.lineno}: {complaint}")
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if (alias.asname or alias.name) == "shlex":
+                    violations.append(f"line {node.lineno}: {complaint}")
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if "shlex" in _all_parameter_names(node):
+                violations.append(f"line {node.lineno}: {complaint}")
+        else:
+            for target in _assignment_targets(node):
+                for inner in ast.walk(target):
+                    if isinstance(inner, ast.Name) and inner.id == "shlex":
+                        violations.append(f"line {node.lineno}: {complaint}")
+    return violations
+
+
+def _assignment_targets(node) -> list:
+    if isinstance(node, ast.Assign):
+        return list(node.targets)
+    if isinstance(node, (ast.AnnAssign, ast.AugAssign, ast.NamedExpr)):
+        return [node.target]
+    if isinstance(node, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return [node.target]
+    if isinstance(node, ast.withitem):
+        return [node.optional_vars] if node.optional_vars is not None else []
+    return []
+
+
+def _shell_sites(tree) -> list:
+    """Every ``(scope, expression)`` pair that a remote shell will run."""
+    positional, keyword = _sink_table(tree)
+    sites = []
+    for scope in _scopes(tree):
+        for node in _scope_body(scope):
+            if isinstance(node, ast.Call):
+                for argument in _sink_arguments(node, positional, keyword):
+                    sites.append((scope, argument))
+    return sites
+
+
+def _shell_injection_violations(source: str) -> list:
+    """Every caller-controlled value that reaches a shell unquoted."""
+    tree = ast.parse(source)
+    positional, keyword = _sink_table(tree)
+
+    violations = _shlex_rebinding_violations(tree)
+    for scope in _scopes(tree):
+        clean = _clean_names(scope, _sink_parameters(scope, positional, keyword))
+        for node in _scope_body(scope):
+            if not isinstance(node, ast.Call):
+                continue
+            for argument in _sink_arguments(node, positional, keyword):
+                if not _is_clean(argument, clean):
+                    violations.append(
+                        f"line {argument.lineno}: "
+                        f"{ast.unparse(argument)!r} reaches a remote shell "
+                        "without passing through shlex.quote()"
+                    )
+    return violations
 
 
 def test_the_module_imports_shlex():
