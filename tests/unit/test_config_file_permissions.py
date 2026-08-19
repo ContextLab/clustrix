@@ -252,3 +252,39 @@ def test_environment_variable_secrets_survive_include_secrets(tmp_path):
 
     reloaded = ClusterConfig.load_from_file(str(config_path))
     assert reloaded.environment_variables == config.environment_variables
+
+
+def test_repr_masks_credentials_but_keeps_ordinary_fields():
+    """A config used to print its own password into any traceback or log.
+
+    save_to_file already refused to write credentials in plaintext; showing
+    them on screen instead was barely an improvement. Masked rather than
+    omitted, so it stays visible that a value is set at all.
+    """
+    config = ClusterConfig(
+        cluster_host="hpc.example.edu",
+        username="researcher",
+        password="fake-password-value",
+        hf_token="fake-hf-token-value",
+        api_key="sk-fake-api-value",
+        environment_variables={
+            "OMP_NUM_THREADS": "8",
+            "AWS_SECRET_ACCESS_KEY": "fake-aws-value",
+        },
+    )
+
+    rendered = repr(config)
+
+    for secret in (
+        "fake-password-value",
+        "fake-hf-token-value",
+        "sk-fake-api-value",
+        "fake-aws-value",
+    ):
+        assert secret not in rendered, f"{secret!r} leaked through repr()"
+
+    # It must still be a useful repr.
+    assert "hpc.example.edu" in rendered
+    assert "researcher" in rendered
+    assert "OMP_NUM_THREADS" in rendered
+    assert "password='***'" in rendered

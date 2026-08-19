@@ -53,8 +53,7 @@ FABRICATED_RESULT = "Function execution completed"
 # is the point of this suite. The only data unpickled here is data this test
 # wrote moments earlier into a private temporary directory, so there is no
 # untrusted input anywhere in the loop.
-WORKER = textwrap.dedent(
-    """
+WORKER = textwrap.dedent("""
     import pickle, sys
     from clustrix.utils import deserialize_function
 
@@ -66,8 +65,7 @@ WORKER = textwrap.dedent(
 
     with open(sys.argv[2], "wb") as fh:
         pickle.dump(result, fh)
-    """
-)
+    """)
 
 
 class SubprocessJobRunner:

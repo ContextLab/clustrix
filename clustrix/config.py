@@ -215,6 +215,29 @@ class ClusterConfig:
     # Runtime venv information (set during execution)
     venv_info: Optional[dict] = None  # Information about created virtual environments
 
+    def __repr__(self) -> str:
+        """Render the config with credentials masked.
+
+        The dataclass-generated ``__repr__`` printed every field verbatim, so
+        a password or API token landed in any traceback, log line or notebook
+        cell that displayed a config. ``save_to_file`` already refused to
+        write these in plaintext; showing them on screen instead was not much
+        better. Masked rather than omitted, so it stays obvious that a value
+        is set.
+        """
+        parts = []
+        for field_def in fields(self):
+            value = getattr(self, field_def.name)
+            if field_def.name in SECRET_FIELDS and value is not None:
+                value = "***"
+            elif field_def.name in SECRET_BEARING_MAPPINGS and isinstance(value, dict):
+                value = {
+                    k: ("***" if k not in _redact_secret_entries(value) else v)
+                    for k, v in value.items()
+                }
+            parts.append(f"{field_def.name}={value!r}")
+        return f"{type(self).__name__}({', '.join(parts)})"
+
     def __post_init__(self):
         if self.environment_variables is None:
             self.environment_variables = {}

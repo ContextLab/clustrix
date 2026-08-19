@@ -254,14 +254,17 @@ class TestClusterDecoratorReal:
         # Submit async job
         job_result = slow_computation(10)
 
-        # For async, should return a job handle/future
-        # The actual implementation may vary, but we test the concept
-        if hasattr(job_result, "result"):
-            # If it's a future-like object
-            final_result = job_result.result(timeout=5)
-        else:
-            # If async is not fully implemented, may return direct result
-            final_result = job_result
+        # async_submit=True returns an AsyncJobResult handle (clustrix.
+        # async_executor_simple.AsyncJobResult), never the direct value: its
+        # API is get_result()/get_status()/is_complete(), not a `.result`
+        # future-like attribute, so the old `hasattr(job_result, "result")`
+        # check was always False and fell through to treating the handle
+        # itself as the answer.
+        from clustrix.async_executor_simple import AsyncJobResult
+
+        assert isinstance(job_result, AsyncJobResult)
+        final_result = job_result.get_result(timeout=5)
+        assert job_result.get_status() == "completed"
 
         # Validate result
         assert final_result["input"] == 10

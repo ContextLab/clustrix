@@ -188,10 +188,24 @@ def process_datasets(config):
 - Check scheduler-specific logs (SLURM: slurm-*.out)
 
 ### Configuration Priority
-1. Runtime parameters (highest priority)
-2. Configuration file (`clustrix.yml`)
-3. Environment variables
-4. Default values (lowest priority)
+1. Runtime parameters — `configure(...)` and `@cluster(...)` keywords (highest priority)
+2. Configuration file (`clustrix.yml`, discovered in `~/.clustrix/` and `/etc/clustrix/`)
+3. Default values (lowest priority)
+
+This list previously named "environment variables" as a third level. **No such
+level exists.** Nothing reads a `CLUSTRIX_<FIELD>` variable; grep for it before
+believing otherwise. Only two environment variables are consulted at all, and
+neither sets a config field:
+
+- `CLUSTRIX_CONFIG_DIR` — where configuration files are looked for and saved
+- whatever `ClusterConfig.password_env_var` names — read by the auth fallback
+  to supply a password, and only a password
+
+This matters more now that `save_to_file` omits secret-bearing fields by
+default: `password_env_var` is currently the only supported channel for getting
+a credential in without writing it to disk. A general environment-variable
+overlay would be a reasonable feature, but it has not been built, and the
+documentation must not imply it has.
 
 ## ⚠️ MANDATORY PRE-COMMIT WORKFLOW ⚠️
 

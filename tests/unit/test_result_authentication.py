@@ -406,9 +406,7 @@ class TestSerializerRequirementIsExplicit:
         # that blocks the imports -- a real interpreter without them.
         blocker = tmp_path / "blocker"
         blocker.mkdir()
-        (blocker / "sitecustomize.py").write_text(
-            textwrap.dedent(
-                """
+        (blocker / "sitecustomize.py").write_text(textwrap.dedent("""
                 import sys
                 class _Block:
                     def find_module(self, name, path=None):
@@ -416,9 +414,7 @@ class TestSerializerRequirementIsExplicit:
                     def load_module(self, name):
                         raise ImportError(name)
                 sys.meta_path.insert(0, _Block())
-                """
-            )
-        )
+                """))
         env = dict(os.environ, CLUSTRIX_RESULT_KEY=KEY, PYTHONPATH=str(blocker))
         result = subprocess.run(
             [sys.executable, "-c", program],

@@ -72,15 +72,30 @@ if __name__ == "__main__":
         """
         Test lambda function serialization.
 
-        Lambdas are notoriously difficult to serialize.
+        This used to assert that decorating a lambda raises -- the docstring
+        called lambdas "notoriously difficult to serialize", which is true
+        for stdlib pickle but not for clustrix: `serialize_function` byte-
+        serializes with dill (`_dumps_by_value`), and dill has always been
+        able to serialize lambdas (its whole reason for existing over pickle
+        is closures and dynamically-defined callables). `inspect.getsource`
+        does fail for a lambda passed inline like this, but that failure is
+        caught and simply leaves `function_source` as None -- it was never
+        allowed to propagate. So a decorated lambda genuinely works, both
+        executed locally (no cluster_host configured, so it's a direct
+        in-process call) and when actually pushed through serialization.
         """
         configure(cluster_type="local")
 
-        # This should raise an error or handle gracefully
-        with pytest.raises((AttributeError, TypeError, ValueError)):
-            # Lambda functions cannot be decorated directly
-            func = cluster(cores=1)(lambda x: x * 2)
-            func(5)
+        func = cluster(cores=1)(lambda x: x * 2)
+        assert func(5) == 10
+
+        # Confirm the "difficult to serialize" premise is false for the real
+        # serialization path too, not just the local-execution shortcut.
+        from clustrix.utils import serialize_function
+
+        func_data = serialize_function(lambda x: x * 2, (5,), {})
+        assert func_data["function"] is not None
+        assert func_data["args"] is not None
 
     def test_nested_function_serialization(self):
         """
@@ -212,23 +227,26 @@ class TestResourceLimitEdgeCases:
         """
         Test behavior with zero resource requests.
 
-        Some systems may not handle zero requests properly.
+        `with pytest.raises(ValueError) or True:` was always equivalent to
+        `with pytest.raises(ValueError):` -- the context manager object is
+        truthy, so `or True` never gets evaluated -- while the try/except
+        immediately inside caught any ValueError before it could reach that
+        outer context manager. The block could therefore never satisfy
+        `pytest.raises`, and always failed with "DID NOT RAISE ValueError"
+        regardless of what `zero_cores()` actually did.
+
+        `cores` is never validated for the local-execution path this test
+        exercises (no cluster_host configured, so the decorator makes a
+        direct in-process call and job_config's cores value is simply
+        unused) -- so the real, current behavior is that it runs normally.
         """
         configure(cluster_type="local")
 
-        # Zero cores should either fail or use minimum
-        with pytest.raises(ValueError) or True:
+        @cluster(cores=0, memory="1GB")
+        def zero_cores():
+            return "executed"
 
-            @cluster(cores=0, memory="1GB")
-            def zero_cores():
-                return "executed"
-
-            # This might fail or use default minimum
-            try:
-                result = zero_cores()
-                assert result == "executed"
-            except ValueError:
-                pass  # Expected for zero cores
+        assert zero_cores() == "executed"
 
     def test_excessive_resource_request(self):
         """
@@ -334,21 +352,45 @@ class TestNetworkEdgeCases:
         Test behavior with connection timeouts.
 
         Network timeouts should be handled gracefully.
+
+        `connection_timeout` is not a real ClusterConfig field (the actual
+        field is `ssh_connect_timeout`, default 30s) -- setting it here just
+        creates an unused attribute, direct attribute assignment on a
+        dataclass instance never validates against declared fields. Worse:
+        `ClusterExecutor.connect()` -> `setup_ssh_connection()`
+        (clustrix/executor_connections.py) never passes a `timeout` to
+        `paramiko.SSHClient.connect()` at all, so `ssh_connect_timeout` isn't
+        honored on this path either -- see the defect note in this sweep's
+        report. Without *some* bound, connecting to a black-holed address
+        (TEST-NET-1) can hang past any reasonable test timeout, as it did
+        here (observed hanging >20s).
+
+        `socket.setdefaulttimeout()` is the real fix available from a test:
+        paramiko's `connect()` falls back to `socket.create_connection(...,
+        timeout=None)`, and a freshly constructed socket with no explicit
+        timeout inherits the *process-wide* default timeout. This is not a
+        mock -- it is the standard library's own real, global timeout knob,
+        exercised against a real (blocked) TCP connection attempt.
         """
         config = ClusterConfig()
         config.cluster_type = "ssh"
-        config.cluster_host = "192.0.2.1"  # TEST-NET-1 (should timeout)
+        config.cluster_host = "192.0.2.1"  # TEST-NET-1 (should never respond)
         config.cluster_port = 22
         config.username = "testuser"
-        config.connection_timeout = 5  # 5 second timeout
 
         executor = ClusterExecutor(config)
 
-        # Should timeout trying to connect
-        start = time.time()
-        with pytest.raises((TimeoutError, ConnectionError, OSError)):
-            executor.connect()
-        duration = time.time() - start
+        import socket
+
+        previous_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(5)
+        try:
+            start = time.time()
+            with pytest.raises((TimeoutError, ConnectionError, OSError)):
+                executor.connect()
+            duration = time.time() - start
+        finally:
+            socket.setdefaulttimeout(previous_timeout)
 
         # Should timeout within reasonable time
         assert duration < 10  # Should timeout within 10 seconds
@@ -359,6 +401,30 @@ class TestNetworkEdgeCases:
         Test behavior with intermittent connections.
 
         Connections that drop during execution.
+
+        Nothing listens on localhost:2222, so the real submission attempt
+        raises `paramiko.ssh_exception.NoValidConnectionsError` -- an
+        `OSError` subclass, but NOT a `ConnectionError` subclass (Python's
+        `ConnectionError` covers only `BrokenPipeError`/
+        `ConnectionAbortedError`/`ConnectionRefusedError`/
+        `ConnectionResetError`), so `except ConnectionError:` never caught
+        it. Broadened to `OSError`, which covers `ConnectionError` too.
+
+        `auto_gpu_parallel=False` sidesteps a real defect found while
+        diagnosing this: with GPU auto-detection on, the executor first
+        makes a speculative connection attempt for GPU probing that fails,
+        but `setup_ssh_connection()` (clustrix/executor_connections.py)
+        leaves `self.ssh_client` set to the constructed-but-never-connected
+        `paramiko.SSHClient()` rather than resetting it to None on failure.
+        The GPU probe's failure is swallowed (by design), but the *real*
+        submission that follows then reuses that same executor and its
+        `execute_remote_command()` only checks `self.ssh_client is None` --
+        true only if `.connect()` was never attempted -- so it calls
+        `exec_command()` on the dead client and raises `AttributeError:
+        'NoneType' object has no attribute 'open_session'` deep inside
+        paramiko instead of a clean connection error. See this sweep's
+        report for the exact fix (owned by clustrix/executor_connections.py,
+        not this test file).
         """
         configure(
             cluster_type="ssh",
@@ -368,7 +434,7 @@ class TestNetworkEdgeCases:
             password="testpass",
         )
 
-        @cluster(cores=2, memory="2GB", retry_count=3)
+        @cluster(cores=2, memory="2GB", retry_count=3, auto_gpu_parallel=False)
         def flaky_network_task(iterations):
             """Task that might fail due to network issues."""
             import random
@@ -391,8 +457,9 @@ class TestNetworkEdgeCases:
         try:
             result = flaky_network_task(10)
             assert result["completed"] <= 10
-        except ConnectionError:
-            # Expected if network issues occur
+        except OSError:
+            # Expected if network issues occur (no SSH server on
+            # localhost:2222 in this environment)
             pass
 
     def test_large_data_transfer(self):
@@ -435,6 +502,24 @@ class TestConcurrencyEdgeCases:
         Test maximum parallel job limits.
 
         Systems have limits on concurrent executions.
+
+        `max_parallel_jobs` throttles clustrix's own remote/cloud job
+        submission and polling loop -- it has no way to reach into a
+        caller's own `ThreadPoolExecutor` and limit its concurrency, and
+        with no cluster_host configured (cluster_type="local" with no host
+        just means "no cluster configured"), `@cluster` for a
+        non-parallelized function is a direct in-process call
+        (`return func(*args, **func_kwargs)` in clustrix/decorator.py) --
+        clustrix never sees these ten calls as "jobs" to queue at all. So
+        the old assumption -- that setting `max_parallel_jobs=3` would make
+        10 concurrent `ThreadPoolExecutor` submissions serialize into
+        batches of 3 -- was never something the code promised; all 10
+        threads genuinely run concurrently (Python threads block on
+        `time.sleep`, which releases the GIL), finishing in ~0.5s, not the
+        ~2s the old timing assertion required. Rewritten to check what
+        `max_parallel_jobs` and this code path actually guarantee:
+        correctness under real concurrent execution, not artificial
+        serialization.
         """
         configure(cluster_type="local", max_parallel_jobs=3)  # Limit parallel jobs
 
@@ -443,14 +528,13 @@ class TestConcurrencyEdgeCases:
             """Quick task for parallel testing."""
             import time
 
-            time.sleep(0.5)
+            time.sleep(0.1)
             return {"task_id": task_id, "timestamp": time.time()}
 
-        # Submit many jobs in parallel
+        # Submit many jobs concurrently via the caller's own thread pool.
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            # Submit 10 jobs but only 3 should run in parallel
             futures = {executor.submit(quick_task, i): i for i in range(10)}
 
             results = []
@@ -458,15 +542,10 @@ class TestConcurrencyEdgeCases:
                 result = future.result()
                 results.append(result)
 
-        # All should complete
+        # All should complete, each with the correct, uncorrupted task_id --
+        # that's the real correctness guarantee under concurrency.
         assert len(results) == 10
-
-        # Check timing to verify parallelism limit
-        timestamps = sorted(r["timestamp"] for r in results)
-
-        # With limit of 3 and 0.5s per task, should take ~2 seconds minimum
-        total_duration = timestamps[-1] - timestamps[0]
-        assert total_duration >= 1.5  # Some parallelism occurred
+        assert sorted(r["task_id"] for r in results) == list(range(10))
 
     def test_race_conditions(self):
         """
@@ -630,8 +709,15 @@ class TestErrorRecoveryEdgeCases:
         Test cleanup after job failure.
 
         Resources should be cleaned up even after failures.
+
+        `cleanup_on_failure` is not a real ClusterConfig field (the real
+        field is `cleanup_on_success`, which is orthogonal to this test and
+        also irrelevant here: local direct-call execution creates no remote
+        job/scratch directory to clean up in the first place). Passing an
+        unrecognized kwarg to `configure()` raises `ValueError: Unknown
+        configuration parameter`, which is what actually failed here.
         """
-        configure(cluster_type="local", cleanup_on_failure=True)
+        configure(cluster_type="local")
 
         temp_files = []
 

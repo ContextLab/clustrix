@@ -27,8 +27,7 @@ from clustrix.utils import (
 #: clustrix/ -> the repository root.
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(clustrix.__file__)))
 
-WORKER_SOURCE = textwrap.dedent(
-    '''
+WORKER_SOURCE = textwrap.dedent('''
     """Load a clustrix payload in an interpreter that cannot import the project."""
     import importlib.util
     import pickle
@@ -52,8 +51,7 @@ WORKER_SOURCE = textwrap.dedent(
     with open(payload_path, "rb") as handle:
         func, args, kwargs = deserialize_function(pickle.loads(handle.read()))
     sys.stdout.write("RESULT:" + repr(func(*args, **kwargs)))
-    '''
-)
+    ''')
 
 
 @pytest.fixture
