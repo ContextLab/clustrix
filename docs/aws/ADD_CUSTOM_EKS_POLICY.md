@@ -1,5 +1,14 @@
 # Add Custom EKS Policy for Clustrix User
 
+> **Historical.** Clustrix no longer has an AWS or Kubernetes execution
+> backend -- both were removed in v0.2.0 because neither had ever been shown to
+> run a job end to end (tracking issues
+> [#142](https://github.com/ContextLab/clustrix/issues/142) and
+> [#143](https://github.com/ContextLab/clustrix/issues/143); they are planned
+> for a future update). This guide is kept as a record of the IAM permissions
+> that provisioning needed, and because the `scripts/aws/` cleanup utilities
+> still need AWS credentials to reclaim anything left behind.
+
 ## The Problem
 The AWS managed EKS policies (like `AmazonEKSClusterPolicy`) are designed for service roles, not IAM users. They don't grant permissions like `eks:ListClusters` or `eks:CreateCluster` that users need.
 

@@ -34,8 +34,8 @@ Requirements
 
 - **Python 3.10 or newer** (``requires-python = ">=3.10"``).
 - For remote backends: SSH access to the target machine, and the scheduler's
-  own client tools (``sbatch``/``squeue``, ``qsub``, ...) present *on that
-  machine*. Nothing scheduler-specific is needed locally.
+  own client tools (``sbatch``/``squeue``) present *on that machine*. Nothing
+  scheduler-specific is needed locally.
 - For ``cluster_type="huggingface"``: a Hugging Face token with permission to
   write jobs in the namespace you target.
 
@@ -78,37 +78,15 @@ For the interactive configuration widget and the ``%%remote`` magic:
 Importing ``clustrix`` registers the magic but deliberately displays nothing.
 Run ``%%remote`` in a cell to show the widget.
 
-Kubernetes Support
-~~~~~~~~~~~~~~~~~~
+Kubernetes and cloud provider extras
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: bash
-
-   pip install "clustrix[kubernetes]"
-
-.. warning::
-
-   The Kubernetes backend is implemented but has never been verified against
-   a real cluster. See :ref:`supported-cluster-types`.
-
-Cloud Provider Support
-~~~~~~~~~~~~~~~~~~~~~~
-
-These extras install each provider's SDK. They are what the **pricing and
-cost-estimation** clients use, and those do work -- they query provider
-pricing APIs and never submit a job.
-
-.. code-block:: bash
-
-   pip install "clustrix[aws]"     # boto3 + kubernetes
-   pip install "clustrix[gcp]"     # google-cloud-* + kubernetes
-   pip install "clustrix[azure]"   # azure-* + kubernetes
-   pip install "clustrix[cloud]"   # all three
-
-.. warning::
-
-   Installing these does **not** give you a working cloud execution backend.
-   No AWS, GCP, Azure or Lambda Cloud job has been shown to run end to end.
-   See :ref:`supported-cluster-types`.
+There are none, and there is nothing to install. The Kubernetes backend and
+the AWS / GCP / Azure / Lambda Cloud VM backends were removed in v0.2.0
+because none of them had ever been shown to run a job end to end. The cost
+monitoring and cloud pricing API went with them. They are planned for a future
+release and each has a tracking issue -- see :ref:`removed-backends` for the
+list and the links.
 
 Documentation
 ~~~~~~~~~~~~~

@@ -48,39 +48,6 @@ setup(
             "jupyter>=1.0",
             "ipython>=7.0",
         ],
-        "kubernetes": ["kubernetes>=20.13.0"],
-        "aws": [
-            "boto3>=1.26.0",
-            "kubernetes>=20.13.0",
-        ],
-        "azure": [
-            "azure-identity>=1.12.0",
-            "azure-mgmt-containerservice>=20.0.0",
-            "azure-mgmt-compute>=30.0.0",
-            "azure-mgmt-resource>=23.0.0,<26.0.0",
-            "azure-mgmt-network>=25.0.0",
-            "azure-mgmt-authorization>=4.0.0",
-            "kubernetes>=20.13.0",
-        ],
-        "gcp": [
-            "google-cloud-container>=2.15.0",
-            "google-cloud-resource-manager>=1.14.0",
-            "google-auth>=2.15.0",
-            "kubernetes>=20.13.0",
-        ],
-        "cloud": [
-            "boto3>=1.26.0",
-            "azure-identity>=1.12.0",
-            "azure-mgmt-containerservice>=20.0.0",
-            "azure-mgmt-compute>=30.0.0",
-            "azure-mgmt-resource>=23.0.0,<26.0.0",
-            "azure-mgmt-network>=25.0.0",
-            "azure-mgmt-authorization>=4.0.0",
-            "google-cloud-container>=2.15.0",
-            "google-cloud-resource-manager>=1.14.0",
-            "google-auth>=2.15.0",
-            "kubernetes>=20.13.0",
-        ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
@@ -111,18 +78,6 @@ setup(
             "coverage>=6.0",
             "pytest-xdist>=2.0",  # For parallel test execution
             "pytest-mock>=3.0",  # For better mocking support
-            # Cloud provider dependencies for comprehensive testing
-            "boto3>=1.26.0",  # AWS
-            "azure-identity>=1.12.0",  # Azure auth
-            "azure-mgmt-compute>=30.0.0",  # Azure compute
-            "azure-mgmt-containerservice>=20.0.0",  # Azure AKS
-            "azure-mgmt-resource>=23.0.0,<26.0.0",  # Azure resources
-            "azure-mgmt-network>=25.0.0",  # Azure networking
-            "google-cloud-compute>=1.11.0",  # GCP compute
-            "google-cloud-container>=2.15.0",  # GCP GKE
-            "google-cloud-resource-manager>=1.14.0",  # GCP resource manager
-            "google-auth>=2.15.0",  # GCP auth
-            "kubernetes>=20.13.0",  # Kubernetes client
         ],
         "docs": [
             "sphinx>=4.0",
@@ -137,18 +92,6 @@ setup(
             "ipywidgets>=7.6.0",
             "jupyter>=1.0",
             "ipython>=7.0",
-            # Cloud provider dependencies
-            "kubernetes>=20.13.0",
-            "boto3>=1.26.0",
-            "azure-identity>=1.12.0",
-            "azure-mgmt-containerservice>=20.0.0",
-            "azure-mgmt-compute>=30.0.0",
-            "azure-mgmt-resource>=23.0.0,<26.0.0",
-            "azure-mgmt-network>=25.0.0",
-            "azure-mgmt-authorization>=4.0.0",
-            "google-cloud-container>=2.15.0",
-            "google-cloud-resource-manager>=1.14.0",
-            "google-auth>=2.15.0",
             # Development dependencies
             "pytest>=6.0",
             "pytest-cov>=2.0",

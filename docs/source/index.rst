@@ -45,8 +45,10 @@ Start here
 - :doc:`installation` -- install it, with the optional extras.
 - :doc:`quickstart` -- a real result in five minutes, beginning with a backend
   that needs no cluster at all.
-- :ref:`supported-cluster-types` -- **read this before depending on a
-  backend.** They are not equally proven.
+- :ref:`supported-cluster-types` -- the four backends Clustrix supports, and
+  the evidence that each one runs a real job.
+- :ref:`removed-backends` -- if you are looking for PBS, SGE, Kubernetes or a
+  cloud VM provider, start here.
 
 Features
 --------
@@ -56,12 +58,11 @@ Features
   cloudpickle, so closures, nested functions and project-local modules travel
   with it -- source code is not required
 - **Interactive Jupyter Widget**: ``%%remote`` magic command with GUI configuration manager
-- **Multiple Cluster Backends**: SLURM, SSH and HuggingFace Jobs are verified working;
-  PBS, SGE and Kubernetes are implemented but untested. See
-  :ref:`supported-cluster-types` before relying on a backend.
+- **Multiple Cluster Backends**: SLURM, SSH, HuggingFace Jobs and local
+  execution. Every backend Clustrix ships has been run end to end -- see
+  :ref:`supported-cluster-types`.
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
-- **Cost Estimation**: Pricing and cost estimates for AWS, GCP, Azure, and Lambda Cloud
 - **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Loop Parallelization**: distributes a loop across nodes when its body has
   no dependencies between iterations. The analysis is deliberately
@@ -114,22 +115,20 @@ variables, module loads and pre-execution commands:
 
 **What the widget covers**
 
-The cluster type dropdown offers ``local``, ``ssh``, ``slurm``, ``pbs``,
-``sge``, ``kubernetes`` and ``huggingface``.
+The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
+``huggingface`` -- the same four values as
+:data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`.
 
-- ``ssh``, ``slurm``, ``pbs`` and ``sge`` show the connection section: host,
-  port, username, SSH key file, password, remote work directory, an environment
-  variable to read the password from, and an "Auto setup SSH keys" button.
+- ``ssh`` and ``slurm`` show the connection section: host, port, username, SSH
+  key file, password, remote work directory, an environment variable to read
+  the password from, and an "Auto setup SSH keys" button.
 - ``huggingface`` shows namespace, flavor, token and an "Allow paid GPU
   flavors" checkbox. GPU flavors bill by the second, so that box has to be
   ticked before one is accepted.
-- ``kubernetes`` shows a Kubernetes section: namespace, image, service account
-  and image pull policy. The remaining ``k8s_*`` settings (node count, region,
-  provider, auto-provisioning) are configuration-file or
-  ``clustrix.configure()`` only.
+- ``local`` needs no connection settings at all.
 
-There are no AWS, GCP, Azure or Lambda Cloud entries, because those execution
-backends are unverified.
+There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries.
+Those backends were removed in v0.2.0; see :ref:`removed-backends`.
 
 Table of Contents
 -----------------
@@ -159,8 +158,6 @@ Table of Contents
    tutorials/usage_patterns
    tutorials/filesystem_tutorial
    tutorials/slurm_tutorial
-   tutorials/pbs_tutorial
-   tutorials/kubernetes_tutorial
 
 .. toctree::
    :maxdepth: 2
@@ -170,29 +167,8 @@ Table of Contents
    notebooks/cluster_config_example
    notebooks/complete_api_demo
    notebooks/slurm_tutorial
-   notebooks/pbs_tutorial
-   notebooks/sge_tutorial
-   notebooks/kubernetes_tutorial
    notebooks/ssh_tutorial
    notebooks/basic_usage
-
-.. warning::
-
-   The cloud VM tutorials below (AWS, Azure, GCP, HuggingFace Spaces, Lambda
-   Cloud) describe an execution path that has never been shown to run a job end
-   to end. See :ref:`supported-cluster-types`. The cost monitoring tutorial is
-   unaffected.
-
-.. toctree::
-   :maxdepth: 2
-   :caption: Cloud Platform Tutorials
-
-   notebooks/aws_cloud_tutorial
-   notebooks/azure_cloud_tutorial
-   notebooks/gcp_cloud_tutorial
-   notebooks/huggingface_spaces_tutorial
-   notebooks/lambda_cloud_tutorial
-   notebooks/cost_monitoring_tutorial
 
 .. toctree::
    :maxdepth: 2
@@ -204,7 +180,6 @@ Table of Contents
    api/file_packaging
    api/config
    api/notebook_magic
-   api/cost_monitoring
    api/local_executor
 
 .. _supported-cluster-types:
@@ -213,6 +188,10 @@ Supported Cluster Types
 -----------------------
 
 **Execution backends**
+
+Clustrix supports exactly four ``cluster_type`` values -- the contents of
+:data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`, which is also what the CLI and
+the notebook widget offer. There are no others.
 
 +--------------------+-------------------+--------------------------------------------------+
 | ``cluster_type``   | Status            | Notes                                            |
@@ -228,37 +207,20 @@ Supported Cluster Types
 | ``local``          | Works             | Local processes; used for development and the    |
 |                    |                   | fast tests.                                      |
 +--------------------+-------------------+--------------------------------------------------+
-| ``pbs``            | Untested          | Shares SLURM's environment-setup path, so it     |
-|                    |                   | builds the same two-venv environment -- but no   |
-|                    |                   | job has run against a real PBS scheduler.        |
-+--------------------+-------------------+--------------------------------------------------+
-| ``sge``            | Untested          | Same caveat as PBS.                              |
-+--------------------+-------------------+--------------------------------------------------+
-| ``kubernetes``     | Untested          | Not verified against a real cluster. Per-job     |
-|                    |                   | overrides are unsupported: the executor reads    |
-|                    |                   | only configuration-level ``k8s_*`` settings.     |
-+--------------------+-------------------+--------------------------------------------------+
 
-**Cloud VM backends**
+Note that ``cluster_type='huggingface'`` means HuggingFace *Jobs*. The separate
+HuggingFace *Spaces* provider was removed in v0.2.0 along with the other
+unverified backends; see :ref:`removed-backends`.
 
-The ``provider=`` argument to ``@cluster`` (``'aws'``, ``'gcp'``, ``'azure'``,
-``'lambda'``, ``'huggingface'``) routes to the AWS EC2, Azure VM, Google
-Compute Engine and Lambda Cloud backends. **None of them has been shown to run
-a job end to end.** Until recently the path could not have run at all: the
-serializer writes the function under a ``"function"`` key while the remote
-bootstrap read ``"func"``, so every cloud job died with a ``KeyError`` on its
-first line. That was fixed (issue #119), but nothing has since demonstrated a
-completed cloud job, and ``scripts/collect_execution_evidence.py`` does not
-cover these backends. Treat the cloud platform tutorials listed above as a
-description of the intended interface.
+.. _removed-backends-pointer:
 
-Note that ``cluster_type='huggingface'`` (HuggingFace Jobs) is a different
-thing from ``provider='huggingface'`` (the HuggingFace Spaces provider, which
-never satisfied the dispatch interface). Use the former.
+**Backends that were removed**
 
-The pricing and cost-estimation clients for AWS, GCP, Azure and Lambda Cloud
-are separate code and do work; they query provider pricing APIs and never
-submit a job. See :doc:`api/cost_monitoring`.
+PBS, SGE, Kubernetes, AWS, GCP, Azure and Lambda Cloud were implemented but
+never shown to run a job end to end, and were removed in v0.2.0 rather than
+shipped as if they worked. The cost-monitoring and cloud pricing APIs went with
+them. Each has a tracking issue and is planned for a future release --
+:ref:`removed-backends` has the details and the links.
 
 **Evidence**
 

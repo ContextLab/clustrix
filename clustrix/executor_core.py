@@ -1,7 +1,7 @@
 """Core ClusterExecutor class that coordinates all execution types.
 
 This module provides the main ClusterExecutor class that acts as a coordinator
-for different job execution backends (schedulers, Kubernetes, cloud providers).
+for the supported job execution backends: local, ssh, slurm and huggingface.
 """
 
 import shlex
@@ -14,10 +14,9 @@ from typing import Any, Dict, Optional
 
 import cloudpickle
 
+from .config import validate_cluster_type
 from .executor_connections import ConnectionManager
 from .executor_schedulers import SchedulerManager
-from .executor_kubernetes import KubernetesJobManager
-from .executor_cloud import CloudJobManager
 from .hf_jobs import HFJobsManager
 from .local_executor import LocalJobManager
 from .utils import verify_signed_payload
@@ -39,8 +38,6 @@ class ClusterExecutor:
         # Initialize sub-managers
         self.connection_manager = ConnectionManager(config)
         self.scheduler_manager = SchedulerManager(config, self.connection_manager)
-        self.k8s_manager = KubernetesJobManager(config, self.connection_manager)
-        self.cloud_manager = CloudJobManager(config)
         self.hf_jobs_manager = HFJobsManager(config)
         self.local_manager = LocalJobManager(config)
 
@@ -60,28 +57,6 @@ class ClusterExecutor:
         Returns:
             Job ID for tracking
         """
-        # Check if this is a cloud provider job (but not auto-provisioned Kubernetes)
-        provider = job_config.get("provider")
-        if provider is not None and not (
-            self.config.cluster_type == "kubernetes"
-            and getattr(self.config, "auto_provision_k8s", False)
-        ):
-            # If provider is specified and not auto-provisioned K8s, use cloud provider routing
-            supported_providers = ["lambda", "aws", "azure", "gcp", "huggingface"]
-            if provider in supported_providers:
-                job_id = self.cloud_manager.submit_cloud_job(
-                    func_data, job_config, provider
-                )
-                # Track in combined active jobs
-                self.active_jobs[job_id] = {"manager": "cloud", "job_id": job_id}
-                return job_id
-            else:
-                raise ValueError(
-                    f"Unsupported cloud provider: {provider}. Supported providers: {supported_providers}"
-                )
-
-        # If no provider specified, use traditional cluster routing
-
         # "local" runs the function on this machine. It is advertised in the
         # widget's cluster-type dropdown and in the docs, but had no branch
         # here and raised "Unsupported cluster type: local" (#120). Like
@@ -100,24 +75,17 @@ class ClusterExecutor:
             self.active_jobs[job_id] = {"manager": "huggingface", "job_id": job_id}
             return job_id
 
+        # Checked before connect(): a cluster type this executor cannot
+        # dispatch used to fail *after* an SSH round trip to a host that was
+        # never going to be used.
+        validate_cluster_type(self.config.cluster_type)
+
         # Ensure connection is established for traditional cluster types
         self.connect()
 
         if self.config.cluster_type == "slurm":
             job_id = self.scheduler_manager.submit_slurm_job(func_data, job_config)
             self.active_jobs[job_id] = {"manager": "scheduler", "job_id": job_id}
-            return job_id
-        elif self.config.cluster_type == "pbs":
-            job_id = self.scheduler_manager.submit_pbs_job(func_data, job_config)
-            self.active_jobs[job_id] = {"manager": "scheduler", "job_id": job_id}
-            return job_id
-        elif self.config.cluster_type == "sge":
-            job_id = self.scheduler_manager.submit_sge_job(func_data, job_config)
-            self.active_jobs[job_id] = {"manager": "scheduler", "job_id": job_id}
-            return job_id
-        elif self.config.cluster_type == "kubernetes":
-            job_id = self.k8s_manager.submit_k8s_job(func_data, job_config)
-            self.active_jobs[job_id] = {"manager": "kubernetes", "job_id": job_id}
             return job_id
         elif self.config.cluster_type == "ssh":
             job_id = self.scheduler_manager.submit_ssh_job(func_data, job_config)
@@ -140,15 +108,7 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             manager_type = self.active_jobs[job_id]["manager"]
 
-            if manager_type == "cloud":
-                result = self.cloud_manager.wait_for_cloud_result(job_id)
-                del self.active_jobs[job_id]
-                return result
-            elif manager_type == "kubernetes":
-                result = self.k8s_manager.wait_for_k8s_result(job_id)
-                del self.active_jobs[job_id]
-                return result
-            elif manager_type == "huggingface":
+            if manager_type == "huggingface":
                 result = self.hf_jobs_manager.wait_for_result(job_id)
                 del self.active_jobs[job_id]
                 return result
@@ -166,18 +126,7 @@ class ClusterExecutor:
         # This handles backward compatibility
         if job_id.startswith("local_"):
             return self.local_manager.wait_for_result(job_id)
-        if (
-            job_id.startswith("lambda_")
-            or job_id.startswith("aws_")
-            or job_id.startswith("azure_")
-            or job_id.startswith("gcp_")
-            or job_id.startswith("huggingface_")
-        ):
-            return self.cloud_manager.wait_for_cloud_result(job_id)
-        elif job_id.startswith("clustrix-job-"):
-            return self.k8s_manager.wait_for_k8s_result(job_id)
-        else:
-            return self._wait_for_scheduler_result(job_id)
+        return self._wait_for_scheduler_result(job_id)
 
     def _verify_result_signature(
         self, job_id: str, remote_dir: str, payload: bytes
@@ -219,14 +168,21 @@ class ClusterExecutor:
         verify_signed_payload(payload, tag, key, f"Job {job_id}")
 
     def _wait_for_scheduler_result(self, job_id: str) -> Any:
-        """Wait for scheduler job result (SLURM/PBS/SGE/SSH)."""
+        """Wait for scheduler job result (SLURM/SSH)."""
         job_info = self.scheduler_manager.active_jobs.get(job_id)
         if not job_info:
             raise ValueError(f"Unknown job ID: {job_id}")
 
         remote_dir = job_info["remote_dir"]
 
-        # Poll for completion
+        # Poll for completion, under a deadline. An unbounded `while True`
+        # here meant a job that never reached a terminal state -- held by the
+        # scheduler, stuck behind a queue that never cleared -- hung the
+        # caller with no way out but Ctrl-C, and no indication of why.
+        timeout = getattr(self.config, "job_wait_timeout", None)
+        deadline = None if timeout is None else time.monotonic() + timeout
+        status = "unknown"
+
         while True:
             status = self.scheduler_manager.check_job_status(job_id)
 
@@ -283,6 +239,21 @@ class ClusterExecutor:
                     # Fallback to RuntimeError with log
                     raise RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")
 
+            if deadline is not None and time.monotonic() >= deadline:
+                # The job is left alone deliberately: it may still be
+                # queued, and cancelling someone's allocation because the
+                # client got bored is not this function's decision. The
+                # remote directory is named so the result can be collected
+                # by hand.
+                raise TimeoutError(
+                    f"Job {job_id} did not finish within "
+                    f"{timeout}s (config.job_wait_timeout). Its last known "
+                    f"status was {status!r}. The job has NOT been cancelled; "
+                    f"its files are at {remote_dir} on the cluster. Raise "
+                    f"job_wait_timeout, or set it to None to wait "
+                    f"indefinitely."
+                )
+
             # Wait before next poll
             time.sleep(self.config.job_poll_interval)
 
@@ -292,11 +263,7 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             manager_type = self.active_jobs[job_id]["manager"]
 
-            if manager_type == "cloud":
-                return self.cloud_manager.get_cloud_job_status(job_id)
-            elif manager_type == "kubernetes":
-                return self.k8s_manager.check_k8s_job_status(job_id)
-            elif manager_type == "huggingface":
+            if manager_type == "huggingface":
                 return self.hf_jobs_manager.get_job_status(job_id)
             elif manager_type == "local":
                 return self.local_manager.get_job_status(job_id)
@@ -306,18 +273,7 @@ class ClusterExecutor:
         # Fallback for untracked jobs
         if job_id.startswith("local_"):
             return self.local_manager.get_job_status(job_id)
-        if (
-            job_id.startswith("lambda_")
-            or job_id.startswith("aws_")
-            or job_id.startswith("azure_")
-            or job_id.startswith("gcp_")
-            or job_id.startswith("huggingface_")
-        ):
-            return self.cloud_manager.get_cloud_job_status(job_id)
-        elif job_id.startswith("clustrix-job-"):
-            return self.k8s_manager.check_k8s_job_status(job_id)
-        else:
-            return self.scheduler_manager.check_job_status(job_id)
+        return self.scheduler_manager.check_job_status(job_id)
 
     def get_result(self, job_id: str) -> Any:
         """Get result (alias for wait_for_result)."""
@@ -344,16 +300,7 @@ class ClusterExecutor:
                     )
                 del self.active_jobs[job_id]
                 return
-            if manager_type == "cloud":
-                self.cloud_manager.cancel_cloud_job(job_id)
-                del self.active_jobs[job_id]
-                return
-            elif manager_type == "kubernetes":
-                self.k8s_manager.cleanup_k8s_job(job_id)
-                del self.k8s_manager.active_jobs[job_id]
-                del self.active_jobs[job_id]
-                return
-            elif manager_type == "scheduler":
+            if manager_type == "scheduler":
                 self.scheduler_manager.cancel_job(job_id)
                 del self.active_jobs[job_id]
                 return
@@ -362,18 +309,7 @@ class ClusterExecutor:
         if job_id.startswith("local_"):
             self.local_manager.cancel_job(job_id)
             return
-        if (
-            job_id.startswith("lambda_")
-            or job_id.startswith("aws_")
-            or job_id.startswith("azure_")
-            or job_id.startswith("gcp_")
-            or job_id.startswith("huggingface_")
-        ):
-            self.cloud_manager.cancel_cloud_job(job_id)
-        elif job_id.startswith("clustrix-job-"):
-            self.k8s_manager.cleanup_k8s_job(job_id)
-        else:
-            self.scheduler_manager.cancel_job(job_id)
+        self.scheduler_manager.cancel_job(job_id)
 
     def connect(self):
         """Establish connection to cluster (for manual connection)."""
@@ -396,30 +332,8 @@ class ClusterExecutor:
         job_id = self.submit_job(func_data, job_config)
         return self.wait_for_result(job_id)
 
-    def cleanup_auto_provisioned_cluster(self):
-        """Clean up auto-provisioned Kubernetes cluster."""
-        self.connection_manager.cleanup_auto_provisioned_cluster()
-
-    def get_cluster_status(self) -> Dict[str, Any]:
-        """Get status of managed Kubernetes cluster."""
-        return self.connection_manager.get_cluster_status()
-
-    def ensure_cluster_ready(self, timeout: int = 900) -> bool:
-        """Ensure auto-provisioned cluster is ready for job execution."""
-        return self.connection_manager.ensure_cluster_ready(timeout)
-
     def __del__(self):
         """Cleanup resources."""
-        # Clean up auto-provisioned cluster if configured to do so
-        if hasattr(self.connection_manager, "_k8s_provisioner") and getattr(
-            self.config, "k8s_cleanup_on_exit", True
-        ):
-            try:
-                self.cleanup_auto_provisioned_cluster()
-            except Exception as e:
-                # Don't raise exceptions in destructor
-                logger.error(f"Error during cluster cleanup in destructor: {e}")
-
         self.disconnect()
 
     # Backward compatibility properties and methods
@@ -443,23 +357,9 @@ class ClusterExecutor:
         """Set SFTP client for backward compatibility."""
         self.connection_manager.sftp_client = value
 
-    @property
-    def k8s_client(self):
-        """Access to Kubernetes client for backward compatibility."""
-        return self.connection_manager.k8s_client
-
-    @k8s_client.setter
-    def k8s_client(self, value):
-        """Set Kubernetes client for backward compatibility."""
-        self.connection_manager.k8s_client = value
-
     def _setup_ssh_connection(self):
         """Backward compatibility method."""
         return self.connection_manager.setup_ssh_connection()
-
-    def _setup_kubernetes(self):
-        """Backward compatibility method."""
-        return self.connection_manager.setup_kubernetes()
 
     def _execute_remote_command(self, command: str) -> tuple:
         """Backward compatibility method."""
@@ -509,18 +409,13 @@ class ClusterExecutor:
             manager_type = self.active_jobs[job_id]["manager"]
             if manager_type == "scheduler":
                 return self.scheduler_manager.get_error_log(job_id)
-            elif manager_type == "kubernetes":
-                return self.k8s_manager.get_k8s_error_log(job_id)
             elif manager_type == "local":
                 return self.local_manager.get_error_log(job_id)
 
         # Fallback for untracked jobs
         if job_id.startswith("local_"):
             return self.local_manager.get_error_log(job_id)
-        if job_id.startswith("clustrix-job-"):
-            return self.k8s_manager.get_k8s_error_log(job_id)
-        else:
-            return self.scheduler_manager.get_error_log(job_id)
+        return self.scheduler_manager.get_error_log(job_id)
 
     def _extract_original_exception(self, job_id: str) -> Optional[Exception]:
         """Backward compatibility method."""
@@ -529,14 +424,9 @@ class ClusterExecutor:
             manager_type = self.active_jobs[job_id]["manager"]
             if manager_type == "scheduler":
                 return self.scheduler_manager.extract_original_exception(job_id)
-            elif manager_type == "kubernetes":
-                return self.k8s_manager.extract_k8s_exception(job_id)
 
         # Fallback for untracked jobs
-        if job_id.startswith("clustrix-job-"):
-            return self.k8s_manager.extract_k8s_exception(job_id)
-        else:
-            return self.scheduler_manager.extract_original_exception(job_id)
+        return self.scheduler_manager.extract_original_exception(job_id)
 
     def _submit_slurm_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
@@ -544,34 +434,8 @@ class ClusterExecutor:
         """Backward compatibility method."""
         return self.scheduler_manager.submit_slurm_job(func_data, job_config)
 
-    def _submit_pbs_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Backward compatibility method."""
-        return self.scheduler_manager.submit_pbs_job(func_data, job_config)
-
-    def _submit_sge_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Backward compatibility method."""
-        return self.scheduler_manager.submit_sge_job(func_data, job_config)
-
-    def _submit_k8s_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Backward compatibility method."""
-        return self.k8s_manager.submit_k8s_job(func_data, job_config)
-
     def _check_slurm_status(self, job_id: str) -> str:
         """Backward compatibility method."""
         return self.scheduler_manager.status_manager._check_slurm_job_status_robust(
             job_id, self.scheduler_manager.active_jobs
         )
-
-    def _check_pbs_status(self, job_id: str) -> str:
-        """Backward compatibility method."""
-        return self.scheduler_manager.status_manager._check_pbs_status(job_id)
-
-    def _check_sge_status(self, job_id: str) -> str:
-        """Backward compatibility method."""
-        return self.scheduler_manager.status_manager._check_sge_status(job_id)

@@ -7,7 +7,7 @@ Before the fix, every one of them ended in
 
 import pytest
 
-from clustrix.config import ClusterConfig
+from clustrix.config import ClusterConfig, SUPPORTED_CLUSTER_TYPES
 from clustrix.executor_core import ClusterExecutor
 from clustrix.utils import serialize_function
 
@@ -76,6 +76,33 @@ def test_local_job_cancellation_does_not_claim_a_lie():
 
 
 def test_unknown_cluster_type_still_fails_loudly():
-    executor = ClusterExecutor(ClusterConfig(cluster_type="not-a-cluster"))
-    with pytest.raises(Exception):
+    """An unrunnable backend is refused at configuration time, not at submit.
+
+    It used to reach ClusterExecutor.submit_job, which checked the type only
+    *after* self.connect() -- so a typo cost an SSH round trip to a host that
+    was never going to be used.
+    """
+    with pytest.raises(ValueError) as excinfo:
+        ClusterConfig(cluster_type="not-a-cluster")
+
+    message = str(excinfo.value)
+    assert "not-a-cluster" in message
+    for supported in SUPPORTED_CLUSTER_TYPES:
+        assert supported in message
+
+
+def test_a_cluster_type_set_after_construction_is_still_refused():
+    """setattr bypasses __post_init__, so the executor checks again.
+
+    This is the path configure() and the notebook widget both take, and it
+    is the reason the executor keeps its own check rather than trusting that
+    the config was validated when it was built.
+    """
+    config = ClusterConfig(cluster_type="slurm", cluster_host="hpc.example")
+    config.cluster_type = "not-a-cluster"
+
+    executor = ClusterExecutor(config)
+    with pytest.raises(ValueError) as excinfo:
         executor.submit_job(serialize_function(add, (1, 2), {}), {"cores": 1})
+
+    assert "not-a-cluster" in str(excinfo.value)

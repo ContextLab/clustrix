@@ -13,6 +13,24 @@ from pathlib import Path
 from typing import Dict
 
 
+def _report_failure(label: str, result: subprocess.CompletedProcess) -> None:
+    """Print everything a failed pytest run produced.
+
+    The four categories the pre-push hook runs all reported failure with an
+    empty body, because only ``stdout`` was printed and a collection error
+    goes to ``stderr``. An operator was told something failed and not what
+    (issue #147).
+    """
+    print(f"\u274c {label} failed (exit {result.returncode})")
+    if result.stdout:
+        print(result.stdout)
+    if result.stderr:
+        print("--- stderr ---")
+        print(result.stderr)
+    if not result.stdout and not result.stderr:
+        print("(no output captured)")
+
+
 class RealWorldTestRunner:
     """Runner for real-world tests with various configurations."""
 
@@ -51,13 +69,9 @@ class RealWorldTestRunner:
             print(f"  1Password: {'✅' if manager.is_1password_available() else '❌'}")
 
             service_names = {
-                "aws": "AWS",
-                "azure": "Azure",
-                "gcp": "GCP",
                 "ssh": "SSH",
                 "slurm": "SLURM",
                 "huggingface": "HuggingFace",
-                "lambda_cloud": "Lambda Cloud",
             }
 
             for service, available in credentials.items():
@@ -110,8 +124,7 @@ class RealWorldTestRunner:
                 print("✅ Unit tests passed")
                 return True
             else:
-                print(f"❌ Unit tests failed: {result.stdout}")
-                print(f"Error: {result.stderr}")
+                _report_failure("Unit tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running unit tests: {e}")
@@ -137,7 +150,7 @@ class RealWorldTestRunner:
                 print("✅ Filesystem tests passed")
                 return True
             else:
-                print(f"❌ Filesystem tests failed: {result.stdout}")
+                _report_failure("Filesystem tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running filesystem tests: {e}")
@@ -163,7 +176,7 @@ class RealWorldTestRunner:
                 print("✅ SSH tests passed")
                 return True
             else:
-                print(f"❌ SSH tests failed: {result.stdout}")
+                _report_failure("SSH tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running SSH tests: {e}")
@@ -192,7 +205,7 @@ class RealWorldTestRunner:
                 print("✅ API tests passed")
                 return True
             else:
-                print(f"❌ API tests failed: {result.stdout}")
+                _report_failure("API tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running API tests: {e}")
@@ -220,7 +233,7 @@ class RealWorldTestRunner:
                 print(f"📸 Check screenshots in: {self.real_world_dir / 'screenshots'}")
                 return True
             else:
-                print(f"❌ Visual tests failed: {result.stdout}")
+                _report_failure("Visual tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running visual tests: {e}")
@@ -247,7 +260,7 @@ class RealWorldTestRunner:
                 print("✅ Hybrid tests passed")
                 return True
             else:
-                print(f"❌ Hybrid tests failed: {result.stdout}")
+                _report_failure("Hybrid tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running hybrid tests: {e}")
@@ -282,7 +295,7 @@ class RealWorldTestRunner:
                 print("✅ All tests passed")
                 return True
             else:
-                print(f"❌ Some tests failed: {result.stdout}")
+                _report_failure("Tests", result)
                 return False
         except Exception as e:
             print(f"❌ Error running tests: {e}")
@@ -375,26 +388,37 @@ def main():
         runner.run_demo()
         return
 
+    # Every return value below is collected. Dropping them is what made the
+    # pre-push hook incapable of blocking a push (issue #147): each category
+    # printed "failed" and the script still exited 0, so the hook's
+    # `if ! python scripts/run_real_world_tests.py --filesystem` never fired.
+    outcomes = []
+
     if args.unit:
-        runner.run_unit_tests()
+        outcomes.append(runner.run_unit_tests())
 
     if args.filesystem:
-        runner.run_filesystem_tests()
+        outcomes.append(runner.run_filesystem_tests())
 
     if args.ssh:
-        runner.run_ssh_tests()
+        outcomes.append(runner.run_ssh_tests())
 
     if args.api:
-        runner.run_api_tests(include_expensive=args.expensive)
+        outcomes.append(runner.run_api_tests(include_expensive=args.expensive))
 
     if args.visual:
-        runner.run_visual_tests()
+        outcomes.append(runner.run_visual_tests())
 
     if args.hybrid:
-        runner.run_hybrid_tests()
+        outcomes.append(runner.run_hybrid_tests())
 
     if args.all:
-        runner.run_all_tests(include_expensive=args.expensive, include_visual=True)
+        outcomes.append(
+            runner.run_all_tests(include_expensive=args.expensive, include_visual=True)
+        )
+
+    if outcomes and not all(outcomes):
+        sys.exit(1)
 
     if not any(
         [

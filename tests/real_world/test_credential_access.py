@@ -67,34 +67,13 @@ def test_validation_credentials():
     else:
         print("❌ HuggingFace credentials not found")
 
-    # Test Lambda Cloud credentials
-    lambda_creds = creds.get_lambda_cloud_credentials()
-    if lambda_creds:
-        print("✅ Lambda Cloud credentials found")
-        api_key = lambda_creds.get("api_key", "")
-        print(f"   API key length: {len(api_key) if api_key else 0}")
-        print(f"   Endpoint: {lambda_creds.get('endpoint', 'default')}")
+    # Test SSH credentials
+    ssh_creds = creds.get_ssh_credentials()
+    if ssh_creds:
+        print("✅ SSH credentials found")
+        print(f"   Host: {ssh_creds.get('host', 'not set')}")
     else:
-        print("❌ Lambda Cloud credentials not found")
-
-    # Test AWS credentials
-    aws_creds = creds.get_aws_credentials()
-    if aws_creds:
-        print("✅ AWS credentials found")
-        access_key = aws_creds.get("aws_access_key_id", "")
-        print(f"   Access key length: {len(access_key) if access_key else 0}")
-        print(f"   Region: {aws_creds.get('aws_region', 'default')}")
-    else:
-        print("❌ AWS credentials not found")
-
-    # Test GCP credentials
-    gcp_creds = creds.get_gcp_credentials()
-    if gcp_creds:
-        print("✅ GCP credentials found")
-        print(f"   Project ID: {gcp_creds.get('project_id', 'not set')}")
-        print(f"   Region: {gcp_creds.get('region', 'default')}")
-    else:
-        print("❌ GCP credentials not found")
+        print("❌ SSH credentials not found")
 
 
 def test_environment_fallback():
@@ -105,11 +84,6 @@ def test_environment_fallback():
     env_vars = [
         "HUGGINGFACE_TOKEN",
         "HF_TOKEN",
-        "LAMBDA_CLOUD_API_KEY",
-        "AWS_ACCESS_KEY_ID",
-        "AWS_SECRET_ACCESS_KEY",
-        "GOOGLE_APPLICATION_CREDENTIALS",
-        "GOOGLE_CLOUD_PROJECT",
     ]
 
     found_vars = []

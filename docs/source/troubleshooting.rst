@@ -67,12 +67,8 @@ Scheduler output lands in the same directory:
      - Files
    * - SLURM
      - ``slurm-<jobid>.out``, ``slurm-<jobid>.err``
-   * - PBS
+   * - SSH
      - ``job.out``, ``job.err``
-   * - SGE
-     - ``job.out``, ``job.err``
-   * - Kubernetes
-     - no files; read the pod log (``kubectl logs``)
    * - HuggingFace Jobs
      - no files; the job log is fetched through the API
 
@@ -101,7 +97,7 @@ scheduler's ``.err`` file, not in ``error.pkl``.
    cd ~/.clustrix/jobs
    ls -t | head            # most recent job directories first
    cd job_1787099351_a1b2c3d4
-   cat slurm-*.err         # or job.err on PBS/SGE
+   cat slurm-*.err         # or job.err on the ssh backend
    cat job.sh              # exactly what ran
 
 Messages you are likely to see
@@ -145,8 +141,8 @@ confusing failure than this one.
 **Exit 127, no other output**
 
 The job died before it could write a diagnostic, almost always because
-``remote_work_dir`` is not visible from the compute node. On SLURM, PBS and SGE
-each node has its own ``/tmp``, so an environment built on the login node
+``remote_work_dir`` is not visible from the compute node. On SLURM each node
+has its own ``/tmp``, so an environment built on the login node
 simply is not there at run time. Use a home directory or shared scratch. The
 default (``~/.clustrix/jobs``) is already safe; this bites people who set
 ``/tmp/...`` deliberately.
@@ -173,8 +169,8 @@ Two shapes of "wrong answer" are known and documented rather than mysterious:
   **different shapes**, because results arrive as a list of per-chunk values.
   See :doc:`limitations`.
 - Passing a keyword to ``@cluster`` that it does not recognise is accepted and
-  **ignored**, with a warning. ``k8s_namespace``, ``hf_namespace`` and friends
-  are configuration-level settings, not per-call ones. If a setting seems not
+  **ignored**, with a warning. ``hf_namespace`` and friends are
+  configuration-level settings, not per-call ones. If a setting seems not
   to apply, check :doc:`configuration` for whether it is read at all -- a
   number of fields have no effect.
 

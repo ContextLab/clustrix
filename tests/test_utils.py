@@ -286,42 +286,6 @@ class TestScriptGeneration:
         assert "function_data.pkl" in script
         assert "result.pkl" in script
 
-    def test_create_job_script_pbs(self):
-        """Test PBS script generation with detailed validation."""
-        config = ClusterConfig(
-            remote_work_dir="/home/test", python_executable="python3"
-        )
-
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00", "queue": "batch"}
-
-        script = create_job_script("pbs", job_config, "/home/test/jobs/job_456", config)
-
-        # Check PBS directives
-        assert "#!/bin/bash" in script
-        assert "#PBS -N clustrix" in script
-        assert "#PBS -l nodes=1:ppn=4" in script
-        assert "#PBS -l mem=8gb" in script  # PBS spells it lowercase
-        assert "#PBS -l walltime=01:00:00" in script
-        assert "#PBS -q batch" in script
-
-        # Check working directory
-        assert "cd /home/test/jobs/job_456" in script
-
-        # Check execution setup
-        assert "source venv/bin/activate" in script
-
-    def test_create_job_script_sge(self):
-        """Test SGE script generation."""
-        config = ClusterConfig()
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
-
-        result = create_job_script("sge", job_config, "/tmp/job", config)
-        assert result is not None
-        assert "#$ -N clustrix" in result
-        assert "#$ -pe smp 4" in result
-        assert "#$ -l h_vmem=8G" in result
-        assert "cd /tmp/job" in result
-
     def test_create_job_script_ssh(self):
         """Test SSH script generation."""
         config = ClusterConfig(

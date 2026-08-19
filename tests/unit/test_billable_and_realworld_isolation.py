@@ -44,7 +44,6 @@ _PREVIOUSLY_UNMARKED_FILES = (
     "test_cluster_job_system.py",
     "test_credential_access.py",
     "test_filesystem_utilities.py",
-    "test_field_mapping_fixes.py",
     "test_slurm_cluster_environment_setup.py",
     "test_real_world_credentials.py",
 )

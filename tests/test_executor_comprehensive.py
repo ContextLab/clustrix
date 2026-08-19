@@ -100,7 +100,7 @@ class TestClusterExecutorReal:
 
         # An unroutable cluster type is refused rather than guessed at.
         base_config.cluster_type = "not-a-cluster"
-        with pytest.raises(ValueError, match="Unsupported cluster type"):
+        with pytest.raises(ValueError, match="is not a supported cluster type"):
             ClusterExecutor(base_config).submit_job(sample_func_data, {"cores": 1})
 
     def test_result_retrieval_success(self):

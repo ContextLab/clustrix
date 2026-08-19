@@ -13,6 +13,7 @@ import tempfile
 from pathlib import Path
 from clustrix.config import (
     ClusterConfig,
+    SUPPORTED_CLUSTER_TYPES,
     configure,
     get_config,
     load_config,
@@ -81,15 +82,17 @@ class TestClusterConfigReal:
         - Configuration validation
         - Real-world settings
         """
-        # "namespace" was never a ClusterConfig field -- the real Kubernetes
-        # namespace field is "k8s_namespace". "gpu" is a per-job @cluster
+        # Restated over SLURM. This used to configure Kubernetes via
+        # k8s_namespace/auto_provision_k8s/k8s_provider/k8s_region; that
+        # backend and all four fields were removed (issue #142) because it had
+        # never been run against a real cluster. "gpu" is a per-job @cluster
         # decorator kwarg, not a ClusterConfig field, so it is not passed
         # here (Issue #114).
         config = ClusterConfig(
-            cluster_type="kubernetes",
-            cluster_host="k8s.example.com",
-            username="k8s-user",
-            k8s_namespace="ml-workloads",
+            cluster_type="slurm",
+            cluster_host="hpc.example.com",
+            username="hpc-user",
+            default_partition="gpu",
             default_cores=16,
             default_memory="64GB",
             environment_variables={
@@ -97,17 +100,12 @@ class TestClusterConfigReal:
                 "TF_GPU_MEMORY_GROWTH": "true",
             },
             module_loads=["cuda/11.8", "cudnn/8.6"],
-            auto_provision_k8s=True,
-            k8s_provider="aws",
-            k8s_region="us-west-2",
         )
 
-        assert config.cluster_type == "kubernetes"
-        assert config.k8s_namespace == "ml-workloads"
+        assert config.cluster_type == "slurm"
+        assert config.default_partition == "gpu"
         assert config.environment_variables["CUDA_VISIBLE_DEVICES"] == "0,1"
         assert "cuda/11.8" in config.module_loads
-        assert config.auto_provision_k8s is True
-        assert config.k8s_provider == "aws"
 
     def test_save_and_load_yaml_config(self, temp_config_dir, reset_config):
         """
@@ -177,13 +175,11 @@ class TestClusterConfigReal:
         config_file = temp_config_dir / "cluster_config.json"
 
         # Configure
-        # "namespace" is not a real field (the real one is "k8s_namespace").
-        # "node_selector"/"tolerations" are not ClusterConfig fields at all --
-        # there is no passthrough for arbitrary Kubernetes Job-spec fields
-        # like node selectors or tolerations (Issue #114).
+        # Restated over HuggingFace Jobs: the Kubernetes backend this used to
+        # configure has been removed (issue #142). The round trip is the point.
         configure(
-            cluster_type="kubernetes",
-            k8s_namespace="production",
+            cluster_type="huggingface",
+            hf_namespace="contextlab",
             default_cores=8,
             default_memory="32Gi",
         )
@@ -206,8 +202,8 @@ class TestClusterConfigReal:
         with open(config_file, "r") as f:
             loaded_data = json.load(f)
 
-        assert loaded_data["cluster_type"] == "kubernetes"
-        assert loaded_data["k8s_namespace"] == "production"
+        assert loaded_data["cluster_type"] == "huggingface"
+        assert loaded_data["hf_namespace"] == "contextlab"
         assert loaded_data["default_memory"] == "32Gi"
 
     def test_environment_variable_configuration(self, reset_config):
@@ -221,9 +217,9 @@ class TestClusterConfigReal:
         """
         # Set environment variables
         env_vars = {
-            "CLUSTRIX_CLUSTER_TYPE": "pbs",
-            "CLUSTRIX_CLUSTER_HOST": "pbs.cluster.com",
-            "CLUSTRIX_USERNAME": "pbsuser",
+            "CLUSTRIX_CLUSTER_TYPE": "ssh",
+            "CLUSTRIX_CLUSTER_HOST": "gpu.cluster.com",
+            "CLUSTRIX_USERNAME": "sshuser",
             "CLUSTRIX_DEFAULT_CORES": "16",
             "CLUSTRIX_DEFAULT_MEMORY": "64GB",
             "CLUSTRIX_QUEUE": "batch",
@@ -248,9 +244,9 @@ class TestClusterConfigReal:
                             setattr(config, attr_name, value)
 
             # Verify environment variable application
-            assert config.cluster_type == "pbs"
-            assert config.cluster_host == "pbs.cluster.com"
-            assert config.username == "pbsuser"
+            assert config.cluster_type == "ssh"
+            assert config.cluster_host == "gpu.cluster.com"
+            assert config.username == "sshuser"
             assert config.default_cores == 16
 
         finally:
@@ -320,8 +316,10 @@ class TestClusterConfigReal:
         - Real multi-cluster workflows
         """
         # Create multiple configuration files
-        # "namespace" and "partition" are not real field names; the real
-        # ones are "k8s_namespace" and "default_partition" (Issue #114).
+        # "partition" is not a real field name; the real one is
+        # "default_partition" (Issue #114). The middle profile used to be a
+        # Kubernetes one keyed on k8s_namespace, a removed backend and a
+        # removed field (issue #142).
         configs = {
             "dev": {
                 "cluster_type": "local",
@@ -329,8 +327,8 @@ class TestClusterConfigReal:
                 "default_memory": "4GB",
             },
             "test": {
-                "cluster_type": "kubernetes",
-                "k8s_namespace": "testing",
+                "cluster_type": "huggingface",
+                "hf_namespace": "contextlab",
                 "default_cores": 4,
                 "default_memory": "8Gi",
             },
@@ -359,58 +357,10 @@ class TestClusterConfigReal:
             assert current.cluster_type == expected["cluster_type"]
             assert current.default_cores == expected["default_cores"]
 
-            if "k8s_namespace" in expected:
-                assert current.k8s_namespace == expected["k8s_namespace"]
+            if "hf_namespace" in expected:
+                assert current.hf_namespace == expected["hf_namespace"]
             if "default_partition" in expected:
                 assert current.default_partition == expected["default_partition"]
-
-    @pytest.mark.real_world
-    def test_kubernetes_configuration_real(self, reset_config):
-        """
-        Test Kubernetes-specific configuration.
-
-        This demonstrates:
-        - K8s-specific settings
-        - Auto-provisioning configuration
-        - Real K8s parameters
-
-        NOTE: this test originally asserted a much larger surface of K8s
-        fields (k8s_project_id, k8s_zone, k8s_gpu_type, k8s_gpu_count,
-        k8s_preemptible, k8s_autoscaling, k8s_min_nodes, k8s_max_nodes,
-        namespace, service_account, image_pull_secrets, node_selector) that
-        are not, and never were, fields on ClusterConfig (confirmed via
-        `git log -S` -- e.g. node_selector/tolerations have no history at
-        all). Kubernetes Job-spec passthroughs (node_selector, tolerations,
-        image_pull_secrets) and GPU/autoscaling knobs are a genuine gap in
-        ClusterConfig, not a test bug; see Issue #114 report. This test now
-        only exercises fields that genuinely exist.
-        """
-        configure(
-            cluster_type="kubernetes",
-            auto_provision_k8s=True,
-            k8s_provider="gcp",
-            gcp_project_id="my-gcp-project",
-            k8s_region="us-central1",
-            gcp_zone="us-central1-a",
-            k8s_cluster_name="ml-cluster",
-            k8s_node_count=3,
-            k8s_node_type="n1-standard-8",
-            k8s_namespace="ml-workloads",
-            k8s_service_account="ml-service-account",
-        )
-
-        config = get_config()
-
-        # Verify K8s configuration
-        assert config.cluster_type == "kubernetes"
-        assert config.auto_provision_k8s is True
-        assert config.k8s_provider == "gcp"
-        assert config.gcp_project_id == "my-gcp-project"
-        assert config.k8s_cluster_name == "ml-cluster"
-        assert config.k8s_node_count == 3
-        assert config.k8s_node_type == "n1-standard-8"
-        assert config.k8s_namespace == "ml-workloads"
-        assert config.k8s_service_account == "ml-service-account"
 
     def test_validation_and_error_handling(self, reset_config):
         """
@@ -428,9 +378,10 @@ class TestClusterConfigReal:
         # Test invalid types (would need type checking in real implementation)
         config = ClusterConfig()
 
-        # These should be validated in a real implementation
-        valid_cluster_types = ["slurm", "pbs", "sge", "kubernetes", "ssh", "local"]
-        assert config.cluster_type in valid_cluster_types
+        # Read the shipped tuple rather than a second hand-maintained copy:
+        # the old literal list here still named pbs/sge/kubernetes after those
+        # backends were removed.
+        assert config.cluster_type in SUPPORTED_CLUSTER_TYPES
 
         # Memory should be a string with units
         assert isinstance(config.default_memory, str)

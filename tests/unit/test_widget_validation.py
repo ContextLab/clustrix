@@ -84,11 +84,11 @@ class TestRejectedValues:
     def test_out_of_range_port_is_rejected(self, port):
         assert "Port must be between" in _problems(_widget("slurm", port=port))
 
-    @pytest.mark.parametrize("cluster_type", ["ssh", "slurm", "pbs", "sge"])
+    @pytest.mark.parametrize("cluster_type", ["ssh", "slurm"])
     def test_remote_cluster_requires_a_host(self, cluster_type):
         assert "host is required" in _problems(_widget(cluster_type, host=""))
 
-    @pytest.mark.parametrize("cluster_type", ["ssh", "slurm", "pbs", "sge"])
+    @pytest.mark.parametrize("cluster_type", ["ssh", "slurm"])
     def test_remote_cluster_requires_a_username(self, cluster_type):
         assert "username is required" in _problems(_widget(cluster_type, username=""))
 
@@ -128,14 +128,13 @@ class TestBackendSpecificSections:
     """Each backend needs different settings, and only its own should show."""
 
     SECTIONS = {
-        "remote_section": ("ssh", "slurm", "pbs", "sge"),
+        "remote_section": ("ssh", "slurm"),
         "hf_section": ("huggingface",),
-        "k8s_section": ("kubernetes",),
     }
 
     @pytest.mark.parametrize(
         "cluster_type",
-        ["local", "ssh", "slurm", "pbs", "sge", "kubernetes", "huggingface"],
+        ["local", "ssh", "slurm", "huggingface"],
     )
     def test_exactly_the_right_sections_are_shown(self, cluster_type):
         widget = _widget(cluster_type)
@@ -144,20 +143,6 @@ class TestBackendSpecificSections:
             assert (
                 widget.widgets[section].layout.display == expected
             ), f"{section} should be {expected} for {cluster_type}"
-
-    def test_kubernetes_settings_reach_the_config(self):
-        """None of these had fields, so only the defaults were ever usable."""
-        widget = _widget("kubernetes")
-        widget.widgets["k8s_namespace"].value = "research"
-        widget.widgets["k8s_image"].value = "python:3.12-slim"
-        widget.widgets["k8s_service_account"].value = "clustrix-runner"
-        widget.widgets["k8s_pull_policy"].value = "Always"
-
-        config = widget._get_config_from_widgets()
-        assert config.k8s_namespace == "research"
-        assert config.k8s_image == "python:3.12-slim"
-        assert config.k8s_service_account == "clustrix-runner"
-        assert config.k8s_pull_policy == "Always"
 
     def test_huggingface_settings_reach_the_config(self):
         widget = _widget("huggingface")
@@ -179,8 +164,5 @@ class TestBackendSpecificSections:
             "local",
             "ssh",
             "slurm",
-            "pbs",
-            "sge",
-            "kubernetes",
             "huggingface",
         }

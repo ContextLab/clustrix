@@ -1,23 +1,20 @@
 """
 Comprehensive real-world advanced scheduler validation tests.
 
-This module tests advanced scheduler integration (PBS, SGE, specialized schedulers),
+This module tests advanced scheduler integration beyond basic job submission,
 addressing Phase 5 of Issue #63 external service validation.
 
 Tests cover:
-- PBS (Portable Batch System) job submission and monitoring
-- SGE (Sun Grid Engine) job submission and queue management
 - Advanced SLURM features and queue specifications
-- Hybrid scheduler environments
-- Scheduler-specific resource management
+- Scheduler queue/partition inspection
+- Scheduler job monitoring
+- Scheduler-specific resource management and environment variables
 
 NO MOCK TESTS - Only real scheduler integration testing.
 
-Supports multiple scheduler types:
-- PBS Pro/Torque
-- SGE/OGE (Open Grid Engine)
-- Advanced SLURM configurations
-- LSF (Load Sharing Facility) if available
+Scope note: this file previously also covered PBS and SGE. Both backends were
+removed from clustrix because they were never verified against real hardware,
+so their tests were deleted rather than left asserting against dead code.
 """
 
 import pytest
@@ -62,10 +59,7 @@ def get_scheduler_credentials(scheduler_type: str) -> Optional[Dict[str, str]]:
 def check_scheduler_available(scheduler_type: str, creds: Dict[str, str]) -> bool:
     """Check if a scheduler is available on the target cluster."""
     scheduler_commands = {
-        "pbs": "qstat --version",
-        "sge": "qstat -help",
         "slurm": "sinfo --version",
-        "lsf": "bsub -V",
     }
 
     if scheduler_type not in scheduler_commands:
@@ -99,59 +93,6 @@ def check_scheduler_available(scheduler_type: str, creds: Dict[str, str]) -> boo
         return False
 
 
-def validate_scheduler_job_submission(
-    scheduler_type: str, creds: Dict[str, str]
-) -> Dict[str, Any]:
-    """Test basic job submission to a scheduler."""
-    logger.info(f"Testing {scheduler_type.upper()} job submission")
-
-    try:
-        # Configure clustrix for the scheduler
-        config_params = {
-            "cluster_type": scheduler_type,
-            "cluster_host": creds["host"],
-            "username": creds["username"],
-            "password": creds.get("password"),
-            "key_file": creds.get("key_file"),
-        }
-
-        # Remove None values
-        config_params = {k: v for k, v in config_params.items() if v is not None}
-
-        configure(**config_params)
-
-        # Define a simple test function
-        @cluster(cores=1, memory="1GB", time="00:05:00")
-        def scheduler_test_function(x: int) -> int:
-            """Simple test function for scheduler validation."""
-            import time
-            import os
-
-            # Brief computation to validate execution
-            result = x * 2 + 1
-            time.sleep(2)  # Brief delay to simulate work
-
-            # Return result with scheduler info if available
-            scheduler_info = os.getenv("SCHEDULER_ID", "unknown")
-            return {"result": result, "scheduler": scheduler_info, "input": x}
-
-        # Submit job
-        job_result = scheduler_test_function(42)
-
-        return {
-            "submission_successful": True,
-            "result": job_result,
-            "scheduler_type": scheduler_type,
-        }
-
-    except Exception as e:
-        return {
-            "submission_successful": False,
-            "error": str(e),
-            "scheduler_type": scheduler_type,
-        }
-
-
 @pytest.mark.real_world
 class TestAdvancedSchedulersComprehensive:
     """Comprehensive advanced scheduler integration tests addressing Issue #63 Phase 5."""
@@ -161,8 +102,8 @@ class TestAdvancedSchedulersComprehensive:
         self.scheduler_creds = {}
         self.available_schedulers = []
 
-        # Test different scheduler types
-        schedulers = ["pbs", "sge", "slurm"]
+        # Only SLURM remains a supported scheduler backend.
+        schedulers = ["slurm"]
 
         for scheduler in schedulers:
             creds = get_scheduler_credentials(scheduler)
@@ -179,46 +120,6 @@ class TestAdvancedSchedulersComprehensive:
                     logger.info(
                         f"⚠️ {scheduler.upper()} not available on {creds['host']}"
                     )
-
-    @pytest.mark.real_world
-    def test_pbs_job_submission_basic(self):
-        """Test basic PBS job submission functionality."""
-        if "pbs" not in self.available_schedulers:
-            pytest.skip("PBS scheduler not available for testing")
-
-        logger.info("Testing PBS basic job submission")
-
-        creds = self.scheduler_creds["pbs"]
-        result = validate_scheduler_job_submission("pbs", creds)
-
-        if result["submission_successful"]:
-            assert result["result"] is not None, "PBS job should return a result"
-            logger.info(f"✅ PBS job submission successful: {result['result']}")
-        else:
-            # Log the error but don't fail - this is expected if no PBS cluster available
-            logger.warning(
-                f"⚠️ PBS job submission failed (expected without cluster): {result['error']}"
-            )
-
-    @pytest.mark.real_world
-    def test_sge_job_submission_basic(self):
-        """Test basic SGE job submission functionality."""
-        if "sge" not in self.available_schedulers:
-            pytest.skip("SGE scheduler not available for testing")
-
-        logger.info("Testing SGE basic job submission")
-
-        creds = self.scheduler_creds["sge"]
-        result = validate_scheduler_job_submission("sge", creds)
-
-        if result["submission_successful"]:
-            assert result["result"] is not None, "SGE job should return a result"
-            logger.info(f"✅ SGE job submission successful: {result['result']}")
-        else:
-            # Log the error but don't fail - this is expected if no SGE cluster available
-            logger.warning(
-                f"⚠️ SGE job submission failed (expected without cluster): {result['error']}"
-            )
 
     @pytest.mark.real_world
     def test_slurm_advanced_features(self):
@@ -327,7 +228,7 @@ class TestAdvancedSchedulersComprehensive:
                         "scheduler_vars": {
                             k: v
                             for k, v in os.environ.items()
-                            if k.startswith(("SLURM_", "PBS_", "SGE_", "LSF_"))
+                            if k.startswith("SLURM_")
                         },
                     }
 
@@ -374,10 +275,6 @@ class TestAdvancedSchedulersComprehensive:
                 # Test queue information retrieval
                 if scheduler == "slurm":
                     queue_cmd = ["sinfo", "-o", "%P %A %T"]
-                elif scheduler == "pbs":
-                    queue_cmd = ["qstat", "-Q"]
-                elif scheduler == "sge":
-                    queue_cmd = ["qstat", "-g", "c"]
                 else:
                     continue
 
@@ -459,10 +356,6 @@ class TestAdvancedSchedulersComprehensive:
                 # Test job monitoring commands
                 if scheduler == "slurm":
                     monitor_cmd = ["squeue", "-u", creds["username"]]
-                elif scheduler == "pbs":
-                    monitor_cmd = ["qstat", "-u", creds["username"]]
-                elif scheduler == "sge":
-                    monitor_cmd = ["qstat", "-u", creds["username"]]
                 else:
                     continue
 
@@ -517,8 +410,6 @@ class TestAdvancedSchedulersComprehensive:
 
         env_var_patterns = {
             "slurm": ["SLURM_JOB_ID", "SLURM_PROCID", "SLURM_JOB_PARTITION"],
-            "pbs": ["PBS_JOBID", "PBS_ENVIRONMENT", "PBS_QUEUE"],
-            "sge": ["JOB_ID", "QUEUE", "SGE_TASK_ID"],
         }
 
         env_tests = []
@@ -554,8 +445,6 @@ class TestAdvancedSchedulersComprehensive:
                     # Count total scheduler-related variables
                     scheduler_prefixes = {
                         "slurm": "SLURM_",
-                        "pbs": "PBS_",
-                        "sge": "SGE_",
                     }
                     prefix = scheduler_prefixes.get(scheduler, scheduler.upper() + "_")
 

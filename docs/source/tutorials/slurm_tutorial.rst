@@ -13,9 +13,9 @@ Prerequisites
 .. note::
 
    SLURM is verified end to end against a real cluster (SSH connect, job
-   submission, environment build, result retrieval). PBS and SGE
-   (:doc:`pbs_tutorial`, :doc:`../notebooks/sge_tutorial`) share almost all of
-   the same code path but have not been exercised against real hardware.
+   submission, environment build, result retrieval). PBS and SGE are **not
+   currently supported** -- they were removed in v0.2.0 and are planned for a
+   future release; see :ref:`removed-backends`.
 
 What Happens When You Call a ``@cluster``-Decorated Function
 --------------------------------------------------------------

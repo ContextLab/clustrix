@@ -12,10 +12,12 @@ Implementing Issue #71: Refactoring all tests to mirror real user workflows with
 - Created priority list based on anti-pattern density
 
 ### Phase 2: Reference Workflows (✅ COMPLETED)
-Created three reference modules:
+Created reference modules:
 1. `reference_workflows/basic_usage.py` - Core @cluster patterns
-2. `reference_workflows/kubernetes_workflows.py` - K8s auto-provisioning
-3. `reference_workflows/data_analysis_workflows.py` - Scientific computing
+2. `reference_workflows/data_analysis_workflows.py` - Scientific computing
+
+A third module, `reference_workflows/kubernetes_workflows.py`, was deleted
+along with the Kubernetes backend (see "Backend removal" below).
 
 ### Phase 3: Test Refactoring (🔄 IN PROGRESS)
 
@@ -24,7 +26,6 @@ Created three reference modules:
 |--------------|---------------|----------|---------|
 | `test_executor.py` | 86 | `test_executor_real.py` | ✅ Complete |
 | `test_decorator.py` | 72 | `test_decorator_real.py` | ✅ Complete |
-| `test_cloud_providers_gcp.py` | 135 | `test_cloud_providers_gcp_real.py` | ✅ Complete |
 | `test_notebook_magic.py` | 125 | `test_notebook_magic_real.py` | ✅ Complete |
 | `test_auth_fallbacks.py` | 114 | `test_auth_fallbacks_real.py` | ✅ Complete |
 
@@ -39,8 +40,8 @@ Created three reference modules:
 
 **Infrastructure Tests**
 - Real SSH connections
-- Actual Kubernetes cluster provisioning
-- Live cloud provider APIs (GCP, AWS, Azure)
+- Real SLURM job submission
+- Real HuggingFace Jobs submission
 - Real file system operations
 
 **Authentication Tests**
@@ -51,7 +52,6 @@ Created three reference modules:
 
 **Execution Tests**
 - Real job submission to clusters
-- Actual container execution
 - Live result retrieval
 - Real parallel processing
 
@@ -59,9 +59,7 @@ Created three reference modules:
 
 1. `test_secure_credentials.py` (107 anti-patterns)
 2. `test_config.py` (96 anti-patterns)
-3. `test_cloud_providers_aws.py` (94 anti-patterns)
-4. `test_slurm_advanced.py` (91 anti-patterns)
-5. `test_kubernetes_scaling.py` (90 anti-patterns)
+3. `test_slurm_advanced.py` (91 anti-patterns)
 
 ## Testing Strategy
 
@@ -120,7 +118,6 @@ Each refactored test file includes:
 
 ### Phase 4: Infrastructure Setup
 - Docker containers for test environments
-- Kind clusters for local Kubernetes
 - Test data generation scripts
 
 ### Phase 5: Coverage
@@ -148,7 +145,7 @@ python tests/audit_antipatterns.py
 python tests/run_refactored_tests.py
 
 # Run specific real-world test
-pytest tests/test_executor_real.py::TestClusterExecutorReal::test_job_submission_kubernetes -v -s
+pytest tests/test_executor_real.py -v -s
 
 # Run all real-world tests (requires credentials)
 pytest -m real_world tests/
@@ -162,7 +159,21 @@ pytest -m real_world tests/
 - Visual outputs (figures, screenshots) for verification
 - Cost-conscious API usage with initial verification
 
+## Backend removal (2026-08-19)
+
+Every backend that had never been verified against real hardware was deleted
+from the package: `pbs`, `sge`, `kubernetes`, and the AWS/GCP/Azure/Lambda
+cloud providers. The retained `cluster_type` values are `local`, `ssh`,
+`slurm` and `huggingface` (HuggingFace **Jobs**).
+
+Consequently the counts in this report are historical and no longer describe
+the current tree: the cloud-provider and Kubernetes rows above referred to
+files that no longer exist, and `tests/real_world/`, `tests/integration/`,
+`tests/infrastructure/` and `tests/reference_workflows/` lost the tests,
+fixtures, credential accessors and docker-compose services that only existed
+to exercise those backends.
+
 ---
 
-*Last Updated: Current Session*
+*Last Updated: 2026-08-19*
 *Issue #71 Implementation*

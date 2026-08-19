@@ -234,7 +234,7 @@ def reset_config():
     """Restore the global configuration singleton after every test.
 
     This used to reset eight hand-listed fields. Everything else a test set
-    -- k8s_namespace, remote_work_dir, package_manager, environment_variables,
+    -- remote_work_dir, package_manager, environment_variables,
     ssh_host_key_policy -- leaked into every test that ran afterwards, and
     ClusterConfig has over a hundred fields. The notebook widget reads the
     live config to populate itself, so it inherited whatever the previous

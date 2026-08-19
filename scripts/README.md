@@ -55,15 +55,18 @@ This directory contains essential utility scripts for development and maintenanc
 
 ### Setup and Configuration
 
-#### `setup_validation_credentials.py`
-**Purpose**: Secure credential setup using environment variables  
-**Usage**: `python scripts/setup_validation_credentials.py`  
-**Features**:
-- Guides through environment variable setup
-- Tests credential accessibility
-- Supports multiple cloud providers (AWS, GCP, Lambda Cloud, HuggingFace)
-- Uses .env files for local development
-- **Security**: Uses environment variables for secure credential storage
+Credential setup lives in the CLI, not in a script here:
+
+```bash
+clustrix credentials setup    # interactive wizard, writes ~/.clustrix/.env
+clustrix credentials test     # validates each configured credential for real
+```
+
+`setup_validation_credentials.py` used to duplicate this and was deleted: it
+gated everything behind a 1Password CLI check, and 1Password support was
+removed in #97, so `is_op_available()` returns `False` unconditionally. Every
+run exited at that check and told the reader to install a CLI clustrix no
+longer uses.
 
 ## Workflow Integration
 

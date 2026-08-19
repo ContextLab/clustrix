@@ -9,9 +9,7 @@ requiring cloud resources or external clusters.
 import subprocess
 import time
 import sys
-import os
 from pathlib import Path
-import yaml
 import json
 
 
@@ -21,15 +19,12 @@ class TestInfrastructureSetup:
     def __init__(self):
         self.infrastructure_dir = Path(__file__).parent
         self.docker_compose_file = self.infrastructure_dir / "docker-compose.yml"
-        self.kind_config_file = self.infrastructure_dir / "kind-config.yaml"
 
     def check_dependencies(self):
         """Check if required tools are installed."""
         dependencies = {
             "docker": ["docker", "--version"],
             "docker-compose": ["docker-compose", "--version"],
-            "kind": ["kind", "--version"],
-            "kubectl": ["kubectl", "version", "--client"],
         }
 
         missing = []
@@ -49,151 +44,6 @@ class TestInfrastructureSetup:
             return False
 
         return True
-
-    def create_kind_config(self):
-        """Create Kind cluster configuration."""
-        kind_config = {
-            "kind": "Cluster",
-            "apiVersion": "kind.x-k8s.io/v1alpha4",
-            "nodes": [
-                {
-                    "role": "control-plane",
-                    "kubeadmConfigPatches": [
-                        """
-kind: InitConfiguration
-nodeRegistration:
-  kubeletExtraArgs:
-    node-labels: "clustrix-test=true"
-"""
-                    ],
-                    "extraPortMappings": [
-                        {"containerPort": 30000, "hostPort": 30000, "protocol": "TCP"},
-                        {"containerPort": 30001, "hostPort": 30001, "protocol": "TCP"},
-                    ],
-                },
-                {
-                    "role": "worker",
-                    "kubeadmConfigPatches": [
-                        """
-kind: JoinConfiguration
-nodeRegistration:
-  kubeletExtraArgs:
-    node-labels: "clustrix-test=true,workload=compute"
-"""
-                    ],
-                },
-                {
-                    "role": "worker",
-                    "kubeadmConfigPatches": [
-                        """
-kind: JoinConfiguration
-nodeRegistration:
-  kubeletExtraArgs:
-    node-labels: "clustrix-test=true,workload=gpu"
-"""
-                    ],
-                },
-            ],
-            "networking": {
-                "podSubnet": "10.244.0.0/16",
-                "serviceSubnet": "10.96.0.0/12",
-            },
-        }
-
-        with open(self.kind_config_file, "w") as f:
-            yaml.dump(kind_config, f)
-
-        print(f"✅ Created Kind configuration at {self.kind_config_file}")
-
-    def setup_kubernetes(self):
-        """Setup local Kubernetes cluster using Kind."""
-        print("\n🚀 Setting up Kubernetes cluster...")
-
-        # Check if cluster already exists
-        result = subprocess.run(
-            ["kind", "get", "clusters"], capture_output=True, text=True
-        )
-
-        if "clustrix-test" in result.stdout:
-            print("ℹ️  Cluster 'clustrix-test' already exists")
-            return True
-
-        # Create Kind configuration
-        self.create_kind_config()
-
-        # Create cluster
-        try:
-            subprocess.run(
-                [
-                    "kind",
-                    "create",
-                    "cluster",
-                    "--name",
-                    "clustrix-test",
-                    "--config",
-                    str(self.kind_config_file),
-                    "--wait",
-                    "5m",
-                ],
-                check=True,
-            )
-            print("✅ Kubernetes cluster created successfully")
-
-            # Install basic resources
-            self.setup_k8s_resources()
-
-            return True
-
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to create Kubernetes cluster: {e}")
-            return False
-
-    def setup_k8s_resources(self):
-        """Setup basic Kubernetes resources for testing."""
-        print("📦 Setting up Kubernetes resources...")
-
-        # Create test namespace
-        namespace_yaml = """
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: clustrix-test
-  labels:
-    name: clustrix-test
-"""
-
-        # Apply namespace
-        subprocess.run(
-            ["kubectl", "apply", "-f", "-"], input=namespace_yaml.encode(), check=True
-        )
-
-        # Create service account
-        sa_yaml = """
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: clustrix-test-sa
-  namespace: clustrix-test
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
-metadata:
-  name: clustrix-test-binding
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: cluster-admin
-subjects:
-- kind: ServiceAccount
-  name: clustrix-test-sa
-  namespace: clustrix-test
-"""
-
-        subprocess.run(
-            ["kubectl", "apply", "-f", "-"], input=sa_yaml.encode(), check=True
-        )
-
-        print("✅ Kubernetes resources created")
 
     def setup_docker_services(self):
         """Setup Docker services using docker-compose."""
@@ -297,10 +147,6 @@ subjects:
         """Create test configuration file."""
         config = {
             "infrastructure": {
-                "kubernetes": {
-                    "context": "kind-clustrix-test",
-                    "namespace": "clustrix-test",
-                },
                 "ssh": {
                     "host": "localhost",
                     "port": 2222,
@@ -335,7 +181,6 @@ subjects:
         env_file = self.infrastructure_dir / "test.env"
         with open(env_file, "w") as f:
             f.write("# Test Infrastructure Environment Variables\n")
-            f.write("export KUBECONFIG=$HOME/.kube/config\n")
             f.write("export TEST_SSH_HOST=localhost\n")
             f.write("export TEST_SSH_PORT=2222\n")
             f.write("export TEST_SSH_USER=testuser\n")
@@ -364,10 +209,6 @@ subjects:
         if not self.check_dependencies():
             return False
 
-        # Setup Kubernetes
-        if not self.setup_kubernetes():
-            print("⚠️  Kubernetes setup failed, continuing with other services...")
-
         # Setup Docker services
         if not self.setup_docker_services():
             return False
@@ -377,7 +218,6 @@ subjects:
 
         print("\n✨ Test infrastructure setup complete!")
         print("\nServices available:")
-        print("  • Kubernetes: kubectl --context kind-clustrix-test")
         print("  • SSH Server: ssh -p 2222 testuser@localhost")
         print("  • MinIO (S3): http://localhost:9001 (admin/admin)")
         print("  • PostgreSQL: psql -h localhost -U clustrix clustrix_test")
@@ -399,15 +239,6 @@ subjects:
             print("✅ Docker services stopped")
         except:
             print("⚠️  Failed to stop Docker services")
-
-        # Delete Kind cluster
-        try:
-            subprocess.run(
-                ["kind", "delete", "cluster", "--name", "clustrix-test"], check=True
-            )
-            print("✅ Kubernetes cluster deleted")
-        except:
-            print("⚠️  Failed to delete Kubernetes cluster")
 
         print("✨ Teardown complete")
 

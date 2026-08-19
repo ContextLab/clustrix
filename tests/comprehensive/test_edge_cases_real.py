@@ -275,33 +275,6 @@ class TestResourceLimitEdgeCases:
             # Expected to fail with excessive requests
             assert "resource" in str(e).lower() or "memory" in str(e).lower()
 
-    def test_fractional_core_request(self):
-        """
-        Test behavior with fractional core requests.
-
-        Some systems support fractional CPU allocation.
-        """
-        configure(cluster_type="kubernetes")
-
-        @cluster(cores=0.5, memory="512Mi")
-        def fractional_cpu():
-            """Function with fractional CPU request."""
-            import time
-
-            start = time.time()
-
-            # Do some CPU-bound work
-            total = sum(i * i for i in range(1000000))
-
-            duration = time.time() - start
-            return {"result": total, "duration": duration}
-
-        # Execute if Kubernetes is available
-        if os.getenv("KUBECONFIG"):
-            result = fractional_cpu()
-            assert result["result"] > 0
-            assert result["duration"] > 0
-
     def test_memory_string_formats(self):
         """
         Test various memory specification formats.

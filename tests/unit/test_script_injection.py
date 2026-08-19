@@ -227,24 +227,51 @@ class TestValidatedSites:
                 "slurm", job_config, "/scratch/jobs/job_1", ClusterConfig()
             )
 
-    def test_pbs_queue_carrying_a_directive_is_refused(self):
-        job_config = dict(BASE_JOB_CONFIG, queue="normal -l walltime=99:00:00")
+    def test_a_job_directory_with_shell_syntax_is_refused_in_directives(self):
+        """Directive lines cannot be quoted, so the value has to be clean.
 
-        with pytest.raises(ValueError, match="queue"):
-            create_job_script("pbs", job_config, "/scratch/jobs/job_1", ClusterConfig())
-
-    @pytest.mark.parametrize("cluster_type", ["slurm", "pbs", "sge"])
-    def test_a_job_directory_with_shell_syntax_is_refused_in_directives(
-        self, cluster_type
-    ):
-        """Directive lines cannot be quoted, so the value has to be clean."""
+        Narrowed from ["slurm", "pbs", "sge"] to SLURM: PBS and SGE were
+        removed, and SLURM is now the only backend that writes the job
+        directory into a scheduler directive. SSH, the other remote backend,
+        writes it only into shell commands and is covered by the next test.
+        """
         with pytest.raises(ValueError, match="remote_work_dir"):
             create_job_script(
-                cluster_type,
+                "slurm",
                 dict(BASE_JOB_CONFIG),
                 "/scratch/$(touch /tmp/pwn)/job_1",
                 ClusterConfig(),
             )
+
+    @pytest.mark.parametrize(
+        "hostile_dir",
+        [
+            "/scratch/$(touch /tmp/pwn)/job_1",
+            "/scratch/`touch /tmp/pwn`/job_1",
+            "/scratch/x'; touch /tmp/pwn; '",
+        ],
+    )
+    def test_an_ssh_job_directory_is_quoted_rather_than_expanded(self, hostile_dir):
+        """SSH has no directive lines, so it defends by quoting instead.
+
+        The value reaches `cd` and `cat` only inside single quotes, which the
+        shell does not expand. Asserting this explicitly because the previous
+        parametrisation over ["slurm", "pbs", "sge"] never covered SSH at all,
+        and substituting SSH into the directive test above would have been a
+        false negative: it raises nothing because it has nothing to validate.
+        """
+        script = create_job_script(
+            "ssh", dict(BASE_JOB_CONFIG), hostile_dir, ClusterConfig()
+        )
+
+        # No unquoted occurrence of the payload anywhere in the script.
+        assert "touch /tmp/pwn" in script  # it is present...
+        for line in script.splitlines():
+            if "touch /tmp/pwn" in line:
+                # ...but only ever inside a single-quoted word.
+                assert line.count("'") >= 2, line
+                assert not line.startswith("cd /scratch"), line
+        assert "cd " + hostile_dir not in script
 
     def test_walltime_and_cores_are_validated_too(self):
         with pytest.raises(ValueError, match="time"):

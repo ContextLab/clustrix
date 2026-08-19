@@ -3,26 +3,25 @@
 See issue #109.
 
 Everything in this directory talks to external infrastructure, and a large
-subset provisions **billable** cloud resources (AWS EKS clusters, EC2
-instances, GPU nodes). Before this gate existed, the documented command
+subset consumes **billable** resources (remote GPU nodes, paid job APIs).
+Before this gate existed, the documented command
 ``pytest tests/ -m "not real_world"`` collected this directory, because none of
 its files carried a pytest marker.
 
 A marker-based skip would not be sufficient. pytest must *import* a module in
 order to collect it, and several modules here are standalone scripts rather
-than test modules -- ``test_eks_permissions.py`` and ``test_aws_eks_debug.py``
-fetch credentials, call boto3, and invoke ``exit()`` at module scope. Importing
-them is itself the harm:
+than test modules: they fetch credentials, open connections and invoke
+``exit()`` at module scope. Importing them is itself the harm:
 
-* the AWS calls happen before any marker or skip is consulted, and
-* the module-level ``sys.exit(1)`` raises ``SystemExit`` during collection,
+* the external calls happen before any marker or skip is consulted, and
+* a module-level ``sys.exit(1)`` raises ``SystemExit`` during collection,
   which crashes the whole pytest run with ``INTERNALERROR``.
 
 So the gate has to stop *collection*, which is what ``collect_ignore_glob``
 does -- pytest never imports an ignored file.
 
 The gate is deliberately directory-wide (default-deny) rather than a
-per-file allowlist. Misclassifying one file out of ~48 costs real money, and a
+per-file allowlist. Misclassifying a single file costs real money, and a
 newly added file must not be able to run for free simply because nobody
 remembered to mark it.
 
@@ -30,7 +29,7 @@ To run these tests deliberately::
 
     CLUSTRIX_ALLOW_BILLABLE=1 pytest tests/integration/
 
-Be aware that doing so may create real, chargeable cloud resources.
+Be aware that doing so may consume real, chargeable resources.
 """
 
 import os

@@ -305,8 +305,7 @@ class TestWidgetComponents:
         # Check cluster type dropdown
         cluster_type = widget.widgets["cluster_type"]
         assert cluster_type.value == "local"
-        assert "slurm" in cluster_type.options
-        assert "kubernetes" in cluster_type.options
+        assert list(cluster_type.options) == ["local", "ssh", "slurm", "huggingface"]
 
         # Check resource fields. Values come from the active profile
         # ("Local single-core" in BUILTIN_PROFILES), whose default_memory is
@@ -552,7 +551,7 @@ class TestConfigurationSynchronization:
 
         # Create a config
         config = ClusterConfig(
-            cluster_type="pbs",
+            cluster_type="slurm",
             default_cores=16,
             default_memory="64GB",
             default_time="04:00:00",
@@ -564,7 +563,7 @@ class TestConfigurationSynchronization:
         widget._load_config_to_widgets(config)
 
         # Verify widget values
-        assert widget.widgets["cluster_type"].value == "pbs"
+        assert widget.widgets["cluster_type"].value == "slurm"
         assert widget.widgets["cpus"].value == 16
         assert widget.widgets["ram"].value == "64GB"  # Now string format
         assert widget.widgets["time"].value == "04:00:00"
@@ -579,7 +578,7 @@ class TestConfigurationSynchronization:
 
         # Original config
         original_config = ClusterConfig(
-            cluster_type="sge",
+            cluster_type="slurm",
             default_cores=24,
             default_memory="128GB",
             default_time="08:00:00",

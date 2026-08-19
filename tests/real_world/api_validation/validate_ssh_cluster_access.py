@@ -444,7 +444,7 @@ if __name__ == "__main__":
 
 
 def test_cluster_scheduler_detection(hostname, username, password=None, key_file=None):
-    """Detect available cluster schedulers (SLURM, PBS, SGE, etc.)."""
+    """Detect available cluster schedulers (currently only SLURM is supported)."""
     print(f"\n⚙️  Cluster Scheduler Detection: {username}@{hostname}")
     print("=" * 60)
 
@@ -471,9 +471,6 @@ def test_cluster_scheduler_detection(hostname, username, password=None, key_file
         # Test for different schedulers
         scheduler_tests = {
             "slurm": ["sinfo", "squeue", "sbatch"],
-            "pbs": ["qstat", "qsub", "pbsnodes"],
-            "sge": ["qstat", "qsub", "qhost"],
-            "lsf": ["bjobs", "bsub", "bhosts"],
         }
 
         detected_schedulers = {}

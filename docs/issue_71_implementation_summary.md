@@ -1,5 +1,11 @@
 # Issue #71 Implementation Summary
 
+> **Historical record.** This summarises the state of the test infrastructure
+> at the time issue #71 was closed. The Kind/Kubernetes services it mentions
+> were removed in v0.2.0 along with the Kubernetes backend
+> ([#142](https://github.com/ContextLab/clustrix/issues/142)); see the current
+> `tests/infrastructure/docker-compose.yml` for what actually runs.
+
 ## Objective
 Ensure all tests mirror real user workflows with **NO MOCKS, NO SIMULATIONS**. Always use real API integration, real servers, real data, etc.
 

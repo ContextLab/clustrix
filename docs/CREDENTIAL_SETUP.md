@@ -2,6 +2,15 @@
 
 This guide explains how to set up credentials for Clustrix real-world testing, supporting both local development (with environment variables) and GitHub Actions (with repository secrets).
 
+> **Scope note.** Clustrix has four execution backends: `local`, `ssh`, `slurm`
+> and `huggingface` (HuggingFace **Jobs**), and `clustrix.credential_manager`
+> now reads only the `SSH_*` and `HF_*` variables. The AWS, GCP and Azure
+> entries below no longer reach clustrix at all: those backends were removed in
+> v0.2.0 and are planned for a future update (tracking issues
+> [#140-#146](https://github.com/ContextLab/clustrix/issues/140)). They are
+> kept here only because the `scripts/aws/` cleanup utilities read AWS
+> credentials directly through boto3.
+
 ## Overview
 
 The credential system supports two modes:
@@ -47,9 +56,6 @@ TEST_SLURM_PASSWORD=your-password
 # HuggingFace Credentials
 HUGGINGFACE_TOKEN=your-hf-token
 HUGGINGFACE_USERNAME=your-username
-
-# Lambda Cloud Credentials
-LAMBDA_CLOUD_API_KEY=your-api-key
 ```
 
 ### 2. Alternative: Export Environment Variables
@@ -86,9 +92,6 @@ export TEST_SLURM_PASSWORD="your-password"
 # HuggingFace
 export HUGGINGFACE_TOKEN="your-token"
 export HUGGINGFACE_USERNAME="your-username"
-
-# Lambda Cloud
-export LAMBDA_CLOUD_API_KEY="your-api-key"
 ```
 
 ### 3. Test Local Setup
@@ -107,7 +110,7 @@ Add the following secrets to your GitHub repository (`Settings → Secrets and v
 #### Required Secrets
 - `CLUSTRIX_USERNAME`: Username for SSH and SLURM servers
 - `CLUSTRIX_PASSWORD`: Password for SSH and SLURM servers
-- `LAMBDA_CLOUD_API_KEY`: Lambda Cloud API key
+- `HF_TOKEN`: HuggingFace token with job-write permission in the target namespace
 
 #### Optional Secrets (for expanded testing)
 - `AWS_ACCESS_KEY_ID`: AWS access key ID
@@ -136,7 +139,6 @@ The GitHub Actions workflow (`.github/workflows/real-world-tests.yml`) automatic
 export GITHUB_ACTIONS=true
 export CLUSTRIX_USERNAME="your-username"
 export CLUSTRIX_PASSWORD="your-password"
-export LAMBDA_CLOUD_API_KEY="your-api-key"
 export GCP_PROJECT_ID="your-gcp-project"
 export GCP_JSON='{"type": "service_account", ...}'
 export AWS_ACCESS_KEY_ID="your-aws-key-id"
@@ -268,7 +270,6 @@ ssh -vvv user@host
 - AWS CloudWatch for AWS usage
 - GCP Cloud Monitoring for GCP usage
 - Azure Monitor for Azure usage
-- Lambda Cloud dashboard for GPU usage
 
 ### Access Monitoring
 - Local environment variable usage logs

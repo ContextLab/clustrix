@@ -30,17 +30,6 @@ def cluster(
     auto_gpu_parallel: Optional[bool] = None,
     environment: Optional[str] = None,
     async_submit: Optional[bool] = None,
-    provider: Optional[str] = None,
-    instance_type: Optional[str] = None,
-    region: Optional[str] = None,
-    # NEW: Kubernetes auto-provisioning parameters
-    platform: Optional[str] = None,
-    auto_provision: Optional[bool] = None,
-    cluster_name: Optional[str] = None,
-    node_count: Optional[int] = None,
-    node_type: Optional[str] = None,
-    kubernetes_version: Optional[str] = None,
-    from_scratch: Optional[bool] = None,
     **kwargs,
 ):
     """
@@ -60,19 +49,6 @@ def cluster(
             Parallelize across GPUs inside your own function instead.
         environment: Conda environment name
         async_submit: Whether to submit jobs asynchronously (non-blocking)
-        provider: Cloud provider to use ('lambda', 'aws', 'azure', 'gcp', 'huggingface')
-        instance_type: Cloud instance type (e.g., 'gpu_1x_a100' for Lambda Cloud)
-        region: Cloud region (e.g., 'us-east-1')
-
-        # NEW: Kubernetes auto-provisioning parameters
-        platform: Execution platform ('kubernetes' to enable K8s execution)
-        auto_provision: Whether to automatically provision K8s cluster if needed
-        cluster_name: Name for the auto-provisioned cluster
-        node_count: Number of worker nodes in the cluster
-        node_type: Cloud-specific node instance type
-        kubernetes_version: Kubernetes version to install
-        from_scratch: Whether to create all infrastructure from scratch
-
         **kwargs: Additional job parameters
 
     Returns:
@@ -96,91 +72,31 @@ def cluster(
                 "environment": environment or config.conda_env_name,
             }
 
-            # Add cloud provider parameters if specified
-            if provider:
-                job_config["provider"] = provider
-
-            if instance_type:
-                job_config["instance_type"] = instance_type
-
-            if region:
-                job_config["region"] = region
-
-            # NEW: Add Kubernetes auto-provisioning parameters
-            if platform:
-                job_config["platform"] = platform
-                # If platform is kubernetes, set cluster_type to kubernetes
-                if platform == "kubernetes":
-                    config.cluster_type = "kubernetes"
-
-            if auto_provision is not None:
-                job_config["auto_provision"] = auto_provision
-                config.auto_provision_k8s = auto_provision
-
-            if cluster_name:
-                job_config["cluster_name"] = cluster_name
-                config.k8s_cluster_name = cluster_name
-
-            if node_count is not None:
-                job_config["node_count"] = node_count
-                config.k8s_node_count = node_count
-
-            if node_type:
-                job_config["node_type"] = node_type
-                config.k8s_node_type = node_type
-
-            if kubernetes_version:
-                job_config["kubernetes_version"] = kubernetes_version
-                config.k8s_version = kubernetes_version
-
-            if from_scratch is not None:
-                job_config["from_scratch"] = from_scratch
-                config.k8s_from_scratch = from_scratch
-
-            # Add any additional cloud provider parameters from kwargs
-            cloud_params = [
-                "lambda_api_key",
-                "aws_access_key_id",
-                "aws_secret_access_key",
-                "aws_region",
-                "azure_subscription_id",
-                "azure_tenant_id",
-                "azure_client_id",
-                "azure_client_secret",
-                "gcp_project_id",
-                "gcp_service_account_key",
+            # Per-job overrides the backends read off job_config. hf_jobs.py
+            # already reads hf_flavor/hf_timeout, they were simply never put
+            # there, so the documented @cluster(hf_flavor=...) was dropped.
+            passthrough_params = [
                 "hf_token",
                 "hf_username",
-                "key_file",
-                "terminate_on_completion",
-                "instance_startup_timeout",
-                # Per-job overrides for the API-backed backends. hf_jobs.py
-                # already reads hf_flavor/hf_timeout off job_config and
-                # executor_kubernetes.py reads the k8s_* ones; they were simply
-                # never put there, so the documented
-                # @cluster(k8s_namespace="compute") was silently dropped.
                 "hf_flavor",
                 "hf_timeout",
                 "hf_namespace",
-                "k8s_namespace",
-                "k8s_image",
-                "k8s_service_account",
-                "k8s_pull_policy",
+                "key_file",
             ]
 
-            for param in cloud_params:
+            for param in passthrough_params:
                 if param in kwargs:
                     job_config[param] = kwargs[param]
 
             # A silently ignored option is worse than a rejected one: the job
             # runs with settings the caller believes they changed.
-            unknown_kwargs = sorted(set(kwargs) - set(cloud_params))
+            unknown_kwargs = sorted(set(kwargs) - set(passthrough_params))
             if unknown_kwargs:
                 logger.warning(
                     "@cluster received unrecognised option(s) %s; they have no "
                     "effect. Recognised extras: %s",
                     ", ".join(unknown_kwargs),
-                    ", ".join(sorted(cloud_params)),
+                    ", ".join(sorted(passthrough_params)),
                 )
 
             # Determine execution mode
@@ -237,37 +153,12 @@ def cluster(
                     # Async execution
                     async_executor = _shared_async_executor(config)
 
-                    # NEW: Ensure Kubernetes cluster is ready if auto-provisioning (for async)
-                    if config.cluster_type == "kubernetes" and getattr(
-                        config, "auto_provision_k8s", False
-                    ):
-                        # For async execution, we still need to ensure cluster is ready first
-                        # Create a temporary executor to check readiness
-                        temp_executor = ClusterExecutor(config)
-                        if not temp_executor.ensure_cluster_ready(
-                            timeout=900
-                        ):  # 15 minutes
-                            raise RuntimeError(
-                                "Auto-provisioned Kubernetes cluster failed to become ready"
-                            )
-                        temp_executor.disconnect()
-
                     return async_executor.submit_job_async(
                         func, args, func_kwargs, job_config
                     )
                 else:
                     # Synchronous execution (original behavior)
                     executor = ClusterExecutor(config)
-
-                    # NEW: Ensure Kubernetes cluster is ready if auto-provisioning
-                    if config.cluster_type == "kubernetes" and getattr(
-                        config, "auto_provision_k8s", False
-                    ):
-                        # Give cluster extra time to be ready if auto-provisioned
-                        if not executor.ensure_cluster_ready(timeout=900):  # 15 minutes
-                            raise RuntimeError(
-                                "Auto-provisioned Kubernetes cluster failed to become ready"
-                            )
 
                     if should_parallelize:
                         loop_info = detect_loops(func, args, func_kwargs)
@@ -515,12 +406,6 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     Returns:
         'local' or 'remote'
     """
-    # Check for Kubernetes auto-provisioning
-    if config.cluster_type == "kubernetes" and getattr(
-        config, "auto_provision_k8s", False
-    ):
-        return "remote"
-
     # Some backends reach their compute over an HTTP API rather than SSH, so
     # they legitimately have no cluster_host. Without this they fall into the
     # "no cluster configured" branch below and run on the caller's machine --

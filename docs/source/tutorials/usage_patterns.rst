@@ -10,9 +10,8 @@ mocks) as part of this documentation's own test suite -- see
 A key fact that shapes every pattern here: **if you don't configure a
 remote cluster, ``@cluster`` still runs your function -- just locally, in the
 calling process.** ``clustrix.decorator._choose_execution_mode`` falls back to
-local execution whenever ``config.cluster_host`` is unset (SLURM/PBS/SGE/SSH)
-and the cluster type isn't Kubernetes-with-auto-provisioning or one of the
-HTTP-API backends (currently HuggingFace Jobs). That means every example
+local execution whenever ``config.cluster_host`` is unset (SLURM/SSH) and the
+cluster type isn't one of the HTTP-API backends (currently HuggingFace Jobs). That means every example
 below runs as shown, without touching a real cluster, and the *same code*
 starts submitting real remote jobs once you point ``configure()`` at one.
 
@@ -168,71 +167,39 @@ See :doc:`slurm_tutorial` and :doc:`../ssh_setup` for the two backends this
 project has verified end to end, and :ref:`supported-cluster-types` for what
 "verified" means for each backend.
 
-Pattern 4: Kubernetes with Auto-Provisioning
------------------------------------------------
+Pattern 4: what to do when you wanted Kubernetes or a cloud VM
+---------------------------------------------------------------
 
-A common mistake is to pass ``provider=`` to ``@cluster(...)`` expecting it
-to select the Kubernetes provisioner -- it doesn't; that keyword is for the
-hostful cloud VM backends (Lambda Cloud, AWS, Azure, GCP). The Kubernetes
-provider is a separate setting, ``k8s_provider``, and it has to be set via
-``configure()`` (default: ``"aws"``):
+Earlier versions of Clustrix documented a Kubernetes auto-provisioning
+pattern here, plus ``@cluster(provider="aws"|"gcp"|"azure"|"lambda")`` for
+cloud VMs. **None of those is currently supported.** Kubernetes, PBS, SGE and
+the four cloud VM providers were removed in v0.2.0 because none of them had
+ever been shown to run a job end to end, and the cost monitoring and cloud
+pricing API went with them.
 
-.. danger::
+They are planned for a future release, and each has a tracking issue --
+Kubernetes `#142`_, AWS `#143`_, GCP `#144`_, Azure `#145`_, Lambda Cloud
+`#146`_, PBS `#140`_, SGE `#141`_. :ref:`removed-backends` has the full
+table.
 
-   Calling a function under ``auto_provision_k8s=True`` **creates real cloud
-   infrastructure and bills you for it**. ``k8s_provider`` defaults to
-   ``"aws"``, so omitting it -- or calling this function before
-   ``configure()`` has run -- goes straight to AWS EKS and starts creating a
-   VPC. A reviewer copy-pasting this example with only
-   ``configure(cluster_type="local")`` in effect got as far as
-   ``CreateVpc`` -> ``VpcLimitExceeded`` against a real account.
+In the meantime:
 
-   ``@cluster(platform=..., auto_provision=...)`` is not a per-call
-   override: both write straight into the global configuration
-   (``decorator.py``), so one decorated function can turn provisioning on
-   for everything that runs afterwards in the same process.
+* **A cloud GPU without owning hardware**: ``cluster_type="huggingface"``
+  submits to HuggingFace Jobs, which runs your function in a container on
+  rented GPUs. It is verified end to end. (Note that this is HuggingFace
+  *Jobs*; the separate HuggingFace *Spaces* provider was removed too.)
+* **A machine you brought up yourself**: bring up the VM through your
+  provider's own console or CLI, then point ``cluster_type="ssh"`` at it.
+  That path is verified end to end.
+* **A batch allocation**: ``cluster_type="slurm"``, also verified.
 
-   Set ``k8s_provider="local"`` (kind/minikube, no cloud account involved)
-   unless you have deliberately decided to spend money. The cloud
-   provisioning paths are **unverified**: no clustrix job has been shown to
-   run end to end on any of them.
-
-.. code-block:: python
-
-    # cluster-required: PROVISIONS REAL INFRASTRUCTURE. Do not run casually.
-    from clustrix import configure, cluster
-
-    configure(
-        cluster_type="kubernetes",
-        auto_provision_k8s=True,
-        k8s_provider="local",   # NOT set via @cluster(provider=...)
-        k8s_node_count=2,
-    )
-
-    # `platform` and `auto_provision` ARE real decorator parameters, and they
-    # do not merely apply to this call: they MUTATE THE GLOBAL CONFIG.
-    # `platform="kubernetes"` sets config.cluster_type, and
-    # `auto_provision=True` sets config.auto_provision_k8s -- the flag that
-    # causes infrastructure to be created. Both persist for every subsequent
-    # call in the process, not just this one.
-    @cluster(platform="kubernetes", auto_provision=True, cores=1, memory="512Mi")
-    def analyze_data(size, multiplier=1):
-        import math
-        import socket
-
-        total = sum(math.sqrt(i * multiplier) for i in range(min(size, 1000)))
-        return {
-            "analysis_result": total,
-            "execution_environment": {"hostname": socket.gethostname()},
-        }
-
-    result = analyze_data(1000, 2)
-    print(f"Result: {result['analysis_result']}")
-    print(f"Executed on: {result['execution_environment']['hostname']}")
-
-See :doc:`kubernetes_tutorial` (the "Auto-Provisioning a Cluster" section)
-for the full picture, including which of the five supported cloud providers
-are unverified and which environment variables each one needs.
+.. _#140: https://github.com/ContextLab/clustrix/issues/140
+.. _#141: https://github.com/ContextLab/clustrix/issues/141
+.. _#142: https://github.com/ContextLab/clustrix/issues/142
+.. _#143: https://github.com/ContextLab/clustrix/issues/143
+.. _#144: https://github.com/ContextLab/clustrix/issues/144
+.. _#145: https://github.com/ContextLab/clustrix/issues/145
+.. _#146: https://github.com/ContextLab/clustrix/issues/146
 
 Key Takeaways
 -------------
@@ -249,5 +216,6 @@ Key Takeaways
 5. **Results**: prefer returning a small dictionary with both the computed
    value and execution context (hostname, etc.) -- it makes it obvious
    whether a job actually ran remotely.
-6. **Kubernetes specifically**: ``k8s_provider`` (via ``configure()``) picks
-   the auto-provisioning backend; ``@cluster(provider=...)`` does not.
+6. **Backends**: ``local``, ``ssh``, ``slurm`` and ``huggingface`` are the
+   only ``cluster_type`` values Clustrix accepts. Anything else raises
+   ``ValueError`` at submit time -- see :ref:`removed-backends`.

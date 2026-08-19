@@ -41,29 +41,6 @@ def test_credential_integration():
     print("\n🧪 Testing Specific Credentials:")
     print("=" * 35)
 
-    # Test AWS credentials
-    aws_creds = manager.get_aws_credentials()
-    if aws_creds:
-        print(
-            f"✅ AWS: Access key length: {len(aws_creds['access_key_id'])}, Region: {aws_creds['region']}"
-        )
-    else:
-        print("❌ AWS: No credentials found")
-
-    # Test Azure credentials
-    azure_creds = manager.get_azure_credentials()
-    if azure_creds:
-        print(f"✅ Azure: Subscription: {azure_creds['subscription_id'][:8]}...")
-    else:
-        print("❌ Azure: No credentials found")
-
-    # Test GCP credentials
-    gcp_creds = manager.get_gcp_credentials()
-    if gcp_creds:
-        print(f"✅ GCP: Project: {gcp_creds['project_id']}")
-    else:
-        print("❌ GCP: No credentials found")
-
     # Test SSH credentials
     ssh_creds = manager.get_ssh_credentials()
     if ssh_creds:
@@ -86,14 +63,6 @@ def test_credential_integration():
     else:
         print("❌ HuggingFace: No credentials found")
 
-    # Test Lambda Cloud credentials
-    lambda_creds = manager.get_lambda_cloud_credentials()
-    if lambda_creds:
-        key_len = len(lambda_creds["api_key"]) if lambda_creds["api_key"] else 0
-        print(f"✅ Lambda Cloud: API key length: {key_len}")
-    else:
-        print("❌ Lambda Cloud: No credentials found")
-
     return True
 
 
@@ -107,16 +76,11 @@ def test_environment_variable_setup():
 
     # Check if environment variables were set
     env_vars_to_check = [
-        "TEST_AWS_ACCESS_KEY",
-        "TEST_AWS_SECRET_KEY",
-        "TEST_AZURE_SUBSCRIPTION_ID",
-        "TEST_GCP_PROJECT_ID",
         "TEST_SSH_HOST",
         "TEST_SSH_USERNAME",
         "TEST_SLURM_HOST",
         "TEST_SLURM_USERNAME",
         "HUGGINGFACE_TOKEN",
-        "LAMBDA_CLOUD_API_KEY",
     ]
 
     set_vars = []
@@ -146,7 +110,6 @@ def test_github_actions_simulation():
     mock_secrets = {
         "CLUSTRIX_USERNAME": "testuser",
         "CLUSTRIX_PASSWORD": "testpass",
-        "LAMBDA_CLOUD_API_KEY": "test_lambda_key",
     }
 
     original_values = {}
@@ -176,13 +139,6 @@ def test_github_actions_simulation():
             print(f"✅ SLURM: {slurm_creds['username']}@{slurm_creds['host']}")
         else:
             print("❌ SLURM: No credentials found")
-
-        # Test Lambda Cloud credentials (should use GitHub secrets)
-        lambda_creds = gh_manager.get_lambda_cloud_credentials()
-        if lambda_creds:
-            print(f"✅ Lambda Cloud: API key set")
-        else:
-            print("❌ Lambda Cloud: No credentials found")
 
         print("✅ GitHub Actions simulation successful")
 
@@ -215,15 +171,13 @@ def test_1password_integration():
             if manager._op_manager:
                 # Try to get a test credential
                 test_cred = manager._op_manager.get_credential(
-                    "clustrix-lambda-cloud-validation", "api_key"
+                    "clustrix-huggingface-validation", "token"
                 )
                 if test_cred:
-                    print(
-                        f"✅ Retrieved Lambda Cloud API key (length: {len(test_cred)})"
-                    )
+                    print(f"✅ Retrieved HuggingFace token (length: {len(test_cred)})")
                 else:
-                    print("⚠️  Lambda Cloud credential not found in 1Password")
-                    print("   Make sure 'clustrix-lambda-cloud-validation' item exists")
+                    print("⚠️  HuggingFace credential not found in 1Password")
+                    print("   Make sure 'clustrix-huggingface-validation' item exists")
         except Exception as e:
             print(f"❌ Error accessing 1Password: {e}")
     else:

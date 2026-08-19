@@ -138,17 +138,20 @@ class TestCondaVersusVirtualenv:
         assert "deactivate" not in generate_two_venv_execution_commands(*CONDA)
 
 
-class TestEverySchedulerRunsTheSameBody:
-    """PBS and SGE used to diverge from SLURM, and PBS did not work at all.
+class TestEveryBackendRunsTheSameBody:
+    """Remote backends used to each carry their own copy of the job body.
 
     PBS ended its script with ``python execute_function.py`` -- a file nothing
     in clustrix has ever created, so every PBS job died immediately. SGE
     carried its own copy of the single-venv script, which meant it silently
     missed the two-venv path, the conda sourcing and the result signing as
-    those were fixed on the SLURM one. All three now share one body.
+    those were fixed on the SLURM one. Both backends have since been removed
+    (issues #140, #141) for never having been run against real hardware, so
+    the invariant is asserted over the two remote backends that remain: only
+    the directive header may differ between them.
     """
 
-    SCHEDULERS = ("slurm", "pbs", "sge")
+    SCHEDULERS = ("slurm", "ssh")
 
     def _script(self, scheduler, *, two_venv):
         from clustrix.config import ClusterConfig
@@ -169,37 +172,45 @@ class TestEverySchedulerRunsTheSameBody:
         )
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
-    def test_no_scheduler_runs_a_file_that_is_never_created(self, scheduler):
+    def test_no_backend_runs_a_file_that_is_never_created(self, scheduler):
         assert "execute_function.py" not in self._script(scheduler, two_venv=False)
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
-    def test_every_scheduler_reads_the_function_payload(self, scheduler):
+    def test_every_backend_reads_the_function_payload(self, scheduler):
         assert "function_data.pkl" in self._script(scheduler, two_venv=False)
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
-    def test_every_scheduler_uses_the_two_venv_path_when_available(self, scheduler):
+    def test_every_backend_uses_the_two_venv_path_when_available(self, scheduler):
         script = self._script(scheduler, two_venv=True)
         assert "VENV1" in script
         assert "conda run -n e1" in script
         assert "conda run -n e2" in script
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
-    def test_every_scheduler_sources_conda(self, scheduler):
+    def test_every_backend_sources_conda(self, scheduler):
         script = self._script(scheduler, two_venv=True)
         assert "source /opt/conda/etc/profile.d/conda.sh" in script
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
-    def test_every_scheduler_signs_its_result(self, scheduler):
+    def test_every_backend_signs_its_result(self, scheduler):
         script = self._script(scheduler, two_venv=True)
         assert "result.pkl.hmac" in script
         assert "CLUSTRIX_RESULT_KEY" in script
 
-    def test_the_bodies_are_identical_across_schedulers(self):
-        """Only the directive header should differ between schedulers."""
+    def test_the_bodies_are_identical_across_backends(self):
+        """Only the directive header should differ between backends.
+
+        The slice starts at the result-key export rather than at the first
+        `cd`. The SSH script emits its own `cd <job dir>` before the shared
+        block, so the shared block itself begins one line later; comparing
+        from the first `cd` would compare SSH's redundant one against SLURM's
+        and report a difference that is not in the executed body. Everything
+        that actually runs the function -- venv activation, both `python -c`
+        programs, the signing step -- is inside the compared region.
+        """
         bodies = {}
         for scheduler in self.SCHEDULERS:
             script = self._script(scheduler, two_venv=True)
-            # Drop the scheduler directives; keep everything from `cd` onward.
-            body = script[script.index("cd /remote/job") :]
+            body = script[script.index("export CLUSTRIX_RESULT_KEY") :]
             bodies[scheduler] = body
-        assert bodies["slurm"] == bodies["pbs"] == bodies["sge"]
+        assert bodies["slurm"] == bodies["ssh"]

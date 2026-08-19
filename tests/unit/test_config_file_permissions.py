@@ -66,7 +66,6 @@ def secret_bearing_config():
         username="researcher",
         password="fake-password-for-this-test",
         api_key="sk-fake-key-abcdef123456",
-        aws_secret_access_key="AKIAABCDEFSECRETVALUE",  # nosec
         hf_token="hf_thisisasecrettoken",  # nosec
     )
 
@@ -149,7 +148,6 @@ def test_load_from_file_round_trips_after_default_save(tmp_path, secret_bearing_
     assert reloaded.username == "researcher"
     assert reloaded.password is None
     assert reloaded.api_key is None
-    assert reloaded.aws_secret_access_key is None
     assert reloaded.hf_token is None
 
 
@@ -207,14 +205,14 @@ def test_secret_fields_derived_from_dataclass_covers_known_credential_names():
     list that can silently fall out of date. Spot-check known credential
     fields are present.
     """
+    # aws_secret_access_key, aws_access_key_id, azure_client_secret,
+    # gcp_service_account_key and lambda_api_key were spot-checked here too.
+    # Those fields went with the cloud backends (issues #143-#146); the
+    # patterns that classified them are still in _SECRET_FIELD_PATTERN, so
+    # the derivation is unchanged -- there is simply nothing left to name.
     for expected in (
         "password",
         "api_key",
-        "aws_secret_access_key",
-        "aws_access_key_id",
-        "azure_client_secret",
-        "gcp_service_account_key",
-        "lambda_api_key",
         "hf_token",
     ):
         assert expected in SECRET_FIELDS, (

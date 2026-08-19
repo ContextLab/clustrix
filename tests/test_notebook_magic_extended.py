@@ -27,19 +27,18 @@ class TestDefaultConfigsExtended:
 
     def test_all_cluster_types_present(self):
         """Test that all expected cluster types are present in defaults."""
-        expected_types = {"local", "ssh", "slurm", "pbs", "sge", "kubernetes"}
+        expected_types = {"local", "ssh", "slurm", "huggingface"}
         actual_types = {config["cluster_type"] for config in DEFAULT_CONFIGS.values()}
-        assert expected_types.issubset(actual_types)
+        assert actual_types == expected_types
 
     def test_cluster_specific_fields(self):
         """Test cluster-specific fields in default configs."""
         for config_name, config in DEFAULT_CONFIGS.items():
             cluster_type = config["cluster_type"]
 
-            if cluster_type == "kubernetes":
-                assert "k8s_namespace" in config
-                assert "k8s_image" in config
-            elif cluster_type in ["slurm", "pbs", "sge"]:
+            if cluster_type == "huggingface":
+                assert "hf_hardware" in config
+            elif cluster_type == "slurm":
                 assert "cluster_host" in config
                 assert "username" in config
                 assert "default_time" in config
@@ -56,10 +55,10 @@ class TestDefaultConfigsExtended:
 
             if cluster_type == "local":
                 assert "Local" in config_name
-            elif cluster_type == "kubernetes":
-                assert "Kubernetes" in config_name or "K8s" in config_name
-            elif cluster_type in ["slurm", "pbs", "sge"]:
-                assert any(x in config_name for x in ["SLURM", "PBS", "SGE", "Cluster"])
+            elif cluster_type == "huggingface":
+                assert "HuggingFace" in config_name
+            elif cluster_type == "slurm":
+                assert any(x in config_name for x in ["SLURM", "Cluster"])
 
 
 class TestConfigFileOperations:
@@ -360,13 +359,10 @@ class TestWidgetErrorHandling:
             "port_field",
             "work_dir_field",
             "ssh_key_field",
-            "cost_monitoring_checkbox",
         ]:
             field = MagicMock()
             if field_name in ["cores_field", "port_field"]:
                 field.value = 1
-            elif field_name == "cost_monitoring_checkbox":
-                field.value = False
             else:
                 field.value = ""
             setattr(widget, field_name, field)
@@ -574,7 +570,7 @@ class TestWidgetInteractionMethods:
         # Should update dropdown options
 
         # Test cluster type change handling
-        for cluster_type in ["local", "ssh", "kubernetes", "slurm", "pbs", "sge"]:
+        for cluster_type in ["local", "ssh", "slurm", "huggingface"]:
             change_event = {"new": cluster_type}
             widget._on_cluster_type_change(change_event)
             # Should handle each cluster type
@@ -726,13 +722,10 @@ class TestFileOperationEdgeCases:
             "port_field",
             "work_dir_field",
             "ssh_key_field",
-            "cost_monitoring_checkbox",
         ]:
             field = MagicMock()
             if field_name in ["cores_field", "port_field"]:
                 field.value = 1
-            elif field_name == "cost_monitoring_checkbox":
-                field.value = False
             else:
                 field.value = ""
             setattr(widget, field_name, field)

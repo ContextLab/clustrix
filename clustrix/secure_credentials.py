@@ -62,47 +62,11 @@ class ValidationCredentials:
     def __init__(self):
         logger.info("Using environment variable fallback for validation credentials")
 
-    def get_aws_credentials(self) -> Optional[Dict[str, str]]:
-        """Get AWS credentials from environment variables."""
-        if all(
-            os.getenv(key) for key in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"]
-        ):
-            return {
-                "aws_access_key_id": os.getenv("AWS_ACCESS_KEY_ID", ""),
-                "aws_secret_access_key": os.getenv("AWS_SECRET_ACCESS_KEY", ""),
-                "aws_region": os.getenv("AWS_DEFAULT_REGION", "us-east-1"),
-            }
-        return None
-
-    def get_gcp_credentials(self) -> Optional[Dict[str, str]]:
-        """Get GCP credentials from environment variables."""
-        if os.getenv("GOOGLE_APPLICATION_CREDENTIALS"):
-            return {
-                "project_id": os.getenv("GOOGLE_CLOUD_PROJECT", ""),
-                "service_account_json": os.getenv("GOOGLE_APPLICATION_CREDENTIALS", ""),
-                "region": os.getenv("GOOGLE_CLOUD_REGION", "us-central1"),
-            }
-        return None
-
-    def get_lambda_cloud_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Lambda Cloud credentials from environment variables."""
-        api_key = os.getenv("LAMBDA_CLOUD_API_KEY")
-        if api_key:
-            return {
-                "api_key": api_key,
-                "endpoint": "https://cloud.lambdalabs.com/api/v1",
-            }
-        return None
-
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
         """Get HuggingFace credentials from environment variables."""
         token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
         if token:
             return {"token": token, "username": os.getenv("HUGGINGFACE_USERNAME", "")}
-        return None
-
-    def get_docker_credentials(self) -> Optional[Dict[str, str]]:
-        """Docker credentials no longer available - use environment or docker login."""
         return None
 
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:

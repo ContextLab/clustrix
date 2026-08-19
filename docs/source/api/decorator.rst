@@ -141,9 +141,9 @@ How Execution Mode Is Chosen
 
 ``clustrix.decorator._choose_execution_mode`` decides, on every call,
 whether to run locally or submit to a remote backend. It falls back to
-*local* execution whenever ``config.cluster_host`` is unset (SLURM, PBS,
-SGE, SSH) and the cluster type is not Kubernetes-with-auto-provisioning or
-one of the HTTP-API backends (currently HuggingFace Jobs). Concretely: if
+*local* execution whenever ``config.cluster_host`` is unset (SLURM, SSH) and
+the cluster type is not one of the HTTP-API backends (currently HuggingFace
+Jobs). Concretely: if
 you never call ``configure()`` with a real host, ``@cluster``-decorated
 functions still run -- in the calling process, with no cluster involved --
 and the exact same code starts submitting real remote jobs the moment

@@ -219,9 +219,9 @@ class TestIntegration:
 
         # Create configuration
         configure(
-            cluster_type="sge",
-            cluster_host="sge.cluster.com",
-            username="sgeuser",
+            cluster_type="ssh",
+            cluster_host="gpu.cluster.com",
+            username="sshuser",
             default_cores=16,
             default_memory="32GB",
             module_loads=["python/3.9", "gcc/11.2"],
@@ -243,9 +243,9 @@ class TestIntegration:
 
         # Verify loaded configuration
         config = get_config()
-        assert config.cluster_type == "sge"
-        assert config.cluster_host == "sge.cluster.com"
-        assert config.username == "sgeuser"
+        assert config.cluster_type == "ssh"
+        assert config.cluster_host == "gpu.cluster.com"
+        assert config.username == "sshuser"
         assert config.default_cores == 16
         assert config.default_memory == "32GB"
         assert config.module_loads == ["python/3.9", "gcc/11.2"]
@@ -350,7 +350,7 @@ class TestIntegration:
     def test_resource_specification_inheritance(self):
         """Test that decorator resources override defaults."""
         configure(
-            cluster_type="pbs",
+            cluster_type="slurm",
             default_cores=4,
             default_memory="8GB",
             default_time="01:00:00",

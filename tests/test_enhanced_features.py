@@ -348,41 +348,6 @@ class TestRemoteEnvironmentSetup:
 class TestConfigurationEnhancements:
     """Test enhanced configuration features."""
 
-    def test_kubernetes_configuration_fields(self):
-        """Test new Kubernetes configuration fields."""
-        config = ClusterConfig(
-            cluster_type="kubernetes",
-            k8s_namespace="production",
-            k8s_image="python:3.12-slim",
-            k8s_service_account="clustrix-sa",
-            k8s_pull_policy="Always",
-            k8s_job_ttl_seconds=7200,
-            k8s_backoff_limit=5,
-        )
-
-        assert config.k8s_namespace == "production"
-        assert config.k8s_image == "python:3.12-slim"
-        assert config.k8s_service_account == "clustrix-sa"
-        assert config.k8s_pull_policy == "Always"
-        assert config.k8s_job_ttl_seconds == 7200
-        assert config.k8s_backoff_limit == 5
-
-    def test_cloud_provider_configuration_fields(self):
-        """Test cloud provider configuration fields."""
-        config = ClusterConfig(
-            cloud_provider="aws",
-            cloud_region="us-east-1",
-            cloud_auto_configure=True,
-            eks_cluster_name="production-cluster",
-            aws_profile="production",
-        )
-
-        assert config.cloud_provider == "aws"
-        assert config.cloud_region == "us-east-1"
-        assert config.cloud_auto_configure is True
-        assert config.eks_cluster_name == "production-cluster"
-        assert config.aws_profile == "production"
-
     def test_package_manager_configuration(self):
         """Test package manager configuration."""
         config = ClusterConfig(package_manager="uv")
@@ -396,15 +361,19 @@ class TestConfigurationEnhancements:
         assert config.package_manager == "pip"
 
     def test_configuration_persistence_with_new_fields(self):
-        """Test saving and loading configuration with new fields."""
+        """Test saving and loading configuration with new fields.
+
+        Rewritten: this used to round-trip k8s_/cloud_/eks_ fields, which no
+        longer exist on ClusterConfig. The property under test -- that a saved
+        config reloads field for field -- is unchanged; only the fields it is
+        stated over had to move to backends clustrix still has.
+        """
         original_config = ClusterConfig(
-            cluster_type="kubernetes",
-            k8s_namespace="test",
-            k8s_image="python:3.11",
-            cloud_provider="aws",
-            cloud_auto_configure=True,
+            cluster_type="huggingface",
+            hf_namespace="contextlab",
+            hf_flavor="cpu-basic",
             package_manager="uv",
-            eks_cluster_name="test-cluster",
+            venv_setup_timeout=600,
         )
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -418,59 +387,50 @@ class TestConfigurationEnhancements:
             loaded_config = ClusterConfig.load_from_file(config_file)
 
             # Verify all fields are preserved
-            assert loaded_config.cluster_type == "kubernetes"
-            assert loaded_config.k8s_namespace == "test"
-            assert loaded_config.k8s_image == "python:3.11"
-            assert loaded_config.cloud_provider == "aws"
-            assert loaded_config.cloud_auto_configure is True
+            assert loaded_config.cluster_type == "huggingface"
+            assert loaded_config.hf_namespace == "contextlab"
+            assert loaded_config.hf_flavor == "cpu-basic"
             assert loaded_config.package_manager == "uv"
-            assert loaded_config.eks_cluster_name == "test-cluster"
+            assert loaded_config.venv_setup_timeout == 600
 
         finally:
             if os.path.exists(config_file):
                 os.unlink(config_file)
 
     def test_configure_function_with_new_parameters(self):
-        """Test configure function with new parameters."""
-        # Test configuring new Kubernetes parameters
+        """Test configure function with new parameters.
+
+        Rewritten: the parameters it named (k8s_namespace, k8s_image,
+        cloud_provider) belonged to removed backends. Restated over the
+        HuggingFace Jobs settings, which are the ones a user configures today.
+        """
         configure(
-            k8s_namespace="custom",
-            k8s_image="python:3.12",
-            cloud_provider="azure",
+            hf_namespace="contextlab",
+            hf_flavor="cpu-basic",
             package_manager="uv",
         )
 
         config = get_config()
-        assert config.k8s_namespace == "custom"
-        assert config.k8s_image == "python:3.12"
-        assert config.cloud_provider == "azure"
+        assert config.hf_namespace == "contextlab"
+        assert config.hf_flavor == "cpu-basic"
         assert config.package_manager == "uv"
 
-    def test_azure_specific_configuration(self):
-        """Test Azure-specific configuration fields."""
-        config = ClusterConfig(
-            cloud_provider="azure",
-            aks_cluster_name="my-cluster",
-            azure_resource_group="my-rg",
-            azure_subscription_id="subscription-123",
-        )
+    def test_configure_rejects_a_setting_from_a_removed_backend(self):
+        """configure() must not silently accept a field that no longer exists.
 
-        assert config.aks_cluster_name == "my-cluster"
-        assert config.azure_resource_group == "my-rg"
-        assert config.azure_subscription_id == "subscription-123"
+        The message has to name the backend and its tracking issue. It used
+        to come back through difflib as "did you mean ...?" pointed at an
+        unrelated field, which sent the reader after the wrong thing.
+        """
+        with pytest.raises(ValueError) as excinfo:
+            configure(k8s_namespace="production")
 
-    def test_gcp_specific_configuration(self):
-        """Test GCP-specific configuration fields."""
-        config = ClusterConfig(
-            cloud_provider="gcp",
-            gke_cluster_name="my-gke-cluster",
-            gcp_project_id="my-project-123",
-            gcp_zone="us-central1-a",
-        )
-
-        assert config.gke_cluster_name == "my-gke-cluster"
-        assert config.gcp_project_id == "my-project-123"
-        assert config.gcp_zone == "us-central1-a"
+        message = str(excinfo.value)
+        assert "k8s_namespace" in message
+        assert "Kubernetes" in message
+        assert "removed" in message
+        assert "#142" in message
+        assert "did you mean" not in message
 
 
 class TestBackwardCompatibility:
@@ -491,10 +451,10 @@ class TestBackwardCompatibility:
         assert config.username == "user"
         assert config.remote_work_dir == "/scratch/user"
 
-        # New fields should have defaults
+        # New fields should have defaults. The two cloud_* assertions that
+        # were here are gone with the fields themselves.
         assert config.package_manager == "pip"
-        assert config.cloud_provider == "manual"
-        assert config.cloud_auto_configure is False
+        assert config.replicate_local_environment is True
 
     @patch("subprocess.run")
     def test_environment_capture_fallback(self, mock_run):
@@ -553,22 +513,3 @@ class TestIntegrationScenarios:
 
         # Should fallback to pip
         assert pkg_manager == "pip"
-
-    def test_kubernetes_with_cloud_provider_config(self):
-        """Test Kubernetes configuration with cloud provider settings."""
-        config = ClusterConfig(
-            cluster_type="kubernetes",
-            cloud_provider="aws",
-            cloud_auto_configure=True,
-            eks_cluster_name="prod-cluster",
-            k8s_namespace="production",
-            package_manager="uv",
-        )
-
-        # All settings should coexist
-        assert config.cluster_type == "kubernetes"
-        assert config.cloud_provider == "aws"
-        assert config.cloud_auto_configure is True
-        assert config.eks_cluster_name == "prod-cluster"
-        assert config.k8s_namespace == "production"
-        assert config.package_manager == "uv"

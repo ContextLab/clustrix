@@ -13,7 +13,8 @@ script directly:
   It doesn't; ``ClusterConfig`` is not re-exported from ``clustrix/__init__.py``.
 - ``docs/PRICING_API_REFERENCE.md`` and ``docs/PRICING_USER_GUIDE.md``
   documented ``clustrix.pricing_clients.performance_monitor`` and
-  ``.resilience``, both since deleted as unused code.
+  ``.resilience``; the whole pricing-client tree has since been deleted
+  along with the cloud backends it served.
 
 Per code block:
 
@@ -484,12 +485,7 @@ def check_file(target: TargetFile) -> List[Result]:
 
 #: Pages that need a narrower window than "the whole file". Keyed by path
 #: relative to the repository root.
-_SECTION_BOUNDS = {
-    "docs/source/tutorials/kubernetes_tutorial.rst": (
-        "Auto-Provisioning a Cluster\n----",
-        "Configuration Options\n---",
-    ),
-}
+_SECTION_BOUNDS: dict = {}
 
 #: Directories under docs/ that are build output or vendored, not sources.
 _SKIP_DIRS = {"build", "_build", "_static", "_templates"}
@@ -564,7 +560,22 @@ def _discover_documented_modules(scan_root: Path) -> List[TargetFile]:
         source = inspect.getsourcefile(module)
         if source is None:  # pragma: no cover - namespace/extension modules
             continue
-        targets.append(TargetFile(Path(source), "py", module=name))
+        source_path = Path(source).resolve()
+        # The docs in this checkout are only meaningfully checked against the
+        # code in this checkout. If `clustrix` imports from somewhere else --
+        # a non-editable `pip install .` earlier in the same CI job puts it in
+        # site-packages -- then every docstring example read here belongs to a
+        # different copy, and a pass would mean nothing. Say so plainly
+        # instead of failing 20 frames down inside `Path.relative_to`.
+        if not source_path.is_relative_to(REPO_ROOT):
+            raise SystemExit(
+                f"documented module {name!r} imports from {source_path}, which "
+                f"is outside this checkout ({REPO_ROOT}). The examples here "
+                f"would be checked against a different copy of the code. "
+                f"Install the package editable (pip install -e .) or run this "
+                f"before a non-editable install."
+            )
+        targets.append(TargetFile(source_path, "py", module=name))
     return targets
 
 

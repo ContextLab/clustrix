@@ -2,7 +2,7 @@
 Comprehensive cluster job monitoring and validation framework.
 
 This module provides tools for monitoring and validating real cluster job
-submissions across different cluster types (SLURM, PBS, SGE, Kubernetes, SSH).
+submissions across the supported cluster types (SLURM, SSH).
 """
 
 import time
@@ -25,9 +25,6 @@ class ClusterType(Enum):
     """Supported cluster types."""
 
     SLURM = "slurm"
-    PBS = "pbs"
-    SGE = "sge"
-    KUBERNETES = "kubernetes"
     SSH = "ssh"
 
 
@@ -337,24 +334,6 @@ class ClusterJobValidator:
                 )
                 return result.returncode == 0 and result.stdout.strip() != ""
 
-            elif self.cluster_type == ClusterType.PBS:
-                result = subprocess.run(
-                    ["qstat", job_id], capture_output=True, text=True
-                )
-                return result.returncode == 0
-
-            elif self.cluster_type == ClusterType.SGE:
-                result = subprocess.run(
-                    ["qstat", "-j", job_id], capture_output=True, text=True
-                )
-                return result.returncode == 0
-
-            elif self.cluster_type == ClusterType.KUBERNETES:
-                result = subprocess.run(
-                    ["kubectl", "get", "job", job_id], capture_output=True, text=True
-                )
-                return result.returncode == 0
-
             elif self.cluster_type == ClusterType.SSH:
                 # For SSH, check if process is running
                 result = subprocess.run(
@@ -385,37 +364,6 @@ class ClusterJobValidator:
                         if "=" in line:
                             key, value = line.split("=", 1)
                             details[key.strip()] = value.strip()
-
-            elif self.cluster_type == ClusterType.PBS:
-                result = subprocess.run(
-                    ["qstat", "-f", job_id], capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    # Parse PBS job details
-                    for line in result.stdout.split("\n"):
-                        if "=" in line and not line.startswith("Job Id:"):
-                            key, value = line.split("=", 1)
-                            details[key.strip()] = value.strip()
-
-            elif self.cluster_type == ClusterType.SGE:
-                result = subprocess.run(
-                    ["qstat", "-j", job_id], capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    # Parse SGE job details
-                    for line in result.stdout.split("\n"):
-                        if ":" in line:
-                            key, value = line.split(":", 1)
-                            details[key.strip()] = value.strip()
-
-            elif self.cluster_type == ClusterType.KUBERNETES:
-                result = subprocess.run(
-                    ["kubectl", "describe", "job", job_id, "-o", "json"],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    details = json.loads(result.stdout)
 
         except Exception as e:
             self.logger.error(f"Error getting job details for {job_id}: {e}")
@@ -456,61 +404,6 @@ class ClusterJobValidator:
                             return JobStatus.COMPLETED
                         elif "FAILED" in status:
                             return JobStatus.FAILED
-
-            elif self.cluster_type == ClusterType.PBS:
-                result = subprocess.run(
-                    ["qstat", job_id], capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    lines = result.stdout.strip().split("\n")
-                    if len(lines) > 1:
-                        status = lines[1].split()[4]  # Status column
-                        if status == "Q":
-                            return JobStatus.PENDING
-                        elif status == "R":
-                            return JobStatus.RUNNING
-                        elif status == "C":
-                            return JobStatus.COMPLETED
-                        elif status == "E":
-                            return JobStatus.FAILED
-
-            elif self.cluster_type == ClusterType.SGE:
-                result = subprocess.run(
-                    ["qstat", "-j", job_id], capture_output=True, text=True
-                )
-                if result.returncode == 0:
-                    if "job_state" in result.stdout:
-                        for line in result.stdout.split("\n"):
-                            if "job_state" in line:
-                                status = line.split(":")[1].strip()
-                                if status == "qw":
-                                    return JobStatus.PENDING
-                                elif status == "r":
-                                    return JobStatus.RUNNING
-                                elif status == "t":
-                                    return JobStatus.COMPLETED
-
-            elif self.cluster_type == ClusterType.KUBERNETES:
-                result = subprocess.run(
-                    [
-                        "kubectl",
-                        "get",
-                        "job",
-                        job_id,
-                        "-o",
-                        "jsonpath='{.status.conditions[0].type}'",
-                    ],
-                    capture_output=True,
-                    text=True,
-                )
-                if result.returncode == 0:
-                    status = result.stdout.strip().strip("'")
-                    if status == "Complete":
-                        return JobStatus.COMPLETED
-                    elif status == "Failed":
-                        return JobStatus.FAILED
-                    else:
-                        return JobStatus.RUNNING
 
             return JobStatus.UNKNOWN
 
@@ -606,16 +499,6 @@ class ClusterJobValidator:
                 # SLURM typically creates slurm-<jobid>.out files
                 files["stdout"] = f"slurm-{job_id}.out"
                 files["stderr"] = f"slurm-{job_id}.err"
-
-            elif self.cluster_type == ClusterType.PBS:
-                # PBS creates <jobname>.o<jobid> and <jobname>.e<jobid> files
-                files["stdout"] = f"{job_id}.o{job_id}"
-                files["stderr"] = f"{job_id}.e{job_id}"
-
-            elif self.cluster_type == ClusterType.SGE:
-                # SGE creates <jobname>.o<jobid> and <jobname>.e<jobid> files
-                files["stdout"] = f"{job_id}.o{job_id}"
-                files["stderr"] = f"{job_id}.e{job_id}"
 
             # Add clustrix-specific result files
             files["result"] = f"result_{job_id}.pkl"

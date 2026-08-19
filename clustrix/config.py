@@ -28,92 +28,13 @@ class ClusterConfig:
     cluster_host: Optional[str] = None
     cluster_port: int = 22
 
-    # Kubernetes-specific settings
-    k8s_namespace: str = "default"
-    k8s_image: str = "python:3.11-slim"
-    k8s_service_account: Optional[str] = None
-    k8s_pull_policy: str = "IfNotPresent"
-    k8s_job_ttl_seconds: int = 3600
-    k8s_backoff_limit: int = 3
-    k8s_remote: bool = False
-
-    # Cloud provider settings for remote Kubernetes
-    cloud_provider: str = "manual"  # manual, aws, azure, gcp
-    cloud_region: Optional[str] = None
-    cloud_auto_configure: bool = False
-
-    # NEW: Kubernetes auto-provisioning settings
-    auto_provision_k8s: bool = False
-    k8s_provider: str = "aws"  # aws, gcp, azure, huggingface, lambda
-    k8s_from_scratch: bool = True  # Always provision infrastructure
-    k8s_auto_cleanup: bool = True
-    k8s_cluster_name: Optional[str] = None
-
-    # NEW: Cluster specifications (provider-specific defaults)
-    k8s_node_count: int = 2
-    k8s_node_type: Optional[str] = None  # t3.medium, e2-standard-4, etc.
-    k8s_version: str = "1.28"
-    k8s_region: Optional[str] = None
-
-    # AWS-specific settings
-    # NOTE: Both standard boto3 and widget field names are supported for backward compatibility
-    # Field mapping is handled automatically via clustrix.field_mappings module
-    aws_profile: Optional[str] = None
-    aws_access_key_id: Optional[str] = None  # Standard boto3 field name
-    aws_secret_access_key: Optional[str] = None  # Standard boto3 field name
-    aws_access_key: Optional[str] = (
-        None  # Widget field name (mapped to aws_access_key_id)
-    )
-    aws_secret_key: Optional[str] = (
-        None  # Widget field name (mapped to aws_secret_access_key)
-    )
-    aws_session_token: Optional[str] = None  # For temporary credentials
-    aws_instance_type: Optional[str] = None
-    aws_cluster_type: Optional[str] = None  # ec2 or eks
-    eks_cluster_name: Optional[str] = None
-    aws_region: Optional[str] = None
-
-    # Azure-specific settings
-    # NOTE: Field names match widget naming scheme (azure_* prefix)
-    # Mapped to Azure SDK field names via clustrix.field_mappings module
-    azure_subscription_id: Optional[str] = None  # Required for authentication
-    azure_resource_group: Optional[str] = None
-    azure_tenant_id: Optional[str] = (
-        None  # Required for service principal authentication
-    )
-    azure_client_id: Optional[str] = (
-        None  # Required for service principal authentication
-    )
-    azure_client_secret: Optional[str] = (
-        None  # Required for service principal authentication
-    )
-    azure_instance_type: Optional[str] = None
-    aks_cluster_name: Optional[str] = None
-    azure_region: Optional[str] = None
-
-    # GCP-specific settings
-    # NOTE: Field names match widget naming scheme (gcp_* prefix)
-    # Mapped to Google Cloud SDK field names via clustrix.field_mappings module
-    gcp_project_id: Optional[str] = None  # Required for authentication
-    gcp_zone: Optional[str] = None
-    gcp_service_account_key: Optional[str] = None  # Required: JSON service account key
-    gcp_instance_type: Optional[str] = None
-    gke_cluster_name: Optional[str] = None
-    gcp_region: Optional[str] = None
-
-    # Lambda Cloud settings
-    # NOTE: Field names match widget naming scheme (lambda_* prefix)
-    # Mapped to Lambda Cloud API field names via clustrix.field_mappings module
-    lambda_instance_type: Optional[str] = None
-    lambda_api_key: Optional[str] = None  # Required for authentication
-
-    # Hugging Face Spaces settings
-    # NOTE: Field names match widget naming scheme (hf_* prefix)
-    # Mapped to HuggingFace API field names via clustrix.field_mappings module
+    # HuggingFace Jobs settings. hf_hardware and hf_username are the older
+    # widget-facing spellings; hf_jobs.py still reads them as fallbacks for
+    # hf_flavor and hf_namespace, so they are kept. hf_sdk was a *Spaces*
+    # concept (gradio/streamlit/static) and went with that backend.
     hf_hardware: Optional[str] = None
     hf_token: Optional[str] = None  # Required for authentication
     hf_username: Optional[str] = None
-    hf_sdk: Optional[str] = None
     # HuggingFace Jobs backend (cluster_type="huggingface"). The namespace is
     # usually an org rather than the personal account, which is often not on a
     # plan that can run jobs.
@@ -155,6 +76,13 @@ class ClusterConfig:
     max_parallel_jobs: int = 100
     max_gpu_parallel_jobs: int = 8
     job_poll_interval: int = 30
+    # Seconds to keep polling a submitted job before giving up. Without a
+    # bound, a job that never reaches a terminal state -- held by the
+    # scheduler, stuck in a node-drain loop, a queue that never clears --
+    # hangs the caller forever with no way out but Ctrl-C. 24 hours is
+    # deliberately generous, because a real HPC queue wait legitimately runs
+    # into hours; set it to None to restore the unbounded wait.
+    job_wait_timeout: Optional[int] = 86400
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
@@ -165,9 +93,6 @@ class ClusterConfig:
     # error.
     ssh_connect_timeout: int = 30
     venv_setup_timeout: int = 300  # Timeout for venv setup in seconds (5 minutes)
-
-    # Monitoring settings
-    cost_monitoring: bool = False  # Enable cost monitoring for cloud providers
 
     # Enhanced Authentication Options
     use_env_password: bool = False  # Enable environment variable password
@@ -264,23 +189,7 @@ class ClusterConfig:
                 f"(insecure, trusts unknown host keys automatically)."
             )
 
-        # Auto-install cloud provider dependencies if needed
-        self._ensure_cloud_dependencies()
-
-    def _ensure_cloud_dependencies(self) -> None:
-        """Ensure cloud provider dependencies are available for this configuration."""
-        try:
-            from .auto_install import ensure_cloud_provider_dependencies
-
-            ensure_cloud_provider_dependencies(
-                cluster_type=self.cluster_type,
-                cloud_provider=self.cloud_provider,
-                auto_install=True,
-                quiet=True,  # Quiet in constructor to avoid spam
-            )
-        except Exception:
-            # Silently fail in constructor to avoid breaking imports
-            pass
+        validate_cluster_type(self.cluster_type)
 
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
@@ -344,11 +253,83 @@ SUPPORTED_CLUSTER_TYPES = (
     "local",
     "ssh",
     "slurm",
-    "pbs",
-    "sge",
-    "kubernetes",
     "huggingface",
 )
+
+#: Backends clustrix used to carry code for and no longer implements, mapped
+#: to the issue tracking their return. Every one of them was removed for the
+#: same reason: it had never been run against real hardware, so nothing
+#: justified the claim that it worked. Keeping the names here is what lets a
+#: user with an older ``clustrix.yml`` get an answer instead of a guess --
+#: without it, ``cluster_type: pbs`` and a stale ``k8s_namespace`` key both
+#: come back through ``difflib`` pointed at some unrelated field.
+REMOVED_CLUSTER_TYPES = {
+    "pbs": 140,
+    "sge": 141,
+    "kubernetes": 142,
+    "aws": 143,
+    "gcp": 144,
+    "azure": 145,
+    "lambda_cloud": 146,
+    "huggingface_spaces": None,
+}
+
+#: Settings that belonged to the removed backends, as (prefix or exact name)
+#: -> (what it configured, tracking issue). Checked before the did-you-mean
+#: path in :func:`load_config`.
+_REMOVED_SETTINGS = (
+    ("k8s_", "Kubernetes", 142),
+    ("auto_provision_k8s", "Kubernetes", 142),
+    ("aws_", "the AWS backend", 143),
+    ("eks_cluster_name", "the AWS backend", 143),
+    ("gcp_", "the GCP backend", 144),
+    ("gke_cluster_name", "the GCP backend", 144),
+    ("azure_", "the Azure backend", 145),
+    ("aks_cluster_name", "the Azure backend", 145),
+    ("lambda_", "the Lambda Cloud backend", 146),
+    ("cloud_provider", "the cloud VM backends", None),
+    ("cloud_region", "the cloud VM backends", None),
+    ("cloud_auto_configure", "the cloud VM backends", None),
+    ("cost_monitoring", "cloud cost monitoring", None),
+    ("hf_sdk", "the HuggingFace Spaces SDK", None),
+)
+
+
+def _removed_setting_reason(name: str) -> Optional[str]:
+    """Explain a setting that a removed backend used to own, or return None."""
+    for key, what, issue in _REMOVED_SETTINGS:
+        matches = name.startswith(key) if key.endswith("_") else name == key
+        if matches:
+            where = f" (see issue #{issue})" if issue else ""
+            return f"{name} configured {what}, which has been removed{where}"
+    return None
+
+
+def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:
+    """Reject a backend clustrix cannot run, saying which kind of wrong it is.
+
+    Three outcomes rather than two: a supported type passes, a *removed* type
+    is named along with why it went and where it is tracked, and anything else
+    is an ordinary typo. Collapsing the middle case into the last one is what
+    left ``cluster_type: pbs`` looking like a spelling mistake.
+    """
+    if cluster_type in SUPPORTED_CLUSTER_TYPES:
+        return
+
+    supported = ", ".join(SUPPORTED_CLUSTER_TYPES)
+    if cluster_type in REMOVED_CLUSTER_TYPES:
+        issue = REMOVED_CLUSTER_TYPES[cluster_type]
+        where = f" Its return is tracked in issue #{issue}." if issue else ""
+        raise ValueError(
+            f"{source}={cluster_type!r} is no longer implemented. It was "
+            f"removed in v0.2.0 because it had never been verified against "
+            f"real hardware.{where} Supported types are: {supported}."
+        )
+
+    raise ValueError(
+        f"{source}={cluster_type!r} is not a supported cluster type. "
+        f"Supported types are: {supported}."
+    )
 
 
 _SECRET_FIELD_PATTERN = re.compile(
@@ -431,43 +412,35 @@ def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> Non
 _config = ClusterConfig()
 
 
-def configure(auto_install_deps: bool = True, **kwargs) -> None:
+def configure(**kwargs) -> None:
     """
     Configure Clustrix settings.
 
     Args:
-        auto_install_deps: Whether to automatically install cloud provider dependencies
         **kwargs: Configuration parameters matching ClusterConfig fields
     """
     global _config  # noqa: F824
 
-    # Update configuration with provided kwargs
-    for key, value in kwargs.items():
+    # Validate everything before applying anything: a rejected keyword used
+    # to leave the earlier ones already written to the live config, so a
+    # failed configure() call still changed the process's behaviour.
+    for key in kwargs:
         if hasattr(_config, key):
-            setattr(_config, key, value)
-        else:
-            raise ValueError(f"Unknown configuration parameter: {key}")
+            continue
+        removed = _removed_setting_reason(key)
+        if removed:
+            raise ValueError(removed)
+        raise ValueError(f"Unknown configuration parameter: {key}")
 
-    # Check if we need to install cloud provider dependencies
-    if auto_install_deps:
-        from .auto_install import ensure_cloud_provider_dependencies
+    if "cluster_type" in kwargs:
+        # setattr below does not re-run __post_init__, so without this a
+        # removed backend reaches the executor and fails there instead --
+        # after connect(), i.e. after an SSH round trip to a host that was
+        # never going to be used.
+        validate_cluster_type(kwargs["cluster_type"])
 
-        cluster_type = kwargs.get("cluster_type", _config.cluster_type)
-        cloud_provider = kwargs.get("cloud_provider", _config.cloud_provider)
-
-        # Try to ensure dependencies, but don't fail if installation fails
-        try:
-            ensure_cloud_provider_dependencies(
-                cluster_type=cluster_type,
-                cloud_provider=cloud_provider,
-                auto_install=True,
-                quiet=False,
-            )
-        except Exception as e:
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(f"Could not auto-install cloud provider dependencies: {e}")
+    for key, value in kwargs.items():
+        setattr(_config, key, value)
 
 
 def load_config(config_path: str) -> None:
@@ -506,10 +479,22 @@ def load_config(config_path: str) -> None:
 
         hints = []
         for name in unknown:
+            # A setting a removed backend owned gets a real explanation. The
+            # did-you-mean path below would otherwise match "k8s_namespace"
+            # against some unrelated field and send the reader after it.
+            removed = _removed_setting_reason(name)
+            if removed:
+                hints.append(removed)
+                continue
             close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
             hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
         raise ValueError(
             f"{config_path} contains unknown setting(s): {'; '.join(hints)}"
+        )
+
+    if "cluster_type" in config_data:
+        validate_cluster_type(
+            config_data["cluster_type"], source=f"{config_path}: cluster_type"
         )
 
     _config = ClusterConfig(**config_data)

@@ -167,124 +167,6 @@ class RealWorldCredentialManager:
             return False
         return self._op_manager.is_op_available()
 
-    def get_aws_credentials(self) -> Optional[Dict[str, str]]:
-        """Get AWS credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._validation_creds:
-            try:
-                aws_creds = self._validation_creds.get_aws_credentials()
-                if aws_creds:
-                    return {
-                        "access_key_id": aws_creds.get("aws_access_key_id"),
-                        "secret_access_key": aws_creds.get("aws_secret_access_key"),
-                        "region": aws_creds.get("aws_region", "us-east-1"),
-                    }
-            except Exception as e:
-                logger.debug(f"Failed to get AWS credentials from 1Password: {e}")
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            access_key = os.getenv("AWS_ACCESS_KEY_ID")
-            secret_key = os.getenv("AWS_ACCESS_KEY")  # GitHub secret name
-            region = os.getenv("AWS_REGION", "us-east-1")
-
-            if access_key and secret_key:
-                return {
-                    "access_key_id": access_key,
-                    "secret_access_key": secret_key,
-                    "region": region,
-                }
-
-        # Fall back to environment variables
-        access_key = os.getenv("AWS_ACCESS_KEY_ID") or os.getenv("TEST_AWS_ACCESS_KEY")
-        secret_key = os.getenv("AWS_SECRET_ACCESS_KEY") or os.getenv(
-            "TEST_AWS_SECRET_KEY"
-        )
-        region = os.getenv("AWS_REGION") or os.getenv("TEST_AWS_REGION", "us-east-1")
-
-        if access_key and secret_key:
-            return {
-                "access_key_id": access_key,
-                "secret_access_key": secret_key,
-                "region": region,
-            }
-
-        return None
-
-    def get_azure_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Azure credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._validation_creds:
-            try:
-                azure_creds = self._validation_creds.get_azure_credentials()
-                if azure_creds:
-                    return azure_creds
-            except Exception as e:
-                logger.debug(f"Failed to get Azure credentials from 1Password: {e}")
-
-        # Fall back to environment variables
-        subscription_id = os.getenv("AZURE_SUBSCRIPTION_ID") or os.getenv(
-            "TEST_AZURE_SUBSCRIPTION_ID"
-        )
-        tenant_id = os.getenv("AZURE_TENANT_ID") or os.getenv("TEST_AZURE_TENANT_ID")
-        client_id = os.getenv("AZURE_CLIENT_ID") or os.getenv("TEST_AZURE_CLIENT_ID")
-        client_secret = os.getenv("AZURE_CLIENT_SECRET") or os.getenv(
-            "TEST_AZURE_CLIENT_SECRET"
-        )
-
-        if subscription_id:
-            return {
-                "subscription_id": subscription_id,
-                "tenant_id": tenant_id,
-                "client_id": client_id,
-                "client_secret": client_secret,
-            }
-
-        return None
-
-    def get_gcp_credentials(self) -> Optional[Dict[str, str]]:
-        """Get GCP credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._validation_creds:
-            try:
-                gcp_creds = self._validation_creds.get_gcp_credentials()
-                if gcp_creds:
-                    return gcp_creds
-            except Exception as e:
-                logger.debug(f"Failed to get GCP credentials from 1Password: {e}")
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            project_id = os.getenv("GCP_PROJECT_ID")
-            service_account_json = os.getenv("GCP_JSON")
-
-            if project_id and service_account_json:
-                return {
-                    "project_id": project_id,
-                    "service_account_json": service_account_json,
-                }
-
-        # Fall back to environment variables
-        project_id = (
-            os.getenv("GOOGLE_CLOUD_PROJECT")
-            or os.getenv("GCP_PROJECT_ID")
-            or os.getenv("TEST_GCP_PROJECT_ID")
-        )
-        service_account_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or os.getenv(
-            "TEST_GCP_SERVICE_ACCOUNT_PATH"
-        )
-        service_account_json = os.getenv("GCP_JSON")
-
-        if project_id:
-            result = {"project_id": project_id}
-            if service_account_json:
-                result["service_account_json"] = service_account_json
-            elif service_account_path:
-                result["service_account_path"] = service_account_path
-            return result
-
-        return None
-
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
         """Get SSH credentials from available sources."""
         # Try 1Password first (local development)
@@ -491,120 +373,12 @@ class RealWorldCredentialManager:
 
         return None
 
-    def get_lambda_cloud_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Lambda Cloud credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._validation_creds:
-            try:
-                lambda_creds = self._validation_creds.get_lambda_cloud_credentials()
-                if lambda_creds:
-                    return lambda_creds
-            except Exception as e:
-                logger.debug(
-                    f"Failed to get Lambda Cloud credentials from 1Password: {e}"
-                )
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            api_key = os.getenv("LAMBDA_CLOUD_API_KEY")
-            if api_key:
-                return {
-                    "api_key": api_key,
-                    "endpoint": "https://cloud.lambdalabs.com/api/v1",
-                }
-
-        # Fall back to environment variables
-        api_key = os.getenv("LAMBDA_CLOUD_API_KEY")
-        endpoint = os.getenv(
-            "LAMBDA_CLOUD_ENDPOINT", "https://cloud.lambdalabs.com/api/v1"
-        )
-
-        if api_key:
-            return {"api_key": api_key, "endpoint": endpoint}
-
-        return None
-
-    def get_kubernetes_credentials(self) -> Optional[Dict[str, str]]:
-        """Get Kubernetes credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._op_manager:
-            try:
-                # Try to get Kubernetes cluster credentials
-                kubeconfig = self._op_manager.get_credential(
-                    "clustrix-kubernetes-validation", "kubeconfig"
-                )
-                namespace = self._op_manager.get_credential(
-                    "clustrix-kubernetes-validation", "namespace"
-                )
-                context = self._op_manager.get_credential(
-                    "clustrix-kubernetes-validation", "context"
-                )
-
-                if kubeconfig:
-                    result = {
-                        "kubeconfig_content": kubeconfig,
-                        "namespace": namespace or "default",
-                    }
-                    if context:
-                        result["context"] = context
-                    return result
-
-            except Exception as e:
-                logger.debug(
-                    f"Failed to get Kubernetes credentials from 1Password: {e}"
-                )
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            kubeconfig = os.getenv("KUBECONFIG_CONTENT")
-            namespace = os.getenv("K8S_NAMESPACE")
-
-            if kubeconfig:
-                result = {
-                    "kubeconfig_content": kubeconfig,
-                    "namespace": namespace or "default",
-                }
-                context = os.getenv("K8S_CONTEXT")
-                if context:
-                    result["context"] = context
-                return result
-
-        # Fall back to environment variables and local kubeconfig
-        kubeconfig_path = os.getenv("KUBECONFIG") or os.path.expanduser(
-            "~/.kube/config"
-        )
-        if os.path.exists(kubeconfig_path):
-            namespace = os.getenv("K8S_NAMESPACE", "default")
-            context = os.getenv("K8S_CONTEXT")
-
-            result = {
-                "kubeconfig_path": kubeconfig_path,
-                "namespace": namespace,
-            }
-            if context:
-                result["context"] = context
-            return result
-
-        # Check if running in-cluster
-        if os.path.exists("/var/run/secrets/kubernetes.io/serviceaccount/token"):
-            return {
-                "in_cluster": True,
-                "namespace": os.getenv("K8S_NAMESPACE", "default"),
-            }
-
-        return None
-
     def get_credential_status(self) -> Dict[str, bool]:
         """Get status of all credential types."""
         return {
-            "aws": self.get_aws_credentials() is not None,
-            "azure": self.get_azure_credentials() is not None,
-            "gcp": self.get_gcp_credentials() is not None,
             "ssh": self.get_ssh_credentials() is not None,
             "slurm": self.get_slurm_credentials() is not None,
-            "kubernetes": self.get_kubernetes_credentials() is not None,
             "huggingface": self.get_huggingface_credentials() is not None,
-            "lambda_cloud": self.get_lambda_cloud_credentials() is not None,
             "1password": self.is_1password_available(),
         }
 
@@ -625,35 +399,6 @@ class RealWorldCredentialManager:
 
     def setup_environment_variables(self) -> None:
         """Set up environment variables from available credentials."""
-        # Set AWS credentials
-        aws_creds = self.get_aws_credentials()
-        if aws_creds:
-            os.environ["TEST_AWS_ACCESS_KEY"] = aws_creds["access_key_id"]
-            os.environ["TEST_AWS_SECRET_KEY"] = aws_creds["secret_access_key"]
-            os.environ["TEST_AWS_REGION"] = aws_creds["region"]
-
-        # Set Azure credentials
-        azure_creds = self.get_azure_credentials()
-        if azure_creds:
-            os.environ["TEST_AZURE_SUBSCRIPTION_ID"] = azure_creds["subscription_id"]
-            if azure_creds.get("tenant_id"):
-                os.environ["TEST_AZURE_TENANT_ID"] = azure_creds["tenant_id"]
-            if azure_creds.get("client_id"):
-                os.environ["TEST_AZURE_CLIENT_ID"] = azure_creds["client_id"]
-            if azure_creds.get("client_secret"):
-                os.environ["TEST_AZURE_CLIENT_SECRET"] = azure_creds["client_secret"]
-
-        # Set GCP credentials
-        gcp_creds = self.get_gcp_credentials()
-        if gcp_creds:
-            os.environ["TEST_GCP_PROJECT_ID"] = gcp_creds["project_id"]
-            if gcp_creds.get("service_account_path"):
-                os.environ["TEST_GCP_SERVICE_ACCOUNT_PATH"] = gcp_creds[
-                    "service_account_path"
-                ]
-            if gcp_creds.get("service_account_json"):
-                os.environ["GCP_JSON"] = gcp_creds["service_account_json"]
-
         # Set SSH credentials
         ssh_creds = self.get_ssh_credentials()
         if ssh_creds:
@@ -682,12 +427,6 @@ class RealWorldCredentialManager:
             if hf_creds.get("username"):
                 os.environ["HUGGINGFACE_USERNAME"] = hf_creds["username"]
                 os.environ["HF_USERNAME"] = hf_creds["username"]
-
-        # Set Lambda Cloud credentials
-        lambda_creds = self.get_lambda_cloud_credentials()
-        if lambda_creds:
-            os.environ["LAMBDA_CLOUD_API_KEY"] = lambda_creds["api_key"]
-            os.environ["LAMBDA_CLOUD_ENDPOINT"] = lambda_creds["endpoint"]
 
 
 # Global credential manager instance
@@ -718,31 +457,6 @@ def print_credential_status() -> None:
     """Print credential status for debugging."""
     manager = get_credential_manager()
     manager.print_credential_status()
-
-
-# Convenience functions for tests
-def get_lambda_credentials() -> Optional[Dict[str, str]]:
-    """Get Lambda Cloud credentials for tests."""
-    manager = get_credential_manager()
-    return manager.get_lambda_cloud_credentials()
-
-
-def get_aws_credentials() -> Optional[Dict[str, str]]:
-    """Get AWS credentials for tests."""
-    manager = get_credential_manager()
-    return manager.get_aws_credentials()
-
-
-def get_azure_credentials() -> Optional[Dict[str, str]]:
-    """Get Azure credentials for tests."""
-    manager = get_credential_manager()
-    return manager.get_azure_credentials()
-
-
-def get_gcp_credentials() -> Optional[Dict[str, str]]:
-    """Get GCP credentials for tests."""
-    manager = get_credential_manager()
-    return manager.get_gcp_credentials()
 
 
 # Set up credentials when module is imported

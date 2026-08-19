@@ -1,7 +1,7 @@
 """Scheduler job status monitoring and error handling.
 
-This module handles status checking and error retrieval for traditional
-HPC scheduler jobs (SLURM, PBS, SGE).
+This module handles status checking and error retrieval for SLURM jobs and
+for jobs run directly over SSH.
 """
 
 import os
@@ -42,8 +42,6 @@ class SchedulerStatusManager:
         **Multi-Scheduler Support:**
 
         - **SLURM**: Uses `squeue -j {job_id} -h -o %T` to check job status
-        - **PBS**: Uses `qstat -f {job_id}` to query detailed job information
-        - **SGE**: Job status checking (using similar logic to PBS)
         - **SSH**: File-based status detection (result.pkl vs error files)
 
         **Status Detection Logic:**
@@ -73,10 +71,6 @@ class SchedulerStatusManager:
             >>> status = scheduler.check_job_status("12345", active_jobs)
             >>> print(status)  # "running"
 
-            >>> # PBS job completed (removed from queue)
-            >>> status = scheduler.check_job_status("67890.headnode", active_jobs)
-            >>> print(status)  # "completed"
-
             >>> # SSH job failed
             >>> status = scheduler.check_job_status("ssh_1234567890", active_jobs)
             >>> print(status)  # "failed"
@@ -97,42 +91,6 @@ class SchedulerStatusManager:
                 # immediate version of that same outcome.)
                 return "unknown"
             return self._check_slurm_job_status_robust(job_id, active_jobs)
-
-        elif self.config.cluster_type == "pbs":
-            cmd = f"qstat -f {job_id}"
-            try:
-                stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-                if "job_state = C" in stdout:
-                    return "completed"
-                elif "job_state = R" in stdout:
-                    return "running"
-                else:
-                    return "failed"
-            except Exception:
-                # Job might be completed and removed from queue
-                if job_id in active_jobs:
-                    job_info = active_jobs[job_id]
-                    result_exists = self.connection_manager.remote_file_exists(
-                        f"{job_info['remote_dir']}/result.pkl"
-                    )
-                    return "completed" if result_exists else "failed"
-                else:
-                    return "completed"
-
-        elif self.config.cluster_type == "sge":
-            sge_status = self._check_sge_status(job_id)
-            if sge_status == "completed":
-                # Job completed but not in queue, check if result exists
-                if job_id in active_jobs:
-                    job_info = active_jobs[job_id]
-                    result_exists = self.connection_manager.remote_file_exists(
-                        f"{job_info['remote_dir']}/result.pkl"
-                    )
-                    return "completed" if result_exists else "failed"
-                else:
-                    return "completed"
-            else:
-                return sge_status
 
         elif self.config.cluster_type == "ssh":
             # For SSH jobs, check if result file exists
@@ -486,61 +444,6 @@ class SchedulerStatusManager:
             )
         return detail
 
-    def _check_pbs_status(self, job_id: str) -> str:
-        """Check PBS job status."""
-        cmd = f"qstat -f {job_id}"
-        try:
-            stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-            # Handle full format output (qstat -f)
-            if "job_state = C" in stdout:
-                return "completed"
-            elif "job_state = Q" in stdout:
-                return "queued"
-            elif "job_state = R" in stdout:
-                return "running"
-            elif "job_state = E" in stdout:
-                return "failed"
-            # Handle short format output (qstat)
-            elif " R " in stdout:
-                return "running"
-            elif " Q " in stdout:
-                return "queued"
-            elif " C " in stdout:
-                return "completed"
-            elif " E " in stdout:
-                return "failed"
-            else:
-                return "unknown"
-        except Exception:
-            return "unknown"
-
-    def _check_sge_status(self, job_id: str) -> str:
-        """Check SGE job status."""
-        cmd = f"qstat -j {job_id}"
-        try:
-            stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-            if not stdout.strip() or "Following jobs do not exist" in stderr:
-                # Job not in queue, likely completed
-                return "completed"
-            else:
-                # Parse SGE job state from qstat output
-                # Common SGE states: r (running), qw (queued), Eqw (error), dr (deleting)
-                if "job_state                          r" in stdout:
-                    return "running"
-                elif "job_state                          qw" in stdout:
-                    return "queued"
-                elif "job_state                          Eqw" in stdout:
-                    return "failed"
-                elif "job_state                          dr" in stdout:
-                    return "completed"
-                # Check for exit status indicating completion
-                elif "exit_status" in stdout:
-                    return "completed"
-                else:
-                    return "running"  # Default for unknown running states
-        except Exception:
-            return "unknown"
-
     def _authenticated_error_payload(
         self, job_id: str, job_info: Dict[str, Any]
     ) -> Optional[bytes]:
@@ -605,7 +508,6 @@ class SchedulerStatusManager:
         2. **Text Log Files** (Fallback): Searches for various scheduler-specific log files:
            - job.err (standard error output)
            - slurm-*.out (SLURM output files)
-           - job.e* (PBS/SGE error files)
 
         3. **No Error Found**: Returns appropriate message if no error information exists.
 
@@ -678,7 +580,7 @@ class SchedulerStatusManager:
                 )
 
         # Fallback to text error files
-        error_files = ["job.err", "slurm-*.out", "job.e*"]
+        error_files = ["job.err", "slurm-*.out"]
 
         for error_file in error_files:
             try:

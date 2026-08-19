@@ -118,33 +118,6 @@ def temp_resource_manager():
 
 
 @pytest.fixture
-def aws_credentials(test_credentials):
-    """AWS credentials for testing."""
-    creds = test_credentials.get_aws_credentials()
-    if not creds:
-        pytest.skip("AWS credentials not available")
-    return creds
-
-
-@pytest.fixture
-def azure_credentials(test_credentials):
-    """Azure credentials for testing."""
-    creds = test_credentials.get_azure_credentials()
-    if not creds:
-        pytest.skip("Azure credentials not available")
-    return creds
-
-
-@pytest.fixture
-def gcp_credentials(test_credentials):
-    """GCP credentials for testing."""
-    creds = test_credentials.get_gcp_credentials()
-    if not creds:
-        pytest.skip("GCP credentials not available")
-    return creds
-
-
-@pytest.fixture
 def ssh_credentials(test_credentials):
     """SSH credentials for testing."""
     creds = test_credentials.get_ssh_credentials()
@@ -241,15 +214,6 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "ssh_required: mark test as requiring SSH access"
-    )
-    config.addinivalue_line(
-        "markers", "aws_required: mark test as requiring AWS credentials"
-    )
-    config.addinivalue_line(
-        "markers", "azure_required: mark test as requiring Azure credentials"
-    )
-    config.addinivalue_line(
-        "markers", "gcp_required: mark test as requiring GCP credentials"
     )
 
 

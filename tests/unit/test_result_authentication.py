@@ -342,57 +342,34 @@ class TestGeneratedWorkerSignsWhatItWrites:
 
 
 # --------------------------------------------------------------------------
-# V2 -- the cloud path signs its result and the caller checks it
+# V2 -- an unsigned result is refused
+#
+# Two tests here covered the cloud VM worker: that it signed its result, and
+# that CloudJobManager._execute_job_on_cloud_instance verified the signature
+# before unpickling. Both went with clustrix/executor_cloud.py, which was
+# removed along with the cloud VM backends (issues #143-#146) -- no cloud job
+# had ever been shown to run end to end.
+#
+# Neither guarantee is lost for the backends that remain:
+#   * the worker signs what it writes -- TestGeneratedWorkerSignsWhatItWrites
+#     above, which runs the real emitted program out of job_execution_lines
+#     (the shared SLURM/SSH body) in a subprocess; and
+#     tests/unit/test_hf_jobs.py, which asserts the HF Jobs worker computes
+#     the same HMAC.
+#   * the caller verifies before deserializing -- TestVerificationFailsClosed
+#     above, which drives ClusterExecutor._verify_result_signature, and
+#     TestErrorPayloadAuthentication for the error.pkl half.
+#
+# What survives here is the property about verify_signed_payload itself.
 # --------------------------------------------------------------------------
 
 
-class TestCloudResultAuthentication:
-    def _script(self, work_dir: Path) -> str:
-        from clustrix.executor_cloud import CloudJobManager
-
-        return CloudJobManager(ClusterConfig())._create_cloud_execution_script(
-            str(work_dir), {}
-        )
-
-    def test_cloud_worker_signs_its_result(self, tmp_path):
-        script = self._script(tmp_path)
-        data = serialize_function(_read_the_key, (), {})
-        with open(tmp_path / "func_data.pkl", "wb") as handle:
-            cloudpickle.dump(data, handle)
-        script_path = tmp_path / "execute_job.py"
-        script_path.write_text(script)
-
-        result = subprocess.run(
-            [sys.executable, str(script_path)],
-            cwd=tmp_path,
-            env=dict(os.environ, CLUSTRIX_RESULT_KEY=KEY),
-            capture_output=True,
-            text=True,
-        )
-
-        assert result.returncode == 0, result.stdout + result.stderr
-        blob = (tmp_path / "result.pkl").read_bytes()
-        verify_signed_payload(
-            blob, (tmp_path / "result.pkl.hmac").read_text(), KEY, "cloud worker"
-        )
-        # Written with dill, as the caller's dill.load has always claimed.
-        assert dill.loads(blob) is None
-
-    def test_the_caller_verifies_before_deserializing(self):
-        """A regression guard on the seam that had no check at all."""
-        import inspect
-
-        from clustrix.executor_cloud import CloudJobManager
-
-        source = inspect.getsource(CloudJobManager._execute_job_on_cloud_instance)
-        assert "verify_signed_payload" in source
-        assert "result.pkl.hmac" in source or ".hmac" in source
-
-    def test_an_unsigned_cloud_result_would_be_refused(self):
+class TestAnUnsignedResultIsRefused:
+    def test_a_result_arriving_without_a_signature_is_refused(self):
         blob = dill.dumps({"answer": 42}, protocol=4)
 
         with pytest.raises(PayloadAuthenticationError, match="no signature"):
-            verify_signed_payload(blob, "", KEY, "Cloud job x")
+            verify_signed_payload(blob, "", KEY, "Job x")
 
 
 # --------------------------------------------------------------------------
