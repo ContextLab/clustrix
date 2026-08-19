@@ -15,6 +15,8 @@ from tests.real_world import RealWorldTestManager, TestCredentials, TempResource
 # Create global test manager instance
 test_manager = RealWorldTestManager()
 
+_THIS_DIR = Path(__file__).parent.resolve()
+
 
 #: Whole-detection budget. This only gates which tests run, so it must answer
 #: quickly and wrongly-but-safely rather than slowly and exactly. Off-network
@@ -216,7 +218,34 @@ def pytest_configure(config):
 
 
 def pytest_collection_modifyitems(config, items):
-    """Modify test collection for real-world tests."""
+    """Modify test collection for real-world tests.
+
+    Every item collected from this directory is forced to carry the
+    `real_world` marker, regardless of whether the test file itself applies
+    `@pytest.mark.real_world`. Before this, `-m "not real_world"` (the
+    documented CI-safe command) silently collected and ran any file under
+    `tests/real_world/` that forgot the decorator -- making real SSH
+    connections and cloud API calls. Location under this directory is now
+    sufficient by itself; a developer adding a new file here cannot forget
+    the marker and accidentally leak it into the "safe" test run. See
+    issue #109/#114.
+
+    This hook is registered by this conftest.py, but pytest calls it once
+    per session with *every* collected item, not just the ones under this
+    directory -- so the path check below is essential. Without it, a run
+    like `pytest tests/` (which loads this conftest because it traverses
+    into tests/real_world/) would mark the entire test suite as
+    `real_world` and `-m "not real_world"` would deselect everything.
+    """
+    real_world_marker = pytest.mark.real_world
+    for item in items:
+        try:
+            item_path = Path(str(item.fspath)).resolve()
+        except Exception:  # pragma: no cover - defensive, path may be virtual
+            continue
+        if item_path == _THIS_DIR or _THIS_DIR in item_path.parents:
+            item.add_marker(real_world_marker)
+
     # Skip expensive tests by default unless explicitly requested
     if not config.getoption("--run-expensive"):
         skip_expensive = pytest.mark.skip(
