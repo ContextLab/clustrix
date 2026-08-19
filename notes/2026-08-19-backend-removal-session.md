@@ -175,3 +175,32 @@ the pre-existing set plus #140-#146).
   and cloud calls and is gated on secrets, so it is not part of the ordinary
   gate — but it is a genuine unexamined failure and must not be waved off as
   "pre-existing". Investigate on resume.
+
+### Found at the checkpoint: the pre-push hook cannot block a push (#147)
+
+Pushing this branch made the pre-push hook run the real-world suite. All four
+categories printed `❌ ... failed`, and the hook then printed
+`✅ All real-world tests passed!` and allowed the push.
+
+`scripts/run_real_world_tests.py` `main()` discards every
+`runner.run_*_tests()` return value and never calls `sys.exit`, so the script
+exits 0 no matter what. The hook's `if ! python scripts/run_real_world_tests.py
+--filesystem` guard can never fire. Confirmed directly:
+
+```
+$ python scripts/run_real_world_tests.py --filesystem >/tmp/rw.txt 2>&1; echo $?
+0
+$ head -2 /tmp/rw.txt
+📁 Running Filesystem Tests...
+❌ Filesystem tests failed:
+```
+
+Same class as the `flake8 --exit-zero` / `mypy continue-on-error` defects from
+#138. Filed as **#147**. Also noted there: the failure message prints
+`result.stdout`, which was empty in all four cases, so the hook says something
+failed without saying what.
+
+The four failures themselves are explained by this branch's tip not importing
+(`clustrix.executor_kubernetes` is gone) — pytest could not collect, so no real
+SSH or cloud calls were made. That does not soften #147: a tree that cannot
+import is exactly the case the hook exists to stop, and it waved it through.
