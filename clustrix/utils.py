@@ -727,8 +727,6 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     # Get current environment info
     requirements = get_environment_requirements()
-    # Get environment info (not used here but needed for compatibility)
-    _ = get_environment_info()  # For compatibility with tests
 
     # Try to get function source code for better cross-Python compatibility
     func_source = None
@@ -1838,8 +1836,15 @@ def setup_python_compatible_environment(
         # Skip complex requirements to avoid timeout issues
         commands.extend(
             [
+                # pip's own version is not part of the replicated environment,
+                # so failing to upgrade it is genuinely non-fatal.
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed, continuing...'",
-                "pip install dill cloudpickle --timeout=30 || echo 'Failed to install serialization packages, using built-in pickle'",
+                # dill and cloudpickle are not optional: the generated worker
+                # refuses to fall back to stdlib pickle, because pickle
+                # serializes a function by qualified name and cannot resolve it
+                # in a fresh interpreter. Swallowing this failure only moved the
+                # error to a later, far more confusing point.
+                "pip install dill cloudpickle --timeout=30",
             ]
         )
 
