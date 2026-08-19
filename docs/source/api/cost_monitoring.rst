@@ -118,6 +118,8 @@ cost_tracking_decorator
 
    .. code-block:: python
 
+      from clustrix import cost_tracking_decorator, cluster
+
       @cost_tracking_decorator('aws', 'p3.2xlarge')
       @cluster(cores=8, memory='60GB')
       def train_model():
@@ -149,6 +151,8 @@ get_cost_monitor
    **Example:**
 
    .. code-block:: python
+
+      from clustrix import get_cost_monitor
 
       monitor = get_cost_monitor('gcp')
       cost_estimate = monitor.estimate_cost('n2-standard-4', 2.0)

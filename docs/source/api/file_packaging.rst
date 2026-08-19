@@ -468,10 +468,14 @@ The packaging system is automatically used by the @cluster decorator:
 
 .. code-block:: python
 
-    from clustrix import cluster
+    from clustrix import cluster, configure
 
     # cluster_host is a configuration setting, not a decorator argument;
-    # set it with clustrix.configure(cluster_host="cluster.edu").
+    # set it with clustrix.configure(cluster_host="cluster.edu"). Explicit
+    # and self-contained here so this example runs locally regardless of
+    # whatever configuration was active before it.
+    configure(cluster_type="local", cluster_host=None)
+
     @cluster(cores=8)
     def automated_packaging():
         """This function will be automatically packaged and executed remotely."""
@@ -508,9 +512,16 @@ Debug Mode
 .. code-block:: python
 
     import logging
+    from clustrix.file_packaging import package_function_for_execution
+    from clustrix.config import ClusterConfig
 
     # Enable debug logging
     logging.basicConfig(level=logging.DEBUG)
+
+    def your_function():
+        return 42
+
+    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.edu")
 
     # Package function with detailed logging
     package_info = package_function_for_execution(
