@@ -86,10 +86,28 @@ class RejectUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
         )
 
 
+def user_known_hosts_path() -> Path:
+    """The known_hosts file clustrix reads and writes.
+
+    Derived from ``$HOME`` so a test, a container or a relocated home can
+    redirect it. Every OpenSSH *subprocess* must be handed this path
+    explicitly with ``-o UserKnownHostsFile=``: OpenSSH resolves ``~`` from
+    the passwd database rather than the environment, so without that the
+    Python side of clustrix verifies against one file while ssh appends to
+    another.
+
+    This is the single definition. ``ssh_utils`` imports it rather than
+    recomputing the path, because two copies of a rule like this drift and
+    the drift is invisible until the two disagree on a machine where the
+    passwd home and ``$HOME`` differ.
+    """
+    return Path(os.path.expanduser("~")) / ".ssh" / "known_hosts"
+
+
 def _load_known_hosts(client: paramiko.SSHClient) -> None:
     """Load system and user known_hosts files into the client."""
     client.load_system_host_keys()
-    user_known_hosts = Path(os.path.expanduser("~/.ssh/known_hosts"))
+    user_known_hosts = user_known_hosts_path()
     if user_known_hosts.exists():
         client.load_host_keys(str(user_known_hosts))
 

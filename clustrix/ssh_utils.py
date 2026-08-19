@@ -15,7 +15,10 @@ from typing import Optional, Tuple, List, Dict, Any
 import paramiko
 from clustrix.config import ClusterConfig
 from clustrix.auth_fallbacks import setup_auth_with_fallback
-from clustrix.ssh_security import configure_host_key_policy
+from clustrix.ssh_security import (
+    configure_host_key_policy,
+    user_known_hosts_path as _user_known_hosts_path,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -271,17 +274,6 @@ def generate_ssh_key(
 
     except subprocess.CalledProcessError as e:
         raise SSHKeyGenerationError(f"Failed to generate SSH key: {e.stderr}")
-
-
-def _user_known_hosts_path() -> Path:
-    """The known_hosts file this module reads and writes.
-
-    Derived from ``$HOME`` so that a test, a container or a relocated home
-    can redirect it. Every OpenSSH subprocess must be told this path
-    explicitly, because OpenSSH itself resolves ``~`` from the passwd
-    database and would otherwise use a different file.
-    """
-    return Path(os.path.expanduser("~")) / ".ssh" / "known_hosts"
 
 
 def add_host_key(hostname: str, port: int = 22) -> bool:
