@@ -13,7 +13,8 @@ script directly:
   It doesn't; ``ClusterConfig`` is not re-exported from ``clustrix/__init__.py``.
 - ``docs/PRICING_API_REFERENCE.md`` and ``docs/PRICING_USER_GUIDE.md``
   documented ``clustrix.pricing_clients.performance_monitor`` and
-  ``.resilience``, both since deleted as unused code.
+  ``.resilience``; the whole pricing-client tree has since been deleted
+  along with the cloud backends it served.
 
 Per code block:
 

@@ -11,7 +11,7 @@ try:
 except ImportError:
     IPYTHON_AVAILABLE = False
 
-from .config import ClusterConfig
+from .config import ClusterConfig, SUPPORTED_CLUSTER_TYPES
 from .auth_manager import AuthenticationManager
 from .validation import (
     validate_cluster_auth,
@@ -53,18 +53,10 @@ def create_enhanced_cluster_widget(
         value='<h3 style="color: #333; margin-bottom: 10px;">🖥️ Cluster Configuration</h3>'
     )
 
+    # Read the supported set rather than keeping a third copy of it: this
+    # list had drifted to offer five backends the executor cannot dispatch.
     cluster_type = widgets.Dropdown(
-        options=[
-            "local",
-            "ssh",
-            "slurm",
-            "pbs",
-            "sge",
-            "kubernetes",
-            "aws",
-            "azure",
-            "gcp",
-        ],
+        options=list(SUPPORTED_CLUSTER_TYPES),
         value=config.cluster_type,
         description="Cluster Type:",
         style=style,
