@@ -298,3 +298,59 @@ rejection message and a grep showing the backend is gone) and on #147.
 this environment is 25.11.0 and they disagree. A local `black --check` with the
 wrong one passes where CI fails. Session venv:
 `<scratchpad>/blackenv/bin/black`.
+
+---
+
+## PR #149 all green; issue backlog triaged
+
+All 15 CI checks pass on the branch tip. The `Check documentation examples`
+step is confirmed `success`, not skipped.
+
+### Issues closed with evidence (15)
+
+#68 #70 #87 #88 #89 #90 #95 #96 #99 #106 #113 #114 #119 #120 #132 — open count
+49 -> 35. Each got a comment quoting the grep, command output or file:line that
+justifies the close.
+
+### A pattern worth knowing about: the backlog's numbers do not reproduce
+
+Re-measured, claimed vs actual:
+
+| Issue | Claimed | Actual |
+|-|-|-|
+| #117 | 2,513 mock occurrences | **596** (its own regex) |
+| #123 | ClusterConfig ~150 fields | **59** |
+| #123 | utils.py 1,788 lines | **3,109** (grew; the issue understates it) |
+| #123 | 40+ silent `except: pass` | **20** |
+| #99  | `clustrix/providers/aws.py` at 48% | that path has **never existed** |
+| #100 | utils.py at 70% | **63%** (worse than claimed) |
+| #102 | notebook modules at 50% | **67%** |
+| #104 | executor.py at 71% | it is a 7-statement shim at **100%** |
+| #106 | loop_analysis at 72% | **86%** — target already met |
+
+Do not act on a number in an issue here without re-measuring it.
+
+### Fixed in this pass, beyond the removal
+
+- **#123 the untimed wait loop** — `job_wait_timeout`, default 86400, `None`
+  to opt out. The job is deliberately not cancelled on expiry.
+- **#124 docs examples in CI** — and the ordering bug that surfaced: the step
+  must run BEFORE `Test installation`'s non-editable `pip install .`, or the
+  checker reads clustrix from site-packages. The checker now refuses that by
+  name rather than crashing in pathlib.
+- **#115 coverage floor** — `fail_under = 66` against a measured 68%.
+
+### Open, needs the user
+
+- **#111 secret scanning is still disabled** (`gh api ... /secret-scanning/alerts`
+  -> "Secret scanning is disabled on this repository. (HTTP 404)"). A repo
+  settings change; not made without asking. Also unverifiable from here:
+  whether the two HF tokens were actually rotated.
+- **#113's one unverified item**: whether branch protection *requires* the test
+  job. `gh api repos/ContextLab/clustrix/branches/master/protection` settles it.
+
+### Still open and genuinely worth doing
+
+#117 (de-mocking; 3 named offenders survive verbatim), #122 (three modules
+still orphaned, `enhanced_notebook_widget.py` at 0% coverage), #148 (host-key
+verification in the real-world tests), #127 (tag and release v0.2.0).
