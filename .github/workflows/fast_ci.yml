@@ -47,7 +47,9 @@ jobs:
           pip install -e ".[dev]"
       
       - name: Format check with Black
-        run: black --check clustrix/ tests/
+        # Same scope as tests.yml's black step. They covered different
+        # directories, so a file could pass one gate and fail the other.
+        run: black --check clustrix/ tests/ scripts/
       
       - name: Lint with Flake8
         run: flake8 clustrix/ --count --select=E9,F63,F7,F82 --show-source --statistics

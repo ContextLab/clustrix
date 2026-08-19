@@ -135,7 +135,9 @@ class TestMissingCredentialsFailsLoudly:
         # AWS SDK, so the SDK message is the one it hits; a developer machine
         # with boto3 installed hits the credential one.
         assert "credential" in output or "aws sdk" in output, output
-        assert "pip install boto3" in output or "aws_access_key_id" in output.lower(), output
+        assert (
+            "pip install boto3" in output or "aws_access_key_id" in output.lower()
+        ), output
 
     def test_cleanup_execute_without_credentials_also_errors_clearly(self):
         # --execute must not bypass the credential check either.
@@ -167,7 +169,9 @@ class TestMissingCredentialsFailsLoudly:
         # AWS SDK, so the SDK message is the one it hits; a developer machine
         # with boto3 installed hits the credential one.
         assert "credential" in output or "aws sdk" in output, output
-        assert "pip install boto3" in output or "aws_access_key_id" in output.lower(), output
+        assert (
+            "pip install boto3" in output or "aws_access_key_id" in output.lower()
+        ), output
 
     def test_destroy_dry_run_without_credentials_errors_clearly(self):
         env, tmp_home = _clean_env_without_aws_credentials()
@@ -201,7 +205,9 @@ class TestMissingCredentialsFailsLoudly:
         # AWS SDK, so the SDK message is the one it hits; a developer machine
         # with boto3 installed hits the credential one.
         assert "credential" in output or "aws sdk" in output, output
-        assert "pip install boto3" in output or "aws_access_key_id" in output.lower(), output
+        assert (
+            "pip install boto3" in output or "aws_access_key_id" in output.lower()
+        ), output
 
     def test_destroy_execute_without_credentials_also_errors_clearly(self):
         env, tmp_home = _clean_env_without_aws_credentials()
@@ -233,7 +239,9 @@ class TestMissingCredentialsFailsLoudly:
         # AWS SDK, so the SDK message is the one it hits; a developer machine
         # with boto3 installed hits the credential one.
         assert "credential" in output or "aws sdk" in output, output
-        assert "pip install boto3" in output or "aws_access_key_id" in output.lower(), output
+        assert (
+            "pip install boto3" in output or "aws_access_key_id" in output.lower()
+        ), output
 
 
 class TestArgParsingRoundTrip:
