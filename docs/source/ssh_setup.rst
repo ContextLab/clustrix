@@ -1,13 +1,13 @@
 SSH Key Setup for Remote Clusters
 ====================================
 
-Clustrix provides **automated SSH key setup**: it generates a key, deploys
-it to the cluster and writes the ``~/.ssh/config`` entry in one call, instead
-of doing those three steps by hand.
+Clustrix generates an SSH key, deploys it to the cluster, and writes the
+matching ``~/.ssh/config`` entry, in one call. Those are the same three steps
+you would otherwise run by hand, in the same order.
 
 .. note::
-   **🚀 New in Clustrix**: Automated SSH key setup makes cluster access effortless! 
-   Try the interactive tutorial: `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
+   A runnable walkthrough is available as a notebook:
+   `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
 
 Quick Start: Automated Setup
 -----------------------------
@@ -321,13 +321,15 @@ Here's a complete end-to-end example:
    result = scientific_computation(n_samples=500)
    print(f"Computation result: {result}")
 
-Manual Setup (Legacy)
----------------------
+Manual Setup
+------------
 
-.. warning::
-   **Manual setup is no longer recommended**. Use the automated SSH setup above for better security and convenience.
+.. note::
+   Prefer the automated setup above. Do the steps by hand when your site needs
+   something the automation does not cover -- a non-default key type, a jump
+   host, a key held on a smartcard.
 
-If you need manual setup for special configurations:
+The manual equivalent, step by step:
 
 1. Generate SSH Key Pair
 ~~~~~~~~~~~~~~~~~~~~~~~~

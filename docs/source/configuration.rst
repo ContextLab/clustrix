@@ -121,12 +121,13 @@ Choosing a backend
    * - ``cluster_type``
      - ``"slurm"``
      - One of ``local``, ``ssh``, ``slurm``, ``huggingface``
-       (``SUPPORTED_CLUSTER_TYPES``). Anything else raises
-       ``ValueError: Unsupported cluster type: ...`` at submit time. Note the
-       default is ``slurm``, but with no ``cluster_host`` set the decorator
-       still runs locally -- see :ref:`execution-model`. PBS, SGE, Kubernetes
-       and the cloud VM providers were removed in v0.2.0; see
-       :ref:`removed-backends`.
+       (``SUPPORTED_CLUSTER_TYPES``). Anything else raises a ``ValueError``
+       that names the supported set. Note the default is ``slurm``, but with
+       no ``cluster_host`` set the decorator still runs locally -- see
+       :ref:`execution-model`. PBS, SGE, Kubernetes and the cloud VM providers
+       are not supported; see :ref:`removed-backends`. This is a
+       *configuration* setting and not a ``@cluster`` keyword: passing
+       ``@cluster(cluster_type=...)`` warns and has no effect.
    * - ``cluster_host``
      - ``None``
      - The SSH host. **Its absence is what makes execution local** for every
@@ -421,20 +422,18 @@ Field                         Status
 ``gpu_requirements``          Not read.
 ``rapids_ecosystem``          Not read.
 ``max_gpu_parallel_jobs``     Not read.
-``auto_gpu_parallel``         Not read. It used to select a client-side GPU
-                              path that never called your function -- it ran a
-                              fixed torch program per GPU and returned the
-                              traces of random matrices as your result. That
-                              path was deleted; the field is kept so existing
-                              config files keep loading, and passing it to
-                              ``@cluster`` now warns.
+``auto_gpu_parallel``         Not read. There is no automatic
+                              cross-GPU parallelization; parallelize across
+                              GPUs inside your own function. The field is
+                              accepted so that existing config files keep
+                              loading, and passing it to ``@cluster`` warns.
 ``local_parallel_threshold``  Not read. Local chunking uses
                               ``os.cpu_count() * 2`` instead.
 ``cache_credentials``         Not read.
 ``credential_cache_ttl``      Not read.
 ``local_cache_dir``           Not read.
-``hf_hardware``               A Spaces-era field. It survives only as a
-                              fallback for ``hf_flavor``.
+``hf_hardware``               Read only as a fallback for ``hf_flavor``.
+                              Set ``hf_flavor``.
 ``venv_info``                 Runtime scratch space, written by clustrix
                               during a submission. Do not set it yourself.
 ============================  ===========================================

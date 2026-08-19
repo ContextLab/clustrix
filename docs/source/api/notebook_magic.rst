@@ -22,16 +22,16 @@ cell is executed afterwards.
    %%remote
 
 Importing ``clustrix`` registers the magic but does **not** display the widget.
-A library should not inject UI as a side effect of being imported, and the old
-behaviour also produced a second copy of the widget next to any explicit
-``%%remote`` or ``display()`` call. Set ``CLUSTRIX_AUTO_WIDGET=1`` to restore
-display-on-import.
+A library should not inject UI as a side effect of being imported, and an
+import that displayed the widget would also put a second copy of it next to
+any explicit ``%%remote`` or ``display()`` call. Set
+``CLUSTRIX_AUTO_WIDGET=1`` if you want display-on-import anyway.
 
 %%clusterfy (deprecated)
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-``%%clusterfy`` is a deprecated alias for ``%%remote``. It still works and
-emits a ``DeprecationWarning``.
+``%%clusterfy`` is an alias for ``%%remote``. It works, and it emits a
+``DeprecationWarning``.
 
 Widget Interface
 ----------------
@@ -63,9 +63,8 @@ The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
 ``huggingface`` -- the contents of
 :data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`, and nothing else. There are
 no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries, and no
-``k8s_*`` settings: those backends are **not currently supported**. They were
-removed in v0.2.0 because none had been shown to run a job end to end, and
-each is planned for a future release under its own tracking issue -- see
+``k8s_*`` settings, because Clustrix does not support those backends. Each is
+planned for a future release under its own tracking issue -- see
 :ref:`removed-backends`.
 
 "Apply" calls :func:`clustrix.configure` with the widget's values, so
@@ -87,17 +86,18 @@ ClusterfyMagics
    :undoc-members:
    :show-inheritance:
 
-Legacy widget
-~~~~~~~~~~~~~
+A second widget class
+~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: EnhancedClusterConfigWidget
    :members:
    :undoc-members:
    :show-inheritance:
 
-   The previous widget implementation, along with :data:`DEFAULT_CONFIGS`. It
-   is no longer what ``%%remote`` displays and is kept only for compatibility.
-   Any template it offers that names a cluster type outside
+   A separate widget implementation, kept importable, along with
+   :data:`DEFAULT_CONFIGS`. ``%%remote`` displays
+   :class:`~clustrix.modern_notebook_widget.ModernClustrixWidget` instead.
+   Any template this one offers that names a cluster type outside
    :data:`clustrix.config.SUPPORTED_CLUSTER_TYPES` cannot be dispatched by the
    executor; see :ref:`removed-backends`.
 
@@ -110,7 +110,7 @@ Legacy widget
 .. autodata:: clustrix.notebook_magic_config.DEFAULT_CONFIGS
    :no-value:
 
-   Legacy configuration templates, keyed by display name
+   Configuration templates for the widget above, keyed by display name
    (``'Local Single-core'``, ``'University SLURM Cluster'``, ...). Entries hold
    plain :class:`~clustrix.config.ClusterConfig` field names; there is no
    ``name`` or ``description`` key.

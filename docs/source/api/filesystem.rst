@@ -12,16 +12,21 @@ below would document every class and function twice.
 Overview
 --------
 
-The filesystem utilities module provides a unified interface for filesystem operations that work seamlessly across local and remote clusters. All operations use the same API regardless of whether you're working locally or on a remote cluster.
+One set of calls -- ``cluster_ls``, ``cluster_find``, ``cluster_stat``,
+``cluster_exists``, ``cluster_isdir``, ``cluster_isfile``, ``cluster_glob``,
+``cluster_du``, ``cluster_count_files`` -- answers questions about a
+filesystem, and the same call works whether that filesystem is the one under
+your feet or one on a cluster. Which it is depends on the
+:class:`~clustrix.config.ClusterConfig` you pass, not on how you write the
+call. In other words, you write the code once and choose the machine later.
 
-Key Features
-------------
+``cluster_stat`` and ``cluster_du`` return :class:`FileInfo` and
+:class:`DiskUsage` rather than tuples, so the fields have names.
 
-- **Unified API**: Same function calls work locally and remotely
-- **Automatic SSH Management**: Transparent connection handling for remote operations
-- **Path Normalization**: Consistent path handling across platforms
-- **Data Structures**: Structured returns via `FileInfo` and `DiskUsage` classes
-- **Config-Driven**: Uses `ClusterConfig` to determine local vs remote execution
+These utilities are **read-only**. There is no ``cluster_put``, no
+``cluster_get``, and no copy or delete. They tell you what is on a filesystem;
+moving data onto one is your job, and is tracked as `issue #151
+<https://github.com/ContextLab/clustrix/issues/151>`_.
 
 Behind the Scenes
 ------------------

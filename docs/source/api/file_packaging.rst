@@ -12,28 +12,40 @@ below would document every class and function twice.
 Overview
 --------
 
-The file packaging system enables seamless remote execution of locally-defined functions by automatically analyzing dependencies, packaging all required code and data files, and deploying them to remote clusters. This replaces the traditional pickle-based approach with a more robust and flexible solution.
+:class:`FilePackager` reads a function's source with ``ast``, works out which
+local modules and data files it refers to, and writes a ZIP archive containing
+them together with a metadata record.
 
-Key Features
-------------
+.. warning::
 
-- **AST-Based Packaging**: Analyzes function source code rather than relying on pickle serialization
-- **Dependency Resolution**: Automatically detects and includes local functions, imports, and data files
-- **External Package Management**: Automatically installs required external packages on remote systems
-- **Filesystem Integration**: Seamlessly integrates with cluster filesystem utilities
-- **Cross-Platform Compatibility**: Works across different Python versions and platforms
-- **Cluster Detection**: Automatically adapts to shared filesystem configurations
+   **Nothing in the execution path calls this module.** A ``@cluster`` job is
+   shipped by :func:`clustrix.utils.serialize_function`, which pickles the
+   function by value with dill and cloudpickle; see :doc:`../execution_model`.
+   ``file_packaging`` is importable from the top-level ``clustrix`` namespace
+   and it works when you call it, and no decorator, executor or scheduler
+   reaches it. You can confirm this yourself::
 
-Architecture
-------------
+       grep -rn "FilePackager\|package_function" clustrix/decorator.py \
+           clustrix/executor_core.py clustrix/executor_connections.py \
+           clustrix/utils.py
 
-The packaging system consists of several components working together:
+   That search returns nothing. Treat this page as a reference for a component
+   you may call directly, not as a description of what happens when you submit
+   a job. Wiring an explicit staging path into submission is tracked in
+   `issue #151 <https://github.com/ContextLab/clustrix/issues/151>`_.
 
-1. **Dependency Analysis**: Identifies all function dependencies using AST analysis
-2. **File Collection**: Gathers required source files and data files
-3. **Package Creation**: Creates a ZIP archive with all dependencies and metadata
-4. **Remote Deployment**: Transfers and extracts packages on remote clusters
-5. **Execution Setup**: Recreates the execution environment and runs the function
+What it does when you call it
+-----------------------------
+
+1. **Dependency analysis** -- :func:`clustrix.dependency_analysis.analyze_function_dependencies`
+   walks the function's AST.
+2. **File collection** -- local modules and referenced data files are gathered.
+3. **Package creation** -- a ZIP archive is written with the collected files
+   and a metadata record.
+
+Step 4 in the obvious sequence -- putting that archive on a cluster -- has no
+implementation here. Transport lives in
+``clustrix/executor_connections.py`` and is used for the pickled payload only.
 
 Core Components
 ---------------

@@ -95,8 +95,8 @@ SSH-related ones. It then reads, via ``clustrix/credential_manager.py``:
 Only the ``SSH_*`` variables can affect *this* connection. Everything else
 your ``.env`` happens to define is put into the process environment as a side
 effect of loading the whole file, and matters only if something else later
-reads it. In particular, cloud-provider and Kubernetes credentials no longer
-select any execution backend: those backends were removed in v0.2.0, see
+reads it. Cloud-provider and Kubernetes credentials in particular select no
+execution backend, because Clustrix has none for them; see
 :ref:`removed-backends`.
 
 **The optional SSH-key-setup helper.** ``setup_ssh_keys_with_fallback()``
@@ -155,8 +155,8 @@ Cluster Settings
   same tuple for their cluster-type choices, so it is never possible for one
   of them to offer a backend the other (or ``ClusterExecutor``) cannot
   actually run. ``pbs``, ``sge``, ``kubernetes`` and the cloud VM providers
-  are not in the set: they were removed in v0.2.0 and now raise
-  ``ValueError: Unsupported cluster type``. See :ref:`removed-backends`.
+  are not in the set, and naming one raises a ``ValueError`` that says so and
+  points at its tracking issue. See :ref:`removed-backends`.
 - ``cluster_type="local"`` runs the function on the submitting machine via
   ``LocalJobManager`` (see :doc:`local_executor`) instead of talking to a
   scheduler at all -- there is no host, no SSH connection, and

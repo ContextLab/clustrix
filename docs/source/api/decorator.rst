@@ -1,7 +1,14 @@
 Decorator API
 =============
 
-The ``@cluster`` decorator is the main interface for Clustrix, allowing you to easily execute functions on remote clusters or locally with parallelization.
+``@cluster`` is the whole interface. Put it on a function, call the function,
+and Clustrix either submits the call to the backend you configured or runs it
+in the calling process.
+
+One thing to fix in your expectations before reading further: ``cores`` is a
+*request to a scheduler*. On the local path there is no scheduler, so
+``@cluster(cores=8)`` runs your function once, in this process, on one core.
+See :ref:`limitation-local-cores`.
 
 .. automodule:: clustrix.decorator
    :members:
@@ -53,12 +60,10 @@ path below. Two conditions must BOTH hold, and most functions fail at least
 one of them.
 
 **First, the loop's range must be a literal.** ``detect_loops`` only
-recognises a ``for`` loop written as ``range(<int literal>)``. Anything whose
-bound is known only at run time is declined outright. It used to guess
-``range(0, 10)`` in that case, which meant a loop over ``range(len(data))``
-was chunked as ten iterations and the caller silently received a tenth of the
-work; that fabrication was removed, and the answer is now ``None``. Verified
-directly:
+recognises a ``for`` loop written as ``range(<int literal>)``. A bound known
+only at run time is declined outright and the answer is ``None``, because
+there is no honest way to split a range whose length the analysis cannot read.
+Verified directly:
 
 ``detect_loops`` reads the function's source with ``inspect.getsource``, so
 these have to live in a real file to be analysed at all:
@@ -90,10 +95,9 @@ these have to live in a real file to be analysed at all:
 **Second, the function must be able to receive a chunk.** Clustrix splits the
 range and passes each piece as the keyword arguments ``_chunk_range_<var>``
 and ``_chunk_index``. A function that does not declare them (or ``**kwargs``)
-cannot be handed one, so ``_create_work_chunks`` produces no chunks and the
-call runs whole. This used to inject the argument anyway and fail with
-``TypeError: ... got an unexpected keyword argument '_chunk_range_i'``; it
-now declines and logs instead.
+cannot be handed one, so ``_create_work_chunks`` produces no chunks, the call
+runs whole, and the decision is logged at ``INFO`` on the
+``clustrix.decorator`` logger.
 
 .. code-block:: python
 
@@ -215,8 +219,11 @@ without telling you: it logs ``"Not parallelizing <name> locally: it takes
 no '_parallel_<var>' parameter."`` at ``INFO`` level (see
 ``clustrix/decorator.py``'s ``_create_local_work_chunks``) and then falls
 back to calling the function once, normally -- still a correct result, just
-without local parallelization. Given how narrow the detection criterion is,
-in practice this decline path -- or simply "no loop detected at all" -- is
-what most real functions will hit locally; :doc:`local_executor` and its
-``LocalExecutor.execute_loop_parallel`` are the more direct way to get
-guaranteed local parallel execution over an arbitrary loop.
+without local parallelization.
+
+Expect to land on that decline path, or on "no loop detected at all". The
+detection criterion is narrow enough that most real functions hit one or the
+other, which is the practical reason ``@cluster`` is not a way to use your
+machine's cores. For that, drive :doc:`local_executor` directly:
+``LocalExecutor.execute_loop_parallel`` takes an arbitrary loop and gives you
+a real pool.
