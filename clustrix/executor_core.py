@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 import cloudpickle
 
+from .config import validate_cluster_type
 from .executor_connections import ConnectionManager
 from .executor_schedulers import SchedulerManager
 from .hf_jobs import HFJobsManager
@@ -73,6 +74,11 @@ class ClusterExecutor:
             job_id = self.hf_jobs_manager.submit_job(func_data, job_config)
             self.active_jobs[job_id] = {"manager": "huggingface", "job_id": job_id}
             return job_id
+
+        # Checked before connect(): a cluster type this executor cannot
+        # dispatch used to fail *after* an SSH round trip to a host that was
+        # never going to be used.
+        validate_cluster_type(self.config.cluster_type)
 
         # Ensure connection is established for traditional cluster types
         self.connect()

@@ -182,6 +182,8 @@ class ClusterConfig:
                 f"(insecure, trusts unknown host keys automatically)."
             )
 
+        validate_cluster_type(self.cluster_type)
+
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
         if self.use_env_password and self.password_env_var:
@@ -296,6 +298,33 @@ def _removed_setting_reason(name: str) -> Optional[str]:
     return None
 
 
+def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:
+    """Reject a backend clustrix cannot run, saying which kind of wrong it is.
+
+    Three outcomes rather than two: a supported type passes, a *removed* type
+    is named along with why it went and where it is tracked, and anything else
+    is an ordinary typo. Collapsing the middle case into the last one is what
+    left ``cluster_type: pbs`` looking like a spelling mistake.
+    """
+    if cluster_type in SUPPORTED_CLUSTER_TYPES:
+        return
+
+    supported = ", ".join(SUPPORTED_CLUSTER_TYPES)
+    if cluster_type in REMOVED_CLUSTER_TYPES:
+        issue = REMOVED_CLUSTER_TYPES[cluster_type]
+        where = f" Its return is tracked in issue #{issue}." if issue else ""
+        raise ValueError(
+            f"{source}={cluster_type!r} is no longer implemented. It was "
+            f"removed in v0.2.0 because it had never been verified against "
+            f"real hardware.{where} Supported types are: {supported}."
+        )
+
+    raise ValueError(
+        f"{source}={cluster_type!r} is not a supported cluster type. "
+        f"Supported types are: {supported}."
+    )
+
+
 _SECRET_FIELD_PATTERN = re.compile(
     r"secret|token|password|api_key|access_key|_key$|client_id|tenant_id"
     r"|subscription_id",
@@ -385,12 +414,26 @@ def configure(**kwargs) -> None:
     """
     global _config  # noqa: F824
 
-    # Update configuration with provided kwargs
-    for key, value in kwargs.items():
+    # Validate everything before applying anything: a rejected keyword used
+    # to leave the earlier ones already written to the live config, so a
+    # failed configure() call still changed the process's behaviour.
+    for key in kwargs:
         if hasattr(_config, key):
-            setattr(_config, key, value)
-        else:
-            raise ValueError(f"Unknown configuration parameter: {key}")
+            continue
+        removed = _removed_setting_reason(key)
+        if removed:
+            raise ValueError(removed)
+        raise ValueError(f"Unknown configuration parameter: {key}")
+
+    if "cluster_type" in kwargs:
+        # setattr below does not re-run __post_init__, so without this a
+        # removed backend reaches the executor and fails there instead --
+        # after connect(), i.e. after an SSH round trip to a host that was
+        # never going to be used.
+        validate_cluster_type(kwargs["cluster_type"])
+
+    for key, value in kwargs.items():
+        setattr(_config, key, value)
 
 
 def load_config(config_path: str) -> None:
@@ -442,15 +485,9 @@ def load_config(config_path: str) -> None:
             f"{config_path} contains unknown setting(s): {'; '.join(hints)}"
         )
 
-    requested = config_data.get("cluster_type")
-    if requested in REMOVED_CLUSTER_TYPES:
-        issue = REMOVED_CLUSTER_TYPES[requested]
-        where = f" It is tracked in issue #{issue}." if issue else ""
-        raise ValueError(
-            f"{config_path} requests cluster_type={requested!r}, which clustrix "
-            f"no longer implements. It was removed because it had never been "
-            f"verified against real hardware.{where} Supported types are: "
-            f"{', '.join(SUPPORTED_CLUSTER_TYPES)}."
+    if "cluster_type" in config_data:
+        validate_cluster_type(
+            config_data["cluster_type"], source=f"{config_path}: cluster_type"
         )
 
     _config = ClusterConfig(**config_data)
