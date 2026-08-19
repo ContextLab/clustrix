@@ -218,3 +218,42 @@ jobs:
         pip install jupyter nbconvert
         jupyter nbconvert --to script docs/source/notebooks/basic_usage.ipynb
         # Note: Full notebook execution would require cluster setup
+  # A single stable name for branch protection to require. Without it,
+  # protection has to list all seven `test (os, version)` jobs individually
+  # and silently stops covering any combination added later -- and `master`
+  # had no protection at all, so a red run could always be merged past.
+  #
+  # `if: always()` so this job still runs when a dependency fails; without it
+  # the gate would be skipped rather than failing, and a skipped required
+  # check does not block a merge.
+  tests-status:
+    name: Tests Status
+    runs-on: ubuntu-latest
+    needs: [test, integration-test, docs-test]
+    if: always()
+    steps:
+    - name: Check status
+      run: |
+        # Every job in `needs` must be checked by name. An aggregator that
+        # forgets one reports success while that one burns -- the exact
+        # defect fixed in fast_ci.yml's status-check, which had
+        # security-scan in `needs` but not in its condition.
+        failed=0
+        for job in test integration-test docs-test; do
+          case "$job" in
+            test)             result="${{ needs.test.result }}" ;;
+            integration-test) result="${{ needs.integration-test.result }}" ;;
+            docs-test)        result="${{ needs.docs-test.result }}" ;;
+          esac
+          if [ "$result" != "success" ]; then
+            echo "::error::$job: $result"
+            failed=1
+          else
+            echo "$job: success"
+          fi
+        done
+        if [ "$failed" -ne 0 ]; then
+          echo "One or more test jobs did not succeed."
+          exit 1
+        fi
+        echo "All test jobs passed."
