@@ -484,12 +484,7 @@ def check_file(target: TargetFile) -> List[Result]:
 
 #: Pages that need a narrower window than "the whole file". Keyed by path
 #: relative to the repository root.
-_SECTION_BOUNDS = {
-    "docs/source/tutorials/kubernetes_tutorial.rst": (
-        "Auto-Provisioning a Cluster\n----",
-        "Configuration Options\n---",
-    ),
-}
+_SECTION_BOUNDS: dict = {}
 
 #: Directories under docs/ that are build output or vendored, not sources.
 _SKIP_DIRS = {"build", "_build", "_static", "_templates"}
