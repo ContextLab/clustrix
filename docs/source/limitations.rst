@@ -439,40 +439,72 @@ write its own output to a durable location -- a file on the cluster, a
 database -- and return only a path or a summary.
 
 
-Unverified backends
--------------------
+.. _removed-backends:
 
-Only ``slurm``, ``ssh`` and ``huggingface`` have been demonstrated running a
-real job end to end (``scripts/collect_execution_evidence.py``). ``local``
-works and is exercised by the test suite. The rest are implemented but
-unverified:
+Backends removed in v0.2.0
+--------------------------
 
-==================  ===========================================================
-Backend             Caveat
-==================  ===========================================================
-``pbs``             Never run against real hardware. It now shares the staging
-                    and environment setup the other schedulers use; previously
-                    it ran ``python execute_function.py``, a file nothing in
-                    clustrix has ever created.
-``sge``             Never run against real hardware.
-``kubernetes``      Never verified against a real cluster. Additionally it does
-                    **not** replicate your environment: the container installs
-                    only ``cloudpickle`` and ``dill``, so everything else your
-                    function imports must already be in ``k8s_image``. Results
-                    come back through the pod log, which means a very large
-                    result is at the mercy of log retention.
-Cloud VM providers  Every ``provider=`` backend (``aws``, ``gcp``, ``azure``,
-                    ``lambda``, and ``provider="huggingface"``, which is the
-                    Spaces provider, not HuggingFace Jobs) is unverified end to
-                    end. Until recently the path could not have worked at all:
-                    the serializer writes the function under a ``"function"``
-                    key while the remote bootstrap read ``"func"``. That was
-                    fixed (issue #119), but nothing has since demonstrated a
-                    completed cloud job.
-==================  ===========================================================
+Clustrix once shipped seven more execution backends. All seven were implemented
+in full, and not one of them had ever been shown to run a job end to end
+against real hardware. Rather than keep publishing them as if they worked, they
+were removed in v0.2.0.
 
-Use ``cluster_type="huggingface"`` (HuggingFace Jobs), not
-``provider="huggingface"`` (Spaces).
+Nothing about them was deprecated gently first, and that is deliberate: a
+backend that has never completed a job is not a feature with rough edges, it is
+an untested code path with a plausible-looking API in front of it. The failure
+mode is that you write against it, it appears to submit, and you find out much
+later that no result was ever produced.
+
+Each removed backend has a tracking issue. They are planned for a future
+release, and the gate for each one is the same as the gate the surviving
+backends already passed: a real job, on real hardware, whose result comes back
+and is checked in as evidence.
+
+=================  =============  ====================================================
+Backend            Issue          What it was
+=================  =============  ====================================================
+PBS                `#140`_        ``cluster_type="pbs"`` -- the PBS/Torque scheduler.
+SGE                `#141`_        ``cluster_type="sge"`` -- Sun/Son of Grid Engine.
+Kubernetes         `#142`_        ``cluster_type="kubernetes"``, the ``k8s_*``
+                                  settings, and cluster auto-provisioning.
+AWS                `#143`_        ``provider="aws"`` -- EC2 and EKS.
+GCP                `#144`_        ``provider="gcp"`` -- Google Compute Engine.
+Azure              `#145`_        ``provider="azure"`` -- Azure VMs.
+Lambda Cloud       `#146`_        ``provider="lambda"`` -- Lambda Labs GPU cloud.
+=================  =============  ====================================================
+
+.. _#140: https://github.com/ContextLab/clustrix/issues/140
+.. _#141: https://github.com/ContextLab/clustrix/issues/141
+.. _#142: https://github.com/ContextLab/clustrix/issues/142
+.. _#143: https://github.com/ContextLab/clustrix/issues/143
+.. _#144: https://github.com/ContextLab/clustrix/issues/144
+.. _#145: https://github.com/ContextLab/clustrix/issues/145
+.. _#146: https://github.com/ContextLab/clustrix/issues/146
+
+Two more things went with them:
+
+* **The HuggingFace Spaces provider** (``provider="huggingface"``). This is a
+  different thing from ``cluster_type="huggingface"``, which is HuggingFace
+  **Jobs** and is verified working and fully supported. Only Spaces was
+  removed.
+* **The cost monitoring and cloud pricing API** --
+  ``cost_tracking_decorator``, ``get_cost_monitor``, ``start_cost_monitoring``,
+  ``generate_cost_report`` and ``get_pricing_info``. These estimated the cost
+  of running on the cloud VM backends, so with those backends gone the API had
+  nothing left to price.
+
+What to do instead
+~~~~~~~~~~~~~~~~~~
+
+* **PBS or SGE**: no direct substitute in Clustrix today. Follow `#140`_ /
+  `#141`_. If your site also runs SLURM, ``cluster_type="slurm"`` is verified.
+* **Kubernetes**: no substitute. Follow `#142`_.
+* **A cloud GPU**: ``cluster_type="huggingface"`` submits to HuggingFace Jobs,
+  which runs your function in a container on rented GPUs and is verified end to
+  end. Otherwise, bring up a VM yourself and use ``cluster_type="ssh"``, which
+  is also verified.
+* **Cost estimates**: use your provider's own pricing calculator. Clustrix no
+  longer ships one.
 
 
 Windows clients: config and credential files are not permission-restricted
@@ -541,21 +573,14 @@ Smaller sharp edges
   keys *are* validated and will refuse metacharacters.
 * **``cores=0`` falls back to the default.** The merge is written as
   ``cores or config.default_cores``, so any falsy value takes the default.
-* **``@cluster`` mutates global configuration.** Passing ``platform=``,
-  ``auto_provision=``, ``cluster_name=``, ``node_count=``, ``node_type=``,
-  ``kubernetes_version=`` or ``from_scratch=`` writes the corresponding field
-  onto the shared ``ClusterConfig``, where it stays for every later call.
 * **Unknown ``@cluster`` keywords are warned about, not rejected**, and only on
   the first call -- so a typo in a keyword name is easy to miss if you are not
   watching the log.
 * **Some recognised ``@cluster`` keywords are still ignored by their backend.**
-  ``k8s_namespace``, ``k8s_image``, ``k8s_service_account`` and
-  ``k8s_pull_policy`` are accepted and placed in ``job_config``, but
-  ``KubernetesJobManager`` reads only ``self.config.k8s_*``. Likewise
-  ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted but
-  ``HFJobsManager`` resolves them from configuration. These produce no warning,
-  because the keywords *are* on the recognised list. Set them through
-  ``clustrix.configure()``.
+  ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted and placed in
+  ``job_config``, but ``HFJobsManager`` resolves them from configuration
+  instead. This produces no warning, because the keywords *are* on the
+  recognised list. Set them through ``clustrix.configure()``.
 
 
 See also

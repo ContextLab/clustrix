@@ -1,7 +1,11 @@
-"""SLURM, PBS, and SGE scheduler job submission and monitoring.
+"""SLURM scheduler and plain-SSH job submission and monitoring.
 
-This module handles job submission, monitoring, and status checking for traditional
-HPC schedulers including SLURM, PBS/Torque, and Sun Grid Engine (SGE).
+This module handles job submission, monitoring, and status checking for SLURM
+and for direct execution over SSH.
+
+PBS/Torque and SGE submission used to live here. Neither was ever verified
+against a real scheduler, so both were removed in v0.2.0 (PBS: issue #140,
+SGE: issue #141).
 """
 
 import os
@@ -21,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 class SchedulerManager:
-    """Submits jobs to SLURM, PBS, SGE and plain SSH hosts."""
+    """Submits jobs to SLURM and plain SSH hosts."""
 
     def _prepare_job_dir(self, remote_job_dir: str) -> str:
         """Create the job directory and give the job a result-signing key.
@@ -103,10 +107,8 @@ class SchedulerManager:
     def _setup_job_environment(self, remote_job_dir: str, func_data: Dict[str, Any]):
         """Build the Python environment the generated job script will activate.
 
-        Shared by SLURM, PBS, SGE and SSH. SLURM and SSH each carried a copy of
-        this, SGE had only the basic half, and PBS had none at all -- so a PBS
-        job ran a script whose first act was `source venv/bin/activate` against
-        a virtualenv nothing had created, and died there every time (#120).
+        Shared by SLURM and SSH, which each used to carry their own copy of
+        it (#120).
 
         Returns the config to generate the job script from: `venv_info` set for
         the two-venv layout, or cleared when only the single venv was built.
@@ -215,75 +217,6 @@ class SchedulerManager:
 
         return job_id
 
-    def submit_pbs_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Submit job via PBS."""
-        remote_job_dir, result_key = self._stage_job_directory(func_data)
-        updated_config = self._setup_job_environment(remote_job_dir, func_data)
-
-        # Create PBS script
-        script_content = create_job_script(
-            cluster_type="pbs",
-            job_config=job_config,
-            remote_job_dir=remote_job_dir,
-            config=updated_config,
-        )
-
-        script_path = f"{remote_job_dir}/job.pbs"
-        self.connection_manager.create_remote_file(script_path, script_content)
-
-        # Submit job
-        cmd = f"cd {remote_job_dir} && qsub job.pbs"
-        stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-
-        job_id = stdout.strip()
-
-        self.active_jobs[job_id] = {
-            "remote_dir": remote_job_dir,
-            "result_key": result_key,
-            "status": "submitted",
-            "submit_time": time.time(),
-        }
-
-        return job_id
-
-    def submit_sge_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Submit job via SGE."""
-        remote_job_dir, result_key = self._stage_job_directory(func_data)
-        updated_config = self._setup_job_environment(remote_job_dir, func_data)
-
-        # Create job script
-        script_content = create_job_script(
-            cluster_type="sge",
-            job_config=job_config,
-            remote_job_dir=remote_job_dir,
-            config=updated_config,
-        )
-
-        # Upload and submit job script
-        script_path = f"{remote_job_dir}/job.sge"
-        self.connection_manager.create_remote_file(script_path, script_content)
-
-        # Submit job
-        cmd = f"cd {remote_job_dir} && qsub job.sge"
-        stdout, stderr = self.connection_manager.execute_remote_command(cmd)
-
-        # Extract job ID from qsub output (SGE format: "Your job 123456 ...")
-        job_id = stdout.strip().split()[2] if "Your job" in stdout else stdout.strip()
-
-        # Store job info
-        self.active_jobs[job_id] = {
-            "remote_dir": remote_job_dir,
-            "result_key": result_key,
-            "status": "submitted",
-            "submit_time": time.time(),
-        }
-
-        return job_id
-
     def submit_ssh_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
@@ -337,10 +270,6 @@ class SchedulerManager:
         """Cancel a running job."""
         if self.config.cluster_type == "slurm":
             self.connection_manager.execute_remote_command(f"scancel {job_id}")
-        elif self.config.cluster_type == "pbs":
-            self.connection_manager.execute_remote_command(f"qdel {job_id}")
-        elif self.config.cluster_type == "sge":
-            self.connection_manager.execute_remote_command(f"qdel {job_id}")
 
         if job_id in self.active_jobs:
             del self.active_jobs[job_id]

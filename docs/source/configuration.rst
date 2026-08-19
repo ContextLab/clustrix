@@ -120,15 +120,17 @@ Choosing a backend
      - Effect
    * - ``cluster_type``
      - ``"slurm"``
-     - One of ``local``, ``ssh``, ``slurm``, ``pbs``, ``sge``, ``kubernetes``,
-       ``huggingface`` (``SUPPORTED_CLUSTER_TYPES``). Anything else raises
+     - One of ``local``, ``ssh``, ``slurm``, ``huggingface``
+       (``SUPPORTED_CLUSTER_TYPES``). Anything else raises
        ``ValueError: Unsupported cluster type: ...`` at submit time. Note the
        default is ``slurm``, but with no ``cluster_host`` set the decorator
-       still runs locally -- see :ref:`execution-model`.
+       still runs locally -- see :ref:`execution-model`. PBS, SGE, Kubernetes
+       and the cloud VM providers were removed in v0.2.0; see
+       :ref:`removed-backends`.
    * - ``cluster_host``
      - ``None``
      - The SSH host. **Its absence is what makes execution local** for every
-       backend except ``huggingface`` and auto-provisioned Kubernetes.
+       backend except ``huggingface``.
    * - ``cluster_port``
      - ``22``
      - Port passed to paramiko.
@@ -209,17 +211,13 @@ Resources
      - ``--cpus-per-task`` / ``ppn`` / ``-pe``, and the local process-pool size.
    * - ``default_memory``
      - ``"8GB"``
-     - Rewritten per scheduler by ``normalize_memory``: ``8G`` for SLURM,
-       ``8gb`` for PBS/SGE, ``8GB`` for Kubernetes.
+     - Rewritten per scheduler by ``normalize_memory``: ``8G`` for SLURM.
    * - ``default_time``
      - ``"01:00:00"``
      - Wall-clock limit directive.
    * - ``default_partition``
      - ``None``
      - ``#SBATCH --partition``. Omitted when unset.
-   * - ``default_queue``
-     - ``None``
-     - ``#PBS -q`` / ``#$ -q``. Omitted when unset.
    * - ``max_parallel_jobs``
      - ``100``
      - Upper bound on the number of chunks ``_execute_parallel`` splits a
@@ -240,7 +238,7 @@ Paths and the remote environment
      - ``"~/.clustrix/jobs"``
      - Parent of every job directory. A leading ``~/`` is expanded against the
        remote ``$HOME`` before SFTP touches it. Home-relative rather than
-       ``/tmp`` on purpose: on SLURM/PBS/SGE a compute node has its own
+       ``/tmp`` on purpose: on SLURM a compute node has its own
        ``/tmp``, so an environment built on the login node is simply absent at
        run time and the job dies with exit 127 before writing diagnostics.
    * - ``local_work_dir``
@@ -348,32 +346,6 @@ Execution behaviour
 Backend-specific settings
 -------------------------
 
-Kubernetes
-~~~~~~~~~~
-
-``k8s_namespace`` (``"default"``), ``k8s_image`` (``"python:3.11-slim"``),
-``k8s_service_account`` (``None``), ``k8s_pull_policy`` (``"IfNotPresent"``),
-``k8s_job_ttl_seconds`` (``3600``), ``k8s_backoff_limit`` (``3``).
-
-``@cluster`` accepts ``k8s_namespace``, ``k8s_image``,
-``k8s_service_account`` and ``k8s_pull_policy`` as keyword arguments and puts
-them in ``job_config`` -- but ``KubernetesJobManager.submit_k8s_job`` reads
-only ``self.config.k8s_*``, so **those per-call values have no effect**. The
-only ``job_config`` keys this backend reads are ``cores`` and ``memory``. Set
-the ``k8s_*`` fields through configuration instead.
-
-The container installs only ``cloudpickle`` and ``dill``:
-**``replicate_local_environment`` and ``cluster_packages`` are not honoured by
-this backend.** Pick an image that already contains what your function
-imports.
-
-Auto-provisioning fields -- ``auto_provision_k8s`` (``False``),
-``k8s_provider`` (``"aws"``), ``k8s_from_scratch`` (``True``),
-``k8s_auto_cleanup`` (``True``), ``k8s_cluster_name``, ``k8s_node_count``
-(``2``), ``k8s_node_type``, ``k8s_version`` (``"1.28"``), ``k8s_region`` --
-drive cluster creation. ``k8s_remote`` (``False``) is read by the notebook
-widget only.
-
 HuggingFace Jobs (``cluster_type="huggingface"``)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -429,27 +401,6 @@ cache), so passing them per call has no effect on this backend.
    hf_allow_gpu_flavors=True to confirm you intend to pay for it; otherwise use
    a CPU flavor (default: cpu-basic).
 
-Cloud VM providers
-~~~~~~~~~~~~~~~~~~
-
-``aws_*``, ``azure_*``, ``gcp_*``, ``lambda_*``, ``cloud_provider``
-(``"manual"``), ``cloud_region``, ``cloud_auto_configure`` (``False``) feed the
-``provider=`` routing and the pricing clients. The pricing and cost-estimation
-clients work. The VM *execution* backends have never been shown to run a job
-end to end; see :doc:`limitations`.
-
-Both boto3-style and widget-style AWS names are accepted
-(``aws_access_key_id``/``aws_access_key``, ``aws_secret_access_key``/
-``aws_secret_key``) and reconciled by ``clustrix.field_mappings``.
-
-The following can also be passed per call to ``@cluster``: ``lambda_api_key``,
-``aws_access_key_id``, ``aws_secret_access_key``, ``aws_region``,
-``azure_subscription_id``, ``azure_tenant_id``, ``azure_client_id``,
-``azure_client_secret``, ``gcp_project_id``, ``gcp_service_account_key``,
-``key_file``, ``terminate_on_completion``, ``instance_startup_timeout``.
-Anything else is warned about and ignored.
-
-
 Settings that currently have no effect
 --------------------------------------
 
@@ -482,13 +433,8 @@ Field                         Status
 ``cache_credentials``         Not read.
 ``credential_cache_ttl``      Not read.
 ``local_cache_dir``           Not read.
-``k8s_service_account``       Not read by the executor.
-``k8s_pull_policy``           Not read by the executor.
-``k8s_auto_cleanup``          Not read by the executor.
-``cost_monitoring``           Not read.
-``k8s_remote``                Notebook widget only.
-``hf_sdk`` / ``hf_hardware``  Spaces-era fields. ``hf_hardware`` survives only
-                              as a fallback for ``hf_flavor``.
+``hf_hardware``               A Spaces-era field. It survives only as a
+                              fallback for ``hf_flavor``.
 ``venv_info``                 Runtime scratch space, written by clustrix
                               during a submission. Do not set it yourself.
 ============================  ===========================================
