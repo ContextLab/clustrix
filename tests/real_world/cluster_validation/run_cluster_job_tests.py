@@ -71,36 +71,8 @@ class ClusterJobTestRunner:
             f"  {status} SLURM: {'Available' if availability['slurm'] else 'Not available'}"
         )
 
-        # Check PBS (use SSH credentials)
-        ssh_creds = self.credential_manager.get_ssh_credentials()
-        availability["pbs"] = ssh_creds is not None
-        status = "✅" if availability["pbs"] else "❌"
-        print(
-            f"  {status} PBS: {'Available' if availability['pbs'] else 'Not available'}"
-        )
-
-        # Check SGE (use SSH credentials)
-        availability["sge"] = ssh_creds is not None
-        status = "✅" if availability["sge"] else "❌"
-        print(
-            f"  {status} SGE: {'Available' if availability['sge'] else 'Not available'}"
-        )
-
-        # Check Kubernetes
-        try:
-            result = subprocess.run(
-                ["kubectl", "cluster-info"], capture_output=True, text=True, timeout=10
-            )
-            availability["kubernetes"] = result.returncode == 0
-        except (subprocess.TimeoutExpired, FileNotFoundError):
-            availability["kubernetes"] = False
-
-        status = "✅" if availability["kubernetes"] else "❌"
-        print(
-            f"  {status} Kubernetes: {'Available' if availability['kubernetes'] else 'Not available'}"
-        )
-
         # Check SSH
+        ssh_creds = self.credential_manager.get_ssh_credentials()
         availability["ssh"] = ssh_creds is not None
         status = "✅" if availability["ssh"] else "❌"
         print(
@@ -475,7 +447,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run cluster job submission tests")
     parser.add_argument(
         "--cluster",
-        choices=["slurm", "pbs", "sge", "kubernetes", "ssh", "all"],
+        choices=["slurm", "ssh", "all"],
         default="all",
         help="Cluster type to test",
     )

@@ -57,9 +57,6 @@ def test_system_components():
     # Test test files exist
     test_files = [
         "tests/real_world/test_slurm_job_submission_real.py",
-        "tests/real_world/test_pbs_job_submission_real.py",
-        "tests/real_world/test_sge_job_submission_real.py",
-        "tests/real_world/test_kubernetes_job_submission_real.py",
         "tests/real_world/test_ssh_job_execution_real.py",
     ]
 
