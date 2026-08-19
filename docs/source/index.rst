@@ -1,7 +1,12 @@
 Clustrix Documentation
 ======================
 
-Clustrix is a Python package that enables seamless distributed computing on clusters. With a simple decorator, you can execute any Python function remotely on cluster resources while automatically handling dependency management, environment setup, and result collection.
+**Run an ordinary Python function somewhere else.**
+
+Add ``@cluster`` to a function, call it normally, and Clustrix serializes it
+with its arguments, ships it to the compute resource you configured, runs it
+there, and hands you back the return value. No job script, no ``scp``, no
+polling loop, no result-unpickling glue.
 
 .. image:: https://img.shields.io/pypi/v/clustrix.svg
    :target: https://pypi.org/project/clustrix/
@@ -15,6 +20,34 @@ Clustrix is a Python package that enables seamless distributed computing on clus
    :target: https://github.com/ContextLab/clustrix/blob/master/LICENSE
    :alt: License
 
+.. code-block:: python
+
+   from clustrix import cluster, configure
+
+   configure(cluster_type="local")  # no cluster needed to try this
+
+   @cluster(cores=8, memory="16GB", time="02:00:00")
+   def expensive_computation(iterations=1000):
+       import math
+
+       return sum(math.sqrt(i) for i in range(iterations))
+
+   print(expensive_computation(iterations=10_000))
+
+Change ``cluster_type="local"`` to a SLURM login node and those same lines
+submit a batch job. That substitutability is the point of the library.
+
+Start here
+----------
+
+- :doc:`introduction` -- what Clustrix is, what it is not, and how it compares
+  to hand-written sbatch scripts, Dask, Ray, joblib and plain SSH.
+- :doc:`installation` -- install it, with the optional extras.
+- :doc:`quickstart` -- a real result in five minutes, beginning with a backend
+  that needs no cluster at all.
+- :ref:`supported-cluster-types` -- **read this before depending on a
+  backend.** They are not equally proven.
+
 Features
 --------
 
@@ -27,55 +60,14 @@ Features
 - **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
 - **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
 - **Cost Estimation**: Pricing and cost estimates for AWS, GCP, Azure, and Lambda Cloud
-- **Automatic Dependency Management**: Captures and replicates your exact Python environment  
+- **Automatic Dependency Management**: Captures and replicates your exact Python environment
 - **Loop Parallelization**: Automatically distributes loops across cluster nodes
 - **Local Parallelization**: Multi-core execution for development and testing
-- **Flexible Configuration**: Easy setup with config files, environment variables, or interactive widget
+- **Flexible Configuration**: Easy setup with config files or the interactive widget
 - **Error Handling**: Comprehensive error reporting and job monitoring
 
-Quick Start
------------
-
-Installation
-~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   pip install clustrix
-
-Basic Usage
-~~~~~~~~~~~
-
-.. code-block:: python
-
-   import clustrix
-   
-   # Configure your cluster
-   clustrix.configure(
-       cluster_type='slurm',
-       cluster_host='your-cluster.example.com',
-       username='your-username',
-       default_cores=4,
-       default_memory='8GB'
-   )
-   
-   # Decorate your function
-   @clustrix.cluster(cores=8, memory='16GB', time='02:00:00')
-   def expensive_computation(data, iterations=1000):
-       import numpy as np
-       array = np.asarray(data)
-       result = 0
-       for i in range(iterations):
-           result += np.sum(array ** 2)
-       return result
-   
-   # Execute on cluster
-   data = [1, 2, 3, 4, 5]
-   result = expensive_computation(data, iterations=10000)
-   print(f"Result: {result}")
-
 Jupyter Notebook Integration
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+----------------------------
 
 Clustrix registers an IPython magic that opens a configuration widget:
 
@@ -138,15 +130,25 @@ Table of Contents
 
 .. toctree::
    :maxdepth: 2
+   :caption: Getting Started
+
+   introduction
+   installation
+   quickstart
+
+.. toctree::
+   :maxdepth: 2
    :caption: User Guide
 
-   installation
+   execution_model
+   configuration
    ssh_setup
+   limitations
 
 .. toctree::
    :maxdepth: 2
    :caption: Tutorials
-   
+
    tutorials/usage_patterns
    tutorials/filesystem_tutorial
    tutorials/slurm_tutorial
@@ -156,7 +158,7 @@ Table of Contents
 .. toctree::
    :maxdepth: 2
    :caption: Interactive Notebooks
-   
+
    notebooks/filesystem_tutorial
    notebooks/cluster_config_example
    notebooks/complete_api_demo
@@ -177,7 +179,7 @@ Table of Contents
 .. toctree::
    :maxdepth: 2
    :caption: Cloud Platform Tutorials
-   
+
    notebooks/aws_cloud_tutorial
    notebooks/azure_cloud_tutorial
    notebooks/gcp_cloud_tutorial
