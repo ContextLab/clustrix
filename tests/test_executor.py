@@ -1,11 +1,67 @@
+import logging
+import textwrap
+
 import pytest
-import pickle
-import os
-import sys
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 from clustrix.executor import ClusterExecutor
 from clustrix.config import ClusterConfig
-import clustrix.executor
+from clustrix.utils import create_job_script, serialize_function
+
+
+def _double(x):
+    """Module-level so it can really be serialized and really be run."""
+    return x * 2
+
+
+def _explode():
+    """A real failure with a real traceback."""
+    return 1 / 0
+
+
+#: A kubeconfig that the real kubernetes client parses successfully. It points
+#: at a port nothing is listening on, which is enough: these tests exercise
+#: client setup, never an API call.
+_MINIMAL_KUBECONFIG = textwrap.dedent("""\
+    apiVersion: v1
+    kind: Config
+    clusters:
+    - name: clustrix-test
+      cluster:
+        server: https://127.0.0.1:6443
+    contexts:
+    - name: clustrix-test
+      context:
+        cluster: clustrix-test
+        user: clustrix-test
+    current-context: clustrix-test
+    users:
+    - name: clustrix-test
+      user:
+        token: not-a-real-token
+    """)
+
+
+def _point_kubeconfig_at(monkeypatch, path):
+    """Aim the real kubernetes client at `path`.
+
+    `KUBECONFIG` alone is not enough: kubernetes.config reads it once, into a
+    module constant, when it is first imported. Setting the environment
+    variable afterwards leaves whichever value the first import saw, so the
+    constant is redirected too. Nothing is faked -- the client still reads a
+    real file off disk and either parses it or refuses it.
+    """
+    monkeypatch.setenv("KUBECONFIG", str(path))
+    monkeypatch.setattr(
+        "kubernetes.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION", str(path)
+    )
+
+
+#: (cluster_type, ClusterExecutor submission method, directive unique to it).
+SCHEDULER_CASES = [
+    ("slurm", "_submit_slurm_job", "#SBATCH --cpus-per-task=4"),
+    ("pbs", "_submit_pbs_job", "#PBS -l nodes=1:ppn=4"),
+    ("sge", "_submit_sge_job", "#$ -pe smp 4"),
+]
 
 
 class TestClusterExecutor:
@@ -100,8 +156,16 @@ class TestClusterExecutor:
         mock_ssh.exec_command.assert_called_once_with("echo test")
 
     def test_execute_command_not_connected(self, executor):
-        """Test command execution without connection."""
-        with pytest.raises(RuntimeError, match="Not connected"):
+        """A command with no SSH connection must fail, and say why.
+
+        Nothing is mocked: this is the shipped code raising its real error.
+
+        The expected text is CHANGED from "Not connected". The refactor moved
+        this into ConnectionManager, whose message is "SSH client not
+        connected. Call setup_ssh_connection() first." -- the old regex never
+        matched anything clustrix produces.
+        """
+        with pytest.raises(RuntimeError, match="SSH client not connected"):
             executor._execute_command("echo test")
 
     @patch("cloudpickle.dumps")
@@ -125,212 +189,94 @@ class TestClusterExecutor:
         assert call_args["kwargs"] == {}
         assert call_args["config"] == {"cores": 4}
 
-    @patch("os.unlink")
-    @patch("pickle.dump")
-    @patch("tempfile.NamedTemporaryFile")
-    @patch.object(clustrix.executor, "setup_remote_environment")
-    @patch("clustrix.executor.ClusterExecutor._upload_file")
-    @patch("clustrix.executor.ClusterExecutor._create_remote_file")
-    def test_submit_slurm_job(
-        self,
-        mock_create_file,
-        mock_upload,
-        mock_setup_env,
-        mock_tempfile,
-        mock_pickle,
-        mock_unlink,
-        executor,
+    # ------------------------------------------------------------------
+    # Job submission.
+    #
+    # The four tests that lived here (slurm/pbs/sge/k8s) were mock theatre.
+    # They patched `clustrix.executor.setup_remote_environment` -- a name that
+    # module has not exported since the refactor, so the patch was a silent
+    # no-op -- and `clustrix.executor.cloudpickle`, likewise absent. They then
+    # replaced `executor._execute_remote_command`, a backward-compatibility
+    # alias the scheduler path no longer calls, fed it "Submitted batch job
+    # 12345", and asserted that "12345" came back. No clustrix code decided
+    # anything in any of them.
+    #
+    # Two things about submission are real and checkable here, with no
+    # scheduler and no network: the script each scheduler generates (a pure
+    # function), and the fact that a submission with no connection fails
+    # loudly rather than inventing a job ID.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize("cluster_type,_method,directive", SCHEDULER_CASES)
+    def test_scheduler_script_carries_only_its_own_directives(
+        self, cluster_type, _method, directive
     ):
-        """Test SLURM job submission (simplified)."""
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
+        """Real generator, real output -- create_job_script is pure."""
+        config = ClusterConfig(cluster_type=cluster_type, remote_work_dir="/scratch/w")
 
-        # Mock tempfile
-        mock_file = Mock()
-        mock_file.name = "/tmp/test_file"
-        mock_tempfile.return_value.__enter__.return_value = mock_file
-
-        # Mock command execution responses
-        command_responses = {
-            "mkdir -p": ("", ""),  # mkdir command
-            "sbatch": ("Submitted batch job 12345", ""),  # sbatch command
-        }
-
-        def mock_execute_command(cmd):
-            for key, response in command_responses.items():
-                if key in cmd:
-                    return response
-            return ("", "")
-
-        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
-
-        func_data = {
-            "func": "dummy_func",  # Simplified - not actually pickled
-            "args": (),
-            "kwargs": {},
-            "requirements": [],
-        }
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
-
-        job_id = executor._submit_slurm_job(func_data, job_config)
-
-        assert job_id == "12345"
-
-        # Verify key methods were called
-        mock_upload.assert_called()  # Function data upload
-        mock_create_file.assert_called()  # Job script creation
-
-        # Verify sbatch command was executed
-        execute_calls = executor._execute_remote_command.call_args_list
-        sbatch_calls = [
-            call_obj for call_obj in execute_calls if "sbatch" in str(call_obj)
-        ]
-        assert len(sbatch_calls) > 0
-
-    @patch("os.unlink")
-    @patch("pickle.dump")
-    @patch("tempfile.NamedTemporaryFile")
-    @patch.object(clustrix.executor, "setup_remote_environment")
-    @patch("clustrix.executor.ClusterExecutor._upload_file")
-    @patch("clustrix.executor.ClusterExecutor._create_remote_file")
-    def test_submit_pbs_job(
-        self,
-        mock_create_file,
-        mock_upload,
-        mock_setup_env,
-        mock_tempfile,
-        mock_pickle,
-        mock_unlink,
-        executor,
-    ):
-        """Test PBS job submission."""
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
-
-        # Mock tempfile
-        mock_file = Mock()
-        mock_file.name = "/tmp/test_file"
-        mock_tempfile.return_value.__enter__.return_value = mock_file
-
-        # Mock command execution responses
-        command_responses = {"mkdir -p": ("", ""), "qsub": ("67890.pbs", "")}
-
-        def mock_execute_command(cmd):
-            for key, response in command_responses.items():
-                if key in cmd:
-                    return response
-            return ("", "")
-
-        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
-
-        func_data = {"func": "dummy_func", "args": (), "kwargs": {}, "requirements": []}
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
-        job_id = executor._submit_pbs_job(func_data, job_config)
-
-        assert job_id == "67890.pbs"
-
-        # Verify key methods were called
-        mock_upload.assert_called()
-        mock_create_file.assert_called()
-
-        # Verify qsub command was executed
-        execute_calls = executor._execute_remote_command.call_args_list
-        qsub_calls = [call_obj for call_obj in execute_calls if "qsub" in str(call_obj)]
-        assert len(qsub_calls) > 0
-
-    @patch("os.unlink")
-    @patch("pickle.dump")
-    @patch("tempfile.NamedTemporaryFile")
-    @patch.object(clustrix.executor, "setup_remote_environment")
-    @patch("clustrix.executor.ClusterExecutor._upload_file")
-    @patch("clustrix.executor.ClusterExecutor._create_remote_file")
-    def test_submit_sge_job(
-        self,
-        mock_create_file,
-        mock_upload,
-        mock_setup_env,
-        mock_tempfile,
-        mock_pickle,
-        mock_unlink,
-        executor,
-    ):
-        """Test SGE job submission."""
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
-
-        # Mock tempfile
-        mock_file = Mock()
-        mock_file.name = "/tmp/test_file"
-        mock_tempfile.return_value.__enter__.return_value = mock_file
-
-        # Mock command execution responses
-        command_responses = {
-            "mkdir -p": ("", ""),
-            "qsub": ("Your job 98765 has been submitted", ""),  # SGE format
-        }
-
-        def mock_execute_command(cmd):
-            for key, response in command_responses.items():
-                if key in cmd:
-                    return response
-            return ("", "")
-
-        executor._execute_remote_command = Mock(side_effect=mock_execute_command)
-
-        func_data = {"func": "dummy_func", "args": (), "kwargs": {}, "requirements": []}
-        job_config = {"cores": 4, "memory": "8GB", "time": "01:00:00"}
-
-        job_id = executor._submit_sge_job(func_data, job_config)
-
-        assert job_id == "98765"
-
-        # Verify key methods were called
-        mock_upload.assert_called()
-        mock_create_file.assert_called()
-
-        # Verify qsub command was executed
-        execute_calls = executor._execute_remote_command.call_args_list
-        qsub_calls = [call_obj for call_obj in execute_calls if "qsub" in str(call_obj)]
-        assert len(qsub_calls) > 0
-
-    @patch("kubernetes.client")
-    @patch("clustrix.executor.cloudpickle")
-    def test_submit_k8s_job(self, mock_cloudpickle, mock_client, executor):
-        """Test Kubernetes job submission."""
-        # Mock cloudpickle serialization
-        mock_cloudpickle.dumps.return_value = b"serialized_data"
-
-        # Mock Kubernetes API response
-        mock_response = Mock()
-        mock_response.metadata.name = "clustrix-job-12345"
-
-        mock_batch_api = Mock()
-        mock_batch_api.create_namespaced_job.return_value = mock_response
-        mock_client.BatchV1Api.return_value = mock_batch_api
-
-        # Mock k8s_client setup
-        executor.k8s_client = Mock()
-
-        func_data = {"func": "dummy_func", "args": (), "kwargs": {}, "requirements": []}
-        job_config = {"cores": 4, "memory": "8Gi"}
-
-        job_id = executor._submit_k8s_job(func_data, job_config)
-
-        assert job_id == "clustrix-job-12345"
-
-        # Verify Kubernetes API was called
-        mock_batch_api.create_namespaced_job.assert_called_once()
-        call_args = mock_batch_api.create_namespaced_job.call_args
-        assert call_args[1]["namespace"] == "default"
-        assert "body" in call_args[1]
-
-        # Verify job manifest structure
-        job_manifest = call_args[1]["body"]
-        assert job_manifest["kind"] == "Job"
-        assert (
-            job_manifest["spec"]["template"]["spec"]["containers"][0]["name"]
-            == "clustrix-worker"
+        script = create_job_script(
+            cluster_type=cluster_type,
+            job_config={"cores": 4, "memory": "8GB", "time": "01:00:00"},
+            remote_job_dir="/scratch/w/job_1",
+            config=config,
         )
+
+        assert script.startswith("#!/bin/bash")
+        assert directive in script
+        # The result the caller collects has to be signed, or it is refused
+        # before deserialization.
+        assert "result.pkl.hmac" in script
+        # A directive meant for another scheduler in this script would be
+        # either ignored or fatal, depending on the site.
+        for other_type, _m, other_directive in SCHEDULER_CASES:
+            if other_type != cluster_type:
+                assert other_directive not in script
+
+    @pytest.mark.parametrize("cluster_type,method,_directive", SCHEDULER_CASES)
+    def test_scheduler_submission_without_a_connection_records_no_job(
+        self, cluster_type, method, _directive
+    ):
+        """A submission that cannot reach the cluster must not invent a job.
+
+        Real call into the shipped submission path. It gets as far as creating
+        the remote job directory and stops there, because there is no SSH
+        connection -- which is exactly the observable behaviour worth pinning:
+        a phantom entry in active_jobs would be waited on forever.
+        """
+        config = ClusterConfig(
+            cluster_type=cluster_type,
+            cluster_host="test.cluster.com",
+            username="testuser",
+            remote_work_dir="/tmp/test_clustrix",
+        )
+        executor = ClusterExecutor(config)
+        func_data = serialize_function(_double, (21,), {})
+
+        with pytest.raises(RuntimeError, match="SSH client not connected"):
+            getattr(executor, method)(func_data, {"cores": 4})
+
+        assert executor.scheduler_manager.active_jobs == {}
+        assert executor.active_jobs == {}
+
+    def test_submit_k8s_job_without_a_usable_cluster_records_no_job(
+        self, monkeypatch, tmp_path
+    ):
+        """Same property for Kubernetes, via the real kubernetes client.
+
+        KUBECONFIG points at a file that does not exist, so the real client
+        refuses to configure itself. No API call is attempted and no cluster
+        is contacted.
+        """
+        _point_kubeconfig_at(monkeypatch, tmp_path / "no-such-kubeconfig.yaml")
+        executor = ClusterExecutor(ClusterConfig(cluster_type="kubernetes"))
+        func_data = serialize_function(_double, (21,), {})
+
+        with pytest.raises(Exception) as excinfo:
+            executor._submit_k8s_job(func_data, {"cores": 4, "memory": "8Gi"})
+
+        assert "kube-config" in str(excinfo.value)
+        assert executor.k8s_manager.active_jobs == {}
+        assert executor.active_jobs == {}
 
     def test_check_slurm_status(self, executor):
         """Test SLURM job status checking."""
@@ -452,109 +398,55 @@ class TestClusterExecutor:
 
         assert status == "completed"
 
-    def test_get_job_status_completed(self, executor):
-        """Test job status when result file exists."""
-        executor.ssh_client = Mock()
-        mock_sftp = Mock()
-        executor.ssh_client.open_sftp.return_value = mock_sftp
+    # ------------------------------------------------------------------
+    # Status and results.
+    #
+    # These three used to hand-build `active_jobs["job_12345"] =
+    # {"remote_dir": ...}` and mock an SFTP `stat`. `get_job_status` now
+    # dispatches on `active_jobs[job_id]["manager"]` -- there are several job
+    # managers (scheduler, kubernetes, local, huggingface) -- so the
+    # hand-built entry raised KeyError. The stale part was the TEST: the entry
+    # clustrix writes has that key.
+    #
+    # `cluster_type="local"` is a real backend, so these now submit real work,
+    # run it, and read the real bookkeeping back.
+    # ------------------------------------------------------------------
 
-        # Mock squeue command to return empty (job not in queue)
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""  # Empty output - job not in queue
-        mock_stderr = Mock()
-        mock_stderr.read.return_value = b""
+    def test_get_job_status_completed(self):
+        """A completed job's status, routed by the manager that owns it."""
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(
+            serialize_function(_double, (21,), {}), {"cores": 1}
+        )
 
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
+        assert executor.active_jobs[job_id]["manager"] == "local"
+        assert executor.get_job_status(job_id) == "completed"
 
-        # Add job to active jobs for tracking
-        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
+    def test_get_job_status_failed(self):
+        """A job that really raised is reported as failed, not as unknown."""
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(serialize_function(_explode, (), {}), {"cores": 1})
 
-        # Mock file existence check - result.pkl exists
-        mock_sftp.stat.return_value = Mock()  # File exists
+        assert executor.active_jobs[job_id]["manager"] == "local"
+        assert executor.get_job_status(job_id) == "failed"
+        # The backward-compatibility alias must agree with the public method.
+        assert executor._check_job_status(job_id) == "failed"
 
-        status = executor.get_job_status("job_12345")
+    def test_get_result_success(self):
+        """`get_result` returns the real value and stops tracking the job.
 
-        assert status == "completed"
+        The old version mocked SFTP to write a pickle of its own dict and
+        asserted it got that dict back. It could not run today anyway: a
+        result is HMAC-verified against the key recorded at submission before
+        anything unpickles it, and a hand-written pickle carries no signature.
+        """
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(
+            serialize_function(_double, (21,), {}), {"cores": 1}
+        )
 
-    def test_get_job_status_failed(self, executor):
-        """Test job status when error file exists."""
-        executor.ssh_client = Mock()
-        mock_sftp = Mock()
-        executor.ssh_client.open_sftp.return_value = mock_sftp
-
-        # Mock squeue command to return empty (job not in queue)
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""  # Empty output - job not in queue
-        mock_stderr = Mock()
-        mock_stderr.read.return_value = b""
-
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
-
-        # Add job to active jobs for tracking
-        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
-
-        # Mock file existence check - result.pkl doesn't exist, error.pkl does exist
-        def stat_side_effect(path):
-            if "result.pkl" in path:
-                raise IOError()  # Result file doesn't exist
-            else:
-                return Mock()  # Other files exist
-
-        mock_sftp.stat.side_effect = stat_side_effect
-
-        status = executor.get_job_status("job_12345")
-
-        assert status == "failed"
-
-    def test_get_result_success(self, executor):
-        """Test retrieving successful result."""
-        executor.ssh_client = Mock()
-        executor.sftp_client = Mock()
-
-        # Mock SFTP for file download
-        mock_sftp = Mock()
-        executor.ssh_client.open_sftp.return_value = mock_sftp
-
-        # Mock SSH command execution for cleanup
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""
-        mock_stderr = Mock()
-        mock_stderr.read.return_value = b""
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, mock_stderr)
-
-        # Add job to active jobs for tracking
-        executor.active_jobs["job_12345"] = {"remote_dir": "/tmp/test_job"}
-
-        # Mock the status check to return completed immediately
-        executor._check_job_status = Mock(return_value="completed")
-
-        # Mock result data
-        test_result = {"value": 42}
-
-        # Mock SFTP get to write test result when called
-        import os
-
-        def mock_get(remote_path, local_path):
-            # Create the directory if it doesn't exist (Windows compatibility)
-            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-            # Write test result to the local path when SFTP.get is called
-            with open(local_path, "wb") as f:
-                pickle.dump(test_result, f)
-
-        mock_sftp.get.side_effect = mock_get
-
-        result = executor.get_result("job_12345")
-
-        assert result == test_result
-        # Verify SFTP get was called with correct remote path (local path is a temp file)
-        mock_sftp.get.assert_called_once()
-        call_args = mock_sftp.get.call_args[0]
-        assert call_args[0] == "/tmp/test_job/result.pkl"  # remote path
-        # Verify local path is a temporary file (cross-platform)
-        import tempfile
-
-        temp_dir = tempfile.gettempdir()
-        assert call_args[1].startswith(temp_dir)  # local temp path
+        assert executor.get_result(job_id) == 42
+        assert job_id not in executor.active_jobs
 
     def test_cancel_job_slurm(self, executor):
         """Test canceling SLURM job."""
@@ -573,50 +465,35 @@ class TestClusterExecutor:
         assert "scancel 12345" in call_args
 
     def test_cancel_job_sge(self, executor):
-        """Test canceling SGE job."""
-        executor.ssh_client = Mock()
+        """A job clustrix failed to cancel must stay tracked.
+
+        Rewritten. The old version mocked `exec_command` and asserted that
+        "qdel 12345" reached its own Mock; its `active_jobs` entry also had no
+        "manager" key, which is now a KeyError. Here the qdel is really
+        attempted, there really is no connection, and the property that
+        matters is the consequence: dropping the job from `active_jobs` after
+        a failed cancellation would leave it running and invisible.
+        """
         executor.config.cluster_type = "sge"
+        executor.active_jobs["12345"] = {"manager": "scheduler", "job_id": "12345"}
 
-        mock_stdout = Mock()
-        mock_stdout.read.return_value = b""
-        mock_stdout.channel.recv_exit_status.return_value = 0
+        with pytest.raises(RuntimeError, match="SSH client not connected"):
+            executor.cancel_job("12345")
 
-        executor.ssh_client.exec_command.return_value = (None, mock_stdout, Mock())
+        assert "12345" in executor.active_jobs
 
-        # Add job to active jobs
-        executor.active_jobs["12345"] = {"remote_dir": "/tmp/test_job"}
+    def test_get_error_log(self):
+        """The real traceback of a real failure, and the unknown-job path."""
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(serialize_function(_explode, (), {}), {"cores": 1})
 
-        executor.cancel_job("12345")
+        error_log = executor._get_error_log(job_id)
+        assert "Traceback (most recent call last)" in error_log
+        assert "_explode" in error_log
 
-        # Verify qdel command was called
-        call_args = executor.ssh_client.exec_command.call_args[0][0]
-        assert "qdel 12345" in call_args
-
-        # Verify job was removed from active jobs
-        assert "12345" not in executor.active_jobs
-
-    def test_get_error_log(self, executor):
-        """Test error log retrieval."""
-        executor.active_jobs["failed_job"] = {"remote_dir": "/tmp/failed_job"}
-
-        error_content = "Traceback (most recent call last):\n  File test.py, line 1\n    syntax error"
-
-        with patch.object(executor, "_execute_remote_command") as mock_exec:
-            mock_exec.return_value = (error_content, "")
-
-            error_log = executor._get_error_log("failed_job")
-            assert error_log == error_content
-
-        # Test when no error log found
-        with patch.object(executor, "_execute_remote_command") as mock_exec:
-            mock_exec.return_value = ("", "")
-
-            error_log = executor._get_error_log("failed_job")
-            assert "No error log found" in error_log
-
-        # Test unknown job
-        error_log = executor._get_error_log("unknown_job")
-        assert "No job info available" in error_log
+        # An ID nobody recorded falls through to the scheduler manager, which
+        # says so rather than guessing.
+        assert "No job info available" in executor._get_error_log("unknown_job")
 
 
 class TestClusterExecutorEdgeCases:
@@ -687,79 +564,59 @@ class TestClusterExecutorEdgeCases:
             with pytest.raises(ImportError, match="kubernetes package required"):
                 executor._setup_kubernetes()
 
-    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
-    @patch("kubernetes.client")
-    @patch("kubernetes.config")
-    @patch("clustrix.executor.logger")
-    def test_setup_kubernetes_with_cloud_auto_configure_success(
-        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
+    # ------------------------------------------------------------------
+    # Cloud auto-configuration during Kubernetes setup.
+    #
+    # Three tests here replaced CloudProviderManager with a Mock and asserted
+    # against `clustrix.executor.logger`. The refactor moved this code into
+    # executor_connections, which logs to its own logger, so the assertions
+    # were made against a logger the code never touched -- they could not
+    # fail for the right reason and did not fail for the wrong one either.
+    #
+    # The real CloudProviderManager reports an incomplete provider config
+    # without contacting anything, so the skip path is testable for real. The
+    # kubeconfig below is a real file the real kubernetes client parses.
+    #
+    # Deleted rather than repaired: the third test, which asserted that a
+    # Mock raising ImportError produced a warning. CloudProviderManager's
+    # constructor stores two attributes and cannot raise, and auto_configure
+    # catches its own exceptions, so that branch is unreachable without a
+    # mock -- the test could only ever have verified the mock.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "cloud_provider,expected_reason",
+        [
+            ("aws", "Missing EKS cluster name or region"),
+            ("gcp", "Missing GKE cluster name, zone, or project ID"),
+        ],
+    )
+    def test_cloud_auto_configure_skip_reason_is_reported(
+        self, cloud_provider, expected_reason, monkeypatch, tmp_path, caplog
     ):
-        """Test Kubernetes setup with successful cloud auto-configuration."""
-        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
+        """Real manager, real logging, no cloud account touched.
+
+        An incomplete provider config is answered from the config itself:
+        `_configure_aws` and `_configure_gcp` both return their reason before
+        constructing a configurator, so nothing here makes a network call.
+        """
+        kubeconfig = tmp_path / "kubeconfig.yaml"
+        kubeconfig.write_text(_MINIMAL_KUBECONFIG)
+        _point_kubeconfig_at(monkeypatch, kubeconfig)
+
+        config = ClusterConfig(
+            cluster_type="kubernetes",
+            cloud_auto_configure=True,
+            cloud_provider=cloud_provider,
+        )
         executor = ClusterExecutor(config)
 
-        # Mock cloud manager
-        mock_cloud_manager = Mock()
-        mock_cloud_manager_class.return_value = mock_cloud_manager
-        mock_cloud_manager.auto_configure.return_value = {
-            "auto_configured": True,
-            "provider": "aws",
-            "cluster_name": "test-cluster",
-        }
+        with caplog.at_level(logging.INFO):
+            executor._setup_kubernetes()
 
-        executor._setup_kubernetes()
-
-        mock_cloud_manager.auto_configure.assert_called_once()
-        mock_logger.info.assert_called_with("Auto-configured aws cluster: test-cluster")
-
-    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
-    @patch("kubernetes.client")
-    @patch("kubernetes.config")
-    @patch("clustrix.executor.logger")
-    def test_setup_kubernetes_with_cloud_auto_configure_skipped(
-        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
-    ):
-        """Test Kubernetes setup when cloud auto-configuration is skipped."""
-        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
-        executor = ClusterExecutor(config)
-
-        # Mock cloud manager
-        mock_cloud_manager = Mock()
-        mock_cloud_manager_class.return_value = mock_cloud_manager
-        mock_cloud_manager.auto_configure.return_value = {
-            "auto_configured": False,
-            "reason": "No cloud credentials found",
-            "error": "Authentication failed",
-        }
-
-        executor._setup_kubernetes()
-
-        mock_logger.info.assert_called_with(
-            "Cloud auto-configuration skipped: No cloud credentials found"
-        )
-        mock_logger.warning.assert_called_with(
-            "Auto-configuration error: Authentication failed"
-        )
-
-    @patch("clustrix.cloud_provider_manager.CloudProviderManager")
-    @patch("kubernetes.client")
-    @patch("kubernetes.config")
-    @patch("clustrix.executor.logger")
-    def test_setup_kubernetes_cloud_manager_exception(
-        self, mock_logger, mock_k8s_config, mock_k8s_client, mock_cloud_manager_class
-    ):
-        """Test Kubernetes setup when cloud manager raises exception."""
-        config = ClusterConfig(cluster_type="kubernetes", cloud_auto_configure=True)
-        executor = ClusterExecutor(config)
-
-        # Mock cloud manager to raise exception
-        mock_cloud_manager_class.side_effect = ImportError("Cloud module not found")
-
-        executor._setup_kubernetes()
-
-        mock_logger.warning.assert_called_with(
-            "Cloud provider auto-configuration failed: Cloud module not found"
-        )
+        assert f"Cloud auto-configuration skipped: {expected_reason}" in caplog.text
+        # Setup still completes: a skipped auto-configuration is not a failure.
+        assert executor.k8s_client is not None
 
     @patch("kubernetes.client")
     @patch("kubernetes.config")
