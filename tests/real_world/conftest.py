@@ -6,9 +6,9 @@ import os
 import pytest
 from pathlib import Path
 import tempfile
-import concurrent.futures
 import functools
 import socket
+import threading
 
 from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
 
@@ -32,17 +32,32 @@ def _within(seconds, func, *args):
     The resolver calls here are not interruptible, so the worker thread is left
     to finish on its own; it is a daemon and holds nothing the caller needs.
     """
-    # Deliberately not a `with` block: its __exit__ calls shutdown(wait=True)
-    # and blocks until the worker finishes, which defeats the timeout entirely
-    # -- a call that should have been abandoned after three seconds still took
-    # thirty.
-    pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    try:
-        return pool.submit(func, *args).result(timeout=seconds)
-    except (concurrent.futures.TimeoutError, OSError):
-        return None
-    finally:
-        pool.shutdown(wait=False)
+    # A plain daemon thread, not a ThreadPoolExecutor. The executor's workers
+    # are non-daemon, and `concurrent.futures` joins every one of them --
+    # untimed -- on the way out of the interpreter, even after
+    # `shutdown(wait=False)`. Abandoning a seventy-second lookup that way only
+    # moved the wait from here to process exit. A daemon thread is genuinely
+    # abandonable: nothing joins it and the interpreter does not wait for it.
+    outcome = {}
+
+    def call():
+        try:
+            outcome["value"] = func(*args)
+        except BaseException as exc:  # re-raised below, in the caller's thread
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=call, daemon=True)
+    worker.start()
+    worker.join(seconds)
+
+    error = outcome.get("error")
+    if error is not None:
+        # Unresolvable names are the expected off-network answer, not a fault.
+        if isinstance(error, OSError):
+            return None
+        raise error
+    # Absent on timeout, because the worker never got as far as storing one.
+    return outcome.get("value")
 
 
 @functools.lru_cache(maxsize=1)

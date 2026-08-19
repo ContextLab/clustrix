@@ -635,9 +635,19 @@ class TestConcurrencyEdgeCases:
                     with lock1:
                         results.append("worker2")
 
-            # Use timeout to prevent actual deadlock
-            t1 = threading.Thread(target=worker1)
-            t2 = threading.Thread(target=worker2)
+            # These two workers take their locks in opposite orders, so the
+            # deadlock below is the point of the test, not an accident: the
+            # join timeout is what keeps *this* function from hanging.
+            #
+            # They must be daemons. The joins below give up after five
+            # seconds and abandon threads that are wedged forever, and
+            # `threading._shutdown()` joins every surviving non-daemon thread
+            # with no timeout before the interpreter can finalize. Leaving
+            # these non-daemon wedged the whole pytest process after the
+            # summary line was printed -- every CI job burned its remaining
+            # budget there and was killed at the fifteen-minute cap.
+            t1 = threading.Thread(target=worker1, daemon=True)
+            t2 = threading.Thread(target=worker2, daemon=True)
 
             t1.start()
             t2.start()
