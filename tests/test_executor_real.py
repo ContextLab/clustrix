@@ -344,7 +344,7 @@ class TestExecutorIntegrationWorkflows:
         """
         # User sets up configuration
         config = ClusterConfig()
-        config.cluster_type = "local"  # Or "kubernetes", "slurm", etc.
+        config.cluster_type = "local"  # Or "ssh", "slurm", "huggingface"
 
         original_config = config_module._config
         config_module._config = config
