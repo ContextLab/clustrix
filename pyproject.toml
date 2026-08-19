@@ -251,7 +251,6 @@ markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
     "expensive: marks tests that provision billable resources (applied automatically to tests/integration; see #109)",
-    "dartmouth_network: marks tests that require access to the Dartmouth campus network",
     "performance: marks performance benchmark tests",
 ]
 # Carried over from the deleted pytest.ini, where it never took effect. These

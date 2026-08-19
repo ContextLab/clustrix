@@ -222,7 +222,7 @@ is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
 @pytest.mark.unit              # a unit test
 @pytest.mark.integration       # exercises several components together
 @pytest.mark.expensive         # provisions billable resources
-@pytest.mark.dartmouth_network # needs the Dartmouth campus network
+@pytest.mark.cluster_network # needs the configured cluster network
 @pytest.mark.performance       # a benchmark
 ```
 

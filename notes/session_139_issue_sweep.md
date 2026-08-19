@@ -51,7 +51,7 @@ Reproduction scripts kept in the session scratchpad: `repro_flatten.py`,
 CI-compatible command. Most files under `tests/real_world/` carry no
 `@pytest.mark.real_world`, and `tests/real_world/conftest.py`'s
 `pytest_collection_modifyitems` only adds *skip* markers for
-expensive/visual/dartmouth categories — it never applies the `real_world`
+expensive/visual/network categories — it never applies the `real_world`
 marker itself. So the documented command runs them, making real SSH and cloud
 calls. A run started during this session had to be killed for that reason.
 

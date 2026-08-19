@@ -126,7 +126,7 @@ acceptance criteria are now met. Comment:
 https://github.com/ContextLab/clustrix/issues/110#issuecomment-5317453905
 
 **#117** untouched, as instructed — `tests/real_world/conftest.py:223` still
-calls `is_dartmouth_network()` at collection time.
+calls `can_reach_configured_cluster()` at collection time.
 
 ---
 

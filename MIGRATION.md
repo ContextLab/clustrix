@@ -88,7 +88,7 @@ markers = [
     "unit: marks tests as unit tests",
     "integration: marks tests as integration tests",
     "expensive: marks tests that provision billable resources",
-    "dartmouth_network: marks tests needing the Dartmouth campus network",
+    "cluster_network: marks tests needing the configured cluster network",
     "performance: marks performance benchmark tests",
 ]
 ```
@@ -152,7 +152,7 @@ python -c "import clustrix; from clustrix import cluster; print('✅ Imports wor
 clustrix --help
 
 # Run quick test
-pytest tests/unit/test_dartmouth_network_detection.py -v
+pytest tests/unit/test_cluster_network_detection.py -v
 ```
 
 ### 4. Update Bookmarks/Scripts
