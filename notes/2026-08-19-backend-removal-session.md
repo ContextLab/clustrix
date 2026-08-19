@@ -270,3 +270,31 @@ rejection message and a grep showing the backend is gone) and on #147.
   executing cells needs a Google sign-in, which is not something to do, so
   expect it to distinguish *loaded in Colab* from *executed locally*.
 - Evidence comments on the remaining pre-existing open issues.
+
+### Follow-on cleanups found after the PR opened
+
+- **Packaging extras installed SDKs for deleted backends.** `kubernetes`,
+  `aws`, `azure`, `gcp` and `cloud` extras, plus cloud SDKs inside `test` and
+  `all`. Nothing in `clustrix/` imports boto3, the kubernetes client, azure-* or
+  google-cloud-*; `scripts/aws/` imports boto3 lazily with its own "not a
+  clustrix dependency" message. CI's install line dropped `kubernetes` with
+  them. Verified by resolving the new line in a clean 3.11 venv.
+- **`real-world-tests.yml` handed cloud credentials to jobs that cannot use
+  them** — LAMBDA_CLOUD_API_KEY, GCP_PROJECT_ID, GCP_JSON and two AWS keys
+  across four steps. Removed.
+- **#147 had a second, worse consumer.** Every step in `real-world-tests.yml`
+  runs `python scripts/run_real_world_tests.py --<category>` as a bare command,
+  so Actions would fail the step on a non-zero exit — but the script always
+  exited 0. That workflow is the *only* one that runs the real-world suite, so
+  the single thing exercising clustrix against real clusters had been reporting
+  green unconditionally. Fixed by the same commit; recorded on #147.
+- **#150 filed**: `tests/infrastructure/docker-compose.yml` starts MinIO,
+  Postgres and Redis, and no test connects to any of them. `ssh-server` is
+  genuinely used (localhost:2222). Pre-existing, unrelated to the removal.
+
+### Use the pinned black
+
+`black==26.3.1` is pinned in pyproject.toml and setup.py; the black on PATH in
+this environment is 25.11.0 and they disagree. A local `black --check` with the
+wrong one passes where CI fails. Session venv:
+`<scratchpad>/blackenv/bin/black`.
