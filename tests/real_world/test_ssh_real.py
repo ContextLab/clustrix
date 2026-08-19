@@ -26,6 +26,7 @@ from clustrix.ssh_utils import (
 from clustrix.config import ClusterConfig
 from clustrix.filesystem import ClusterFilesystem
 from tests.real_world import TempResourceManager, credentials, test_manager
+from clustrix.ssh_security import configure_host_key_policy
 
 
 @pytest.mark.real_world
@@ -100,7 +101,7 @@ class TestRealSSHOperations:
         try:
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             # Attempt connection
             if ssh_config.get("private_key_path"):
@@ -146,7 +147,7 @@ class TestRealSSHOperations:
             try:
                 # Create SSH client
                 client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_host_key_policy(client)
 
                 # Connect
                 if ssh_config.get("private_key_path"):
@@ -330,7 +331,7 @@ Host localhost
         try:
             # Create SSH client with short timeout
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             # Try to connect to non-existent host with timeout
             with pytest.raises((paramiko.SSHException, OSError, TimeoutError)):
@@ -355,7 +356,7 @@ Host localhost
             # Create multiple SSH connections
             for i in range(3):
                 client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_host_key_policy(client)
 
                 if ssh_config.get("private_key_path"):
                     client.connect(
@@ -401,7 +402,7 @@ Host localhost
             start_time = time.time()
 
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             if ssh_config.get("private_key_path"):
                 client.connect(

@@ -27,6 +27,7 @@ from tests.real_world.credential_manager import (
     require_test_username,
 )
 import paramiko
+from clustrix.ssh_security import configure_host_key_policy
 
 
 class SlurmPackagingValidator:
@@ -64,7 +65,7 @@ class SlurmPackagingValidator:
             print("✅ SSH credentials retrieved successfully")
 
             self.ssh_client = paramiko.SSHClient()
-            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(self.ssh_client, self.slurm_config)
 
             hostname = ssh_creds.get("hostname", self.slurm_config.cluster_host)
             username = ssh_creds.get("username", self.slurm_config.username)

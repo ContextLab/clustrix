@@ -24,6 +24,7 @@ from tests.real_world.credential_manager import (
     require_test_host,
     require_test_username,
 )
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_ssh_automation(cluster_configs: list) -> dict:
@@ -123,7 +124,7 @@ def test_ssh_automation(cluster_configs: list) -> dict:
                 import paramiko
 
                 client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_host_key_policy(client, config)
                 client.connect(
                     hostname=config.cluster_host,
                     username=config.username,

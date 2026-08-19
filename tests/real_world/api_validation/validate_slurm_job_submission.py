@@ -23,6 +23,7 @@ from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
 
 from tests.real_world.credential_manager import require_test_remote_work_dir
+from clustrix.ssh_security import configure_host_key_policy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -227,7 +228,7 @@ def test_slurm_job_submission():
         import paramiko
 
         ssh_client = paramiko.SSHClient()
-        ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh_client, config)
 
         connect_kwargs = {"hostname": hostname, "username": username, "timeout": 30}
         if password:

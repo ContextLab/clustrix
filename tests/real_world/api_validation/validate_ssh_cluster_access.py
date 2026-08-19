@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Imported after the path is set, which is the point of this script running
 # standalone against a checkout.
 from clustrix.secure_credentials import ValidationCredentials  # noqa: E402
+from clustrix.ssh_security import configure_host_key_policy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -39,7 +40,7 @@ def test_ssh_connectivity(hostname, username, password=None, key_file=None):
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Setup connection parameters
@@ -172,7 +173,7 @@ def test_sftp_functionality(hostname, username, password=None, key_file=None):
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Connect
@@ -275,7 +276,7 @@ def test_python_environment(hostname, username, password=None, key_file=None):
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Connect
@@ -455,7 +456,7 @@ def test_cluster_scheduler_detection(hostname, username, password=None, key_file
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Connect

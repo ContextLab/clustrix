@@ -24,6 +24,7 @@ from clustrix.config import ClusterConfig
 from clustrix.secure_credentials import ValidationCredentials
 
 from tests.real_world.credential_manager import require_test_remote_work_dir
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_remote_filesystem_comprehensive():
@@ -286,7 +287,7 @@ def test_remote_filesystem_comprehensive():
 
         # Connect directly to create test structure
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh, config)
         ssh.connect(
             hostname=config.cluster_host,
             username=config.username,
@@ -325,7 +326,7 @@ def test_remote_filesystem_comprehensive():
 
         # Cleanup
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh, config)
         ssh.connect(
             hostname=config.cluster_host,
             username=config.username,

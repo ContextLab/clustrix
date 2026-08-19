@@ -5,6 +5,7 @@ Examine the failing SLURM job script and try to understand why it's failing.
 import pytest
 import paramiko
 from tests.real_world import credentials
+from clustrix.ssh_security import configure_host_key_policy
 
 
 @pytest.mark.real_world
@@ -16,7 +17,7 @@ def test_examine_failing_slurm_job():
 
     # Connect via SSH
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     ssh_client.connect(
         hostname=slurm_cluster_creds["host"],

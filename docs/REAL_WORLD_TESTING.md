@@ -129,6 +129,56 @@ export TEST_SSH_USERNAME="$USER"
 export TEST_SSH_PRIVATE_KEY_PATH="$HOME/.ssh/id_rsa"
 ```
 
+## Prerequisite: host keys must be in `known_hosts`
+
+**Every real-world test that opens an SSH connection will fail unless the
+target host's key is already in your `known_hosts`.** This is a hard
+prerequisite, not a recommendation.
+
+These tests used to call
+`ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())`, which
+silently accepted whatever host key was offered -- no verification at all,
+and therefore no protection against a machine-in-the-middle. Since issue
+#148 they go through `clustrix.ssh_security.configure_host_key_policy()`,
+whose default policy is `"reject"`. An unknown host key now raises
+`HostKeyVerificationError` instead of being trusted.
+
+Add each host you intend to test against, once, deliberately:
+
+```bash
+# Replace cluster.example.edu with the host under test.
+ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
+
+# Non-standard SSH port:
+ssh-keyscan -p 2222 cluster.example.edu >> ~/.ssh/known_hosts
+
+# Local sshd used by the localhost-only SSH tests:
+ssh-keyscan localhost 127.0.0.1 >> ~/.ssh/known_hosts
+```
+
+Verify a host is present before running the suite:
+
+```bash
+ssh-keygen -F cluster.example.edu
+```
+
+Hosts come from `CLUSTRIX_TEST_SSH_HOST`, `CLUSTRIX_TEST_SSH_HOST_2`,
+`CLUSTRIX_TEST_SLURM_HOST` and `CLUSTRIX_TEST_SLURM_HOST_2` (see
+`tests/real_world/credential_manager.py`), so scan whichever of those you
+have set. In GitHub Actions, the `real-world-tests` workflow does this in
+its "Populate known_hosts for host key verification" step.
+
+`ssh-keyscan` trusts the network at the moment you run it. On a host you
+have never reached before, compare the fingerprint it prints against one you
+obtained out-of-band from the cluster's administrators before appending it.
+
+Opting back into the old behaviour is possible but is not a fix for a
+failing test -- it is a decision to stop verifying host keys:
+
+```python
+config = ClusterConfig(..., ssh_host_key_policy="auto_add")
+```
+
 ## Running Tests
 
 ### Basic Test Execution

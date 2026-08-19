@@ -13,6 +13,7 @@ from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
 from tests.real_world.credential_manager import require_test_remote_work_dir
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_basic_slurm_submission():
@@ -34,7 +35,7 @@ def test_basic_slurm_submission():
 
     # Connect via SSH
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh)
 
     try:
         ssh.connect(hostname, username=username, password=password)

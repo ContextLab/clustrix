@@ -237,6 +237,25 @@ test used them, so following it produced a collection error.
 
 ## Running Tests
 
+### Prerequisite for real-world tests: host keys in `known_hosts`
+
+Anything under `tests/real_world/` that opens an SSH connection now goes
+through `clustrix.ssh_security.configure_host_key_policy()`, whose default
+policy is `"reject"` (issue #148). The tests previously used
+`paramiko.AutoAddPolicy()`, which trusted any key on first contact. **A host
+that is not in `known_hosts` now raises `HostKeyVerificationError` rather
+than connecting.**
+
+Add the host key once, deliberately, before running those tests:
+
+```bash
+ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts   # add -p PORT if non-standard
+ssh-keygen -F cluster.example.edu                       # confirm it landed
+```
+
+See `docs/REAL_WORLD_TESTING.md` for which environment variables name the
+hosts, and for the CI equivalent of this step.
+
 ### Local Development
 
 ```bash

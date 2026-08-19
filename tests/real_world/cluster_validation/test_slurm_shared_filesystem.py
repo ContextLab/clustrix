@@ -23,6 +23,7 @@ import tempfile
 import zipfile
 import json
 import paramiko
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_shared_filesystem_on_slurm():
@@ -188,7 +189,7 @@ def main():
 
     # Connect to cluster and submit job
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client, config)
 
     try:
         ssh_client.connect(

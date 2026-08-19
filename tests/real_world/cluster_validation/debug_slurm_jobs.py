@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clustrix.secure_credentials import ValidationCredentials
 import paramiko
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def main():
@@ -25,7 +26,7 @@ def main():
     password = cluster_creds.get("password")
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         ssh_client.connect(

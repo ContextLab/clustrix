@@ -15,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clustrix.secure_credentials import ValidationCredentials
+from clustrix.ssh_security import configure_host_key_policy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,7 @@ def test_venv_creation(hostname, username, password=None, key_file=None):
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Connect

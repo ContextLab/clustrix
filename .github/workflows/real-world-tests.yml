@@ -92,6 +92,41 @@ jobs:
         # Test SSH connection
         timeout 10 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.CLUSTRIX_USERNAME }}@localhost "echo 'SSH connection successful'"
 
+    - name: Populate known_hosts for host key verification
+      # Issue #148: the real-world tests no longer call
+      # `set_missing_host_key_policy(paramiko.AutoAddPolicy())`; they go
+      # through `clustrix.ssh_security.configure_host_key_policy`, whose
+      # default policy is "reject". Any host absent from known_hosts now
+      # raises HostKeyVerificationError instead of being trusted silently,
+      # so every host these tests connect to must be scanned in first.
+      #
+      # localhost/127.0.0.1 is the sshd this job installs a few steps above,
+      # and is the only host the CI run actually reaches: `test_ssh_real.py`
+      # skips itself unless the configured host is localhost.
+      #
+      # There is deliberately no `secrets.*` reference for an external
+      # cluster hostname here, because no such repository secret exists --
+      # the only cluster secrets configured are CLUSTRIX_USERNAME,
+      # CLUSTRIX_PASSWORD, HF_USERNAME and HF_TOKEN. Real cluster hosts are
+      # supplied to the suite through the CLUSTRIX_TEST_{SSH,SLURM}_HOST[_2]
+      # environment variables (see tests/real_world/credential_manager.py);
+      # this step scans whichever of those are set so that adding them later
+      # needs no further workflow change.
+      run: |
+        mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        for host in localhost 127.0.0.1 \
+                    "$CLUSTRIX_TEST_SSH_HOST" "$CLUSTRIX_TEST_SSH_HOST_2" \
+                    "$CLUSTRIX_TEST_SLURM_HOST" "$CLUSTRIX_TEST_SLURM_HOST_2"; do
+          [ -n "$host" ] || continue
+          echo "Scanning host key for $host"
+          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
+        done
+        chmod 600 ~/.ssh/known_hosts
+        # Fail loudly rather than let the tests fail later with an opaque
+        # HostKeyVerificationError for the host this job just created.
+        ssh-keygen -F localhost -f ~/.ssh/known_hosts > /dev/null
+
     - name: Run filesystem tests
       run: |
         python scripts/run_real_world_tests.py --filesystem

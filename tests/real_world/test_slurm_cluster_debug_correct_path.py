@@ -8,6 +8,7 @@ import uuid
 from clustrix import configure
 from clustrix.config import ClusterConfig
 from tests.real_world import credentials
+from clustrix.ssh_security import configure_host_key_policy
 
 
 @pytest.mark.real_world
@@ -39,7 +40,7 @@ def test_debug_slurm_with_correct_config():
 
     # Connect via SSH
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client, config)
 
     ssh_client.connect(
         hostname=slurm_cluster_creds["host"],
