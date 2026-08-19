@@ -106,3 +106,43 @@ Parallel agents, each owning a disjoint file set:
 Retained for the main thread: `README.md`, `CLAUDE.md` (#125), version
 unification across four files (#124, #127), `CHANGELOG.md`, `cli.py`, and the
 final evidence comments on every issue.
+
+## Defects found but NOT fixed (need issues filed — ask first)
+
+1. **`_combine_local_results` returns a different shape than the sequential
+   path.** A parallel local run returns a raw list of per-chunk results; the
+   sequential run of the same function returns the function's own return value.
+   So turning parallelism on or off changes the type of what the caller gets.
+   Found by the flattening-deletion agent while fixing #120 item 2.
+
+2. **Local auto-parallelization is narrower than it looks.** After the #106
+   loop-analysis correctness fixes, the analyser only accepts a loop body that
+   reads nothing but the loop variable. That means the injected
+   `_parallel_<var>` chunk can never be consumed *inside* the split loop — the
+   convention is only usable by reading it outside the loop. Worth deciding
+   whether the convention or the analyser is wrong.
+
+3. **`tests/test_cloud_providers_gcp_real.py:510`**
+   `TestGCPProviderIntegrationWorkflows::test_complete_cluster_lifecycle`
+   requests a `gcp_credentials` fixture defined inside a *different* class
+   (`TestGCPProviderReal`), so pytest cannot find it — a collection error, not a
+   failure. Pre-existing.
+
+4. **`|| echo 'Failed to install ...'` guards remain** in
+   `setup_python_compatible_environment` and the GPU-package installer. These
+   are different functions from the two-venv path that was fixed, and are not on
+   the cached-environment path, but they still swallow install failures.
+
+5. **`tests/test_decorator_real.py::test_async_execution`** fails with
+   `'AsyncJobResult' object is not subscriptable`. `AsyncJobResult` exposes
+   `get_result()`, not Future-style `result()`. Verified identical with and
+   without the flattening change.
+
+## User data to review
+
+`~/.clustrix/profiles/profiles.yml` (162 KB, mode 0644) accumulated 47 junk
+`Current configuration (N)` profiles because `ProfileManager.__init__`
+hardcoded `~/.clustrix/profiles` and ignored `CLUSTRIX_CONFIG_DIR`, so every
+test run wrote to the developer's real config. The code bug is fixed in
+`2a23b27`; the existing file is left alone deliberately — it also holds the 9
+real built-in profiles.
