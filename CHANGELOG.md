@@ -16,6 +16,11 @@ backend.
 
 ### Fixed — correctness
 
+Some entries below describe defects in backends that this same release then
+removed (see **Removed — unverified backends**). They are kept because the
+defects were real and the record matters; they are not claims that those
+backends now work.
+
 - **`@cluster` returned a fabricated GPU result instead of your answer.**
   `_attempt_client_side_gpu_parallelization` never called the decorated
   function. It ran a fixed `torch.randn(100, 100)` program on each GPU,
@@ -67,10 +72,6 @@ backend.
 - **Local auto-parallelization never parallelized anything.** It injected a
   `_parallel_<var>` keyword argument the callee could not accept, then swallowed
   the resulting `TypeError` and silently ran sequentially.
-- **Kubernetes reported failed jobs as successful.** `check_k8s_job_status`
-  returned `"completed"` from its exception paths, and results were decoded with
-  `ast.literal_eval` on the pod log, falling back to returning the raw log text
-  as the result.
 - **Environment replication silently dropped a third of the environment.**
   `get_environment_requirements` skipped every freeze line containing `@`. With
   `uv` on `PATH` — which is tried first — every conda-built package is rendered
@@ -79,12 +80,10 @@ backend.
   requirement that genuinely cannot be reproduced remotely (an editable install,
   a git checkout) is now refused at submit time, naming the package, instead of
   producing a job that fails on import.
-- **PBS never set up its remote environment**, unlike SLURM and SGE. All four
-  schedulers now share one staging and environment-setup path.
+- **The scheduler backends did not share a staging and environment-setup path**,
+  so they drifted. They now do.
 - **`cluster_type="local"` raised `ValueError: Unsupported cluster type`**, though
   it was offered in the widget and the CLI.
-- Cloud providers returned placeholder hostnames (`placeholder.example.com`) and
-  empty strings as if they were real, so failures surfaced far from their cause.
 - The by-value serialization walk missed instance attributes, local classes
   subclassing builtin containers, PEP-420 namespace packages, and
   `functools.partial`; and it silently degraded to by-reference at its 20,000-node

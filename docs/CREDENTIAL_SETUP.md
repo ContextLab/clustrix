@@ -55,9 +55,6 @@ TEST_SLURM_PASSWORD=your-password
 # HuggingFace Credentials
 HUGGINGFACE_TOKEN=your-hf-token
 HUGGINGFACE_USERNAME=your-username
-
-# Lambda Cloud Credentials
-LAMBDA_CLOUD_API_KEY=your-api-key
 ```
 
 ### 2. Alternative: Export Environment Variables
@@ -94,9 +91,6 @@ export TEST_SLURM_PASSWORD="your-password"
 # HuggingFace
 export HUGGINGFACE_TOKEN="your-token"
 export HUGGINGFACE_USERNAME="your-username"
-
-# Lambda Cloud
-export LAMBDA_CLOUD_API_KEY="your-api-key"
 ```
 
 ### 3. Test Local Setup
@@ -144,7 +138,6 @@ The GitHub Actions workflow (`.github/workflows/real-world-tests.yml`) automatic
 export GITHUB_ACTIONS=true
 export CLUSTRIX_USERNAME="your-username"
 export CLUSTRIX_PASSWORD="your-password"
-export LAMBDA_CLOUD_API_KEY="your-api-key"
 export GCP_PROJECT_ID="your-gcp-project"
 export GCP_JSON='{"type": "service_account", ...}'
 export AWS_ACCESS_KEY_ID="your-aws-key-id"
@@ -276,7 +269,6 @@ ssh -vvv user@host
 - AWS CloudWatch for AWS usage
 - GCP Cloud Monitoring for GCP usage
 - Azure Monitor for Azure usage
-- Lambda Cloud dashboard for GPU usage
 
 ### Access Monitoring
 - Local environment variable usage logs
