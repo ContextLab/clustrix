@@ -232,13 +232,10 @@ def _atomic_write(target: Path, data: bytes, mode: int = 0o600) -> None:
     partial = target.with_name(target.name + ".partial")
     try:
         fd = os.open(str(partial), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, mode)
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
-                handle.flush()
-                os.fsync(handle.fileno())
-        finally:
-            pass
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(str(partial), str(target))
     except BaseException:
         try:
@@ -569,6 +566,18 @@ class DataPackage:
                 f"exists in {self.repo_id}: {exc}"
             ) from exc
 
+    def __getstate__(self) -> Dict[str, Any]:
+        """Pickle without the materialisation path.
+
+        Where this package was last unpacked is true of one machine at one
+        moment. Carrying it into a pickle means a worker -- or this machine a
+        week later -- can find a stale directory at that path and reuse it.
+        Everything else here is durable; this one field is not.
+        """
+        state = dict(self.__dict__)
+        state["_materialised"] = None
+        return state
+
     def delete(self, config=None) -> bool:
         """Remove the remote copy and any clustrix-owned local cache of it.
 
@@ -586,11 +595,11 @@ class DataPackage:
         would be indefensible. Only the remote folder, and the copy clustrix
         wrote into its own cache, are removed.
         """
-        self._discard_local_cache()
+        cfg = config if config is not None else _config()
+        self._discard_local_cache(cfg)
         if self.is_inline or not self.repo_id or not self.path_in_repo:
             return False
 
-        cfg = config if config is not None else _config()
         api = _hf_api(cfg)
         try:
             api.delete_folder(
@@ -619,9 +628,9 @@ class DataPackage:
         )
         return True
 
-    def _discard_local_cache(self) -> None:
+    def _discard_local_cache(self, config=None) -> None:
         """Remove only what clustrix itself wrote, never the user's originals."""
-        for candidate in (self._materialised, str(self._default_dest(None))):
+        for candidate in (self._materialised, str(self._default_dest(config))):
             if not candidate:
                 continue
             path = Path(candidate)

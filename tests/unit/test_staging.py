@@ -484,6 +484,16 @@ class TestPickledPackagesSurvive:
             assert token.encode() not in blob
         assert pickle.loads(blob).filenames() == pkg.filenames()
 
+    def test_a_stale_materialisation_path_does_not_survive_the_pickle(
+        self, sample_tree, tmp_path, local_config
+    ):
+        """Where it was last unpacked is true of one machine at one moment."""
+        pkg = data_package(sample_tree, config=local_config)
+        pkg.materialize(dest=str(tmp_path / "here"), config=local_config)
+        assert pkg._materialised is not None
+
+        assert pickle.loads(pickle.dumps(pkg))._materialised is None
+
     def test_a_fresh_interpreter_can_load_and_use_a_saved_package(
         self, sample_tree, tmp_path, local_config
     ):
