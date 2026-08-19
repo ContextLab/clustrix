@@ -40,6 +40,19 @@ private dataset repo under the caller's namespace, and the package carries only
 the coordinates plus a digest per file. This is the same store, and the same
 credential path, that ``hf_jobs.py`` already uses for oversized payloads.
 
+Two consequences of that worth knowing *before* it happens rather than after:
+
+* **Clustrix will create a repo in your HuggingFace account.** The first
+  package that does not fit inline calls ``create_repo(..., private=True,
+  exist_ok=True)`` for ``<namespace>/clustrix-data``, where the namespace comes
+  from ``hf_namespace``, then ``hf_username``, then whatever the token's
+  ``whoami()`` reports. Set ``hf_data_repo`` to choose a different one.
+* **Deleting packages never deletes the repo**, only the folders inside it. An
+  account with every package removed still has an empty ``clustrix-data``
+  dataset in it, which you can remove by hand. This is deliberate: a user who
+  pointed ``hf_data_repo`` at a repo they own and care about would not thank us
+  for removing it because the last package went away.
+
 The trust direction is worth being explicit about. Digests are computed
 *locally*, from the user's own files, and travel to the worker inside the
 function payload -- which is a local-origin, upload-only artifact. Bytes fetched
@@ -595,6 +608,11 @@ class DataPackage:
         the user's own data; deleting that because a transfer was cleaned up
         would be indefensible. Only the remote folder, and the copy clustrix
         wrote into its own cache, are removed.
+
+        **The repo itself is never touched either**, only the package's folder
+        inside it. ``hf_data_repo`` may well point at a repo the user owns and
+        cares about. An account whose last package is deleted keeps an empty
+        ``clustrix-data`` dataset, which is theirs to remove.
         """
         cfg = config if config is not None else _config()
         self._discard_local_cache(cfg)

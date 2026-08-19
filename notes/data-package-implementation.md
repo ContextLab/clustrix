@@ -100,6 +100,16 @@ classifies any string with a separator ending in one of 17 extensions as a data 
   single atomic commit per package, which is both cheaper and removes the partial-upload problem.
   The real-HF tests are marked `real_world` so the default suite does not spend the owner's quota.
 
+## Two behaviours a user must know about before they happen
+
+- **Clustrix creates a private dataset repo in the user's HuggingFace account.** The first package
+  that does not fit inline calls `create_repo(private=True, exist_ok=True)` for
+  `<namespace>/clustrix-data`, namespace from `hf_namespace` -> `hf_username` -> the token's
+  `whoami()`. `hf_data_repo` overrides it. Documented in `staging.py`'s module docstring.
+- **Deletion never removes the repo, only folders inside it.** An account with every package deleted
+  keeps an empty `clustrix-data` dataset. Deliberate: `hf_data_repo` may point at a repo the user
+  owns and cares about, and deleting that would be far worse than leaving an empty one.
+
 ## Verified against something real
 
 - Real files on real disk; real `@cluster` execution via `local_executor`.

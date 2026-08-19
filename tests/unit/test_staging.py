@@ -43,17 +43,33 @@ REPO_ROOT = str(Path(clustrix.__file__).resolve().parents[1])
 
 
 def _hf_token_available():
-    """A usable token, or None. Never invents one."""
+    """A usable token, or None. Never invents one.
+
+    Resolved at **import** time, which is before any fixture runs. That matters
+    because ``tests/conftest.py``'s autouse ``isolate_home`` gives every test a
+    throwaway ``$HOME``, and the token written by ``hf auth login`` lives under
+    the real one. Reading it here catches it while ``$HOME`` is still the
+    developer's; the ``hf_config`` fixture then hands it to the tests that need
+    it, and only to those, so no other test and no other subprocess inherits a
+    credential it has no use for.
+    """
     from clustrix.hf_jobs import _token_from_hf_cli_cache
 
     return os.environ.get("HF_TOKEN") or _token_from_hf_cli_cache()
 
 
+#: Captured before $HOME is redirected. None on a machine with no credentials.
+REAL_HF_TOKEN = _hf_token_available()
+
 requires_hf = pytest.mark.skipif(
-    _hf_token_available() is None,
+    REAL_HF_TOKEN is None,
     reason=(
-        "No HuggingFace token (HF_TOKEN or `hf auth login`). The remote-store "
-        "half of data packages is UNVERIFIED without one; it is not mocked."
+        "SKIPPED, NOT PASSED: no HuggingFace token (HF_TOKEN or `hf auth "
+        "login`), so the remote-store half of data packages -- upload, "
+        "download, digest verification, exists, delete, and listing -- has "
+        "NOT been exercised in this run and is UNVERIFIED. It is never mocked; "
+        "a mocked version of this would prove only that huggingface_hub was "
+        "called."
     ),
 )
 
@@ -479,9 +495,8 @@ class TestPickledPackagesSurvive:
 
         # A token embedded in the object would make a saved package a secret
         # on disk. The only bytes in here are the user's own data.
-        token = _hf_token_available()
-        if token:
-            assert token.encode() not in blob
+        if REAL_HF_TOKEN:
+            assert REAL_HF_TOKEN.encode() not in blob
         assert pickle.loads(blob).filenames() == pkg.filenames()
 
     def test_a_stale_materialisation_path_does_not_survive_the_pickle(
@@ -534,20 +549,6 @@ class TestTravellingOverRealSFTP:
     and this exercises exactly that, against a real server, rather than
     asserting that a patched object was called.
     """
-
-    @pytest.fixture(autouse=True)
-    def _isolated_known_hosts(self, tmp_path, monkeypatch):
-        """Keep ``auto_add`` away from the real ``~/.ssh/known_hosts``.
-
-        ``ssh_security._load_known_hosts`` expanduser's that path, and the
-        auto-add policy paramiko installs then *saves* back to whatever file was
-        loaded -- rewriting the whole thing, not appending. Pointing HOME at
-        tmp_path means these tests cannot add to, or truncate, the developer's
-        real file. See issue #157.
-        """
-        home = tmp_path / "home"
-        (home / ".ssh").mkdir(parents=True)
-        monkeypatch.setenv("HOME", str(home))
 
     def _connect(self, server):
         from clustrix.executor_connections import ConnectionManager
@@ -644,7 +645,18 @@ class TestAgainstRealHuggingFace:
     """
 
     @pytest.fixture
-    def hf_config(self, tmp_path):
+    def hf_config(self, tmp_path, monkeypatch):
+        """Config for the real Hub, with the token scoped to these tests only.
+
+        ``conftest.isolate_home`` has already redirected ``$HOME``, so the CLI
+        token cache is out of reach by the time this runs -- which is correct,
+        and stops the suite writing to the developer's real ``~/.ssh``. The
+        token was captured at import time instead; putting it in the
+        environment here reaches exactly the tests that need it, and the
+        subprocess one of them spawns, which is also how a worker gets a token
+        in production.
+        """
+        monkeypatch.setenv("HF_TOKEN", REAL_HF_TOKEN)
         return ClusterConfig(
             cluster_type="huggingface",
             local_cache_dir=str(tmp_path / "cache"),
