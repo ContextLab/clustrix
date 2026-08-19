@@ -1,4 +1,5 @@
 import functools
+import inspect
 import logging
 from typing import Any, Callable, Optional, Dict, List
 
@@ -338,6 +339,11 @@ def _execute_single(
     cloudpickle, which round-trips nested functions, closures, module-level
     globals and source-less ``exec``-created functions correctly. See
     ``tests/unit/test_execute_single_no_fabrication.py``.
+
+    The rewriting machinery named above has since been deleted outright
+    (issues #89 and #90): neither generator ever emitted code that ran, and
+    ``serialize_function`` already covers every case they were meant to
+    rescue, so there was nothing left to keep.
     """
     # Serialize function and dependencies
     func_data = serialize_function(func, args, kwargs)
@@ -751,11 +757,15 @@ def _execute_local_parallel(
             # Combine results
             return _combine_local_results(results, loop_info)
 
+    except TypeError:
+        # The callee could not receive the chunk it was handed. Work chunks are
+        # only built for functions whose signature accepts them, so reaching
+        # here means clustrix built a call the function cannot answer -- a bug
+        # in this module, not a runtime condition. Absorbing it is what let
+        # local parallelization silently never happen; let it surface.
+        raise
     except Exception as e:
         # Fallback to normal execution on error
-        import logging
-
-        logger = logging.getLogger(__name__)
         logger.warning(
             f"Local parallel execution failed, falling back to sequential: {e}"
         )
@@ -809,6 +819,22 @@ def _create_local_work_chunks(
     if not variable or len(loop_range) == 0:
         return []
 
+    # The chunk is handed to the callee as a keyword argument. A function that
+    # does not declare it -- and does not collect **kwargs -- cannot receive it,
+    # so parallelizing would raise TypeError on every chunk. Decline here and
+    # let the caller run the function sequentially, which is the correct answer.
+    name = f"_parallel_{variable}"
+    params = inspect.signature(func).parameters
+    if name not in params and not any(
+        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+    ):
+        logger.info(
+            "Not parallelizing %s locally: it takes no %r parameter.",
+            getattr(func, "__name__", repr(func)),
+            name,
+        )
+        return []
+
     # Determine chunk size (aim for reasonable number of chunks)
     import os
 
@@ -821,7 +847,7 @@ def _create_local_work_chunks(
 
         # Create modified kwargs for this chunk
         chunk_kwargs = kwargs.copy()
-        chunk_kwargs[f"_parallel_{variable}"] = chunk_range
+        chunk_kwargs[name] = chunk_range
 
         chunks.append({"args": args, "kwargs": chunk_kwargs})
 

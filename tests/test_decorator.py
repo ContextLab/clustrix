@@ -525,46 +525,73 @@ class TestWorkChunkCreation:
     def test_create_local_work_chunks_with_range_info(self):
         """Test local work chunk creation with range info."""
         from clustrix.decorator import _create_local_work_chunks
+        from clustrix.loop_analysis import LoopInfo
 
-        def test_func(data):
+        def test_func(data, _parallel_i=None):
             return data
 
-        mock_loop_info = Mock()
-        mock_loop_info.range_info = {"start": 0, "stop": 6, "step": 1}
-        mock_loop_info.variable = "i"
+        loop_info = LoopInfo(
+            "for", variable="i", range_info={"start": 0, "stop": 6, "step": 1}
+        )
 
-        chunks = _create_local_work_chunks(test_func, ([1, 2, 3],), {}, mock_loop_info)
+        chunks = _create_local_work_chunks(test_func, ([1, 2, 3],), {}, loop_info)
 
         assert len(chunks) > 0
         assert all("args" in chunk for chunk in chunks)
         assert all("kwargs" in chunk for chunk in chunks)
+        assert all("_parallel_i" in chunk["kwargs"] for chunk in chunks)
+
+    def test_create_local_work_chunks_declines_a_callee_that_cannot_take_the_chunk(
+        self,
+    ):
+        """Issue #120: the chunk is a keyword argument, so it must be accepted.
+
+        Injecting ``_parallel_i`` into a function that does not declare it
+        raised TypeError on every chunk, which the caller then swallowed and
+        re-ran sequentially. Building no chunks is how that is now avoided.
+        """
+        from clustrix.decorator import _create_local_work_chunks
+        from clustrix.loop_analysis import LoopInfo
+
+        def takes_no_chunk(data):
+            return data
+
+        def collects_kwargs(data, **kwargs):
+            return data
+
+        loop_info = LoopInfo(
+            "for", variable="i", range_info={"start": 0, "stop": 6, "step": 1}
+        )
+
+        assert (
+            _create_local_work_chunks(takes_no_chunk, ([1, 2, 3],), {}, loop_info) == []
+        )
+        assert _create_local_work_chunks(collects_kwargs, ([1, 2, 3],), {}, loop_info)
 
     def test_create_local_work_chunks_with_dict_format(self):
         """Test local work chunk creation with dict format loop info."""
         from clustrix.decorator import _create_local_work_chunks
+        from clustrix.loop_analysis import LoopInfo
 
-        def test_func(data):
+        def test_func(data, _parallel_j=None):
             return data
 
-        mock_loop_info = Mock()
-        mock_loop_info.to_dict.return_value = {
-            "variable": "j",
-            "range_info": {"start": 0, "stop": 8, "step": 2},
-        }
-        # Ensure hasattr check works
-        mock_loop_info.range_info = None
+        loop_info = LoopInfo(
+            "for", variable="j", range_info={"start": 0, "stop": 8, "step": 2}
+        )
 
-        chunks = _create_local_work_chunks(test_func, ([1, 2, 3],), {}, mock_loop_info)
+        chunks = _create_local_work_chunks(test_func, ([1, 2, 3],), {}, loop_info)
 
         assert len(chunks) > 0
         assert all("args" in chunk for chunk in chunks)
         assert all("kwargs" in chunk for chunk in chunks)
+        assert all("_parallel_j" in chunk["kwargs"] for chunk in chunks)
 
     def test_create_local_work_chunks_legacy_format(self):
         """Test local work chunk creation with legacy format."""
         from clustrix.decorator import _create_local_work_chunks
 
-        def test_func(data):
+        def test_func(data, _parallel_k=None):
             return data
 
         loop_info = {"variable": "k", "range": range(4)}
@@ -579,7 +606,7 @@ class TestWorkChunkCreation:
         """Test local work chunk creation when no variable is provided."""
         from clustrix.decorator import _create_local_work_chunks
 
-        def test_func(data):
+        def test_func(data, _parallel_i=None):
             return data
 
         loop_info = {"range": range(4)}  # No variable - should use default 'i'
@@ -588,6 +615,7 @@ class TestWorkChunkCreation:
 
         # Should still create chunks with default variable name
         assert len(chunks) > 0
+        assert all("_parallel_i" in chunk["kwargs"] for chunk in chunks)
 
     def test_create_local_work_chunks_empty_range(self):
         """Test local work chunk creation with empty range."""

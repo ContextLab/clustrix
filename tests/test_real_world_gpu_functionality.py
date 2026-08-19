@@ -3,7 +3,7 @@ Real-world tests for GPU functionality on actual clusters.
 
 These tests create actual jobs on tensor01 and ndoli to validate:
 - GPU detection and VENV setup
-- Function flattening with varying complexity
+- Remote execution of functions with nested helpers
 - GPU-enabled package installation
 - Cross-cluster compatibility
 """
@@ -17,7 +17,6 @@ from typing import Dict, Any, List
 from clustrix import cluster
 from clustrix.config import ClusterConfig
 from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
-from clustrix.function_flattening import analyze_function_complexity
 
 logger = logging.getLogger(__name__)
 
@@ -123,14 +122,14 @@ class TestGPUFunctionalityRealWorld:
     @requires_dartmouth
     @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
     def test_simple_function_execution(self, cluster_name):
-        """Test simple function execution (no flattening needed)."""
+        """Test simple function execution."""
         config_data = TEST_CLUSTERS[cluster_name]
 
         print(f"\n🧪 Testing simple function execution on {cluster_name}...")
 
         @cluster(**config_data)
         def simple_computation(n=100):
-            """Simple function that should not require flattening."""
+            """Simple function with no nested helpers."""
             import math
 
             return {
@@ -141,13 +140,6 @@ class TestGPUFunctionalityRealWorld:
                     "hostname": __import__("socket").gethostname(),
                 },
             }
-
-        # Check complexity
-        complexity = analyze_function_complexity(simple_computation)
-        print(f"Simple function complexity: {complexity}")
-        assert not complexity.get(
-            "is_complex", False
-        ), "Simple function should not be complex"
 
         # Execute and validate
         result = simple_computation(50)
@@ -165,15 +157,19 @@ class TestGPUFunctionalityRealWorld:
 
     @requires_dartmouth
     @pytest.mark.parametrize("cluster_name", ["tensor01", "ndoli"])
-    def test_nested_function_flattening(self, cluster_name):
-        """Test function with nested functions (requires flattening)."""
+    def test_nested_function_execution(self, cluster_name):
+        """A function with nested helpers must execute correctly on the cluster.
+
+        The nested helpers travel inside the serialized function; nothing is
+        rewritten or substituted on the way out.
+        """
         config_data = TEST_CLUSTERS[cluster_name]
 
-        print(f"\n🧪 Testing nested function flattening on {cluster_name}...")
+        print(f"\n🧪 Testing nested function execution on {cluster_name}...")
 
         @cluster(**config_data)
         def nested_computation(data_size=100):
-            """Function with nested functions that requires flattening."""
+            """Function whose helpers are nested inside it."""
 
             def generate_data(size):
                 """Generate test data."""
@@ -211,14 +207,6 @@ class TestGPUFunctionalityRealWorld:
                     "pid": __import__("os").getpid(),
                 },
             }
-
-        # Check complexity
-        complexity = analyze_function_complexity(nested_computation)
-        print(f"Nested function complexity: {complexity}")
-        assert complexity.get("is_complex", False), "Nested function should be complex"
-        assert (
-            complexity.get("nested_functions", 0) > 0
-        ), "Should detect nested functions"
 
         # Execute and validate
         result = nested_computation(80)
@@ -336,17 +324,6 @@ class TestGPUFunctionalityRealWorld:
                 },
             }
 
-        # Check complexity
-        complexity = analyze_function_complexity(gpu_simulation_computation)
-        print(f"GPU simulation complexity: {complexity}")
-        assert complexity.get("is_complex", False), "GPU simulation should be complex"
-        assert (
-            complexity.get("nested_functions", 0) >= 1
-        ), "Should have nested functions"
-        assert (
-            complexity.get("complexity_score", 0) >= 50
-        ), "Should have high complexity score"
-
         # Execute and validate
         result = gpu_simulation_computation(15)
 
@@ -413,13 +390,6 @@ class TestGPUFunctionalityRealWorld:
             # Execute the inline function
             result = simple_gpu_matrix_mult()
             return result
-
-        # Check complexity
-        complexity = analyze_function_complexity(test_gpu_computation_pattern)
-        print(f"Inline function complexity: {complexity}")
-        assert (
-            complexity.get("nested_functions", 0) > 0
-        ), "Should detect inline nested function"
 
         # Execute and validate
         result = test_gpu_computation_pattern()
@@ -663,7 +633,6 @@ class TestGPUFunctionalityRealWorld:
                 "hostname": __import__("socket").gethostname(),
                 "enhanced_venv_features": {
                     "serialization_working": True,
-                    "nested_functions_flattened": True,
                     "cross_version_compatible": True,
                 },
             }
@@ -829,28 +798,11 @@ class TestGPUFunctionalityRealWorld:
                 f"   - {feature.replace('_', ' ').title()}: {'✅' if status else '❌'}"
             )
 
-        # Test function flattening integration
-        print("\n🔄 Function Flattening Integration:")
-        flattening_features = {
-            "nested_function_detection": True,
-            "parameter_signature_preservation": True,
-            "complex_function_handling": True,
-            "gpu_computation_support": True,
-        }
-
-        for feature, status in flattening_features.items():
-            print(
-                f"   - {feature.replace('_', ' ').title()}: {'✅' if status else '❌'}"
-            )
-
         print("\n✅ Enhanced VENV architecture validation completed!")
 
         # Assert all features are implemented
         assert all(venv1_features.values()), "All VENV1 features should be implemented"
         assert all(venv2_features.values()), "All VENV2 features should be implemented"
-        assert all(
-            flattening_features.values()
-        ), "All flattening features should be implemented"
 
 
 if __name__ == "__main__":
@@ -869,7 +821,7 @@ if __name__ == "__main__":
             tests = [
                 test_instance.test_gpu_detection_real_cluster,
                 test_instance.test_simple_function_execution,
-                test_instance.test_nested_function_flattening,
+                test_instance.test_nested_function_execution,
                 test_instance.test_gpu_simulation_computation,
                 test_instance.test_inline_function_pattern,
                 test_instance.test_enhanced_venv_setup_integration,

@@ -1,107 +1,19 @@
 #!/usr/bin/env python3
 """
-Test complete GPU-enabled workflow including function flattening and GPU detection.
+Test complete GPU-enabled workflow: serialization, GPU detection, venv package mapping.
 """
 
-from clustrix.function_flattening import auto_flatten_if_needed
-from clustrix.utils import detect_gpu_capabilities, enhanced_setup_two_venv_environment
+from clustrix.utils import (
+    detect_gpu_capabilities,
+    enhanced_setup_two_venv_environment,
+    serialize_function,
+    deserialize_function,
+)
 from clustrix.config import ClusterConfig
 import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
-
-
-def test_gpu_function_flattening():
-    """Test function flattening specifically for GPU computation patterns."""
-    print("🧪 Testing GPU function flattening...")
-
-    def gpu_matrix_computation(matrix_size=100):
-        """Function with nested GPU computation that needs flattening."""
-
-        def create_matrices():
-            """Create random matrices for computation."""
-            import random
-
-            matrix_a = [
-                [random.random() for _ in range(matrix_size)]
-                for _ in range(matrix_size)
-            ]
-            matrix_b = [
-                [random.random() for _ in range(matrix_size)]
-                for _ in range(matrix_size)
-            ]
-            return matrix_a, matrix_b
-
-        def matrix_multiply(a, b):
-            """Multiply two matrices."""
-            result = []
-            for i in range(len(a)):
-                row = []
-                for j in range(len(b[0])):
-                    sum_val = 0
-                    for k in range(len(b)):
-                        sum_val += a[i][k] * b[k][j]
-                    row.append(sum_val)
-                result.append(row)
-            return result
-
-        def simulate_gpu_info():
-            """Simulate GPU availability detection."""
-            return {
-                "success": True,
-                "device": "cuda:0",
-                "memory_available": 8192,
-                "compute_capability": "8.6",
-            }
-
-        # Execute nested functions
-        matrices = create_matrices()
-        gpu_info = simulate_gpu_info()
-        result = matrix_multiply(matrices[0], matrices[1])
-
-        return {
-            "gpu_info": gpu_info,
-            "result_shape": [len(result), len(result[0])],
-            "result_sample": result[0][0] if result else None,
-            "computation_size": matrix_size,
-        }
-
-    # Test flattening
-    try:
-        flattened_func, flattening_info = auto_flatten_if_needed(gpu_matrix_computation)
-
-        if flattening_info and flattening_info.get("success"):
-            print("✅ GPU function flattened successfully")
-
-            # Test execution
-            original_result = gpu_matrix_computation(5)  # Small size for testing
-            flattened_result = flattened_func(5)
-
-            print(f"Original result: {original_result}")
-            print(f"Flattened result: {flattened_result}")
-
-            # Check key fields match
-            if (
-                original_result["result_shape"] == flattened_result["result_shape"]
-                and original_result["computation_size"]
-                == flattened_result["computation_size"]
-            ):
-                print("✅ GPU function flattening preserves computation behavior")
-                return True
-            else:
-                print("❌ Results don't match between original and flattened")
-                return False
-        else:
-            print(f"❌ GPU function flattening failed: {flattening_info}")
-            return False
-
-    except Exception as e:
-        print(f"❌ GPU function flattening test crashed: {e}")
-        import traceback
-
-        traceback.print_exc()
-        return False
 
 
 def test_gpu_config_integration():
@@ -234,16 +146,14 @@ def test_complete_workflow_simulation():
 
     print("✅ Step 1: Function defined")
 
-    # Step 2: Function flattening (for serialization)
+    # Step 2: Serialize the function exactly as clustrix ships it, then recover
+    # it. The caller's own function is what travels -- nothing is substituted.
     try:
-        flattened_func, flattening_info = auto_flatten_if_needed(
-            distributed_computation
-        )
-        if flattening_info and flattening_info.get("success"):
-            print("✅ Step 2: Function flattened for serialization")
-        else:
-            print("ℹ️  Step 2: Function simple enough, no flattening needed")
-            flattened_func = distributed_computation
+        payload = serialize_function(distributed_computation, (100,), {})
+        shipped_func, shipped_args, shipped_kwargs = deserialize_function(payload)
+        assert shipped_args == (100,)
+        assert shipped_kwargs == {}
+        print("✅ Step 2: Function serialized and recovered for remote execution")
     except Exception as e:
         print(f"❌ Step 2 failed: {e}")
         return False
@@ -294,16 +204,19 @@ def test_complete_workflow_simulation():
         print(f"❌ Step 3 failed: {e}")
         return False
 
-    # Step 4: Test function execution
+    # Step 4: The recovered function must behave like the original
     try:
-        result = flattened_func(100)  # Small test
-        if isinstance(result, dict) and "result_sum" in result:
-            print(
-                f"✅ Step 4: Function execution successful, processed {result['data_size']} items"
-            )
-        else:
+        result = shipped_func(*shipped_args, **shipped_kwargs)
+        if not (isinstance(result, dict) and "result_sum" in result):
             print(f"❌ Step 4: Unexpected result format: {result}")
             return False
+        direct = distributed_computation(100)
+        assert result["total_chunks"] == direct["total_chunks"]
+        assert result["data_size"] == direct["data_size"]
+        print(
+            f"✅ Step 4: Recovered function execution successful, "
+            f"processed {result['data_size']} items"
+        )
     except Exception as e:
         print(f"❌ Step 4 failed: {e}")
         return False
@@ -317,7 +230,6 @@ if __name__ == "__main__":
     print("=" * 60)
 
     tests = [
-        test_gpu_function_flattening,
         test_gpu_config_integration,
         test_venv_gpu_package_mapping,
         test_complete_workflow_simulation,
@@ -344,7 +256,7 @@ if __name__ == "__main__":
 
     if passed == total:
         print("\n🎉 Complete GPU workflow tests passed!")
-        print("✅ Function flattening works with GPU computations")
+        print("✅ Function serialization round-trips the caller's own function")
         print("✅ GPU detection is properly implemented")
         print("✅ Enhanced VENV setup includes GPU package mapping")
         print("✅ Configuration options are properly integrated")

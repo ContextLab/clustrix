@@ -53,7 +53,8 @@ FABRICATED_RESULT = "Function execution completed"
 # is the point of this suite. The only data unpickled here is data this test
 # wrote moments earlier into a private temporary directory, so there is no
 # untrusted input anywhere in the loop.
-WORKER = textwrap.dedent("""
+WORKER = textwrap.dedent(
+    """
     import pickle, sys
     from clustrix.utils import deserialize_function
 
@@ -65,7 +66,8 @@ WORKER = textwrap.dedent("""
 
     with open(sys.argv[2], "wb") as fh:
         pickle.dump(result, fh)
-    """)
+    """
+)
 
 
 class SubprocessJobRunner:
@@ -297,11 +299,23 @@ def test_no_module_assigns_a_canned_value_to_result():
     assert offenders == [], f"a canned result is assigned at: {offenders}"
 
 
-def test_create_simple_subprocess_fallback_no_longer_exists():
-    """The stub is deleted, not merely unreferenced."""
-    import clustrix.function_flattening as ff
+def test_the_source_rewriting_machinery_no_longer_exists():
+    """The modules are deleted, not merely unreferenced.
 
-    assert not hasattr(ff, "create_simple_subprocess_fallback")
+    ``create_simple_subprocess_fallback`` lived in
+    ``clustrix.function_flattening``, which together with
+    ``clustrix.dependency_resolution`` has been removed: neither generator
+    ever produced code that ran, and ``serialize_function`` already covers
+    every case they were meant to rescue. Importing them must fail.
+    """
+    import importlib
+
+    for name in (
+        "clustrix.function_flattening",
+        "clustrix.dependency_resolution",
+    ):
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module(name)
 
 
 def test_decorator_does_not_reach_for_the_flattener():
@@ -318,7 +332,8 @@ def test_decorator_does_not_reach_for_the_flattener():
     code_lines = [
         line
         for line in source.splitlines()
-        if "function_flattening" in line and not line.lstrip().startswith("#")
+        if ("function_flattening" in line or "dependency_resolution" in line)
+        and not line.lstrip().startswith("#")
     ]
     assert code_lines == [], f"decorator.py still references flattening: {code_lines}"
 

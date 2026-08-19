@@ -238,8 +238,8 @@ def test_tensor01_auto_gpu_parallelization_simple(tensor01_credentials):
 
 @pytest.mark.dartmouth_network
 @pytest.mark.real_world
-def test_tensor01_function_flattening_integration(tensor01_credentials):
-    """Test that function flattening works with complex functions."""
+def test_tensor01_complex_function_execution(tensor01_credentials):
+    """A large, deeply nested function must execute correctly on tensor01."""
 
     load_config("tensor01_config.yml")
 
@@ -247,13 +247,13 @@ def test_tensor01_function_flattening_integration(tensor01_credentials):
         password=tensor01_credentials.get("password"),
         cleanup_on_success=False,
         job_poll_interval=5,
-        auto_gpu_parallel=False,  # Test flattening without GPU parallelization first
+        auto_gpu_parallel=False,  # Exercise plain execution, no GPU parallelization
     )
 
     @cluster(cores=1, memory="4GB", auto_gpu_parallel=False)
-    def complex_function_that_should_be_flattened():
+    def deliberately_complex_function():
         """
-        A deliberately complex function that should trigger automatic flattening.
+        A deliberately complex function shipped to the cluster unmodified.
 
         This function has:
         - Multiple imports
@@ -301,8 +301,8 @@ def test_tensor01_function_flattening_integration(tensor01_credentials):
             "complexity_test": "completed",
         }
 
-    print("Testing function flattening with complex function...")
-    result = complex_function_that_should_be_flattened()
+    print("Testing remote execution of a deliberately complex function...")
+    result = deliberately_complex_function()
 
     # Verify the function executed successfully despite complexity
     assert result is not None, "Complex function returned None"
@@ -331,7 +331,7 @@ def test_tensor01_function_flattening_integration(tensor01_credentials):
     ), f"Total mismatch: expected {expected_total}, got {total_value}"
 
     print(
-        f"✅ Complex function flattening successful: {len(results_list)} results, total {total_value}"
+        f"✅ Complex function executed remotely: {len(results_list)} results, total {total_value}"
     )
 
 
