@@ -14,12 +14,6 @@ from .basic_usage import (
     test_file_processing_workflow,
 )
 
-from .kubernetes_workflows import (
-    test_kubernetes_auto_provisioning_workflow,
-    test_kubernetes_multi_node_workflow,
-    test_kubernetes_gpu_workflow,
-)
-
 from .data_analysis_workflows import (
     test_pandas_analysis_workflow,
     test_numpy_computation_workflow,
@@ -31,10 +25,6 @@ __all__ = [
     "test_basic_data_analysis_workflow",
     "test_simple_computation_workflow",
     "test_file_processing_workflow",
-    # Kubernetes
-    "test_kubernetes_auto_provisioning_workflow",
-    "test_kubernetes_multi_node_workflow",
-    "test_kubernetes_gpu_workflow",
     # Data analysis
     "test_pandas_analysis_workflow",
     "test_numpy_computation_workflow",
