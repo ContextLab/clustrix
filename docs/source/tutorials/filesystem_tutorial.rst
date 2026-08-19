@@ -477,7 +477,7 @@ Configuration Management
         if os.getenv("CLUSTRIX_ENV") == "production":
             return ClusterConfig(
                 cluster_type="slurm",
-                cluster_host="prod-cluster.edu",
+                cluster_host="cluster.example.edu",
                 username="prod_user",
                 remote_work_dir="/scratch/production"
             )

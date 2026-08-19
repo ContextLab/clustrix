@@ -161,7 +161,7 @@ from clustrix.config import ClusterConfig
 # Configure for local or remote operations
 config = ClusterConfig(
     cluster_type="slurm",  # or "local" for local operations
-    cluster_host="cluster.edu",
+    cluster_host="cluster.example.edu",
     username="researcher",
     remote_work_dir="/scratch/project"
 )

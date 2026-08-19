@@ -245,10 +245,10 @@ Open the widget with the `%%remote` magic:
 #### Method 2: CLI Command
 ```bash
 # Basic setup
-clustrix ssh-setup --host cluster.university.edu --user your_username
+clustrix ssh-setup --host cluster.example.edu --user your_username
 
 # With custom alias for easy access
-clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
+clustrix ssh-setup --host cluster.example.edu --user your_username --alias my_hpc
 
 # Now you can connect with: ssh my_hpc
 ```
@@ -261,7 +261,7 @@ from clustrix.config import ClusterConfig
 
 config = ClusterConfig(
     cluster_type="slurm",
-    cluster_host="cluster.university.edu", 
+    cluster_host="cluster.example.edu", 
     username="your_username"
 )
 
@@ -293,8 +293,8 @@ failing both, a prompt — a dialog in a notebook, a terminal prompt in the CLI.
 For university/enterprise clusters using Kerberos authentication:
 ```bash
 # Clustrix deploys keys successfully, then use Kerberos for auth
-kinit your_netid@UNIVERSITY.EDU
-ssh your_netid@cluster.university.edu
+kinit your_netid@EXAMPLE.EDU
+ssh your_netid@cluster.example.edu
 ```
 
 A runnable walkthrough is in the [SSH Key Automation Tutorial](docs/ssh_key_automation_tutorial.ipynb) [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
@@ -313,7 +313,7 @@ from clustrix.config import ClusterConfig
 # Configure for local or remote operations
 config = ClusterConfig(
     cluster_type="slurm",  # or "local" for local operations
-    cluster_host="cluster.edu",
+    cluster_host="cluster.example.edu",
     username="researcher",
     remote_work_dir="/scratch/project"
 )

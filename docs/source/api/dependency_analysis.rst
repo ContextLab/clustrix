@@ -353,7 +353,7 @@ The dependency analysis is automatically used by the file packaging system:
         csv_files = cluster_find("*.csv", "data/")
         return len(csv_files)
 
-    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.edu")
+    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.example.edu")
     
     # Dependency analysis happens automatically during packaging
     package_info = package_function_for_execution(

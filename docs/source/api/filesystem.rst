@@ -64,7 +64,7 @@ for a tight loop:
    from clustrix.config import ClusterConfig
 
    remote_config = ClusterConfig(
-       cluster_type="slurm", cluster_host="cluster.edu", username="researcher"
+       cluster_type="slurm", cluster_host="cluster.example.edu", username="researcher"
    )
    fs = ClusterFilesystem(remote_config)
    for name in fs.ls("data/"):        # first call opens the connection
@@ -149,7 +149,7 @@ part of this page's own test suite:
 
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host="cluster.edu",
+        cluster_host="cluster.example.edu",
         username="researcher",
         remote_work_dir="/scratch/project"
     )
@@ -225,7 +225,7 @@ config object passed to it changes:
 
     remote_config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host="cluster.edu",
+        cluster_host="cluster.example.edu",
         username="researcher"
     )
     remote_files = cluster_ls(".", remote_config)

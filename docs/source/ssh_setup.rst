@@ -28,7 +28,7 @@ Then:
 
 1. Choose a remote cluster type (``ssh`` or ``slurm``) so the connection
    section appears
-2. Enter your cluster hostname (e.g. ``cluster.university.edu``)
+2. Enter your cluster hostname (e.g. ``cluster.example.edu``)
 3. Enter your username
 4. Enter your password
 5. Click "Auto setup SSH keys"
@@ -39,10 +39,10 @@ Method 2: Command Line Interface
 .. code-block:: bash
 
    # Basic automated setup
-   clustrix ssh-setup --host cluster.university.edu --user your_username
+   clustrix ssh-setup --host cluster.example.edu --user your_username
    
    # With custom alias for easy access
-   clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
+   clustrix ssh-setup --host cluster.example.edu --user your_username --alias my_hpc
    
    # Now you can connect with: ssh my_hpc
 
@@ -57,7 +57,7 @@ Method 3: Python API
 
    config = ClusterConfig(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu", 
+       cluster_host="cluster.example.edu", 
        username="your_username"
    )
    
@@ -109,14 +109,14 @@ message:
 
 .. code-block:: text
 
-   HostKeyVerificationError: Host key verification failed for 'cluster.university.edu':
+   HostKeyVerificationError: Host key verification failed for 'cluster.example.edu':
    this host is not in your known_hosts file(s), so clustrix refused the
    connection rather than risk a machine-in-the-middle attack.
      Offered key: ssh-ed25519 SHA256:AbCdEf...
 
    To fix this:
      1. If you recognize and trust this host, add its key with:
-          ssh-keyscan cluster.university.edu >> ~/.ssh/known_hosts
+          ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
         then retry.
      2. If you understand the risk and want clustrix to trust unknown host
         keys automatically (NOT recommended -- this is exactly the behavior
@@ -133,7 +133,7 @@ which means the first connection to any cluster needs one of:
    same thing ``ssh`` itself would ask you to confirm interactively the
    first time you connect by hand), or
 2. Already have a plain ``ssh`` connection to that host under your belt --
-   if you can already ``ssh cluster.university.edu`` from this machine, its
+   if you can already ``ssh cluster.example.edu`` from this machine, its
    key is already in ``known_hosts`` and clustrix will never hit this error
    for that host, or
 3. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
@@ -147,12 +147,12 @@ which means the first connection to any cluster needs one of:
    from clustrix import configure
 
    # Secure default: unknown keys are rejected.
-   configure(cluster_type="slurm", cluster_host="cluster.university.edu")
+   configure(cluster_type="slurm", cluster_host="cluster.example.edu")
 
    # Explicit opt-out -- only for hosts you already trust out-of-band.
    configure(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu",
+       cluster_host="cluster.example.edu",
        ssh_host_key_policy="auto_add",
    )
 
@@ -223,8 +223,8 @@ Many university clusters use **Kerberos authentication**. Clustrix handles this 
 .. code-block:: bash
 
    # Clustrix deploys SSH keys successfully, then use Kerberos for auth
-   kinit your_netid@UNIVERSITY.EDU
-   ssh your_netid@cluster.university.edu
+   kinit your_netid@EXAMPLE.EDU
+   ssh your_netid@cluster.example.edu
 
 The SSH key deployment still succeeds and helps with file transfers and other operations.
 
@@ -251,7 +251,7 @@ Python Configuration
    # After automated SSH setup, just configure normally
    configure(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu",
+       cluster_host="cluster.example.edu",
        username="your_username"
        # No need to specify key_file - automatically detected!
    )
@@ -263,7 +263,7 @@ Configuration File
 
    # ~/.clustrix/config.yml
    cluster_type: "slurm"
-   cluster_host: "cluster.university.edu"
+   cluster_host: "cluster.example.edu"
    username: "your_username"
    # key_file automatically set by SSH automation
    
@@ -290,7 +290,7 @@ Here's a complete end-to-end example:
    # Step 1: Automated SSH setup
    config = ClusterConfig(
        cluster_type="slurm",
-       cluster_host="hpc.university.edu",
+       cluster_host="hpc.example.edu",
        username="researcher"
    )
    
@@ -348,7 +348,7 @@ The manual equivalent, step by step:
 .. code-block:: bash
 
    # Copy public key to cluster
-   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.hostname.edu
+   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.example.edu
 
 3. Configure SSH Client
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -357,7 +357,7 @@ The manual equivalent, step by step:
 
    # ~/.ssh/config
    Host my-cluster
-       HostName cluster.hostname.edu
+       HostName cluster.example.edu
        User username
        IdentityFile ~/.ssh/clustrix_key
        IdentitiesOnly yes
@@ -398,8 +398,8 @@ Common Issues and Solutions
 .. code-block:: bash
 
    # This is expected for university clusters
-   kinit your_netid@UNIVERSITY.EDU
-   ssh your_netid@cluster.university.edu
+   kinit your_netid@EXAMPLE.EDU
+   ssh your_netid@cluster.example.edu
 
 **Connection Test Failed**
 

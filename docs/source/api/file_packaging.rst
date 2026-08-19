@@ -96,7 +96,7 @@ Basic Function Packaging
     # Configure target cluster
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host="cluster.edu",
+        cluster_host="cluster.example.edu",
         username="researcher",
         remote_work_dir="/scratch/project"
     )
@@ -482,7 +482,7 @@ The packaging system is automatically used by the @cluster decorator:
     from clustrix import cluster, configure
 
     # cluster_host is a configuration setting, not a decorator argument;
-    # set it with clustrix.configure(cluster_host="cluster.edu"). Explicit
+    # set it with clustrix.configure(cluster_host="cluster.example.edu"). Explicit
     # and self-contained here so this example runs locally regardless of
     # whatever configuration was active before it.
     configure(cluster_type="local", cluster_host=None)
@@ -533,7 +533,7 @@ Debug Mode
     def your_function():
         return 42
 
-    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.edu")
+    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.example.edu")
 
     # Package function with detailed logging
     package_info = package_function_for_execution(

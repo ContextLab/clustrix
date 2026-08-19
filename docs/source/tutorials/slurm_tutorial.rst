@@ -175,7 +175,7 @@ Configure Clustrix programmatically for your SLURM cluster:
    
    configure(
        cluster_type="slurm",
-       cluster_host="slurm.university.edu",
+       cluster_host="slurm.example.edu",
        username="your_username",
        key_file="~/.ssh/slurm_key",  # Optional if using SSH agent
        remote_work_dir="/scratch/your_username/clustrix"
@@ -280,7 +280,7 @@ Create ``~/.clustrix/config.yml``:
 .. code-block:: yaml
 
    cluster_type: "slurm"
-   cluster_host: "slurm.university.edu"
+   cluster_host: "slurm.example.edu"
    username: "researcher"
    key_file: "~/.ssh/slurm_key"
    remote_work_dir: "/scratch/researcher/clustrix"
@@ -572,7 +572,7 @@ Here's a complete scientific computing example:
    # Configure SLURM cluster
    configure(
        cluster_type="slurm",
-       cluster_host="slurm.university.edu", 
+       cluster_host="slurm.example.edu", 
        username="researcher",
        remote_work_dir="/scratch/researcher/clustrix",
        
