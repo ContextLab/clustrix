@@ -21,6 +21,7 @@ from .executor_schedulers import SchedulerManager
 from .executor_kubernetes import KubernetesJobManager
 from .executor_cloud import CloudJobManager
 from .hf_jobs import HFJobsManager
+from .local_executor import LocalJobManager
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,7 @@ class ClusterExecutor:
         self.k8s_manager = KubernetesJobManager(config, self.connection_manager)
         self.cloud_manager = CloudJobManager(config)
         self.hf_jobs_manager = HFJobsManager(config)
+        self.local_manager = LocalJobManager(config)
 
         # Combined active jobs tracking
         self.active_jobs: Dict[str, Any] = {}
@@ -80,6 +82,16 @@ class ClusterExecutor:
                 )
 
         # If no provider specified, use traditional cluster routing
+
+        # "local" runs the function on this machine. It is advertised in the
+        # widget's cluster-type dropdown and in the docs, but had no branch
+        # here and raised "Unsupported cluster type: local" (#120). Like
+        # huggingface below, it must not fall through to connect(): there is
+        # no host to SSH into.
+        if self.config.cluster_type == "local":
+            job_id = self.local_manager.submit_job(func_data, job_config)
+            self.active_jobs[job_id] = {"manager": "local", "job_id": job_id}
+            return job_id
 
         # HuggingFace Jobs talks to an HTTP API, not a host: there is nothing
         # to SSH into, and calling connect() here would fail on a config that
@@ -141,6 +153,10 @@ class ClusterExecutor:
                 result = self.hf_jobs_manager.wait_for_result(job_id)
                 del self.active_jobs[job_id]
                 return result
+            elif manager_type == "local":
+                result = self.local_manager.wait_for_result(job_id)
+                del self.active_jobs[job_id]
+                return result
             elif manager_type == "scheduler":
                 # For scheduler jobs, delegate to wait_for_scheduler_result
                 result = self._wait_for_scheduler_result(job_id)
@@ -149,6 +165,8 @@ class ClusterExecutor:
 
         # Fallback for jobs not in our tracking
         # This handles backward compatibility
+        if job_id.startswith("local_"):
+            return self.local_manager.wait_for_result(job_id)
         if (
             job_id.startswith("lambda_")
             or job_id.startswith("aws_")
@@ -295,10 +313,14 @@ class ClusterExecutor:
                 return self.k8s_manager.check_k8s_job_status(job_id)
             elif manager_type == "huggingface":
                 return self.hf_jobs_manager.get_job_status(job_id)
+            elif manager_type == "local":
+                return self.local_manager.get_job_status(job_id)
             elif manager_type == "scheduler":
                 return self.scheduler_manager.check_job_status(job_id)
 
         # Fallback for untracked jobs
+        if job_id.startswith("local_"):
+            return self.local_manager.get_job_status(job_id)
         if (
             job_id.startswith("lambda_")
             or job_id.startswith("aws_")
@@ -322,6 +344,9 @@ class ClusterExecutor:
         if job_id in self.active_jobs:
             manager_type = self.active_jobs[job_id]["manager"]
 
+            if manager_type == "local":
+                self.local_manager.cancel_job(job_id)
+                return
             if manager_type == "huggingface":
                 if not self.hf_jobs_manager.cancel_job(job_id):
                     # Keep tracking it: an uncancelled job is still running
@@ -349,6 +374,9 @@ class ClusterExecutor:
                 return
 
         # Fallback for untracked jobs
+        if job_id.startswith("local_"):
+            self.local_manager.cancel_job(job_id)
+            return
         if (
             job_id.startswith("lambda_")
             or job_id.startswith("aws_")
@@ -498,8 +526,12 @@ class ClusterExecutor:
                 return self.scheduler_manager.get_error_log(job_id)
             elif manager_type == "kubernetes":
                 return self.k8s_manager.get_k8s_error_log(job_id)
+            elif manager_type == "local":
+                return self.local_manager.get_error_log(job_id)
 
         # Fallback for untracked jobs
+        if job_id.startswith("local_"):
+            return self.local_manager.get_error_log(job_id)
         if job_id.startswith("clustrix-job-"):
             return self.k8s_manager.get_k8s_error_log(job_id)
         else:

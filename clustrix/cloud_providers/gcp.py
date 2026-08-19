@@ -509,13 +509,22 @@ class GCPProvider(CloudProvider):
                     project=self.project_id, zone=self.zone, instance=cluster_identifier
                 )
 
-                # Get external IP
+                # Get external IP. An instance with no external address is
+                # not reachable over SSH, and returning an empty (or invented)
+                # host only moves the failure to a confusing SSH timeout.
                 external_ip = ""
                 for interface in instance.network_interfaces:
                     for access_config in interface.access_configs:
                         if access_config.nat_i_p:
                             external_ip = access_config.nat_i_p
                             break
+
+                if not external_ip:
+                    raise RuntimeError(
+                        f"GCP instance '{cluster_identifier}' in zone "
+                        f"'{self.zone}' has no external IP address, so there "
+                        "is no host to connect to."
+                    )
 
                 return {
                     "name": f"GCP Compute - {cluster_identifier}",
@@ -536,14 +545,15 @@ class GCPProvider(CloudProvider):
                     },
                 }
             except Exception as e:
-                logger.error(f"Failed to get instance details: {e}")
-                # Return basic config
-                return {
-                    "name": f"GCP Compute - {cluster_identifier}",
-                    "cluster_type": "ssh",
-                    "cluster_host": "placeholder.gcp.com",
-                    "provider": "gcp",
-                }
+                # This used to return cluster_host "placeholder.gcp.com".
+                # Nothing downstream could tell that apart from a real host,
+                # so the failure surfaced as an SSH error against a domain
+                # that does not exist, far from its cause (#119).
+                raise RuntimeError(
+                    f"Could not determine the connection details of GCP "
+                    f"instance '{cluster_identifier}' in zone '{self.zone}' "
+                    f"(project '{self.project_id}'): {e}"
+                ) from e
         elif cluster_type == "gke":
             return {
                 "name": f"GCP GKE - {cluster_identifier}",

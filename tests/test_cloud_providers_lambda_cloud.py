@@ -508,27 +508,19 @@ class TestLambdaCloudProvider:
         mock_response.status_code = 404
         authenticated_provider.session.get.return_value = mock_response
 
-        result = authenticated_provider.get_cluster_config("i-12345")
-
-        # Should return basic config
-        assert result["name"] == "Lambda Cloud - i-12345"
-        assert result["cluster_type"] == "ssh"
-        assert result["cluster_host"] == "placeholder.lambdalabs.com"
-        assert result["username"] == "ubuntu"
-        assert result["provider"] == "lambda"
+        # This used to return cluster_host "placeholder.lambdalabs.com",
+        # which clustrix then tried to SSH into (see #119).
+        with pytest.raises(RuntimeError, match="HTTP 404"):
+            authenticated_provider.get_cluster_config("i-12345")
 
     def test_get_cluster_config_exception(self, authenticated_provider):
         """Test cluster config with exception."""
         authenticated_provider.session.get.side_effect = Exception("Network error")
 
-        result = authenticated_provider.get_cluster_config("i-12345")
-
-        # Should return basic config
-        assert result["name"] == "Lambda Cloud - i-12345"
-        assert result["cluster_type"] == "ssh"
-        assert result["cluster_host"] == "placeholder.lambdalabs.com"
-        assert result["username"] == "ubuntu"
-        assert result["provider"] == "lambda"
+        # This used to return cluster_host "placeholder.lambdalabs.com",
+        # which clustrix then tried to SSH into (see #119).
+        with pytest.raises(RuntimeError, match="Could not reach Lambda Cloud"):
+            authenticated_provider.get_cluster_config("i-12345")
 
     def test_estimate_cost_default(self, provider):
         """Test cost estimation with default values."""
@@ -741,9 +733,9 @@ class TestLambdaCloudProviderEdgeCases:
         }
         provider.session.get.return_value = mock_response
 
-        result = provider.get_cluster_config("i-12345")
-
-        assert result["cluster_host"] == ""  # Empty string when no IP
+        # An instance with no IP has no host to connect to.
+        with pytest.raises(RuntimeError, match="no\\s+IP address yet"):
+            provider.get_cluster_config("i-12345")
 
     def test_get_cluster_status_missing_fields(self):
         """Test cluster status with missing fields."""

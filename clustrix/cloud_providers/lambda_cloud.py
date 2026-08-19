@@ -285,60 +285,58 @@ class LambdaCloudProvider(CloudProvider):
             response = self.session.get(
                 f"{self.base_url}/instances/{cluster_identifier}"
             )
+        except Exception as e:
+            raise RuntimeError(
+                f"Could not reach Lambda Cloud to look up instance "
+                f"'{cluster_identifier}': {e}"
+            ) from e
 
-            if response.status_code == 200:
-                instance_data = response.json()
+        if response.status_code == 200:
+            instance_data = response.json()
 
-                # Get public IP
-                public_ip = ""
-                ip_address = instance_data.get("ip")
-                if ip_address:
-                    public_ip = ip_address
-
-                instance_type = instance_data.get("instance_type", {}).get(
-                    "name", "unknown"
+            # Get public IP. An instance the API reports without one is
+            # not reachable, and an empty (or invented) host only moves
+            # the failure to a confusing SSH timeout later.
+            public_ip = instance_data.get("ip")
+            if not public_ip:
+                raise RuntimeError(
+                    f"Lambda Cloud instance '{cluster_identifier}' has no "
+                    "IP address yet, so there is no host to connect to."
                 )
 
-                return {
-                    "name": f"Lambda Cloud - {cluster_identifier}",
-                    "cluster_type": "ssh",
-                    "cluster_host": public_ip,
-                    "username": "ubuntu",  # Default for Lambda Cloud instances
-                    "cluster_port": 22,
-                    "default_cores": 8,  # Lambda Cloud instances typically have high core counts
-                    "default_memory": "32GB",  # GPU instances typically have large memory
-                    "remote_work_dir": "/home/ubuntu/clustrix",
-                    "package_manager": "conda",
-                    "cost_monitoring": True,
-                    "provider": "lambda",
-                    "provider_config": {
-                        "instance_id": cluster_identifier,
-                        "instance_type": instance_type,
-                        "region": instance_data.get("region", {}).get(
-                            "name", "unknown"
-                        ),
-                    },
-                }
-            else:
-                # Return basic config if instance details can't be retrieved
-                return {
-                    "name": f"Lambda Cloud - {cluster_identifier}",
-                    "cluster_type": "ssh",
-                    "cluster_host": "placeholder.lambdalabs.com",
-                    "username": "ubuntu",
-                    "provider": "lambda",
-                }
+            instance_type = instance_data.get("instance_type", {}).get(
+                "name", "unknown"
+            )
 
-        except Exception as e:
-            logger.error(f"Failed to get Lambda Cloud instance config: {e}")
-            # Return basic config on error
             return {
                 "name": f"Lambda Cloud - {cluster_identifier}",
                 "cluster_type": "ssh",
-                "cluster_host": "placeholder.lambdalabs.com",
-                "username": "ubuntu",
+                "cluster_host": public_ip,
+                "username": "ubuntu",  # Default for Lambda Cloud instances
+                "cluster_port": 22,
+                "default_cores": 8,  # Lambda Cloud instances typically have high core counts
+                "default_memory": "32GB",  # GPU instances typically have large memory
+                "remote_work_dir": "/home/ubuntu/clustrix",
+                "package_manager": "conda",
+                "cost_monitoring": True,
                 "provider": "lambda",
+                "provider_config": {
+                    "instance_id": cluster_identifier,
+                    "instance_type": instance_type,
+                    "region": instance_data.get("region", {}).get("name", "unknown"),
+                },
             }
+        else:
+            # Both of these used to return cluster_host
+            # "placeholder.lambdalabs.com". Nothing downstream could tell
+            # that apart from a real host, so the failure surfaced as an
+            # SSH error against a domain that does not exist, far from its
+            # cause (#119).
+            raise RuntimeError(
+                f"Lambda Cloud returned HTTP {response.status_code} for "
+                f"instance '{cluster_identifier}', so its connection "
+                "details could not be determined."
+            )
 
     def estimate_cost(self, **kwargs) -> Dict[str, float]:
         """Estimate Lambda Cloud costs."""

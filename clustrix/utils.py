@@ -9,7 +9,7 @@ import pickle
 import inspect
 import importlib
 import subprocess
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
@@ -465,7 +465,7 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     }
 
 
-def deserialize_function(func_data: bytes) -> tuple:
+def deserialize_function(func_data: Union[bytes, Dict[str, Any]]) -> tuple:
     """
     Deserialize function data back to function, args, and kwargs.
 

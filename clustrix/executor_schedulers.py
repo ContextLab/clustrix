@@ -76,29 +76,45 @@ class SchedulerManager:
         self.active_jobs: Dict[str, Any] = {}
         self.status_manager = SchedulerStatusManager(config, connection_manager)
 
-    def submit_slurm_job(
-        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
-    ) -> str:
-        """Submit job via SLURM."""
-        # Create remote working directory
+    def _stage_job_directory(self, func_data: Dict[str, Any]) -> tuple:
+        """Create the remote job directory and upload the function data.
+
+        Every scheduler needs exactly this, and each carried its own copy.
+
+        Returns:
+            (remote_job_dir, result_key)
+        """
         work_dir = self.connection_manager.resolve_remote_path(
             self.config.remote_work_dir
         )
         remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
         result_key = self._prepare_job_dir(remote_job_dir)
 
-        # Upload function data
         with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
             pickle.dump(func_data, f, protocol=4)
             local_pickle_path = f.name
+        try:
+            self.connection_manager.upload_file(
+                local_pickle_path, f"{remote_job_dir}/function_data.pkl"
+            )
+        finally:
+            os.unlink(local_pickle_path)
 
-        self.connection_manager.upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
-        os.unlink(local_pickle_path)
+        return remote_job_dir, result_key
 
-        # Setup two-venv environment for cross-version compatibility (if enabled)
+    def _setup_job_environment(self, remote_job_dir: str, func_data: Dict[str, Any]):
+        """Build the Python environment the generated job script will activate.
+
+        Shared by SLURM, PBS, SGE and SSH. SLURM and SSH each carried a copy of
+        this, SGE had only the basic half, and PBS had none at all -- so a PBS
+        job ran a script whose first act was `source venv/bin/activate` against
+        a virtualenv nothing had created, and died there every time (#120).
+
+        Returns the config to generate the job script from: `venv_info` set for
+        the two-venv layout, or cleared when only the single venv was built.
+        """
         updated_config = self.config
+
         if getattr(self.config, "use_two_venv", True):
             try:
                 from .utils import enhanced_setup_two_venv_environment
@@ -131,20 +147,18 @@ class SchedulerManager:
                 )
 
                 if setup_thread.is_alive():
-                    logger.warning(
-                        "Two-venv setup timed out, falling back to basic setup"
-                    )
                     raise TimeoutError("Two-venv setup timed out")
                 elif exception_occurred:
                     raise exception_occurred
                 elif venv_info:
                     # Update config with venv paths for job script generation
                     updated_config.python_executable = venv_info["venv1_python"]
-                    # Store venv_info for script generation
                     updated_config.venv_info = venv_info
                     logger.info(
-                        f"Two-venv setup successful, using: {venv_info['venv1_python']}"
+                        f"Two-venv setup successful, using: "
+                        f"{venv_info['venv1_python']}"
                     )
+                    return updated_config
                 else:
                     raise RuntimeError("Two-venv setup returned no result")
 
@@ -152,25 +166,27 @@ class SchedulerManager:
                 logger.warning(
                     f"Two-venv setup failed, falling back to basic setup: {e}"
                 )
-                # Fallback to basic environment setup
-                setup_remote_environment(
-                    self.connection_manager.ssh_client,
-                    remote_job_dir,
-                    func_data["requirements"],
-                    self.config,
-                )
-                updated_config.venv_info = None
         else:
             logger.info("Two-venv setup disabled, using basic environment setup")
-            # Use basic environment setup
-            setup_remote_environment(
-                self.connection_manager.ssh_client,
-                remote_job_dir,
-                func_data["requirements"],
-                self.config,
-            )
-            updated_config = self.config
-            updated_config.venv_info = None
+
+        # Fall back to the single-venv layout -- which means actually building
+        # that venv. Setting venv_info = None without this leaves the generated
+        # script activating a virtualenv nobody created.
+        setup_remote_environment(
+            self.connection_manager.ssh_client,
+            remote_job_dir,
+            func_data["requirements"],
+            self.config,
+        )
+        updated_config.venv_info = None
+        return updated_config
+
+    def submit_slurm_job(
+        self, func_data: Dict[str, Any], job_config: Dict[str, Any]
+    ) -> str:
+        """Submit job via SLURM."""
+        remote_job_dir, result_key = self._stage_job_directory(func_data)
+        updated_config = self._setup_job_environment(remote_job_dir, func_data)
 
         # Create job script
         script_content = create_job_script(
@@ -205,29 +221,15 @@ class SchedulerManager:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via PBS."""
-        # Similar to SLURM but with PBS commands
-        work_dir = self.connection_manager.resolve_remote_path(
-            self.config.remote_work_dir
-        )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
-        result_key = self._prepare_job_dir(remote_job_dir)
-
-        # Upload function data
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f, protocol=4)
-            local_pickle_path = f.name
-
-        self.connection_manager.upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
-        os.unlink(local_pickle_path)
+        remote_job_dir, result_key = self._stage_job_directory(func_data)
+        updated_config = self._setup_job_environment(remote_job_dir, func_data)
 
         # Create PBS script
         script_content = create_job_script(
             cluster_type="pbs",
             job_config=job_config,
             remote_job_dir=remote_job_dir,
-            config=self.config,
+            config=updated_config,
         )
 
         script_path = f"{remote_job_dir}/job.pbs"
@@ -252,37 +254,15 @@ class SchedulerManager:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via SGE."""
-        # Create remote working directory
-        work_dir = self.connection_manager.resolve_remote_path(
-            self.config.remote_work_dir
-        )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
-        result_key = self._prepare_job_dir(remote_job_dir)
-
-        # Upload function data
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f, protocol=4)
-            local_pickle_path = f.name
-
-        self.connection_manager.upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
-        os.unlink(local_pickle_path)
-
-        # Setup environment
-        setup_remote_environment(
-            self.connection_manager.ssh_client,
-            remote_job_dir,
-            func_data["requirements"],
-            self.config,
-        )
+        remote_job_dir, result_key = self._stage_job_directory(func_data)
+        updated_config = self._setup_job_environment(remote_job_dir, func_data)
 
         # Create job script
         script_content = create_job_script(
             cluster_type="sge",
             job_config=job_config,
             remote_job_dir=remote_job_dir,
-            config=self.config,
+            config=updated_config,
         )
 
         # Upload and submit job script
@@ -310,97 +290,8 @@ class SchedulerManager:
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via direct SSH using two-venv approach."""
-        work_dir = self.connection_manager.resolve_remote_path(
-            self.config.remote_work_dir
-        )
-        remote_job_dir = f"{work_dir}/job_{int(time.time())}_{secrets.token_hex(4)}"
-        result_key = self._prepare_job_dir(remote_job_dir)
-
-        # Upload function data
-        with tempfile.NamedTemporaryFile(mode="wb", delete=False) as f:
-            pickle.dump(func_data, f, protocol=4)
-            local_pickle_path = f.name
-
-        self.connection_manager.upload_file(
-            local_pickle_path, f"{remote_job_dir}/function_data.pkl"
-        )
-        os.unlink(local_pickle_path)
-
-        # Setup two-venv environment for cross-version compatibility (if enabled)
-        updated_config = self.config
-        if getattr(self.config, "use_two_venv", True):
-            try:
-                from .utils import enhanced_setup_two_venv_environment
-
-                logger.info(
-                    "Setting up enhanced two-venv environment with GPU detection"
-                )
-
-                # Use threading to implement timeout for venv setup
-                venv_info = None
-                exception_occurred = None
-
-                def setup_venv():
-                    nonlocal venv_info, exception_occurred
-                    try:
-                        venv_info = enhanced_setup_two_venv_environment(
-                            self.connection_manager.ssh_client,
-                            remote_job_dir,
-                            func_data["requirements"],
-                            self.config,
-                        )
-                    except Exception as e:
-                        exception_occurred = e
-
-                setup_thread = threading.Thread(target=setup_venv)
-                setup_thread.daemon = True
-                setup_thread.start()
-                setup_thread.join(
-                    timeout=getattr(self.config, "venv_setup_timeout", 300)
-                )
-
-                if setup_thread.is_alive():
-                    logger.warning(
-                        "Two-venv setup timed out, falling back to basic setup"
-                    )
-                    raise TimeoutError("Two-venv setup timed out")
-                elif exception_occurred:
-                    raise exception_occurred
-                elif venv_info:
-                    # Update config with venv paths
-                    updated_config.python_executable = venv_info["venv1_python"]
-                    # Store venv_info for script generation
-                    updated_config.venv_info = venv_info
-                    logger.info(
-                        f"Two-venv setup successful, using: {venv_info['venv1_python']}"
-                    )
-                else:
-                    raise RuntimeError("Two-venv setup returned no result")
-
-            except Exception as e:
-                logger.warning(f"Failed to setup two-venv environment: {e}")
-                # Fall back to the single-venv approach -- which means actually
-                # building that venv. Both fallback branches used to set
-                # venv_info = None and stop there, so the generated script
-                # activated a virtualenv nobody had created and every job died
-                # with "venv/bin/activate: No such file or directory". The
-                # SLURM path has always called this; the SSH path never did.
-                setup_remote_environment(
-                    self.connection_manager.ssh_client,
-                    remote_job_dir,
-                    func_data["requirements"],
-                    self.config,
-                )
-                updated_config.venv_info = None
-        else:
-            logger.info("Two-venv setup disabled, using basic environment setup")
-            setup_remote_environment(
-                self.connection_manager.ssh_client,
-                remote_job_dir,
-                func_data["requirements"],
-                self.config,
-            )
-            updated_config.venv_info = None
+        remote_job_dir, result_key = self._stage_job_directory(func_data)
+        updated_config = self._setup_job_environment(remote_job_dir, func_data)
 
         # Create execution script
         script_content = create_job_script(
@@ -414,7 +305,10 @@ class SchedulerManager:
         self.connection_manager.create_remote_file(script_path, script_content)
 
         # Execute in background
-        cmd = f"cd {remote_job_dir} && nohup bash job.sh > job.out 2> job.err < /dev/null &"
+        cmd = (
+            f"cd {remote_job_dir} && "
+            "nohup bash job.sh > job.out 2> job.err < /dev/null &"
+        )
         stdout, stderr = self.connection_manager.execute_remote_command(cmd)
 
         # Use timestamp as job ID for SSH

@@ -631,15 +631,28 @@ class AzureProvider(CloudProvider):
                     self.resource_group, cluster_identifier
                 )
 
-                # Get public IP
-                public_ip = ""
+                # Get public IP. A VM with no reachable address is not a
+                # cluster anyone can connect to, and returning an empty (or
+                # invented) host here only moves the failure to a confusing
+                # SSH timeout later.
                 try:
                     ip_result = self.network_client.public_ip_addresses.get(
                         self.resource_group, f"{cluster_identifier}-ip"
                     )
-                    public_ip = ip_result.ip_address or ""
-                except Exception:
-                    pass
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Azure VM '{cluster_identifier}' in resource group "
+                        f"'{self.resource_group}' has no readable public IP "
+                        f"resource ('{cluster_identifier}-ip'): {e}"
+                    ) from e
+
+                public_ip = ip_result.ip_address
+                if not public_ip:
+                    raise RuntimeError(
+                        f"Azure VM '{cluster_identifier}' has a public IP "
+                        f"resource ('{cluster_identifier}-ip') with no address "
+                        "assigned yet, so there is no host to connect to."
+                    )
 
                 return {
                     "name": f"Azure VM - {cluster_identifier}",
@@ -661,14 +674,15 @@ class AzureProvider(CloudProvider):
                     },
                 }
             except Exception as e:
-                logger.error(f"Failed to get VM details: {e}")
-                # Return basic config
-                return {
-                    "name": f"Azure VM - {cluster_identifier}",
-                    "cluster_type": "ssh",
-                    "cluster_host": "placeholder.azure.com",
-                    "provider": "azure",
-                }
+                # This used to return cluster_host "placeholder.azure.com".
+                # Nothing downstream could tell that apart from a real host,
+                # so the failure surfaced as an SSH error against a domain
+                # that does not exist, far from its cause (#119).
+                raise RuntimeError(
+                    f"Could not determine the connection details of Azure VM "
+                    f"'{cluster_identifier}' in resource group "
+                    f"'{self.resource_group}': {e}"
+                ) from e
         elif cluster_type == "aks":
             return {
                 "name": f"Azure AKS - {cluster_identifier}",

@@ -1,6 +1,9 @@
 """Local parallel execution using multiprocessing and threading."""
 
 import os
+import secrets
+import time
+import traceback
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
@@ -447,3 +450,91 @@ def create_local_executor(
         use_threads = False  # Default to processes
 
     return LocalExecutor(max_workers=max_workers, use_threads=use_threads)
+
+
+class LocalJobManager:
+    """Runs jobs on the submitting machine, for ``cluster_type = "local"``.
+
+    "local" is offered in the notebook widget's cluster-type dropdown and
+    documented as a cluster type, but ``ClusterExecutor.submit_job`` had no
+    branch for it and raised ``ValueError: Unsupported cluster type: local``
+    (#120). This gives it one, reusing :class:`LocalExecutor` rather than
+    growing a second way to call a function.
+
+    Execution is synchronous: ``submit_job`` runs the function and records
+    its outcome, and ``wait_for_result`` hands back that outcome. There is no
+    scheduler to hand the work to and nothing to poll, so pretending otherwise
+    would only add a thread whose result nobody could cancel anyway.
+    """
+
+    def __init__(self, config):
+        """Initialize the local job manager.
+
+        Args:
+            config: ClusterConfig instance (unused for execution; kept so this
+                manager has the same shape as the other backend managers)
+        """
+        self.config = config
+        self.active_jobs: Dict[str, Any] = {}
+
+    def submit_job(self, func_data: Dict[str, Any], job_config: Dict[str, Any]) -> str:
+        """Run a serialized job here and now, returning its job ID."""
+        from .utils import deserialize_function
+
+        job_id = f"local_{int(time.time())}_{secrets.token_hex(4)}"
+        func, args, kwargs = deserialize_function(func_data)
+
+        record: Dict[str, Any] = {
+            "status": "running",
+            "submit_time": time.time(),
+        }
+        self.active_jobs[job_id] = record
+
+        executor = LocalExecutor(max_workers=job_config.get("cores"), use_threads=True)
+        try:
+            record["result"] = executor.execute_single(func, args, kwargs)
+            record["status"] = "completed"
+        except Exception as e:
+            record["error"] = e
+            record["traceback"] = traceback.format_exc()
+            record["status"] = "failed"
+
+        return job_id
+
+    def get_job_status(self, job_id: str) -> str:
+        """Return the recorded status of a local job."""
+        record = self.active_jobs.get(job_id)
+        if record is None:
+            raise ValueError(f"Unknown local job ID: {job_id}")
+        return record["status"]
+
+    def wait_for_result(self, job_id: str) -> Any:
+        """Return a local job's result, or re-raise the exception it hit."""
+        record = self.active_jobs.pop(job_id, None)
+        if record is None:
+            raise ValueError(f"Unknown local job ID: {job_id}")
+
+        if record["status"] == "failed":
+            raise record["error"]
+        return record["result"]
+
+    def get_error_log(self, job_id: str) -> str:
+        """Return the traceback of a failed local job."""
+        record = self.active_jobs.get(job_id)
+        if record is None:
+            raise ValueError(f"Unknown local job ID: {job_id}")
+        return record.get("traceback", "")
+
+    def cancel_job(self, job_id: str):
+        """Local jobs cannot be cancelled: they have already run.
+
+        Reporting a successful cancellation here would be a lie -- the work
+        was done, and any side effects it had have already happened.
+        """
+        if job_id not in self.active_jobs:
+            raise ValueError(f"Unknown local job ID: {job_id}")
+        raise RuntimeError(
+            f"Local job {job_id} cannot be cancelled: cluster_type 'local' "
+            "runs the function on this machine during submission, so it has "
+            "already finished by the time a cancellation could be requested."
+        )

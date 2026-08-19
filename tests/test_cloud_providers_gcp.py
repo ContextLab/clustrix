@@ -621,25 +621,23 @@ class TestGCPProvider:
         mock_instance.network_interfaces = [mock_interface]
         authenticated_provider.compute_client.get.return_value = mock_instance
 
-        result = authenticated_provider.get_cluster_config(
-            "test-instance", cluster_type="compute"
-        )
-
-        assert result["cluster_host"] == ""
+        # An instance with no external IP has no host to connect to. This
+        # used to return cluster_host "" (see #119).
+        with pytest.raises(RuntimeError, match="no external IP"):
+            authenticated_provider.get_cluster_config(
+                "test-instance", cluster_type="compute"
+            )
 
     def test_get_cluster_config_compute_exception(self, authenticated_provider):
         """Test compute cluster config with exception."""
         authenticated_provider.compute_client.get.side_effect = Exception("API error")
 
-        result = authenticated_provider.get_cluster_config(
-            "test-instance", cluster_type="compute"
-        )
-
-        # Should return basic config
-        assert result["name"] == "GCP Compute - test-instance"
-        assert result["cluster_type"] == "ssh"
-        assert result["cluster_host"] == "placeholder.gcp.com"
-        assert result["provider"] == "gcp"
+        # This used to return cluster_host "placeholder.gcp.com", which
+        # clustrix then tried to SSH into (see #119).
+        with pytest.raises(RuntimeError, match="Could not determine"):
+            authenticated_provider.get_cluster_config(
+                "test-instance", cluster_type="compute"
+            )
 
     def test_get_cluster_config_gke(self, authenticated_provider):
         """Test GKE cluster config retrieval."""
@@ -949,9 +947,8 @@ class TestGCPProviderEdgeCases:
         mock_instance.network_interfaces = [mock_interface]
         provider.compute_client.get.return_value = mock_instance
 
-        result = provider.get_cluster_config("test-instance", cluster_type="compute")
-
-        assert result["cluster_host"] == ""
+        with pytest.raises(RuntimeError, match="no external IP"):
+            provider.get_cluster_config("test-instance", cluster_type="compute")
 
     def test_get_cluster_config_no_network_interfaces(self):
         """Test cluster config with instance having no network interfaces."""
@@ -965,9 +962,8 @@ class TestGCPProviderEdgeCases:
         mock_instance.network_interfaces = []  # No network interfaces
         provider.compute_client.get.return_value = mock_instance
 
-        result = provider.get_cluster_config("test-instance", cluster_type="compute")
-
-        assert result["cluster_host"] == ""
+        with pytest.raises(RuntimeError, match="no external IP"):
+            provider.get_cluster_config("test-instance", cluster_type="compute")
 
     def test_gke_cluster_status_no_zone(self):
         """Test GKE cluster status when zone is None."""
