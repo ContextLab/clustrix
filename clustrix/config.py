@@ -274,6 +274,10 @@ class ClusterConfig:
         if not include_secrets:
             for key in SECRET_FIELDS:
                 config_data.pop(key, None)
+            for key in SECRET_BEARING_MAPPINGS:
+                value = config_data.get(key)
+                if isinstance(value, dict):
+                    config_data[key] = _redact_secret_entries(value)
 
         _write_config_file_securely(config_path_obj, config_data)
 
@@ -303,9 +307,41 @@ _SECRET_FIELD_PATTERN = re.compile(
     r"|subscription_id",
     re.IGNORECASE,
 )
+
+# Two kinds of name match the pattern above without holding a secret: a
+# boolean flag (``use_env_password``) and a field that holds the *name* of
+# an environment variable rather than its value (``password_env_var``).
+# Dropping those breaks the auth-fallback configuration round trip while
+# protecting nothing.
+_NOT_ACTUALLY_SECRET = re.compile(r"^use_|_env_var$", re.IGNORECASE)
+
+
+def _is_secret_field(field_name: str, field_type: object) -> bool:
+    if _NOT_ACTUALLY_SECRET.search(field_name):
+        return False
+    return bool(_SECRET_FIELD_PATTERN.search(field_name))
+
+
 SECRET_FIELDS = {
-    f.name for f in fields(ClusterConfig) if _SECRET_FIELD_PATTERN.search(f.name)
-} | {"environment_variables"}
+    f.name for f in fields(ClusterConfig) if _is_secret_field(f.name, f.type)
+}
+
+#: Fields holding a mapping whose *values* may be secrets even though the
+#: field name is innocuous. ``environment_variables`` commonly carries both
+#: ``OMP_NUM_THREADS`` and ``AWS_SECRET_ACCESS_KEY``; dropping the whole
+#: mapping would lose ordinary settings users expect to persist, so the
+#: individual entries are filtered by the same name test instead.
+SECRET_BEARING_MAPPINGS = frozenset({"environment_variables"})
+
+
+def _redact_secret_entries(mapping: dict) -> dict:
+    """Drop the entries of ``mapping`` whose *key* names a secret."""
+    return {
+        k: v
+        for k, v in mapping.items()
+        if not _SECRET_FIELD_PATTERN.search(str(k))
+        or _NOT_ACTUALLY_SECRET.search(str(k))
+    }
 
 
 def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> None:

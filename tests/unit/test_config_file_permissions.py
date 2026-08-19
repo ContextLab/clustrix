@@ -28,8 +28,8 @@ def secret_bearing_config():
         cluster_type="ssh",
         cluster_host="cluster.example.edu",
         username="researcher",
-        password="hunter2-super-secret",  # nosec - test fixture, not real
-        api_key="sk-real-looking-secret-abcdef123456",  # nosec
+        password="fake-password-for-this-test",
+        api_key="sk-fake-key-abcdef123456",
         aws_secret_access_key="AKIAABCDEFSECRETVALUE",  # nosec
         hf_token="hf_thisisasecrettoken",  # nosec
     )
@@ -90,8 +90,8 @@ def test_save_to_file_include_secrets_true_writes_plaintext(
     secret_bearing_config.save_to_file(str(config_path), include_secrets=True)
 
     raw_text = config_path.read_text()
-    assert "hunter2-super-secret" in raw_text
-    assert "sk-real-looking-secret-abcdef123456" in raw_text
+    assert "fake-password-for-this-test" in raw_text
+    assert "sk-fake-key-abcdef123456" in raw_text
 
     # Even with secrets included, the mode must still be 0600 -- opting into
     # writing secrets must never also opt into a wider file mode.
@@ -149,7 +149,7 @@ def test_save_config_module_function_matches_save_to_file(tmp_path, monkeypatch)
     real_config = ClusterConfig(
         cluster_host="module-level.example.edu",
         username="modtest",
-        password="module-secret-value",  # nosec
+        password="fake-module-password",
     )
     monkeypatch.setattr(config_module, "_config", real_config)
 
@@ -178,12 +178,77 @@ def test_secret_fields_derived_from_dataclass_covers_known_credential_names():
         "gcp_service_account_key",
         "lambda_api_key",
         "hf_token",
-        "environment_variables",
     ):
         assert expected in SECRET_FIELDS, (
             f"{expected!r} should be classified as a secret field but "
             f"SECRET_FIELDS is {sorted(SECRET_FIELDS)}"
         )
     # Sanity: fields that are not credentials must not be swept up.
-    for not_expected in ("cluster_host", "username", "cluster_type", "ssh_port"):
+    for not_expected in (
+        "cluster_host",
+        "username",
+        "cluster_type",
+        "ssh_port",
+        # Not secrets despite matching on name: a boolean flag, and a
+        # field holding the NAME of an environment variable rather than
+        # its value. Dropping these broke the auth-fallback round trip
+        # while protecting nothing.
+        "use_env_password",
+        "password_env_var",
+        # A mapping, filtered entry-by-entry rather than dropped whole --
+        # see test_environment_variables_are_filtered_not_dropped.
+        "environment_variables",
+    ):
         assert not_expected not in SECRET_FIELDS
+
+
+def test_environment_variables_are_filtered_not_dropped(tmp_path):
+    """`environment_variables` usually holds a mix.
+
+    Dropping the whole mapping protected the credentials in it but also
+    threw away ordinary settings the user expects to persist -- so saving
+    and reloading a config silently lost OMP_NUM_THREADS. Each entry is
+    judged on its own key name instead.
+    """
+    config = ClusterConfig(
+        cluster_host="cluster.example.edu",
+        username="researcher",
+        environment_variables={
+            "OMP_NUM_THREADS": "8",
+            "MY_PIPELINE_STAGE": "preprocess",
+            "AWS_SECRET_ACCESS_KEY": "fake-aws-secret-value",
+            "HF_TOKEN": "fake-hf-token-value",
+        },
+    )
+
+    config_path = tmp_path / "envvars.json"
+    config.save_to_file(str(config_path))
+    raw_text = config_path.read_text()
+
+    assert "fake-aws-secret-value" not in raw_text
+    assert "fake-hf-token-value" not in raw_text
+
+    reloaded = ClusterConfig.load_from_file(str(config_path))
+    assert reloaded.environment_variables == {
+        "OMP_NUM_THREADS": "8",
+        "MY_PIPELINE_STAGE": "preprocess",
+    }
+
+
+def test_environment_variable_secrets_survive_include_secrets(tmp_path):
+    """Opting in must write the whole mapping, not the filtered version."""
+    config = ClusterConfig(
+        cluster_host="cluster.example.edu",
+        environment_variables={
+            "OMP_NUM_THREADS": "8",
+            "AWS_SECRET_ACCESS_KEY": "fake-aws-secret-value",
+        },
+    )
+    config_path = tmp_path / "envvars_with_secrets.json"
+    config.save_to_file(str(config_path), include_secrets=True)
+
+    assert "fake-aws-secret-value" in config_path.read_text()
+    assert _mode(config_path) == 0o600
+
+    reloaded = ClusterConfig.load_from_file(str(config_path))
+    assert reloaded.environment_variables == config.environment_variables
