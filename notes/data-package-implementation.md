@@ -109,6 +109,16 @@ classifies any string with a separator ending in one of 17 extensions as a data 
   and pickle-then-delete, against a real private `clustrix-data` dataset repo. Kilobytes only.
 - Real subprocess for the pickle-survives-a-fresh-interpreter test.
 
+## The limitation a user will hit first
+
+A package above `stage_inline_max_bytes` needs a HuggingFace account, on **every** backend. The
+issue body's direct SFTP staging into `_stage/` was not built, so a user on SLURM or SSH with no HF
+account has only the inline path: the bytes ride inside the pickled payload, held in memory and
+shipped over the existing SFTP upload. That works, and raising `stage_inline_max_bytes` makes it
+work for larger data, but it is memory-bound and re-ships on every call. If that turns out to be the
+common case, the SFTP backend from the issue body is the thing to add, and `DataPackage` already has
+the shape for it — a second pair of coordinates alongside `repo_id`/`path_in_repo`.
+
 ## Not built this round
 
 Reaper (dead by owner's decision), rsync backend, shared-filesystem elision, content-addressed
