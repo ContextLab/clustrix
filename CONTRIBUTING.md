@@ -56,7 +56,8 @@ Before submitting any code, please ensure it meets our quality standards:
 
 ### Testing
 
-We maintain comprehensive test coverage. When contributing:
+No trustworthy coverage figure has been measured for this project (see
+`README.md`'s Testing Philosophy section). When contributing:
 
 - **Write tests** for all new functionality
 - **Update existing tests** when modifying behavior

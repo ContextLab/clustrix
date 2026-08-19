@@ -321,7 +321,9 @@ def process_datasets(config):
     data_files = cluster_glob("*.csv", "input/", config)
     
     results = []
-    for filename in data_files:  # Loop gets parallelized automatically
+    # Runs sequentially on the cluster node -- auto-parallelization needs a
+    # literal range() and a function that accepts the chunk keywords.
+    for filename in data_files:
         # Check file size before processing
         file_info = cluster_stat(filename, config)
         if file_info.size > 100_000_000:  # Large files
@@ -720,7 +722,10 @@ weights = train_neural_network(my_data, {'epochs': 50})
 def monte_carlo_simulation(n_samples=1000000):
     import numpy as np
     
-    # This loop will be automatically parallelized
+    # NOTE: this loop is NOT auto-parallelized. range(n_samples) is not a
+    # literal range, and this function does not accept the chunk keywords,
+    # so clustrix runs it whole on one node. That is still useful -- the
+    # node has 16 cores and 64GB -- but the parallelism is yours to write.
     results = []
     for i in range(n_samples):
         x, y = np.random.random(2)
@@ -765,8 +770,12 @@ command. `scripts/collect_execution_evidence.py` is that command, and
 The existing test suite does not meet that goal yet. It is being worked
 towards, and the README should not be read as saying it has been reached:
 
-- 42 of 197 test modules (21%) still use `unittest.mock`. Migrating
-  them is in progress; the claim that this project uses zero mocks was not true.
+- 42 of 215 test modules (20%) still use `unittest.mock`. (Count: files
+  named `test_*.py` under `tests/`, via
+  `find tests -name "test_*.py" | wc -l` and
+  `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`.)
+  Migrating them is in progress; the claim that this project uses zero
+  mocks was not true.
 - The main CI workflow runs `tests/unit/` plus a local-only slice of the
   integration tests. The SSH, scheduler and cloud tests need credentials CI
   does not have.

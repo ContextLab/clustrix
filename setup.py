@@ -37,7 +37,10 @@ setup(
         "dill>=0.3.4",
         "click>=8.0.0",
         "requests>=2.25.0",  # For Lambda Cloud and general HTTP requests
-        "huggingface_hub>=0.16.0",  # For HuggingFace Spaces integration
+        # run_job / inspect_job / fetch_job_logs -- the whole Jobs API the
+        # huggingface backend is built on -- arrived well after 0.16.
+        "huggingface_hub>=0.34.0",
+        "python-dotenv>=1.0.0",  # credential_manager.py loads ~/.clustrix/.env
     ],
     extras_require={
         "widget": [
@@ -57,6 +60,7 @@ setup(
         ],
         "gcp": [
             "google-cloud-container>=2.15.0",
+            "google-cloud-resource-manager>=1.14.0",
             "google-auth>=2.15.0",
             "kubernetes>=20.13.0",
         ],
@@ -65,16 +69,31 @@ setup(
             "azure-identity>=1.12.0",
             "azure-mgmt-containerservice>=20.0.0",
             "google-cloud-container>=2.15.0",
+            "google-cloud-resource-manager>=1.14.0",
             "google-auth>=2.15.0",
             "kubernetes>=20.13.0",
         ],
         "dev": [
             "pytest>=6.0",
             "pytest-cov>=2.0",
+            # tests/comprehensive/* and several tests/*_real.py modules import
+            # numpy and pandas at module scope; without them those modules
+            # raise ModuleNotFoundError during collection (see #130).
+            "numpy>=1.19",
+            "pandas>=1.1",
             "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
             # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
             "flake8>=3.8",
             "mypy>=0.812",
+            "types-PyYAML",
+            "types-requests",
+            "types-paramiko",
+            # The notebook widget suite imports these at module scope.
+            "ipywidgets>=7.6.0",
+            "ipython>=7.0.0",
+            # Several deadlock regression tests use @pytest.mark.timeout and
+            # hang forever without it.
+            "pytest-timeout>=2.0",
         ],
         "test": [
             "pytest>=6.0",
@@ -91,6 +110,7 @@ setup(
             "azure-mgmt-network>=25.0.0",  # Azure networking
             "google-cloud-compute>=1.11.0",  # GCP compute
             "google-cloud-container>=2.15.0",  # GCP GKE
+            "google-cloud-resource-manager>=1.14.0",  # GCP resource manager
             "google-auth>=2.15.0",  # GCP auth
             "kubernetes>=20.13.0",  # Kubernetes client
         ],
@@ -113,6 +133,7 @@ setup(
             "azure-identity>=1.12.0",
             "azure-mgmt-containerservice>=20.0.0",
             "google-cloud-container>=2.15.0",
+            "google-cloud-resource-manager>=1.14.0",
             "google-auth>=2.15.0",
             # Development dependencies
             "pytest>=6.0",
