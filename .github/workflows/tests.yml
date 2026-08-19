@@ -53,7 +53,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev,test,kubernetes,widget]"
+        pip install -e ".[dev,test,widget]"
 
     # Linting is version-independent, so run it once on the primary target
     # rather than on every matrix combination.
@@ -129,7 +129,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install -e ".[dev,test,kubernetes,widget]"
+        pip install -e ".[dev,test,widget]"
         
     - name: Run integration tests
       run: |
