@@ -466,7 +466,10 @@ class TestRemoteParallelExecution:
 
         mock_serialize.return_value = b"serialized_function"
 
-        def test_func(data):
+        # The chunk is handed over as a keyword argument, so the callee has to
+        # declare it. Without these parameters clustrix declines to split the
+        # work (issue #114) and this test would be exercising the fallback.
+        def test_func(data, _chunk_range_i=None, _chunk_index=0):
             return [x * 2 for x in data]
 
         loop_info = {"variable": "i", "range": range(4)}
@@ -489,7 +492,7 @@ class TestWorkChunkCreation:
         """Test basic work chunk creation."""
         from clustrix.decorator import _create_work_chunks
 
-        def test_func(data):
+        def test_func(data, _chunk_range_i=None, _chunk_index=0):
             return [x * 2 for x in data]
 
         loop_info = {"variable": "i", "range": range(10)}
@@ -504,7 +507,7 @@ class TestWorkChunkCreation:
         """Test work chunk creation with small range."""
         from clustrix.decorator import _create_work_chunks
 
-        def test_func(data):
+        def test_func(data, _chunk_range_j=None, _chunk_index=0):
             return data
 
         loop_info = {"variable": "j", "range": range(2)}
@@ -521,6 +524,29 @@ class TestWorkChunkCreation:
             assert "_chunk_range_j" in chunk["kwargs"]
             assert "_chunk_index" in chunk["kwargs"]
             assert chunk["kwargs"]["key"] == "value"  # Original kwargs preserved
+
+    def test_create_work_chunks_declines_a_callee_that_cannot_take_the_chunk(self):
+        """Issue #114: the remote chunker gets the same guard as the local one.
+
+        ``_create_work_chunks`` injected ``_chunk_range_<var>`` and
+        ``_chunk_index`` into the user's function with no signature check, so
+        an ordinary function raised ``TypeError: collect() got an unexpected
+        keyword argument '_chunk_range_i'`` on every chunk. Building no chunks
+        is how that is now avoided; ``_execute_parallel`` then submits the
+        function whole.
+        """
+        from clustrix.decorator import _create_work_chunks
+
+        def takes_no_chunk(data):
+            return data
+
+        def collects_kwargs(data, **kwargs):
+            return data
+
+        loop_info = {"variable": "i", "range": range(6)}
+
+        assert _create_work_chunks(takes_no_chunk, ([1, 2, 3],), {}, loop_info, 3) == []
+        assert _create_work_chunks(collects_kwargs, ([1, 2, 3],), {}, loop_info, 3)
 
     def test_create_local_work_chunks_with_range_info(self):
         """Test local work chunk creation with range info."""

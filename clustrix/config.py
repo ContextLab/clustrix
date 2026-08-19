@@ -144,11 +144,16 @@ class ClusterConfig:
 
     # Execution preferences
     auto_parallel: bool = True
-    auto_gpu_parallel: bool = (
-        True  # Automatically parallelize across GPUs when available
-    )
+    # NO EFFECT. Both were read only by the client-side GPU parallelization
+    # path, which was deleted because it never called the decorated function:
+    # it ran a hardcoded torch program per GPU and returned the traces of
+    # random matrices as the user's result. They are kept so that existing
+    # clustrix.yml files and configure(...) calls keep loading, and are listed
+    # under "Settings that currently have no effect" in the configuration docs.
+    # Parallelize across GPUs inside your own function instead.
+    auto_gpu_parallel: bool = True
     max_parallel_jobs: int = 100
-    max_gpu_parallel_jobs: int = 8  # Maximum parallel jobs per GPU
+    max_gpu_parallel_jobs: int = 8
     job_poll_interval: int = 30
     cleanup_on_success: bool = True
     prefer_local_parallel: bool = False

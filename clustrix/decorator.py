@@ -9,9 +9,6 @@ from .async_executor_simple import AsyncClusterExecutor
 from .local_executor import create_local_executor
 from .loop_analysis import find_parallelizable_loops
 from .utils import detect_loops, serialize_function
-from .gpu_utils import (
-    detect_gpu_parallelizable_operations,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -189,12 +186,22 @@ def cluster(
                 parallel if parallel is not None else config.auto_parallel
             )
 
-            # Check if GPU parallelization should be attempted
-            should_gpu_parallelize = (
-                auto_gpu_parallel
-                if auto_gpu_parallel is not None
-                else config.auto_gpu_parallel
-            )
+            # ``auto_gpu_parallel`` no longer does anything. The path it
+            # switched on returned the traces of random matrices instead of
+            # calling the function at all (see the module docstring of
+            # tests/unit/test_decorator_no_gpu_fabrication.py), so it was
+            # deleted. The parameter is still accepted -- removing it would
+            # break every existing @cluster(auto_gpu_parallel=...) call site --
+            # but a silently ignored option is worse than a rejected one, so
+            # say so when someone sets it deliberately.
+            if auto_gpu_parallel is not None:
+                logger.warning(
+                    "@cluster(auto_gpu_parallel=%r) has no effect: automatic "
+                    "GPU parallelization was removed because it never ran the "
+                    "decorated function. Parallelize across GPUs inside your "
+                    "function instead.",
+                    auto_gpu_parallel,
+                )
 
             if execution_mode == "local":
                 use_async = (
@@ -257,15 +264,6 @@ def cluster(
                                 "Auto-provisioned Kubernetes cluster failed to become ready"
                             )
 
-                    # Check for GPU parallelization first (higher priority)
-                    if should_gpu_parallelize:
-                        gpu_parallel_result = _attempt_client_side_gpu_parallelization(
-                            executor, func, args, func_kwargs, job_config
-                        )
-                        if gpu_parallel_result is not None:
-                            return gpu_parallel_result
-
-                    # Fall back to CPU parallelization
                     if should_parallelize:
                         loop_info = detect_loops(func, args, func_kwargs)
                         if loop_info:
@@ -374,6 +372,12 @@ def _execute_parallel(
         func, args, kwargs, loop_info, config.max_parallel_jobs
     )
 
+    if not work_chunks:
+        # Nothing was split, so there is nothing to combine. Falling through
+        # would hand _combine_results an empty list and return [] -- a
+        # fabricated answer. Run the function itself instead.
+        return _execute_single(executor, func, args, kwargs, job_config)
+
     # Submit parallel jobs
     job_ids = []
     for chunk in work_chunks:
@@ -391,6 +395,22 @@ def _execute_parallel(
     return _combine_results(results, loop_info)
 
 
+def _accepts_chunk_kwargs(func: Callable, names: List[str]) -> bool:
+    """Report whether ``func`` can receive every keyword in ``names``.
+
+    Work chunks are handed to the callee as keyword arguments. A function that
+    declares none of them -- and does not collect ``**kwargs`` -- cannot
+    receive them, so parallelizing would raise
+    ``TypeError: f() got an unexpected keyword argument '...'`` on every chunk.
+    The callers decline instead and let the function run whole, which is the
+    correct answer.
+    """
+    params = inspect.signature(func).parameters
+    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+        return True
+    return all(name in params for name in names)
+
+
 def _create_work_chunks(
     func: Callable, args: tuple, kwargs: dict, loop_info: Dict, max_jobs: int
 ) -> List[Dict]:
@@ -403,6 +423,15 @@ def _create_work_chunks(
     chunks = []
     loop_var = loop_info.get("variable")
     loop_range = loop_info.get("range", range(10))  # Default range
+
+    chunk_kwarg_names = [f"_chunk_range_{loop_var}", "_chunk_index"]
+    if not _accepts_chunk_kwargs(func, chunk_kwarg_names):
+        logger.info(
+            "Not parallelizing %s on the cluster: it takes no %s parameter(s).",
+            getattr(func, "__name__", repr(func)),
+            ", ".join(repr(name) for name in chunk_kwarg_names),
+        )
+        return []
 
     chunk_size = max(1, len(loop_range) // max_jobs)
 
@@ -435,241 +464,6 @@ def _combine_results(results: List[tuple], loop_info: Dict) -> Any:
     # For now, just return the list of results
     # In practice, you'd need to intelligently combine based on the original function
     return [result[1] for result in results]
-
-
-def _attempt_client_side_gpu_parallelization(
-    executor: ClusterExecutor,
-    func: Callable,
-    args: tuple,
-    kwargs: dict,
-    job_config: dict,
-) -> Optional[Any]:
-    """
-    Attempt client-side GPU parallelization (similar to CPU parallelization).
-
-    This approach:
-    1. Detects GPU availability on remote cluster
-    2. Analyzes function for parallelizable operations
-    3. Creates separate simple functions for each GPU
-    4. Submits parallel jobs to cluster
-    5. Combines results
-    """
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    try:
-        # Step 1: Simple GPU detection on remote cluster
-        gpu_info = _detect_remote_gpu_count(executor, job_config)
-        if not gpu_info or gpu_info.get("count", 0) < 2:
-            logger.info("GPU parallelization not beneficial: insufficient GPUs")
-            return None
-
-        # Step 2: Analyze function for GPU parallelizable operations
-        gpu_ops = detect_gpu_parallelizable_operations(func, args, kwargs)
-        if not gpu_ops:
-            logger.info(
-                "GPU parallelization not beneficial: no parallelizable operations found"
-            )
-            return None
-
-        # Step 3: Create client-side execution plan
-        execution_plan = _create_client_side_gpu_plan(
-            func, args, kwargs, gpu_info, gpu_ops
-        )
-        if not execution_plan:
-            logger.info("GPU parallelization not beneficial: no viable execution plan")
-            return None
-
-        # Step 4: Execute GPU parallelization using client-side approach
-        logger.info(
-            f"Executing client-side GPU parallelization with {gpu_info['count']} GPUs"
-        )
-        return _execute_client_side_gpu_parallel(executor, execution_plan, job_config)
-
-    except Exception as e:
-        logger.warning(f"GPU parallelization attempt failed: {e}")
-        return None
-
-
-def _detect_remote_gpu_count(
-    executor: ClusterExecutor, job_config: dict
-) -> Optional[Dict[str, Any]]:
-    """Detect GPU count on remote cluster using simple function."""
-
-    def simple_gpu_count():
-        """Simple GPU count detection."""
-        import subprocess
-
-        result = subprocess.run(
-            [
-                "python",
-                "-c",
-                "import torch; print(f'GPU_COUNT:{torch.cuda.device_count()}')",
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-            timeout=30,
-        )
-        return {"output": result.stdout}
-
-    config = executor.config
-    if config.cluster_type in HOSTLESS_CLUSTER_TYPES:
-        # Probing costs a whole extra billed container per @cluster call, and
-        # for a CPU flavor the answer is known in advance. Ask the flavor.
-        from .hf_jobs import is_gpu_flavor, DEFAULT_FLAVOR
-
-        flavor = (
-            job_config.get("hf_flavor")
-            or getattr(config, "hf_flavor", None)
-            or getattr(config, "hf_hardware", None)
-            or DEFAULT_FLAVOR
-        )
-        if not is_gpu_flavor(flavor):
-            return {"available": False, "count": 0}
-
-    try:
-        from .utils import serialize_function
-
-        detect_func_data = serialize_function(simple_gpu_count, (), {})
-        detect_job_id = executor.submit_job(
-            detect_func_data, {"cores": 1, "memory": "2GB"}
-        )
-        result = executor.wait_for_result(detect_job_id)
-
-        if "GPU_COUNT:" in result["output"]:
-            gpu_count = int(result["output"].split("GPU_COUNT:", 1)[1].strip())
-            return {"available": gpu_count > 0, "count": gpu_count}
-
-        return None
-
-    except Exception as e:
-        # Swallowing this made a real failure -- the probe function lives in
-        # clustrix.decorator, so dill ships it by reference and any worker
-        # without clustrix installed raises ModuleNotFoundError -- look
-        # identical to "this cluster has no GPUs".
-        logger.warning("Could not detect remote GPU count: %s", e)
-        return None
-
-
-def _create_client_side_gpu_plan(
-    func: Callable,
-    args: tuple,
-    kwargs: dict,
-    gpu_info: Dict[str, Any],
-    gpu_ops: List[Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
-    """Create client-side GPU execution plan."""
-    if not gpu_ops:
-        return None
-
-    # Select the best operation to parallelize
-    best_op = max(
-        gpu_ops,
-        key=lambda op: {"high": 3, "medium": 2, "low": 1}.get(
-            op.get("estimated_benefit", "low"), 0
-        ),
-    )
-
-    if best_op.get("estimated_benefit") == "low":
-        return None
-
-    return {
-        "target_operation": best_op,
-        "gpu_count": gpu_info["count"],
-        "parallelization_type": "client_side",
-        "chunk_strategy": "even_split",
-    }
-
-
-def _execute_client_side_gpu_parallel(
-    executor: ClusterExecutor, execution_plan: Dict[str, Any], job_config: dict
-) -> Any:
-    """Execute GPU parallelization using client-side approach."""
-    gpu_count = execution_plan["gpu_count"]
-
-    # Create simple functions for each GPU (avoiding complexity threshold)
-    def create_gpu_specific_function(gpu_id: int):
-        """Create a simple function for specific GPU."""
-
-        def gpu_specific_task():
-            import subprocess
-
-            # Simple GPU-specific computation
-            gpu_code = f"""
-import torch
-torch.cuda.set_device({gpu_id})
-device = torch.device('cuda:{gpu_id}')
-
-# Simple computation on this specific GPU
-x = torch.randn(100, 100, device=device)
-y = torch.mm(x, x.t())
-result = y.trace().item()
-
-print(f'GPU_{gpu_id}_RESULT:{{result}}')
-"""
-
-            result = subprocess.run(
-                ["python", "-c", gpu_code],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                universal_newlines=True,
-                timeout=60,
-            )
-
-            return {"output": result.stdout, "success": result.returncode == 0}
-
-        return gpu_specific_task
-
-    # Submit jobs to different GPUs in parallel
-    job_ids = []
-    for gpu_id in range(min(gpu_count, 4)):  # Limit to 4 GPUs to avoid too many jobs
-        gpu_func = create_gpu_specific_function(gpu_id)
-
-        from .utils import serialize_function as util_serialize_function
-
-        func_data = util_serialize_function(gpu_func, (), {})
-
-        # Modify job config to make this GPU visible
-        gpu_job_config = job_config.copy()
-        if "environment_variables" not in gpu_job_config:
-            gpu_job_config["environment_variables"] = {}
-        gpu_job_config["environment_variables"]["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
-
-        job_id = executor.submit_job(func_data, {"cores": 1, "memory": "4GB"})
-        job_ids.append((job_id, gpu_id))
-
-    # Collect results from all GPUs
-    gpu_results: Dict[str, Optional[float]] = {}
-    for job_id, gpu_id in job_ids:
-        try:
-            result = executor.wait_for_result(job_id)
-            if result.get("success") and f"GPU_{gpu_id}_RESULT:" in result.get(
-                "output", ""
-            ):
-                output = result["output"]
-                result_line = [
-                    line
-                    for line in output.split("\n")
-                    if f"GPU_{gpu_id}_RESULT:" in line
-                ][0]
-                result_value = float(result_line.split(":", 1)[1])
-                gpu_results[f"gpu_{gpu_id}"] = result_value
-            else:
-                gpu_results[f"gpu_{gpu_id}"] = None
-        except Exception:
-            gpu_results[f"gpu_{gpu_id}"] = None
-
-    # Return combined results
-    successful_gpus = [k for k, v in gpu_results.items() if v is not None]
-
-    return {
-        "gpu_parallel": True,
-        "gpu_count": len(successful_gpus),
-        "results": gpu_results,
-        "successful_gpus": successful_gpus,
-    }
 
 
 def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) -> str:
@@ -819,15 +613,8 @@ def _create_local_work_chunks(
     if not variable or len(loop_range) == 0:
         return []
 
-    # The chunk is handed to the callee as a keyword argument. A function that
-    # does not declare it -- and does not collect **kwargs -- cannot receive it,
-    # so parallelizing would raise TypeError on every chunk. Decline here and
-    # let the caller run the function sequentially, which is the correct answer.
     name = f"_parallel_{variable}"
-    params = inspect.signature(func).parameters
-    if name not in params and not any(
-        p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
-    ):
+    if not _accepts_chunk_kwargs(func, [name]):
         logger.info(
             "Not parallelizing %s locally: it takes no %r parameter.",
             getattr(func, "__name__", repr(func)),
