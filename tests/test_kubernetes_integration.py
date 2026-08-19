@@ -1,11 +1,50 @@
 """Comprehensive tests for Kubernetes integration and cloud provider features."""
 
-import pytest
-from unittest.mock import Mock, patch
+import base64
+import os
+import subprocess
+import sys
 import time
+from unittest.mock import Mock, patch
+
+import cloudpickle
+import dill
+import pytest
 
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
+from clustrix.executor_kubernetes import build_worker_program
+
+
+def _run_real_worker(func, args=(), kwargs=None, result_key="test-key"):
+    """Run clustrix's actual Kubernetes worker program as a real subprocess.
+
+    executor_kubernetes.build_worker_program() is the exact code clustrix
+    embeds in the container command; this executes it for real (no cluster
+    involved) so the pod-log text used in these tests is genuine worker
+    output -- a signed ``CLUSTRIX_RESULT_B64``/``CLUSTRIX_RESULT_HMAC``
+    payload -- rather than a hand-written stand-in for the retired
+    ``CLUSTRIX_RESULT:<repr>`` format.
+    """
+    kwargs = kwargs or {}
+    func_data = {
+        "function": cloudpickle.dumps(func),
+        "args": dill.dumps(args),
+        "kwargs": dill.dumps(kwargs),
+    }
+    func_data_b64 = base64.b64encode(cloudpickle.dumps(func_data)).decode("utf-8")
+    program = build_worker_program(func_data_b64)
+
+    env = os.environ.copy()
+    env["CLUSTRIX_RESULT_KEY"] = result_key
+
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    return completed.stdout
 
 
 class TestKubernetesJobSubmission:
@@ -67,60 +106,85 @@ class TestKubernetesJobSubmission:
     def test_kubernetes_job_submission_success(
         self, mock_load_config, k8s_config, mock_k8s_client
     ):
-        """Test successful Kubernetes job submission."""
+        """Test successful Kubernetes job submission.
+
+        This used to patch clustrix.executor.cloudpickle to avoid a real
+        cloudpickle.dumps call. The #80 module refactor moved job submission
+        (and its cloudpickle usage) into executor_kubernetes.py, so
+        clustrix.executor has no `cloudpickle` attribute to patch any more --
+        the patch raised AttributeError before ever exercising real code.
+        cloudpickle.dumps on a small dict is cheap and safe to run for real,
+        so there is nothing here that needs mocking.
+        """
         executor = ClusterExecutor(k8s_config)
 
-        # Mock cloudpickle
-        with patch("clustrix.executor.cloudpickle") as mock_cloudpickle:
-            mock_cloudpickle.dumps.return_value = b"serialized_data"
+        func_data = {
+            "func": lambda x: x * 2,
+            "args": (21,),
+            "kwargs": {},
+            "requirements": {},
+        }
+        job_config = {"cores": 2, "memory": "4Gi"}
 
-            func_data = {
-                "func": lambda x: x * 2,
-                "args": (21,),
-                "kwargs": {},
-                "requirements": {},
-            }
-            job_config = {"cores": 2, "memory": "4Gi"}
+        job_id = executor._submit_k8s_job(func_data, job_config)
 
-            job_id = executor._submit_k8s_job(func_data, job_config)
+        # Verify job was submitted
+        assert job_id == "test-job-123"
 
-            # Verify job was submitted
-            assert job_id == "test-job-123"
+        # Verify Kubernetes API calls
+        mock_k8s_client.BatchV1Api().create_namespaced_job.assert_called_once()
+        call_args = mock_k8s_client.BatchV1Api().create_namespaced_job.call_args
 
-            # Verify Kubernetes API calls
-            mock_k8s_client.BatchV1Api().create_namespaced_job.assert_called_once()
-            call_args = mock_k8s_client.BatchV1Api().create_namespaced_job.call_args
+        # Check namespace
+        assert call_args[1]["namespace"] == "test-namespace"
 
-            # Check namespace
-            assert call_args[1]["namespace"] == "test-namespace"
+        # Check job manifest
+        job_manifest = call_args[1]["body"]
+        assert job_manifest["kind"] == "Job"
+        assert job_manifest["metadata"]["name"].startswith("clustrix-job-")
 
-            # Check job manifest
-            job_manifest = call_args[1]["body"]
-            assert job_manifest["kind"] == "Job"
-            assert job_manifest["metadata"]["name"].startswith("clustrix-job-")
-
-            # Check container configuration
-            container = job_manifest["spec"]["template"]["spec"]["containers"][0]
-            assert container["name"] == "clustrix-worker"
-            assert container["image"] == "python:3.11-slim"
-            assert container["resources"]["requests"]["cpu"] == "2"
-            assert container["resources"]["requests"]["memory"] == "4Gi"
+        # Check container configuration
+        container = job_manifest["spec"]["template"]["spec"]["containers"][0]
+        assert container["name"] == "clustrix-worker"
+        assert container["image"] == "python:3.11-slim"
+        assert container["resources"]["requests"]["cpu"] == "2"
+        assert container["resources"]["requests"]["memory"] == "4Gi"
 
     def test_kubernetes_job_result_collection(self, k8s_config, mock_k8s_client):
-        """Test collecting results from Kubernetes job."""
+        """Test collecting results from Kubernetes job.
+
+        The pod log used to be a bare "CLUSTRIX_RESULT:<repr>" string that
+        get_k8s_result ran through ast.literal_eval. get_k8s_result now
+        requires the signed payload the real worker writes
+        (CLUSTRIX_RESULT_B64 + CLUSTRIX_RESULT_HMAC) and verifies it with
+        decode_signed_result before touching dill.loads. This test runs the
+        actual worker subprocess to produce that log rather than fabricating
+        the new format by hand, and calls executor.k8s_manager directly:
+        ClusterExecutor itself only exposes _submit_k8s_job/_check_job_status
+        shortcuts, not a _get_k8s_result one.
+        """
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
 
-            # Set up active job
+            # Set up active job with the per-job signing key get_k8s_result
+            # requires. This lives on the KubernetesJobManager, not on
+            # ClusterExecutor's own (separate) active_jobs dict.
             job_id = "test-job-123"
-            executor.active_jobs[job_id] = {
+            result_key = "unit-test-result-key"
+            executor.k8s_manager.active_jobs[job_id] = {
                 "status": "submitted",
                 "submit_time": time.time(),
                 "k8s_job": True,
+                "result_key": result_key,
             }
 
+            pod_log = _run_real_worker(
+                lambda x: x * 2, args=(21,), result_key=result_key
+            )
+            mock_k8s_client.CoreV1Api().read_namespaced_pod_log.return_value = pod_log
+
             # Test result collection
-            result = executor._get_k8s_result(job_id)
+            result = executor.k8s_manager.get_k8s_result(job_id)
             assert result == 42
 
     def test_kubernetes_job_error_handling(self, k8s_config, mock_k8s_client):
@@ -136,8 +200,10 @@ class TestKubernetesJobSubmission:
                 "ZeroDivisionError: division by zero"
             )
 
+            # get_k8s_error_log lives on the KubernetesJobManager;
+            # ClusterExecutor has no _get_k8s_error_log shortcut.
             job_id = "failed-job-123"
-            error_log = executor._get_k8s_error_log(job_id)
+            error_log = executor.k8s_manager.get_k8s_error_log(job_id)
 
             assert "CLUSTRIX_ERROR:Division by zero" in error_log
             assert "CLUSTRIX_TRACEBACK" in error_log
@@ -148,10 +214,14 @@ class TestKubernetesJobSubmission:
             executor = ClusterExecutor(k8s_config)
 
             job_id = "test-job-123"
+            # get_job_status() dispatches on active_jobs[job_id]["manager"];
+            # without it a tracked-but-unlabeled job raised KeyError instead
+            # of routing to the Kubernetes manager.
             executor.active_jobs[job_id] = {
                 "status": "submitted",
                 "submit_time": time.time(),
                 "k8s_job": True,
+                "manager": "kubernetes",
             }
 
             # Test completed status
@@ -174,8 +244,10 @@ class TestKubernetesJobSubmission:
         with patch("kubernetes.config.load_kube_config"):
             executor = ClusterExecutor(k8s_config)
 
+            # cleanup_k8s_job lives on the KubernetesJobManager;
+            # ClusterExecutor has no _cleanup_k8s_job shortcut.
             job_id = "cleanup-job-123"
-            executor._cleanup_k8s_job(job_id)
+            executor.k8s_manager.cleanup_k8s_job(job_id)
 
             # Verify deletion was called
             mock_k8s_client.BatchV1Api().delete_namespaced_job.assert_called_once_with(
@@ -462,8 +534,10 @@ class TestKubernetesErrorHandling:
                 executor = ClusterExecutor(config)
                 executor._setup_kubernetes()
 
+                # get_k8s_result lives on the KubernetesJobManager;
+                # ClusterExecutor has no _get_k8s_result shortcut.
                 with pytest.raises(RuntimeError, match="No successful pod found"):
-                    executor._get_k8s_result("test-job")
+                    executor.k8s_manager.get_k8s_result("test-job")
 
     def test_kubernetes_log_collection_error(self):
         """Test error handling when log collection fails."""
@@ -488,7 +562,9 @@ class TestKubernetesErrorHandling:
                 executor = ClusterExecutor(config)
                 executor._setup_kubernetes()
 
-                error_log = executor._get_k8s_error_log("test-job")
+                # get_k8s_error_log lives on the KubernetesJobManager;
+                # ClusterExecutor has no _get_k8s_error_log shortcut.
+                error_log = executor.k8s_manager.get_k8s_error_log("test-job")
                 assert "Failed to get logs - Log error" in error_log
 
 
@@ -498,7 +574,15 @@ class TestEndToEndKubernetesWorkflow:
     @patch("kubernetes.config.load_kube_config")
     @patch("kubernetes.client")
     def test_complete_kubernetes_workflow(self, mock_client, mock_load_config):
-        """Test complete workflow: submit -> monitor -> collect result."""
+        """Test complete workflow: submit -> monitor -> collect result.
+
+        The pod log used to be a bare "CLUSTRIX_RESULT:<repr>" string decoded
+        with ast.literal_eval. get_k8s_result now requires the signed payload
+        the real worker produces, and the signing key is generated fresh
+        inside submit_k8s_job -- so the log has to be built (with the real
+        worker subprocess) after submission, using the key that job was
+        actually given, not a fixed value chosen up front.
+        """
         config = ClusterConfig(
             cluster_type="kubernetes",
             k8s_namespace="test",
@@ -531,9 +615,6 @@ class TestEndToEndKubernetesWorkflow:
         mock_pods_response = Mock()
         mock_pods_response.items = [mock_pod]
         mock_core_api.list_namespaced_pod.return_value = mock_pods_response
-        mock_core_api.read_namespaced_pod_log.return_value = (
-            "CLUSTRIX_RESULT:Hello World"
-        )
 
         executor = ClusterExecutor(config)
 
@@ -554,10 +635,15 @@ class TestEndToEndKubernetesWorkflow:
         status = executor._check_job_status(job_id)
         assert status == "completed"
 
-        # Collect result
-        result = executor._get_k8s_result(job_id)
+        # Collect result. The pod log is real worker output, signed with the
+        # per-job key submit_k8s_job actually generated for this job.
+        result_key = executor.k8s_manager.active_jobs[job_id]["result_key"]
+        mock_core_api.read_namespaced_pod_log.return_value = _run_real_worker(
+            lambda: "Hello World", result_key=result_key
+        )
+        result = executor.k8s_manager.get_k8s_result(job_id)
         assert result == "Hello World"
 
         # Verify cleanup was called
-        executor._cleanup_k8s_job(job_id)
+        executor.k8s_manager.cleanup_k8s_job(job_id)
         mock_batch_api.delete_namespaced_job.assert_called_once()
