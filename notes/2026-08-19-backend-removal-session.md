@@ -162,3 +162,16 @@ restarts.
 
 Posting per-issue evidence comments on the remaining open issues (48 open:
 the pre-existing set plus #140-#146).
+
+### CI state at the checkpoint
+
+- `Tests` on master `0e3490e` was still **in progress** when the machine was
+  suspended. It runs server-side, so it will have finished by the time work
+  resumes — check it first. The same tree passed as a pull-request run
+  (`f442d9b`, 15/15 green) before the merge, so a failure here would mean
+  something specific to the push-triggered path, not a code regression.
+- A **`Real World Tests` run failed on `0ca28fa`** (PR #138 era, before this
+  session's work). It has not been looked at. That workflow makes real SSH
+  and cloud calls and is gated on secrets, so it is not part of the ordinary
+  gate — but it is a genuine unexamined failure and must not be waved off as
+  "pre-existing". Investigate on resume.
