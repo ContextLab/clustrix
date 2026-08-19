@@ -11,15 +11,27 @@ For credential management, please use:
 
 import os
 import logging
-from pathlib import Path
 from typing import Dict, Optional
-from .config import get_config_dir
 
 logger = logging.getLogger(__name__)
 
+#: What a caller of the removed 1Password API should do instead. Kept as one
+#: string so the deprecation error and the module docstring cannot drift.
+REPLACEMENT_GUIDANCE = (
+    "1Password support was removed from Clustrix in issue #97. "
+    "Store credentials in ~/.clustrix/.env (see `clustrix credentials setup`) "
+    "and read them with clustrix.credential_manager instead."
+)
+
 
 class SecureCredentialManager:
-    """Legacy credential manager - 1Password support removed."""
+    """Legacy credential manager - 1Password support removed.
+
+    Every retrieval method reports "no credential" because the backing store
+    is gone; :meth:`store_credential` raises instead, because a write that
+    silently reports failure looks identical to a credential that was saved
+    and then lost.
+    """
 
     def __init__(self, vault_name: str = "Private"):
         """Initialize legacy credential manager."""
@@ -51,9 +63,15 @@ class SecureCredentialManager:
         credential_data: Dict[str, str],
         category: str = "API_CREDENTIAL",
     ) -> bool:
-        """1Password credential storage no longer supported."""
-        logger.warning("1Password credential storage is no longer supported")
-        return False
+        """Always raises: there is no store to write to.
+
+        Raises:
+            NotImplementedError: always, naming the supported alternative.
+        """
+        raise NotImplementedError(
+            f"SecureCredentialManager.store_credential cannot store {item_name!r}: "
+            + REPLACEMENT_GUIDANCE
+        )
 
 
 class ValidationCredentials:
@@ -72,43 +90,3 @@ class ValidationCredentials:
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
         """SSH credentials no longer available - use ~/.clustrix/.env instead."""
         return None
-
-
-def ensure_secure_environment():
-    """Ensure environment is set up securely for credential handling."""
-    clustrix_dir = get_config_dir()
-    clustrix_dir.mkdir(exist_ok=True)
-
-    # Create .gitignore patterns to prevent credential leaks
-    gitignore_patterns = [
-        "# Clustrix security",
-        "**/.clustrix/credentials/**",
-        "**/.clustrix/keys/**",
-        "**/clustrix-credentials.json",
-        "**/clustrix-*.pem",
-        "**/clustrix-*.key",
-        "**/*-credentials.json",
-        "**/*-service-account.json",
-        ".env.local",
-        ".env.validation",
-    ]
-
-    # Add patterns to project .gitignore if not already present
-    gitignore_path = Path.cwd() / ".gitignore"
-    if gitignore_path.exists():
-        existing_content = gitignore_path.read_text()
-        if "# Clustrix security" not in existing_content:
-            with gitignore_path.open("a") as f:
-                f.write("\n" + "\n".join(gitignore_patterns) + "\n")
-
-    # Create secure credentials directory
-    cred_dir = clustrix_dir / "credentials"
-    cred_dir.mkdir(exist_ok=True)
-
-    # Set restrictive permissions (Unix-like systems)
-    try:
-        cred_dir.chmod(0o700)  # rwx------
-    except Exception:
-        pass  # Windows or other systems
-
-    return cred_dir
