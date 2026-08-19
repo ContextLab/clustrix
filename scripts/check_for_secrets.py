@@ -41,14 +41,12 @@ TOKEN_PATTERNS = [
 
 #: `password = "hunter2"` and friends. Long enough to be usable, and not one
 #: of the obvious stand-ins below.
-ASSIGNMENT = re.compile(
-    r"""(?ix)
+ASSIGNMENT = re.compile(r"""(?ix)
     \b(pass(word|wd)?|secret|token|api[_-]?key|access[_-]?key|
        client[_-]?secret|auth)\b
     \s* [:=] \s*
     (?P<quote>['"])(?P<value>[^'"\n]{8,})(?P=quote)
-    """
-)
+    """)
 
 #: A PEM block is only interesting if it carries a real body. Test fixtures
 #: and docs write the header around a stand-in like MOCK_KEY_CONTENT; a usable
@@ -67,8 +65,7 @@ KNOWN_EXAMPLES = {
 }
 
 #: Values that are telling you what to put there, not a credential.
-PLACEHOLDER = re.compile(
-    r"""(?ix)
+PLACEHOLDER = re.compile(r"""(?ix)
     ^(
         <.*>                      # <redacted>, <your-token>
       | \{.*\}                    # {token}, format placeholders
@@ -78,8 +75,7 @@ PLACEHOLDER = re.compile(
       | [x*]{8,}                  # xxxxxxxx, ********
       | (password|secret|token|api_key|access_key|key)[-_a-z0-9]*
     )$
-    """
-)
+    """)
 
 #: Words that only appear in values written to be thrown away. A real
 #: credential containing one of these is possible but not worth the noise of

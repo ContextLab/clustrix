@@ -151,11 +151,18 @@ simply is not there at run time. Use a home directory or shared scratch. The
 default (``~/.clustrix/jobs``) is already safe; this bites people who set
 ``/tmp/...`` deliberately.
 
-**"got an unexpected keyword argument '_parallel_...'" or "'_chunk_range_...'"**
+**Parallelization silently did not happen**
 
-Loop parallelization tried to hand your function a chunk it cannot accept. See
-the parallelization section of :doc:`limitations` for the contract a function
-must satisfy.
+If you set ``parallel=True`` and the work was not distributed, the most likely
+reason is that your function cannot accept a chunk. Both paths decline rather
+than failing, and say so at ``INFO``::
+
+    INFO clustrix.decorator: Not parallelizing collect on the cluster:
+    it takes no '_chunk_range_i', '_chunk_index' parameter(s).
+
+The local and remote paths want *different* keyword names, and the loop's
+range must be a literal. See the parallelization section of
+:doc:`limitations` for the exact contract.
 
 When the answer looks wrong rather than missing
 -----------------------------------------------

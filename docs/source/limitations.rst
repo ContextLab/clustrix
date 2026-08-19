@@ -208,8 +208,32 @@ Real output:
 * Set ``auto_parallel=False`` to remove the guesswork entirely.
 
 
-Local auto-parallelization needs a ``_parallel_<var>`` parameter
-----------------------------------------------------------------
+Auto-parallelization needs chunk parameters, and they differ local vs remote
+----------------------------------------------------------------------------
+
+The two paths use **different keyword names**, which is easy to trip over:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 80
+
+   * - Path
+     - Keywords your function must accept
+   * - Local (``_create_local_work_chunks``)
+     - ``_parallel_<loop variable>``
+   * - Remote (``_create_work_chunks``)
+     - ``_chunk_range_<loop variable>`` **and** ``_chunk_index``
+
+Either path declines, and logs at ``INFO``, when the function cannot accept
+its chunk. Neither injects the argument any more: doing so used to raise
+``TypeError: ... got an unexpected keyword argument '_chunk_range_i'`` on the
+remote path, and on the local path the ``TypeError`` was swallowed into a
+silent sequential run.
+
+Both paths also require the loop's range to be a **literal** ``range(<int>)``.
+A range whose bound is only known at run time -- ``range(n)``,
+``range(len(data))`` -- is declined. It used to be guessed as ``range(10)``,
+which meant the caller silently received a tenth of the work.
 
 When ``_create_local_work_chunks`` splits a loop, it hands each chunk to your
 function as a keyword argument named ``_parallel_<loop variable>``. A function

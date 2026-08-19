@@ -228,15 +228,15 @@ Supported Cluster Types
 | ``local``          | Works             | Local processes; used for development and the    |
 |                    |                   | fast tests.                                      |
 +--------------------+-------------------+--------------------------------------------------+
-| ``pbs``            | Untested          | Implemented, but does not use the two-venv path  |
-|                    |                   | and has not been run against real hardware.      |
+| ``pbs``            | Untested          | Shares SLURM's environment-setup path, so it     |
+|                    |                   | builds the same two-venv environment -- but no   |
+|                    |                   | job has run against a real PBS scheduler.        |
 +--------------------+-------------------+--------------------------------------------------+
 | ``sge``            | Untested          | Same caveat as PBS.                              |
 +--------------------+-------------------+--------------------------------------------------+
 | ``kubernetes``     | Untested          | Not verified against a real cluster. Per-job     |
-|                    |                   | overrides are unsupported -- the executor reads  |
-|                    |                   | only configuration-level ``k8s_*`` settings --   |
-|                    |                   | The widget has a Kubernetes section.             |
+|                    |                   | overrides are unsupported: the executor reads    |
+|                    |                   | only configuration-level ``k8s_*`` settings.     |
 +--------------------+-------------------+--------------------------------------------------+
 
 **Cloud VM backends**

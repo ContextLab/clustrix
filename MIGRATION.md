@@ -45,11 +45,13 @@ tests/
 Large modules have been broken into focused components:
 
 **notebook_magic.py** (2883 lines → 5 modules):
-- `notebook_magic.py` (88 lines) - Main entry point
-- `notebook_magic_config.py` (213 lines) - Configuration handling
-- `notebook_magic_core.py` (74 lines) - Core magic functionality
-- `notebook_magic_mocks.py` (171 lines) - Mock objects
-- `notebook_magic_widget.py` (1977 lines) - Widget implementation
+- `notebook_magic.py` (92 lines) - Main entry point
+- `notebook_magic_config.py` (231 lines) - Configuration handling
+- `notebook_magic_core.py` (200 lines) - Core magic functionality
+- `notebook_magic_fallback.py` (139 lines) - honest optional-dependency
+  shim used when ipywidgets/IPython are absent. Formerly `notebook_magic_mocks.py`,
+  renamed because shipped code must not present itself as mocks (issue #116)
+- `notebook_magic_widget.py` (2132 lines) - Widget implementation
 
 **executor.py** (2362 lines → 7 modules):
 - `executor.py` (39 lines) - Main interface

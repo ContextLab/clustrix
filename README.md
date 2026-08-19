@@ -591,7 +591,7 @@ result = my_function(5)
 | `ssh` | Verified. Direct execution over SSH with no scheduler; a real job ran on an 8-GPU host. |
 | `huggingface` | Verified. HuggingFace Jobs; a real job ran in a container. |
 | `local` | Runs in local processes. Used for development and the fast tests. |
-| `pbs` | Implemented, **not verified**. PBS and SGE do not use the two-venv setup path and have not been run against real hardware. |
+| `pbs` | Implemented, **not verified**. All four of SLURM/PBS/SGE/SSH now share one environment-setup path, so PBS builds the same two-venv environment SLURM does -- but no PBS job has been run against a real scheduler. |
 | `sge` | Implemented, **not verified**. Same caveat as PBS. |
 | AWS / GCP / Azure / Lambda VM backends | **Unverified.** No cloud job has been shown to run end to end. See [Cloud Providers](#cloud-providers). |
 

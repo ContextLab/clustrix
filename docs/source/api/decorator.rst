@@ -49,19 +49,23 @@ Parallel Loop Execution (Remote)
 
 When ``parallel=True`` submits to a *remote* backend, loop detection uses
 ``clustrix.utils.detect_loops`` -- a much simpler AST scan than the local
-path below, with a real gap worth knowing about: it only recognises a
-``for`` loop written as a literal ``range(<int>)``. Anything else --
-``for item in data:``, or even ``for i in range(len(data)):`` -- is either
-not detected at all (the function just runs once, unparallelized) or, for
-the ``range(len(...))`` case specifically, silently falls back to a
-hardcoded ``range(0, 10)`` regardless of how long ``data`` actually is,
-because the range expression is evaluated with no access to the function's
-local variables. Verified directly against ``clustrix/utils.py``:
+path below. Two conditions must BOTH hold, and most functions fail at least
+one of them.
+
+**First, the loop's range must be a literal.** ``detect_loops`` only
+recognises a ``for`` loop written as ``range(<int literal>)``. Anything whose
+bound is known only at run time is declined outright. It used to guess
+``range(0, 10)`` in that case, which meant a loop over ``range(len(data))``
+was chunked as ten iterations and the caller silently received a tenth of the
+work; that fabrication was removed, and the answer is now ``None``. Verified
+directly:
+
+``detect_loops`` reads the function's source with ``inspect.getsource``, so
+these have to live in a real file to be analysed at all:
 
 .. code-block:: python
 
-   from clustrix.utils import detect_loops
-
+   # loopdemo.py
    def a(data):
        for item in data:
            pass
@@ -74,21 +78,63 @@ local variables. Verified directly against ``clustrix/utils.py``:
        for i in range(100):
            pass
 
-   detect_loops(a, ([1, 2, 3],), {})   # None -- not detected at all
-   detect_loops(b, ([1, 2, 3],), {})   # range: range(0, 10) -- wrong, ignores len(data)
-   detect_loops(c, (), {})             # range: range(0, 100) -- correct
+.. code-block:: python
 
-The reliable pattern for remote loop parallelization is therefore a literal
-integer bound:
+   from clustrix.utils import detect_loops
+   import loopdemo
+
+   print(detect_loops(loopdemo.a, ([1, 2, 3],), {}))   # None -- a value, not a range
+   print(detect_loops(loopdemo.b, ([1, 2, 3],), {}))   # None -- len(data) is not a literal
+   print(detect_loops(loopdemo.c, (), {})["range"])    # range(0, 100)
+
+**Second, the function must be able to receive a chunk.** Clustrix splits the
+range and passes each piece as the keyword arguments ``_chunk_range_<var>``
+and ``_chunk_index``. A function that does not declare them (or ``**kwargs``)
+cannot be handed one, so ``_create_work_chunks`` produces no chunks and the
+call runs whole. This used to inject the argument anyway and fail with
+``TypeError: ... got an unexpected keyword argument '_chunk_range_i'``; it
+now declines and logs instead.
 
 .. code-block:: python
 
-   @cluster(cores=8, parallel=True)
-   def parallel_processing():
+   from clustrix.decorator import _accepts_chunk_kwargs
+
+   def no_chunk_params():
        results = []
-       for i in range(100):  # a literal range(<int>) is what gets detected
-           results.append(expensive_operation(i))
+       for i in range(100):
+           results.append(i)
        return results
+
+   def chunk_aware(_chunk_range_i=None, _chunk_index=None):
+       total = 0
+       for i in range(100):
+           total += i
+       return total
+
+   names = ["_chunk_range_i", "_chunk_index"]
+   print(_accepts_chunk_kwargs(no_chunk_params, names))   # False -- runs whole
+   print(_accepts_chunk_kwargs(chunk_aware, names))       # True  -- can be chunked
+
+So a remote-parallelizable function needs a literal range *and* the chunk
+parameters:
+
+.. code-block:: python
+
+   # cluster-required: needs a remote backend to actually distribute the work
+   from clustrix import cluster
+
+   @cluster(cores=8, parallel=True)
+   def parallel_processing(_chunk_range_i=None, _chunk_index=None):
+       # When chunked, _chunk_range_i is this worker's slice of range(100).
+       # When not chunked, it is None and the whole range runs here.
+       span = _chunk_range_i if _chunk_range_i is not None else range(100)
+       return [i * i for i in span]
+
+.. note::
+
+   Results come back as a list of per-chunk results, so a parallelized run
+   and an unparallelized run of the same function can return different
+   shapes. See :doc:`../limitations` before relying on this.
 
 How Execution Mode Is Chosen
 -----------------------------

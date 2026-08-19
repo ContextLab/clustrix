@@ -187,6 +187,11 @@ provider is a separate setting, ``k8s_provider``, and it has to be set via
    ``configure(cluster_type="local")`` in effect got as far as
    ``CreateVpc`` -> ``VpcLimitExceeded`` against a real account.
 
+   ``@cluster(platform=..., auto_provision=...)`` is not a per-call
+   override: both write straight into the global configuration
+   (``decorator.py``), so one decorated function can turn provisioning on
+   for everything that runs afterwards in the same process.
+
    Set ``k8s_provider="local"`` (kind/minikube, no cloud account involved)
    unless you have deliberately decided to spend money. The cloud
    provisioning paths are **unverified**: no clustrix job has been shown to
@@ -204,10 +209,13 @@ provider is a separate setting, ``k8s_provider``, and it has to be set via
         k8s_node_count=2,
     )
 
-    # `platform` and `auto_provision` are NOT recognised @cluster keywords --
-    # they are accepted and ignored. Only `cores` and `memory` take effect
-    # per call here. They are shown because they appear in older examples.
-    @cluster(cores=1, memory="512Mi")
+    # `platform` and `auto_provision` ARE real decorator parameters, and they
+    # do not merely apply to this call: they MUTATE THE GLOBAL CONFIG.
+    # `platform="kubernetes"` sets config.cluster_type, and
+    # `auto_provision=True` sets config.auto_provision_k8s -- the flag that
+    # causes infrastructure to be created. Both persist for every subsequent
+    # call in the process, not just this one.
+    @cluster(platform="kubernetes", auto_provision=True, cores=1, memory="512Mi")
     def analyze_data(size, multiplier=1):
         import math
         import socket

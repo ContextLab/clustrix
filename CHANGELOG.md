@@ -16,6 +16,29 @@ backend.
 
 ### Fixed — correctness
 
+- **`@cluster` returned a fabricated GPU result instead of your answer.**
+  `_attempt_client_side_gpu_parallelization` never called the decorated
+  function. It ran a fixed `torch.randn(100, 100)` program on each GPU,
+  scraped the matrix trace out of stdout, and returned those numbers to the
+  caller. `auto_gpu_parallel` defaulted to `True` and the path triggered on
+  any host reporting two or more GPUs. The path is deleted, and
+  `clustrix/gpu_utils.py` went with it — its other four public functions had
+  no callers anywhere, and two generated code referencing undefined names.
+  `auto_gpu_parallel` and `max_gpu_parallel_jobs` are kept so existing
+  configurations keep loading, but have no effect and now warn.
+- **Remote loop parallelization crashed on any function it selected.** It
+  injected `_chunk_range_<var>` and `_chunk_index` with no signature check, so
+  a chosen function failed with `TypeError: ... got an unexpected keyword
+  argument '_chunk_range_i'`. Both the local and remote chunkers now share one
+  signature check and decline, with a log line, rather than injecting an
+  argument the callee cannot take.
+- **Loop ranges were guessed.** `detect_loops` fell back to `range(10)`
+  whenever it could not evaluate a range expression, so a loop over
+  `range(n)` was chunked as ten iterations and the caller silently received a
+  tenth of the work. It now declines to parallelize. The value was also
+  obtained by calling `eval()` on text sliced out of the user's source, under
+  a comment admitting the approach was dangerous; that is replaced by a
+  literal-only reader that cannot execute anything.
 - **`@cluster` could return a fabricated answer instead of your result.**
   When a function was classified "complex" and flattening failed,
   `_execute_single` substituted `create_simple_subprocess_fallback`, whose
@@ -152,9 +175,8 @@ hardware. They are not claimed to work.
 ### Known limitations
 
 - Functions defined in the REPL still lose the source-based features — loop
-  parallelization, GPU-parallel detection, complexity analysis — because those
-  parse source with `ast`. Serialization itself does not need source and works
-  correctly.
+  parallelization and complexity analysis — because those parse source with
+  `ast`. Serialization itself does not need source and works correctly.
 - Loop detection does not see tuple-unpacking targets
   (`for i, x in enumerate(...)`), and its "any external name read" heuristic is
   conservative enough to reject the canonical `results.append(f(x))` pattern.

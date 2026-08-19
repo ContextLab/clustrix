@@ -52,7 +52,11 @@ def cluster(
         partition: Cluster partition to use
         queue: Queue to submit to
         parallel: Whether to parallelize loops automatically
-        auto_gpu_parallel: Whether to automatically parallelize across GPUs
+        auto_gpu_parallel: NO EFFECT. The client-side GPU path it selected
+            never called the decorated function -- it ran a fixed torch
+            program per GPU and returned the traces of random matrices as
+            the result -- so it was deleted. Passing this warns.
+            Parallelize across GPUs inside your own function instead.
         environment: Conda environment name
         async_submit: Whether to submit jobs asynchronously (non-blocking)
         provider: Cloud provider to use ('lambda', 'aws', 'azure', 'gcp', 'huggingface')
@@ -422,7 +426,17 @@ def _create_work_chunks(
 
     chunks = []
     loop_var = loop_info.get("variable")
-    loop_range = loop_info.get("range", range(10))  # Default range
+    # No default. Guessing the range is how a loop over range(n) came to be
+    # split into ten chunks, returning a tenth of the work with no error.
+    # detect_loops now declines rather than inventing one, so an absent range
+    # means "not parallelizable" and must be treated as such here too.
+    loop_range = loop_info.get("range")
+    if loop_range is None:
+        logger.info(
+            "Not parallelizing %s: the loop's range could not be determined.",
+            getattr(func, "__name__", repr(func)),
+        )
+        return []
 
     chunk_kwarg_names = [f"_chunk_range_{loop_var}", "_chunk_index"]
     if not _accepts_chunk_kwargs(func, chunk_kwarg_names):
@@ -606,9 +620,11 @@ def _create_local_work_chunks(
         else:
             return []  # Can't parallelize without range info
     else:
-        # Legacy format
-        loop_range = loop_info.get("range", range(10))
+        # Legacy format. As above: an unknown range is a refusal, not a ten.
+        loop_range = loop_info.get("range")
         variable = loop_info.get("variable", "i")
+        if loop_range is None:
+            return []
 
     if not variable or len(loop_range) == 0:
         return []

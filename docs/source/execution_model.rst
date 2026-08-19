@@ -76,7 +76,7 @@ The order of operations on a call
    defaults.
 3. Decide local or remote (``_choose_execution_mode``).
 4. Decide sync or async (``async_submit``).
-5. Optionally attempt GPU parallelization, then loop parallelization.
+5. Optionally attempt loop parallelization.
 6. Serialize the function, its arguments and the environment description.
 7. Submit: create the remote job directory, upload the payload, build the
    remote environment, generate and submit a job script.
