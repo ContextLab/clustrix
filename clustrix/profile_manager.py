@@ -6,15 +6,26 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import asdict, fields as dataclass_fields
 
-from .config import ClusterConfig
+from .config import ClusterConfig, get_config_dir
 
 
 class ProfileManager:
     """Manages cluster configuration profiles with save/load functionality."""
 
-    def __init__(self, config_dir: str = "~/.clustrix/profiles"):
-        """Initialize ProfileManager with default or custom config directory."""
-        self.config_dir = Path(config_dir).expanduser()
+    def __init__(self, config_dir: Optional[str] = None):
+        """Initialize ProfileManager with default or custom config directory.
+
+        When ``config_dir`` is omitted, this defers to
+        ``clustrix.config.get_config_dir()`` (a ``profiles`` subdirectory of
+        it) rather than hardcoding ``~/.clustrix/profiles``. That keeps
+        ``CLUSTRIX_CONFIG_DIR`` in effect for callers -- including the
+        widget's default ``ProfileManager()`` -- so tests and containers
+        never read or write a real user's ``~/.clustrix``.
+        """
+        if config_dir is None:
+            self.config_dir = get_config_dir() / "profiles"
+        else:
+            self.config_dir = Path(config_dir).expanduser()
         try:
             self.config_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:

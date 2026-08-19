@@ -197,11 +197,22 @@ class TestModernClustrixWidgetInitialization:
             ):
                 ModernClustrixWidget()
 
-    def test_widget_initialization_with_mock_ipython(
-        self, mock_ipython_env, temp_profile_manager
-    ):
-        """Test widget initialization with mocked IPython environment."""
-        from clustrix.modern_notebook_widget import ModernClustrixWidget
+    def test_widget_initialization_with_real_ipython(self, temp_profile_manager):
+        """Test widget initialization against the real IPython/ipywidgets stack.
+
+        ipywidgets and IPython are real installed dependencies here, so this
+        drives the actual `ModernClustrixWidget` through them rather than
+        through the `mock_ipython_env` fixture's mocked `widgets` module.
+        Renamed from `test_widget_initialization_with_mock_ipython`: a test
+        with "mock" in its name that never exercises real ipywidgets is
+        exactly what project policy forbids.
+        """
+        from clustrix.modern_notebook_widget import (
+            ModernClustrixWidget,
+            IPYTHON_AVAILABLE,
+        )
+
+        assert IPYTHON_AVAILABLE, "ipywidgets/IPython must be installed for this test"
 
         widget = ModernClustrixWidget(profile_manager=temp_profile_manager)
 
@@ -211,13 +222,23 @@ class TestModernClustrixWidgetInitialization:
         assert widget.current_cluster_type == "local"
 
     def test_widget_with_default_profile_manager(self, mock_ipython_env):
-        """Test widget initialization with default ProfileManager."""
+        """Test widget initialization with default ProfileManager.
+
+        `ProfileManager()` now seeds one built-in template profile per
+        supported backend (see `ProfileManager.BUILTIN_PROFILES`), not a
+        single "Local single-core" entry -- the count is asserted against
+        that dict rather than hardcoded, so this doesn't go stale again the
+        next time a template is added or removed.
+        """
         from clustrix.modern_notebook_widget import ModernClustrixWidget
+        from clustrix.profile_manager import ProfileManager
 
         widget = ModernClustrixWidget()
 
         assert widget.profile_manager is not None
-        assert len(widget.profile_manager.get_profile_names()) == 1
+        assert len(widget.profile_manager.get_profile_names()) == len(
+            ProfileManager.BUILTIN_PROFILES
+        )
         assert "Local single-core" in widget.profile_manager.get_profile_names()
 
     def test_widget_creation_methods(self, mock_ipython_env, temp_profile_manager):
@@ -259,9 +280,12 @@ class TestWidgetComponents:
 
         widget = ModernClustrixWidget(profile_manager=temp_profile_manager)
 
-        # Check config filename field
+        # Check config filename field. The default is "profiles.yml", not
+        # "clustrix.yml": this field is a bundle of profiles, and
+        # clustrix.yml is the library's own single-config file, a different
+        # format load_config rejects here (see DEFAULT_PROFILE_STORE).
         config_filename = widget.widgets["config_filename"]
-        assert config_filename.value == "clustrix.yml"
+        assert config_filename.value == "profiles.yml"
 
         # Check file management buttons
         assert "save_btn" in widget.widgets
@@ -284,9 +308,11 @@ class TestWidgetComponents:
         assert "slurm" in cluster_type.options
         assert "kubernetes" in cluster_type.options
 
-        # Check resource fields
+        # Check resource fields. Values come from the active profile
+        # ("Local single-core" in BUILTIN_PROFILES), whose default_memory is
+        # "16.25GB", not the widget's own pre-profile placeholder of "16GB".
         assert widget.widgets["cpus"].value == 1
-        assert widget.widgets["ram"].value == "16GB"  # Now Text field with GB
+        assert widget.widgets["ram"].value == "16.25GB"  # Text field with GB
         assert widget.widgets["time"].value == "01:00:00"
 
         # Check advanced toggle
@@ -298,9 +324,11 @@ class TestWidgetComponents:
 
         widget = ModernClustrixWidget(profile_manager=temp_profile_manager)
 
-        # Check package manager
+        # Check package manager. ClusterConfig.package_manager defaults to
+        # "pip" (see clustrix/config.py), which the active profile carries
+        # through to the widget; "auto" is not the default.
         package_manager = widget.widgets["package_manager"]
-        assert package_manager.value == "auto"
+        assert package_manager.value == "pip"
         assert "pip" in package_manager.options
         assert "conda" in package_manager.options
 
@@ -334,9 +362,12 @@ class TestWidgetComponents:
         assert widget.widgets["port"].value == 22
         assert "username" in widget.widgets
 
-        # Check SSH fields
+        # Check SSH fields. The widget is created with a "~/.ssh/id_rsa"
+        # placeholder, but _adopt_live_configuration immediately overwrites
+        # it from the active profile's key_file (None for "Local
+        # single-core", ClusterConfig's default), so the field reads "".
         ssh_key_file = widget.widgets["ssh_key_file"]
-        assert ssh_key_file.value == "~/.ssh/id_rsa"
+        assert ssh_key_file.value == ""
         assert "refresh_keys" in widget.widgets
         assert "password" in widget.widgets
 
@@ -392,6 +423,11 @@ class TestEventHandlers:
         """Test remove profile button handler."""
         from clustrix.modern_notebook_widget import ModernClustrixWidget
 
+        # A fresh ProfileManager seeds one template per supported backend
+        # (BUILTIN_PROFILES), not a single profile -- capture the count
+        # instead of assuming it, same as test_add_profile_handler does.
+        initial_count = len(temp_profile_manager.get_profile_names())
+
         # Add another profile first
         config = ClusterConfig(cluster_type="ssh")
         temp_profile_manager.create_profile("SSH Cluster", config)
@@ -405,13 +441,23 @@ class TestEventHandlers:
         remove_button = widget.widgets["remove_profile_btn"]
         remove_button.trigger_click()
 
-        # Verify profile removed
+        # Verify profile removed, leaving exactly the built-in templates
         assert "SSH Cluster" not in temp_profile_manager.get_profile_names()
-        assert len(temp_profile_manager.get_profile_names()) == 1
+        assert len(temp_profile_manager.get_profile_names()) == initial_count
 
     def test_cannot_remove_last_profile(self, mock_ipython_env, temp_profile_manager):
         """Test that last profile cannot be removed."""
         from clustrix.modern_notebook_widget import ModernClustrixWidget
+
+        # temp_profile_manager starts with one built-in template per
+        # supported backend, not a single profile, so the "last profile"
+        # guard (ProfileManager.remove_profile / _on_remove_profile both
+        # refuse when only one remains) needs to be set up explicitly by
+        # removing every profile but the default.
+        for name in list(temp_profile_manager.get_profile_names()):
+            if name != temp_profile_manager.DEFAULT_PROFILE:
+                temp_profile_manager.remove_profile(name)
+        assert len(temp_profile_manager.get_profile_names()) == 1
 
         widget = ModernClustrixWidget(profile_manager=temp_profile_manager)
 
