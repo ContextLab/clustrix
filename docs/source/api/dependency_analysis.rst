@@ -1,10 +1,14 @@
 Dependency Analysis
 ===================
 
-.. automodule:: clustrix.dependency_analysis
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. currentmodule:: clustrix.dependency_analysis
+
+Every member of this module is documented explicitly below (grouped by
+purpose), following the same pattern used in :doc:`cost_monitoring`. A
+blanket ``automodule:: :members:`` is deliberately not used here: this
+project's global ``autodoc_default_options`` sets ``members: True``, so an
+``automodule`` directive combined with the explicit per-member directives
+below would document every class and function twice.
 
 Overview
 --------

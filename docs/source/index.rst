@@ -147,6 +147,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Tutorials
    
+   tutorials/usage_patterns
    tutorials/filesystem_tutorial
    tutorials/slurm_tutorial
    tutorials/pbs_tutorial

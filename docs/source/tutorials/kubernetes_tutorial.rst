@@ -25,9 +25,153 @@ This tutorial demonstrates how to use Clustrix with Kubernetes clusters for clou
 Prerequisites
 -------------
 
-1. Access to a Kubernetes cluster (local, cloud, or on-premises)
-2. kubectl configured with cluster access
+1. Access to a Kubernetes cluster (local, cloud, or on-premises) -- or let
+   Clustrix create one for you, see `Auto-Provisioning a Cluster`_ below
+2. kubectl configured with cluster access (not needed if you use
+   auto-provisioning; Clustrix configures kubectl itself)
 3. Clustrix installed with Kubernetes support: ``pip install clustrix[kubernetes]``
+
+Auto-Provisioning a Cluster
+----------------------------
+
+If you don't already have a Kubernetes cluster, ``clustrix.kubernetes`` can
+create one from scratch: locally with `kind <https://kind.sigs.k8s.io/>`_
+(Kubernetes-in-Docker), or on a cloud provider. This is the
+``KubernetesClusterProvisioner`` API used internally by
+``@cluster(auto_provision=True, ...)`` (see below); you can also call it
+directly.
+
+.. important::
+
+   The cloud provisioning paths (AWS, GCP, Azure, HuggingFace, Lambda Cloud)
+   are **unverified** -- consistent with this tutorial's opening warning and
+   with the main README, no cloud job has been shown to provision a cluster
+   and run to completion end to end. Only the local ``kind``-based path is
+   described as verified below, and only in the narrow sense that it does not
+   require cloud credentials and its prerequisites (Docker, ``kind``,
+   ``kubectl``) can be checked locally; the provisioner itself has not been
+   exercised end to end in this session either. Treat every code sample here
+   as a description of the documented interface, not a record of a
+   successful run, until you have run it yourself.
+
+Local Provisioning (kind) -- No Cloud Credentials Required
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Requires Docker, `kind (installation instructions)
+<https://kind.sigs.k8s.io/docs/user/quick-start/#installation>`_,
+and ``kubectl`` on the machine running Clustrix. No cloud account, API key,
+or credentials of any kind are needed -- the local provisioner uses a
+placeholder ``{"type": "local"}`` credential internally and ignores it.
+
+.. code-block:: python
+
+   # cluster-required: provisions a real kind cluster via Docker
+   from clustrix import configure, cluster
+
+   configure(
+       cluster_type="kubernetes",
+       auto_provision_k8s=True,
+       k8s_provider="local",      # selects LocalDockerKubernetesProvisioner
+       k8s_node_count=2,
+       k8s_cluster_name="my-local-cluster",  # optional; auto-generated if omitted
+   )
+
+   @cluster(platform="kubernetes", auto_provision=True, cores=1, memory="512Mi")
+   def analyze(x):
+       return x * 2
+
+   analyze(21)  # provisions (or reuses) the kind cluster, then runs the job
+
+.. warning::
+
+   The ``provider=`` keyword on ``@cluster(...)`` (used for the hostful cloud
+   VM backends -- Lambda Cloud, AWS, Azure, GCP) is **not** the same setting
+   as the Kubernetes provider. There is no ``k8s_provider=`` (or ``region=``)
+   parameter on ``@cluster`` itself; ``config.k8s_provider`` defaults to
+   ``"aws"`` and must be set explicitly via ``configure()`` (or a
+   ``ClusterConfig``) as shown above. Passing ``provider="local"`` directly
+   to ``@cluster(...)`` has no effect on which Kubernetes provisioner runs.
+
+Instead of the decorator, you can provision (and later tear down) a cluster
+directly:
+
+.. code-block:: python
+
+   # cluster-required: provisions a real kind cluster via Docker
+   from clustrix.kubernetes.cluster_provisioner import (
+       provision_kubernetes_cluster,
+       destroy_kubernetes_cluster,
+   )
+
+   cluster_info = provision_kubernetes_cluster(
+       provider="local",
+       cluster_name="my-local-cluster",
+       region="local",   # ignored by the local provisioner, but required by the function signature
+       node_count=2,
+   )
+   print(cluster_info["cluster_id"])
+
+   # ... later ...
+   destroy_kubernetes_cluster(cluster_info["cluster_id"], provider="local")
+
+Cloud Provisioning -- Unverified
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The same ``provision_kubernetes_cluster()`` / ``@cluster(auto_provision=True)``
+interface supports five cloud providers by creating a from-scratch cluster
+(EKS, GKE, AKS, a HuggingFace Space, or a Lambda Cloud Kubernetes deployment).
+**None of these have been run end to end**; only DigitalOcean and Linode are
+excluded because no provisioner exists for them at all -- the five below at
+least have provisioner code, but it has not been validated against a live
+account.
+
+.. code-block:: python
+
+   # cluster-required: unverified cloud path, needs real provider credentials
+   from clustrix import configure, cluster
+
+   configure(
+       cluster_type="kubernetes",
+       auto_provision_k8s=True,
+       k8s_provider="aws",            # aws, gcp, azure, huggingface, lambda
+       k8s_region="us-west-2",
+       k8s_node_count=3,
+       k8s_node_type="t3.large",      # provider-specific; see defaults below
+       k8s_version="1.28",
+   )
+
+   @cluster(platform="kubernetes", auto_provision=True, cores=2, memory="4Gi")
+   def train(x):
+       return x
+
+Credentials are read from environment variables via
+``clustrix.credential_manager``, one set per provider:
+
+.. list-table::
+   :header-rows: 1
+
+   * - ``k8s_provider``
+     - Environment variables
+     - Default ``node_type``
+   * - ``aws``
+     - ``AWS_ACCESS_KEY_ID``, ``AWS_SECRET_ACCESS_KEY``, ``AWS_REGION``
+     - ``t3.medium``
+   * - ``gcp``
+     - ``GCP_PROJECT_ID``, ``GCP_SERVICE_ACCOUNT_JSON``
+     - ``e2-standard-4``
+   * - ``azure``
+     - ``AZURE_SUBSCRIPTION_ID``, ``AZURE_TENANT_ID``, ``AZURE_CLIENT_ID``, ``AZURE_CLIENT_SECRET``
+     - ``Standard_D2s_v3``
+   * - ``huggingface``
+     - ``HF_TOKEN``, ``HF_USERNAME``
+     - (Space-based; no VM instance type)
+   * - ``lambda``
+     - ``LAMBDA_CLOUD_API_KEY``
+     - (Lambda Cloud instance types)
+
+If credentials for the selected provider aren't found,
+``KubernetesClusterProvisioner`` raises ``ValueError`` rather than falling
+back to another provider or to local execution.
 
 Configuration Options
 ---------------------

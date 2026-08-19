@@ -68,7 +68,7 @@ Large modules have been broken into focused components:
 ```python
 # These imports continue to work unchanged
 from clustrix import cluster, configure
-from clustrix import ClusterConfig
+from clustrix.config import ClusterConfig  # NOT `from clustrix import ClusterConfig` -- not re-exported
 from clustrix.filesystem import cluster_ls, cluster_find
 ```
 
