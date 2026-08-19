@@ -24,6 +24,7 @@ import base64
 import hashlib
 import logging
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Optional
 
@@ -105,10 +106,12 @@ def configure_host_key_policy(
         client: The ``paramiko.SSHClient`` to configure. Must be configured
             before ``client.connect(...)`` is called.
         config: A ``ClusterConfig`` instance (or any object exposing a
-            ``ssh_host_key_policy`` attribute), or ``None``. When ``None``,
-            or when the attribute is absent, the secure default (``"reject"``)
-            applies -- there is no code path that silently becomes insecure
-            for lack of a config object.
+            ``ssh_host_key_policy`` attribute), a mapping carrying an
+            ``"ssh_host_key_policy"`` key (the notebook widget hands its
+            configuration over as a dict), or ``None``. When ``None``, or
+            when the key/attribute is absent, the secure default
+            (``"reject"``) applies -- there is no code path that silently
+            becomes insecure for lack of a config object.
 
     Raises:
         ValueError: if ``config.ssh_host_key_policy`` is set to something
@@ -116,7 +119,14 @@ def configure_host_key_policy(
     """
     _load_known_hosts(client)
 
-    policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
+    # The notebook widget carries its configuration as a plain dict rather
+    # than a ClusterConfig, so accept either. Reading it here keeps every
+    # call site on the one policy decision instead of each one inventing a
+    # way to hand its own shape over.
+    if isinstance(config, Mapping):
+        policy_name = config.get("ssh_host_key_policy") or "reject"
+    else:
+        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
     if policy_name not in VALID_HOST_KEY_POLICIES:
         raise ValueError(
             f"Invalid ssh_host_key_policy={policy_name!r}. "

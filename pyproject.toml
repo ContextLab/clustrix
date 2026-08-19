@@ -35,7 +35,9 @@ keywords = ["distributed-computing", "cluster", "slurm", "kubernetes", "parallel
 dependencies = [
     "paramiko>=2.7.0",
     "pyyaml>=5.4.0", 
-    "cloudpickle>=2.0.0",
+    "cloudpickle>=3.0.0",  # 2.x cannot ship a by-value package that
+    # defines a typing.NamedTuple when the module object itself is in
+    # the function's globals (KeyError '__module__' on load)
     "dill>=0.3.4",
     "click>=8.0.0",
     "requests>=2.25.0",

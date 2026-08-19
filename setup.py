@@ -32,7 +32,8 @@ setup(
     install_requires=[
         "paramiko>=2.7.0",
         "pyyaml>=5.4.0",
-        "cloudpickle>=2.0.0",
+        "cloudpickle>=3.0.0",  # 2.x breaks by-value packages that define a
+        # typing.NamedTuple; see pyproject.toml
         "dill>=0.3.4",
         "click>=8.0.0",
         "requests>=2.25.0",  # For Lambda Cloud and general HTTP requests

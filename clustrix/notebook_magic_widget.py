@@ -1597,8 +1597,10 @@ class EnhancedClusterConfigWidget:
         try:
             import paramiko
 
+            from .ssh_security import configure_host_key_policy
+
             ssh_client = paramiko.SSHClient()
-            ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(ssh_client, config)
 
             # Connection parameters
             connect_params = {
