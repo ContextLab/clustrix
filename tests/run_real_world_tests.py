@@ -2,8 +2,8 @@
 """
 Runner for real-world tests using actual infrastructure.
 
-This script runs tests against real infrastructure (local or cloud)
-and validates actual functionality without mocks.
+This script runs tests against real infrastructure (local machines, SSH hosts
+and SLURM clusters) and validates actual functionality without mocks.
 """
 
 import sys
@@ -40,28 +40,13 @@ class RealWorldTestRunner:
         # Fallback to environment variables
         return {
             "infrastructure": {
-                "kubernetes": {"available": os.getenv("KUBECONFIG") is not None},
                 "ssh": {"available": os.getenv("TEST_SSH_HOST") is not None},
-                "cloud": {
-                    "aws": os.getenv("AWS_ACCESS_KEY_ID") is not None,
-                    "gcp": os.getenv("GOOGLE_APPLICATION_CREDENTIALS") is not None,
-                    "azure": os.getenv("AZURE_SUBSCRIPTION_ID") is not None,
-                },
             }
         }
 
     def check_infrastructure(self) -> Dict[str, bool]:
         """Check which infrastructure is available."""
         available = {}
-
-        # Check Kubernetes
-        try:
-            result = subprocess.run(
-                ["kubectl", "cluster-info"], capture_output=True, timeout=5
-            )
-            available["kubernetes"] = result.returncode == 0
-        except:
-            available["kubernetes"] = False
 
         # Check SSH
         if self.config.get("infrastructure", {}).get("ssh"):
@@ -88,11 +73,6 @@ class RealWorldTestRunner:
                 available["ssh"] = False
         else:
             available["ssh"] = False
-
-        # Check cloud providers
-        available["aws"] = bool(os.getenv("AWS_ACCESS_KEY_ID"))
-        available["gcp"] = bool(os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-        available["azure"] = bool(os.getenv("AZURE_SUBSCRIPTION_ID"))
 
         # Check Docker
         try:
@@ -212,15 +192,6 @@ class RealWorldTestRunner:
                 "test_secure_credentials_real.py",
                 "test_auth_fallbacks_real.py",
             ],
-            "cloud_providers": [
-                "test_cloud_providers_gcp_real.py",
-                "test_cloud_providers_aws_real.py",
-                "test_cloud_providers_azure_real.py",
-            ],
-            "kubernetes": [
-                "real_world/test_kubernetes_end_to_end_execution.py",
-                "real_world/test_kubernetes_local_execution.py",
-            ],
             "ssh": ["real_world/test_ssh_job_execution_real.py"],
             "notebook": ["test_notebook_magic_real.py"],
         }
@@ -237,17 +208,6 @@ class RealWorldTestRunner:
         start_time = time.time()
 
         for category, tests in test_categories.items():
-            # Skip cloud tests if no credentials
-            if category == "cloud_providers":
-                if not any([available["aws"], available["gcp"], available["azure"]]):
-                    print(f"\n⏭️  Skipping {category} tests (no cloud credentials)")
-                    continue
-
-            # Skip Kubernetes tests if not available
-            if category == "kubernetes" and not available["kubernetes"]:
-                print(f"\n⏭️  Skipping {category} tests (Kubernetes not available)")
-                continue
-
             # Skip SSH tests if not available
             if category == "ssh" and not available["ssh"]:
                 print(f"\n⏭️  Skipping {category} tests (SSH not available)")
@@ -340,8 +300,6 @@ def main():
             "decorator",
             "config",
             "credentials",
-            "cloud_providers",
-            "kubernetes",
             "ssh",
             "notebook",
         ],

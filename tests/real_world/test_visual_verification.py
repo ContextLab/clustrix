@@ -327,7 +327,7 @@ class TestWidgetVisualVerification:
                 profiles = pm.list_profiles()
                 assert len(profiles) >= 4  # Original + 3 test profiles
                 assert "SLURM HPC" in profiles
-                assert "AWS Batch" in profiles
+                assert "HuggingFace Jobs" in profiles
                 assert "SSH Cluster" in profiles
 
         except ImportError:
@@ -792,17 +792,17 @@ class TestPlotVisualization:
             axes[0, 1].set_ylim(0, 100)
 
             # Plot 3: Cost analysis
-            providers = ["AWS", "Azure", "GCP", "Lambda", "Local"]
-            costs = [0.12, 0.15, 0.11, 0.08, 0.00]
-            colors = ["orange", "blue", "red", "purple", "green"]
-            axes[1, 0].bar(providers, costs, color=colors, alpha=0.7)
-            axes[1, 0].set_title("Cost per Hour by Provider")
+            backends = ["SLURM", "SSH", "HF Jobs", "Local"]
+            costs = [0.12, 0.11, 0.08, 0.00]
+            colors = ["orange", "blue", "purple", "green"]
+            axes[1, 0].bar(backends, costs, color=colors, alpha=0.7)
+            axes[1, 0].set_title("Cost per Hour by Backend")
             axes[1, 0].set_ylabel("Cost ($)")
             axes[1, 0].tick_params(axis="x", rotation=45)
 
             # Plot 4: Success rate
-            cluster_types = ["SLURM", "PBS", "SGE", "K8s", "SSH"]
-            success_rates = [95, 92, 88, 97, 90]
+            cluster_types = ["SLURM", "SSH", "HF Jobs", "Local"]
+            success_rates = [95, 90, 97, 99]
             axes[1, 1].bar(cluster_types, success_rates, color="lightcoral", alpha=0.7)
             axes[1, 1].set_title("Job Success Rate by Cluster Type")
             axes[1, 1].set_ylabel("Success Rate (%)")
