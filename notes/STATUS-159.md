@@ -1152,3 +1152,87 @@ no document to plant and live in the docstring — repository state (Actions or
 the workflow disabled, a fork awaiting "Approve and run") and the required
 contexts drifting from `REQUIRED_CONTEXTS`. **Only a real docs-only PR settles
 any of it**, so #169 still must not be closed on a green suite.
+
+# MERGE RUNBOOK (executable; supersedes every earlier merge note)
+
+Every step below was rehearsed in an isolated clone and produced the stated
+result twice. Branch tips move — re-check them before starting.
+
+## 0. Preconditions
+- All agents finished; every worktree `git status --short` empty.
+- Interpreter: `/private/tmp/rt4venv/bin/python` (3.11.16). Sphinx:
+  `/private/tmp/clustrix-docs-venv/bin/python -m sphinx`. **Never** the system
+  `python3` (3.9.13, below the project floor, has the deps, runs a subset).
+- Rehearse in `<scratchpad>/mergesim` (a clone), never in a real worktree.
+
+## 1. Merge order — measured, not guessed
+```
+base work/priorities-and-docs
+  <- work/silent-failures
+  <- work/widget-apply
+  <- work/named-env
+  <- work/leftovers
+  <- (work/fixes merged INTO work/credential-gate first, then that)
+```
+**Do NOT rebase the gate onto fixes.** It branched at `7f82333`, fixes has
+moved since, and the rebase dies on the gate's first commit (`1bf4654`),
+replaying 14 commits through the same conflict. Merging fixes → gate costs one
+reconciliation (6 files, 13 regions) instead.
+
+## 2. Conflicts and their decided resolutions
+
+| Step | File | Resolution |
+|-|-|-|
+| + silent-failures | `tests/unit/test_known_hosts_atomicity.py` | take **ours** (base); drop the orphaned `import time` if it appears |
+| + widget-apply | `clustrix/config.py` | one `typing` line — widget-apply's is a strict superset, take **theirs** |
+| + named-env | `clustrix/config.py` | **semantic merge, NOT take-one-side** — keep HEAD's structure and graft named-env's `conda_env_name` validation in beside the `cluster_type` one at 8-space indent, inside `with _DEFAULT_CONFIG_LOCK:`, before `target = _config`. A careless "keep ours" **silently drops `conda_env_name` validation**, moving the refusal to submission time with the job directory already created and the pickle uploaded. |
+| + named-env | `tests/unit/test_known_hosts_atomicity.py` | take **theirs**; the tree must end with exactly ONE helper (`_wait_until_the_writer_has_written`) |
+| fixes → gate | 6 files, 13 regions | `auth_methods.py`, `config.py`, `notebook_magic_widget.py`, `profile_manager.py`, `test_auth_fallbacks.py`, `test_a_cloned_repository_cannot_take_your_password.py` |
+| + gate | `CHANGELOG.md` | take the **draft**, not a merge of both — the gate carries a partial section (blob `22860cc`) the draft supersedes |
+
+## 3. Merge-time actions that are NOT conflicts — the merge FAILS without them
+
+1. **Delete the stale allowlist entry.** `TRACKED_DEFECTS` in
+   `tests/unit/test_no_silent_swallows.py` contains
+   `("notebook_magic_config.py", "load_config_from_file")`. `work/fixes`
+   `4e76040` fixed that site, so `test_the_allowlists_have_no_stale_entries`
+   fails. Delete the entry in the merge commit and re-count the audit.
+   **Verified by inspection, not assumed.**
+2. **Reconcile the #167 narrative.** `work/fixes` numbers commits
+   "Round 11..16"; `work/credential-gate` numbers "route 3/5/6/7/9/13", and
+   both use "route N" in prose with different schemes. They also fix #167 by
+   different strategies (per-route + write-path provenance vs one choke point +
+   read-path derivation). Both are sound; the merged comments and docs must
+   read as one story.
+3. **Check `_config_under_test` vs `split_config_kwargs`.** The gate built the
+   former because the latter does not exist on its branch; after widget-apply
+   merges, both are present. Collapse them if they overlap.
+4. **Fold #168, #171, #172, #169 into the CHANGELOG draft** — all landed after
+   it was written.
+
+## 4. Gates, in order, all from scratch on the merged tree
+```
+pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+black --check clustrix/ tests/     # MUST be 26.3.1; PATH black is 25.11.0 and disagrees
+flake8 clustrix/ tests/
+mypy clustrix/
+cd docs && sphinx -W -b html source build/html     # note: build/, not _build/
+python scripts/check_docs_markup.py                # expects docs/build/html
+PYTHONPATH=<tree> python scripts/check_docs_examples.py   # refuses to run if an
+                                                          # editable install shadows the checkout
+pytest tests/unit/test_check_for_secrets.py
+pre-commit run --all-files
+```
+Then the **history** secret scan — the working-tree scanner uses `git ls-files`
+and excludes `.git`, so it cannot see a credential committed and later removed.
+Drive its own `TOKEN_PATTERNS`/`PEM_BODY_LINE` over `git log -p master..HEAD`.
+
+## 5. Then
+Re-run `docs/source/notebooks/local_parallel_comparison.ipynb` at the merged
+tip; push; open the PR; **open a docs-only PR to settle #169**.
+
+## 6. Closing set
+Close with evidence: #152 #153 #157 #158 #164 #165 #166 #167 #168 #171 #172,
+then roll up #159.
+**Leave open:** #111, #117, #122, #151, **#169** (unprovable locally),
+**#170** (a design decision, not a defect).
