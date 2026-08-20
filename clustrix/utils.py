@@ -2946,23 +2946,42 @@ def detect_gpu_capabilities(
     # Method 3: Check /proc/driver/nvidia if nvidia-smi fails
     #
     # The NVIDIA kernel driver creates exactly one directory per GPU under
-    # /proc/driver/nvidia/gpus/, named after the device's PCI address, so a
-    # plain listing is one line per GPU and counting the lines is a real
-    # answer. This used to run `ls -la` and subtract 2 for `.` and `..`,
-    # which forgot the `total` line `-l` prints: one GPU came back as two.
-    # `ls` without `-a` and without `-l` emits neither, so there is nothing
-    # to subtract and nothing to get wrong.
+    # /proc/driver/nvidia/gpus/, named after the device's PCI address, so
+    # one entry there is one GPU and counting the entries is a real answer.
     #
-    # `-1` is not redundant with the pipe. GNU and BSD `ls` default to one
-    # entry per line only when stdout is not a terminal, and that default is
-    # what a wrapper overrides: a site `ls` that forces `-C` (the usual
-    # companion of a forced `--color`) columnises into the pipe too, and four
-    # GPUs are then counted as one line. `-1` states the format this parse
-    # depends on instead of inheriting it.
+    # It is `find`, not `ls`, because `ls` cannot be asked for that count.
+    # Every `ls` formulation inherits some of its output shape from the
+    # environment, and a site `ls` -- a shell function or wrapper, which is
+    # how forced `--color` is usually arranged and which a non-interactive
+    # ssh command really does pick up -- prepends flags that the shipped
+    # flags cannot cancel. Two earlier attempts here failed that way: `ls
+    # -la` minus 2 forgot the `total` line and reported one GPU as two, and
+    # `ls -1` (which fixed a wrapper forcing `-C` from packing four GPUs
+    # onto one line) is still overcounted by a wrapper forcing `-a`, which
+    # adds `.` and `..`. That last one fails *open*: on an **empty**
+    # /proc/driver/nvidia/gpus/ the count is 2, so a host with no GPU at all
+    # reports `gpu_available` and, worse, `nvidia_driver_present` -- and
+    # that is the flag `setup_gpu_enabled_venv2` buys a multi-gigabyte CUDA
+    # wheel with. A forced `-R` recurses and reports 12.
+    #
+    # `find <dir> -mindepth 1 -maxdepth 1` states the whole result set
+    # instead of inheriting it: one path per line by construction, never `.`
+    # or `..` (that is what -mindepth 1 means), and never a level deeper
+    # (-maxdepth 1), whatever global options a wrapper puts in front of the
+    # path. The three failure modes stay fail-closed and unchanged: an
+    # absent directory, an unreadable one, and a host with no `find` at all
+    # each print nothing to stdout -- the diagnostics go to stderr, which is
+    # discarded -- so the count is 0, no GPU is claimed, and detection falls
+    # through to lspci. All four behaviours are exercised against the real
+    # `find` of whatever platform runs the tests, in
+    # tests/unit/test_gpu_detection_honesty.py. `-mindepth`/`-maxdepth` are
+    # not POSIX, but GNU findutils, BSD find and busybox all implement them,
+    # which covers the hosts the ssh and slurm backends reach.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(
-                "ls -1 /proc/driver/nvidia/gpus/ 2>/dev/null | wc -l"
+                "find /proc/driver/nvidia/gpus/ -mindepth 1 -maxdepth 1 "
+                "2>/dev/null | wc -l"
             )
             exit_status = stdout.channel.recv_exit_status()
 
@@ -3008,6 +3027,12 @@ def detect_gpu_capabilities(
     # display-class function of one physical GPU, and MIG partitions do not
     # enumerate at all. `gpu_devices` stays empty because lspci yields no
     # per-device memory or compute capability.
+    #
+    # Two details here are deliberately not pinned by a test, because both
+    # fail closed: `-i` on the grep is belt-and-braces for a host that prints
+    # `[10DE:` (pciutils prints lowercase), and dropping `-nn` would remove
+    # the numeric ids the pattern matches on, so such a host would report no
+    # GPU rather than a wrong one.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(

@@ -33,7 +33,9 @@ review of the fix (RT5-6) and both pinned below:
 """
 
 import os
+import shutil
 import stat
+import sys
 import tempfile
 from contextlib import contextmanager
 from pathlib import Path
@@ -44,6 +46,7 @@ from clustrix.config import ClusterConfig
 from clustrix.executor_connections import ConnectionManager
 from clustrix.utils import (
     detect_gpu_capabilities,
+    enhanced_setup_two_venv_environment,
     gpu_detection_summary,
     setup_gpu_enabled_venv2,
 )
@@ -113,29 +116,59 @@ def _write_executable(path, body):
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _install_proc_gpus_shim(bindir, base, pci_addresses, forced_flags=""):
-    """Make ``/proc/driver/nvidia/gpus/`` real, for whatever ``ls`` is asked.
+ABSENT = "absent"
+UNREADABLE = "unreadable"
+
+
+def _real_tool(name):
+    """The system executable, resolved before anything shadows it."""
+    found = shutil.which(name)
+    assert found, f"{name} is not on PATH, so this suite cannot model a host"
+    return found
+
+
+def _install_proc_gpus_shim(
+    bindir, base, pci_addresses, forced_ls_flags="", forced_find_flags=""
+):
+    """Make ``/proc/driver/nvidia/gpus/`` real, for whatever tool asks.
 
     The NVIDIA driver puts one directory per GPU under that path, named after
     the device's PCI address. macOS has no ``/proc`` and the path cannot be
-    created, so a real directory is built elsewhere and ``ls`` is shadowed by
-    a shim that rewrites that one argument and hands everything else --
-    including the flags the shipped code chose -- to the real ``/bin/ls``.
-    Nothing about the listing is hand-written: the bytes clustrix parses are
-    the bytes ``ls`` produces for a directory that really has that shape.
+    created, so a real directory is built elsewhere and both ``find`` and
+    ``ls`` are shadowed by shims that rewrite that one argument and hand
+    everything else -- including the flags the shipped code chose -- to the
+    real executable. Nothing about the listing is hand-written: the bytes
+    clustrix parses are the bytes the real tool produces for a directory that
+    really has that shape.
 
-    ``forced_flags`` models the other thing a site ``ls`` can be: a wrapper,
-    alias or shell function that prepends flags of its own, which is how
-    ``--color`` and ``-C`` usually get turned on. The flags really are passed
-    to the real ``ls``, ahead of the shipped command's own.
+    Both tools are shadowed, not just the one the shipped code currently
+    runs, so a test states a fact about the *host* rather than about the
+    command: the same host answers whichever of them clustrix chooses to ask.
+
+    ``pci_addresses`` is the list of GPUs, or :data:`ABSENT` for a host where
+    the driver never created the tree, or :data:`UNREADABLE` for one where it
+    exists and cannot be read.
+
+    ``forced_ls_flags``/``forced_find_flags`` model the other thing a site
+    tool can be: a wrapper, alias or shell function that prepends flags of
+    its own, which is how ``--color`` and ``-C`` usually get turned on, and
+    which a non-interactive ssh command really does inherit. The flags really
+    are passed to the real executable, ahead of the shipped command's own.
+    ``find``'s go where ``find`` takes global options -- before the path.
     """
     gpus = base / "proc_nvidia_gpus"
-    gpus.mkdir()
-    for address in pci_addresses:
-        (gpus / address).mkdir()
-    _write_executable(
-        bindir / "ls",
-        "#!/bin/sh\n"
+    if pci_addresses == ABSENT:
+        pass  # never created: the driver was never loaded
+    elif pci_addresses == UNREADABLE:
+        gpus.mkdir()
+        (gpus / "0000:01:00.0").mkdir()
+        gpus.chmod(0o000)
+    else:
+        gpus.mkdir()
+        for address in pci_addresses:
+            (gpus / address).mkdir()
+
+    rewrite = (
         "n=$#\n"
         "i=0\n"
         "while [ $i -lt $n ]; do\n"
@@ -146,7 +179,16 @@ def _install_proc_gpus_shim(bindir, base, pci_addresses, forced_flags=""):
         '  set -- "$@" "$a"\n'
         "  i=$((i+1))\n"
         "done\n"
-        f'exec /bin/ls {forced_flags} "$@"\n',
+    )
+    _write_executable(
+        bindir / "ls",
+        "#!/bin/sh\n" + rewrite + f'exec {_real_tool("ls")} {forced_ls_flags} "$@"\n',
+    )
+    _write_executable(
+        bindir / "find",
+        "#!/bin/sh\n"
+        + rewrite
+        + f'exec {_real_tool("find")} {forced_find_flags} "$@"\n',
     )
 
 
@@ -173,6 +215,16 @@ class Host:
             return []
         return [line for line in self._pip_log.read_text().splitlines() if line]
 
+    def cuda_pip_invocations(self):
+        """Just the ones that fetch a CUDA build rather than a CPU one."""
+        return [line for line in self.pip_invocations() if "whl/cu118" in line]
+
+    def setup_environment(self, requirements):
+        """Run the real production entry point against this host."""
+        return enhanced_setup_two_venv_environment(
+            self.ssh_client, self.work_dir, requirements, self.config
+        )
+
 
 @contextmanager
 def gpu_host(
@@ -182,6 +234,7 @@ def gpu_host(
     lspci_stdout=None,
     proc_gpus=None,
     forced_ls_flags="",
+    forced_find_flags="",
 ):
     """A real host whose nvidia-smi, lspci and /proc listing say all this.
 
@@ -209,6 +262,30 @@ def gpu_host(
         bindir / "pip",
         f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{pip_log}"\nexit 0\n',
     )
+    # The interpreter `setup_two_venv_environment` looks for first: it must
+    # report the local Python version, because dill payloads are bytecode and
+    # do not cross minor versions, and it must build the two venvs. It builds
+    # them empty -- a directory and an `activate` that defines `deactivate`,
+    # which is all the shipped setup script sources -- rather than running the
+    # real `venv` module, so that `pip` stays the recording `pip` above
+    # instead of a real one inside a real venv reaching out to PyPI. It is a
+    # real executable on the host's PATH like every other tool here; nothing
+    # is patched in-process.
+    version = f"{sys.version_info.major}, {sys.version_info.minor}"
+    _write_executable(
+        bindir / f"python{sys.version_info.major}.{sys.version_info.minor}",
+        "#!/bin/sh\n"
+        'if [ "$1" = "-c" ]; then\n'
+        f'  echo "({version})"\n'
+        "  exit 0\n"
+        "fi\n"
+        'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
+        '  mkdir -p "$3/bin"\n'
+        '  printf "deactivate() { :; }\\n" > "$3/bin/activate"\n'
+        "  exit 0\n"
+        "fi\n"
+        "exit 1\n",
+    )
     if lspci_stdout is None:
         _write_executable(bindir / "lspci", "#!/bin/sh\nexit 1\n")
     else:
@@ -220,7 +297,9 @@ def gpu_host(
         lspci_payload.write_text(lspci_stdout)
         _write_executable(bindir / "lspci", f'#!/bin/sh\ncat "{lspci_payload}"\n')
     if proc_gpus is not None:
-        _install_proc_gpus_shim(bindir, base, proc_gpus, forced_ls_flags)
+        _install_proc_gpus_shim(
+            bindir, base, proc_gpus, forced_ls_flags, forced_find_flags
+        )
 
     root = base / "served"
     root.mkdir()
@@ -247,6 +326,11 @@ def gpu_host(
             yield Host(connection.ssh_client, config, str(work_dir), pip_log)
         finally:
             connection.disconnect()
+            # An UNREADABLE /proc shim leaves a 0000-mode directory behind;
+            # give it back its bits so tmp_path cleanup can remove it.
+            gpus = base / "proc_nvidia_gpus"
+            if gpus.exists():
+                gpus.chmod(0o755)
 
 
 @contextmanager
@@ -519,6 +603,58 @@ def test_a_cuda_install_needs_the_driver_not_a_card_on_the_bus(tmp_path):
         assert result["pytorch_gpu_installed"] is True
 
 
+def test_the_production_caller_gates_cuda_on_the_same_evidence(tmp_path):
+    """The gate is only in one place if the one caller does not undo it.
+
+    ``setup_gpu_enabled_venv2`` is tested directly above, but it is not
+    called directly by anything that ships: its sole production caller is
+    ``enhanced_setup_two_venv_environment`` (reached from
+    ``executor_schedulers.py``), which is handed the detection result and can
+    rewrite it on the way past. Inserting one line into that caller --
+    ``gpu_info["nvidia_driver_present"] = gpu_info["gpu_available"]`` --
+    restores the original defect in full, and every other test in this file
+    still passes (review RT6-1). "One gate, in one place" is a claim about
+    the caller, so it is pinned through the caller.
+
+    Nothing is stubbed at the Python level. The real entry point runs the
+    real two-venv setup over a real SSH connection against a real host, and
+    the evidence is the argument lists that host's real ``pip`` recorded.
+    """
+    requirements = {"torch": "2.0.1"}
+    cu118 = (
+        "install torch torchvision torchaudio --index-url "
+        "https://download.pytorch.org/whl/cu118 --timeout=600"
+    )
+
+    # A card on the bus and nothing that has ever spoken to a driver.
+    with gpu_host(
+        tmp_path, UNREADABLE_SMI, lspci_stdout=LSPCI_ONE_CONSUMER_GPU
+    ) as host:
+        venv_info = host.setup_environment(requirements)
+        assert venv_info["gpu_info"]["gpu_available"] is True
+        assert venv_info["gpu_info"]["nvidia_driver_present"] is False
+        # The setup really ran: the CPU torch the caller asked for was
+        # installed from the replicated requirements file. Without this a
+        # caller that raised, or did nothing at all, would pass the next
+        # assertion vacuously.
+        assert any(
+            "clustrix_requirements.txt" in call for call in host.pip_invocations()
+        ), host.pip_invocations()
+        assert host.cuda_pip_invocations() == [], (
+            "the production entry point installed a CUDA build on lspci "
+            "evidence, which says a card is fitted and nothing about whether "
+            "any driver can drive it"
+        )
+        assert venv_info["pytorch_gpu_installed"] is False
+
+    # The driver's own directory, which only the driver creates.
+    with gpu_host(tmp_path, "", smi_exit=9, proc_gpus=["0000:01:00.0"]) as host:
+        venv_info = host.setup_environment(requirements)
+        assert venv_info["gpu_info"]["nvidia_driver_present"] is True
+        assert host.cuda_pip_invocations() == [cu118]
+        assert venv_info["pytorch_gpu_installed"] is True
+
+
 def test_the_inconclusive_state_survives_when_nothing_else_can_tell(tmp_path):
     """No NVIDIA on the bus and no driver directory: "could not tell" stands.
 
@@ -577,34 +713,99 @@ def test_proc_driver_counts_gpus_not_listing_decorations(
         assert "no per-device details" in message
 
 
-@pytest.mark.parametrize(
-    "forced_flags",
-    [
-        # A site `ls` that columnises. `-C` is the usual companion of a
-        # forced `--color`, and it survives the pipe: `ls` only defaults to
-        # one entry per line when nobody asked for anything else.
-        "-C",
-        "-C --color=always",
-    ],
-)
-def test_proc_driver_count_survives_an_ls_that_forces_columns(tmp_path, forced_flags):
-    """Four GPUs are four GPUs however the site's `ls` likes to print.
+# A site tool is not the tool in the manual (#172, adversarial review RT6-2).
+#
+# `ls` output shape is inherited from the environment, and a wrapper -- the
+# usual way a site turns on `--color`, and something a non-interactive ssh
+# command really does pick up -- prepends flags the shipped flags cannot
+# cancel. Against a real `ls` and a real directory: `-C` packs four GPUs onto
+# one line (undercount, fail-closed), `-a` adds `.` and `..` (overcount,
+# fail-OPEN), `-R` recurses and reports 12. The overcount is the dangerous
+# one, because it also holds for an *empty* directory, where 2 is enough to
+# claim `nvidia_driver_present` on a host with no GPU at all.
+#
+# `find <dir> -mindepth 1 -maxdepth 1` states the result set instead of
+# inheriting it. The forced flags below really are passed to the real
+# executables, ahead of the shipped command's own.
 
-    The parse counts lines, so the command has to ask for one entry per line
-    rather than inherit it. A wrapper prepending `-C` packs four directory
-    names onto one line and the host was reported as having a single GPU.
-    """
+WRAPPERS = {
+    # `-C` is the usual companion of a forced `--color`, and it survives the
+    # pipe: `ls` only defaults to one entry per line when nobody asked for
+    # anything else.
+    "columnising": ("-C --color=always", ""),
+    # The one `-1` did not fix: `.` and `..` are two more entries.
+    "showing dotfiles": ("-a", ""),
+    "recursing": ("-R", ""),
+    # `find`'s equivalent: global options, which go before the path. `-L`
+    # follows symlinks, `-H` follows them only for the arguments.
+    "dereferencing symlinks": ("-a", "-L"),
+    "dereferencing argument symlinks": ("-a -C", "-H"),
+}
+
+
+@pytest.mark.parametrize("wrapper", sorted(WRAPPERS))
+def test_proc_driver_count_survives_a_site_wrapper(tmp_path, wrapper):
+    """Four GPUs are four GPUs however the site's tools like to print."""
+    forced_ls, forced_find = WRAPPERS[wrapper]
     addresses = ["0000:07:00.0", "0000:0a:00.0", "0000:47:00.0", "0000:4d:00.0"]
     with gpu_info(
         tmp_path,
         "",
         smi_exit=9,
         proc_gpus=addresses,
-        forced_ls_flags=forced_flags,
+        forced_ls_flags=forced_ls,
+        forced_find_flags=forced_find,
     ) as info:
         assert info["gpu_available"] is True
         assert info["detection_method"] == "/proc/driver/nvidia"
-        assert info["gpu_count"] == 4, forced_flags
+        assert info["gpu_count"] == 4, wrapper
+
+
+@pytest.mark.parametrize("wrapper", sorted(WRAPPERS))
+def test_an_empty_driver_directory_is_no_gpu_and_no_driver(tmp_path, wrapper):
+    """The fail-open one. An empty directory must not buy a CUDA wheel.
+
+    `/proc/driver/nvidia/gpus/` with nothing in it is what a host with the
+    module loaded but no GPU bound looks like -- and what any host looks like
+    once a wrapper's `-a` puts `.` and `..` in the listing. Two entries read
+    as two GPUs, which sets `nvidia_driver_present`, which is the flag
+    `setup_gpu_enabled_venv2` installs a multi-gigabyte CUDA build on.
+    """
+    forced_ls, forced_find = WRAPPERS[wrapper]
+    with gpu_host(
+        tmp_path,
+        "",
+        smi_exit=9,
+        proc_gpus=[],
+        forced_ls_flags=forced_ls,
+        forced_find_flags=forced_find,
+    ) as host:
+        info = host.detect()
+        assert info["gpu_available"] is False, wrapper
+        assert info["nvidia_driver_present"] is False, wrapper
+        assert info["gpu_count"] == 0, wrapper
+        setup_gpu_enabled_venv2(
+            host.ssh_client, host.work_dir, {"torch": "2.0.1"}, info, host.config
+        )
+        assert host.cuda_pip_invocations() == [], wrapper
+
+
+@pytest.mark.parametrize("state", [ABSENT, UNREADABLE])
+def test_a_driver_directory_that_cannot_be_counted_claims_nothing(tmp_path, state):
+    """Absent and unreadable were already fail-closed; they stay that way.
+
+    A host that never loaded the driver has no such directory, and one whose
+    /proc is restricted has one it cannot list. Both print their complaint on
+    stderr, which the shipped command discards, so both count 0 -- and
+    detection falls through to lspci rather than claiming a driver.
+    """
+    if state == UNREADABLE and hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root can read a 0000-mode directory, so there is nothing to test")
+    with gpu_info(tmp_path, "", smi_exit=9, proc_gpus=state) as info:
+        assert info["gpu_available"] is False, state
+        assert info["nvidia_driver_present"] is False, state
+        assert info["gpu_count"] == 0, state
+        assert info["detection_method"] != "/proc/driver/nvidia", state
 
 
 def test_proc_driver_wins_over_lspci_because_it_can_count(tmp_path):
