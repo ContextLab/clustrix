@@ -2790,16 +2790,43 @@ def detect_gpu_capabilities(
 
     Returns:
         Dictionary with GPU information including:
-        - gpu_available: bool
+        - gpu_available: bool -- a GPU was positively identified
+        - gpu_detection_inconclusive: bool -- a GPU tool answered in a format
+          this code could not read, so neither presence nor absence is known
         - gpu_count: int
         - gpu_devices: List[Dict] with device info
         - cuda_available: bool
         - cuda_version: str
         - pytorch_gpu_support: bool
         - tensorflow_gpu_support: bool
+
+    What happens when nvidia-smi answers something unreadable:
+
+    ``nvidia-smi --format=csv`` is not a stable contract. A driver can add a
+    column, change a unit, or print a warning line before the rows, and a GPU
+    name is free to contain a comma. This function asks for exactly five
+    fields per device and treats any line that does not yield all five as
+    output it did not understand -- *not* as a device to skip.
+
+    An unreadable answer is reported as neither yes nor no. ``gpu_available``
+    stays ``False`` because nothing was identified, ``gpu_count`` stays ``0``,
+    the offending lines go into ``detection_errors``, and
+    ``gpu_detection_inconclusive`` is set so a caller can tell "no GPU here"
+    apart from "could not tell". The remaining detection methods still run;
+    if one of them positively counts NVIDIA devices then availability *is*
+    known, ``gpu_available`` becomes ``True`` on that method's own evidence
+    and ``gpu_detection_inconclusive`` is left ``False``.
+
+    It does not raise. Unlike ``_select_remote_python``, where no compatible
+    interpreter means no job can run at all, a caller here can proceed
+    perfectly well without a device list -- it just must not be told there is
+    a GPU on the strength of output nobody could read, which is what this
+    function used to do: ``gpu_available`` was set before the parse loop, and
+    a response that parsed into zero devices still reported success.
     """
     gpu_info: Dict[str, Any] = {
         "gpu_available": False,
+        "gpu_detection_inconclusive": False,
         "gpu_count": 0,
         "gpu_devices": [],
         "cuda_available": False,
@@ -2811,6 +2838,10 @@ def detect_gpu_capabilities(
     }
 
     # Method 1: Try nvidia-smi (most reliable)
+    #
+    # `gpu_available` is claimed here only after the whole response has been
+    # read, never before: the claim is the parse result, not the exit status.
+    smi_unreadable = False
     try:
         stdin, stdout, stderr = ssh_client.exec_command(
             "nvidia-smi --query-gpu=index,name,memory.total,memory.free,compute_cap --format=csv,noheader,nounits 2>/dev/null"
@@ -2820,27 +2851,48 @@ def detect_gpu_capabilities(
         if exit_status == 0:
             smi_output = stdout.read().decode().strip()
             if smi_output:
-                gpu_info["gpu_available"] = True
-                gpu_info["detection_method"] = "nvidia-smi"
-
-                # Parse nvidia-smi output
+                # Parse nvidia-smi output. Exactly five fields were asked
+                # for; anything else means the columns are not where this
+                # code thinks they are, so the row is unreadable rather than
+                # merely uninteresting.
                 devices = []
+                unreadable_lines = []
                 for line in smi_output.split("\n"):
-                    if line.strip():
-                        parts = [p.strip() for p in line.split(",")]
-                        if len(parts) >= 5:
-                            devices.append(
-                                {
-                                    "index": int(parts[0]),
-                                    "name": parts[1],
-                                    "memory_total_mb": int(parts[2]),
-                                    "memory_free_mb": int(parts[3]),
-                                    "compute_capability": parts[4],
-                                }
+                    if not line.strip():
+                        continue
+                    parts = [p.strip() for p in line.split(",")]
+                    try:
+                        if len(parts) != 5:
+                            raise ValueError(
+                                f"expected 5 comma-separated fields, got {len(parts)}"
                             )
+                        device = {
+                            "index": int(parts[0]),
+                            "name": parts[1],
+                            "memory_total_mb": int(parts[2]),
+                            "memory_free_mb": int(parts[3]),
+                            "compute_capability": parts[4],
+                        }
+                    except ValueError as parse_error:
+                        unreadable_lines.append(f"{line.strip()!r} ({parse_error})")
+                        continue
+                    devices.append(device)
 
-                gpu_info["gpu_count"] = len(devices)
-                gpu_info["gpu_devices"] = devices
+                if unreadable_lines:
+                    # Discarding these and reporting the rest would be the
+                    # same defect one size smaller: a machine with four GPUs
+                    # would be described as having however many rows happened
+                    # to parse.
+                    smi_unreadable = True
+                    gpu_info["detection_errors"].append(
+                        "nvidia-smi output could not be parsed, so it is not "
+                        "used as evidence either way: " + "; ".join(unreadable_lines)
+                    )
+                elif devices:
+                    gpu_info["gpu_available"] = True
+                    gpu_info["detection_method"] = "nvidia-smi"
+                    gpu_info["gpu_count"] = len(devices)
+                    gpu_info["gpu_devices"] = devices
     except Exception as e:
         gpu_info["detection_errors"].append(f"nvidia-smi failed: {str(e)}")
 
@@ -2903,6 +2955,13 @@ def detect_gpu_capabilities(
                     pass
         except Exception as e:
             gpu_info["detection_errors"].append(f"lspci detection failed: {str(e)}")
+
+    # "Could not tell" only survives if nothing else could tell either. A
+    # positive count from /proc/driver/nvidia or lspci is a real answer about
+    # availability, even though it says nothing about the devices.
+    gpu_info["gpu_detection_inconclusive"] = (
+        smi_unreadable and not gpu_info["gpu_available"]
+    )
 
     return gpu_info
 
@@ -3100,6 +3159,15 @@ def enhanced_setup_two_venv_environment(
             ssh_client, work_dir, requirements, gpu_info, config
         )
         venv_info.update(gpu_venv2_info)
+    elif gpu_info.get("gpu_detection_inconclusive", False):
+        # Not the same sentence as "no GPUs detected", because it is not the
+        # same fact.
+        print(
+            "Could not determine whether this cluster has GPUs: "
+            + "; ".join(gpu_info.get("detection_errors", []))
+            + ". Using standard VENV2 setup; install GPU builds yourself if "
+            "the cluster does have GPUs."
+        )
     else:
         print("No GPUs detected, using standard VENV2 setup...")
 
