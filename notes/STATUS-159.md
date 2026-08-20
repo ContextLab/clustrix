@@ -1414,3 +1414,63 @@ name `disabled` cannot be added because `modern_notebook_widget.py` assigns
 `button.disabled` six times); `warnings.filters.insert(…)`. The fourth
 red-team is asked whether that last justification is sound or whether the check
 could be qualified by receiver.
+
+## DECISION: what `_load_default_config` does with a widget profile bundle
+
+**The problem, verified pre-existing (not caused by the merge).** The widget's
+Save writes `~/.clustrix/config.yml` as a *bundle* of named profiles.
+`_load_default_config` expects a single flat configuration there. On
+`work/fixes` the mismatch is swallowed (`except Exception: continue`); with
+#123's stricter loading it raises `ConfigFileError`, so **pressing Save bricks
+the next `import clustrix`**. Reproduced on the pre-merge tree `cae8d8a` and
+absent on `origin/work/fixes`. Three route-12 tests fail in the merged tree for
+this one reason.
+
+The rehearsal was right not to guess. The three options were: (a) teach the
+loader to recognise a bundle, (b) change what the widget writes, (c) accept the
+raise.
+
+**Decision: (a) — recognise the bundle shape, decline to adopt it, and say so.**
+
+Reasoning:
+- **(c) is worse than the defect it replaces.** Save-then-restart raising on
+  `import clustrix` breaks the widget's own documented workflow. A crash on
+  import is not an acceptable answer to a file the project itself wrote.
+- **(b) breaks existing users.** The filename is user-visible and already on
+  disk in people's `~/.clustrix`; changing it strands saved profiles.
+- **(a) preserves today's *effective* behaviour** — the bundle is not adopted,
+  exactly as the swallow left it — while removing the swallow, which is the
+  whole point of #123. It reports instead of discarding.
+
+Adopting one profile out of N automatically was considered and rejected: it
+picks for the user among several equally-named candidates, which is the
+"accepted the instruction, did something else" shape this campaign exists to
+remove. Apply, not import, is how a profile is chosen.
+
+So: detect the bundle shape deliberately, skip it, and emit a message naming
+the file, saying it holds N named profiles, that clustrix does not adopt one
+automatically, and how to load one. That is strictly better than the status
+quo, does not change what is adopted, and is reversible.
+
+**Where it lands:** `work/silent-failures` owns the strictness, so the fix
+belongs there — queued behind round five. The merge patch is otherwise
+complete.
+
+## Merge rehearsal complete — patch captured
+
+`<scratchpad>/mergesim-a56d54/step5-fixes-resolved.patch` (diff vs pre-merge
+`cae8d8a`; `.format-patch` alongside). **2535 passed, 3 failed** — the three
+being the bundle issue above, nothing else. black 26.3.1, flake8, mypy clean.
+
+`TRACKED_DEFECTS`: the predicted failure was **reproduced first**, then the
+entry deleted, leaving `TRACKED_DEFECTS: dict = {}`. My prediction confirmed
+empirically, not just by inspection.
+
+Notable resolutions: `configure()` keeps #123's lock and
+`_ensure_default_config_loaded` plus #167's `DECLARED_FIELD_NAMES`, `_`-prefix
+refusal and `cluster_host` normalise check; `_load_default_config` keeps #123's
+`ConfigFileError` (**no** `except…continue`) with #167's
+`config_built_from_file` and all three warnings. One unmarked hazard git
+introduced silently: it auto-merged `set_config_source(_config, RUNTIME)` into
+`split_config_kwargs` as **dead code after a `return`**; the rehearsal moved it
+into `configure()`. That would not have been flagged as a conflict.
