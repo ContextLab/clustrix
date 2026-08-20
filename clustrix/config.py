@@ -792,6 +792,43 @@ CONFIG_SOURCE_WORKING_DIRECTORY = "working-directory"
 #: redirected file is adopted says exactly that.
 CONFIG_SOURCE_REDIRECTED_CONFIG_DIR = "redirected-config-dir"
 
+#: A profile restored from a store that never recorded where its profiles
+#: came from. **Not trusted**, and it is a statement of *ignorance* rather
+#: than of provenance -- which is exactly why it is a source of its own
+#: rather than being folded into ``redirected-config-dir``.
+#:
+#: Provenance began to be written into the profile store only once
+#: ``profile_manager.PROFILE_SOURCES_KEY`` existed. Every store written
+#: before that says nothing, and ``ProfileManager._persist()`` fires from
+#: seven mutators -- one of them merely selecting a profile -- so a bundle a
+#: repository shipped had already been copied into ``~/.clustrix`` and was
+#: indistinguishable there from a profile the user built. Resolving that
+#: silence to "wherever the file now sits" is what made the fix protect
+#: nobody who was already affected: it re-derived ``user-config-dir``,
+#: trusted, and released the credential.
+#:
+#: So silence fails closed, which is the same rule
+#: :func:`get_config_source` applies to a config carrying no record at all.
+#: Two things follow from it being *ignorance*:
+#:
+#: * it does not taint the hostname process-wide. ``set_config_source`` is
+#:   passed ``record_host=False`` for it, for the reason that parameter
+#:   exists -- the source was inferred, not read -- and a permanent record
+#:   would leave a user whose only offence is an old store unable to use
+#:   their own cluster from anywhere in the process, and unable to undo it.
+#: * it is *replaceable*, unlike a recorded untrusted source. A store
+#:   recording this value is read as silence again rather than as a verdict,
+#:   so naming the store to ``ProfileManager.load_from_file`` -- the user
+#:   saying "these profiles are mine" about a file they identified -- still
+#:   resolves it, and the store then records a real answer.
+#:
+#: What it does not do is undo the laundering that already happened: a
+#: profile a repository put in a pre-fix store can still be re-trusted by an
+#: explicit ``configure()`` naming its host. Nothing in the file can tell us
+#: it was not the user's, and inventing certainty either way would be worse
+#: than saying so.
+CONFIG_SOURCE_UNRECORDED_PROVENANCE = "unrecorded-provenance"
+
 #: The sources that count as "the user configured this". Everything not
 #: listed is untrusted, so a source nobody has thought of yet fails closed.
 TRUSTED_CONFIG_SOURCES = frozenset(
@@ -809,6 +846,7 @@ UNTRUSTED_CONFIG_SOURCES = frozenset(
     {
         CONFIG_SOURCE_WORKING_DIRECTORY,
         CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
+        CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     }
 )
 

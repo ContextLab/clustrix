@@ -126,6 +126,36 @@ automatically. Changing directory does not reload it.
    keep is kept, along with the reason it is not handed your credential.
    Deleting the profile and starting a new process is what clears it.
 
+   **Upgrading from a version that did not record this.** A profile store
+   written before clustrix recorded provenance says nothing about where its
+   profiles came from, and clustrix does not guess. It used to: it worked out
+   the source from where the store now sat, which is ``~/.clustrix``, which
+   is trusted -- so the rule above protected nobody whose store had already
+   been written into. Silence now fails closed.
+
+   What you see the first time you open such a store is a warning naming the
+   profiles concerned, and, if you go on to use one with a stored credential
+   that names no host, a refusal explaining the same thing. Nothing is
+   deleted, every profile still loads and every other way of connecting --
+   SSH keys, a credential that names its host, ``configure()`` in your own
+   Python -- is unaffected.
+
+   Two things clear it. ``SSH_HOST=<host>`` in the credential file is
+   authorisation for that one host, as always. Or, once you have looked at
+   the list in the warning and recognise every profile on it:
+
+   .. code-block:: python
+
+      import clustrix
+      clustrix.adopt_profile_store()   # then start a new process
+
+   That records, for each profile the store had no answer for, that you named
+   the store yourself -- the same thing passing a path to
+   ``ProfileManager.load_from_file`` has always meant. It is not a way to
+   grant trust: a profile the store *does* record as untrusted is left
+   exactly as it is, however often you run it. Look at the list first; a
+   profile you do not recognise is the thing this is protecting you from.
+
    **What ``load_config(path)`` does and does not mean.** It is trusted:
    it is a call in your own Python naming a file, it is not reachable by
    handing a config back through a function, and distrusting *relative*

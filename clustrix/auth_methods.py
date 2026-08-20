@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from .config import (
     ClusterConfig,
+    CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     config_source_is_trusted,
     get_config_source,
     normalize_hostname as _normalize_hostname,
@@ -278,6 +279,13 @@ def stored_credential_is_for_config(
     that no round trip can manufacture -- and removing the offending file and
     starting again, since the record is per-process.
 
+    ``unrecorded-provenance`` gets a message of its own, because neither the
+    diagnosis nor the remedies are the same. It means the profile store
+    predates provenance being recorded at all, so nothing is *known* about
+    the hostname rather than something bad being known; and it is undoable,
+    by naming the store once. See
+    :data:`clustrix.config.CONFIG_SOURCE_UNRECORDED_PROVENANCE`.
+
     Returns the reason it may not be used, so the caller can say so; ``None``
     means it may.
     """
@@ -293,9 +301,35 @@ def stored_credential_is_for_config(
     if config_source_is_trusted(config):
         return None
 
+    source = get_config_source(config)
+    if source == CONFIG_SOURCE_UNRECORDED_PROVENANCE:
+        # Not "this came from somewhere untrustworthy" -- nobody knows where
+        # it came from, and the generic message below would say something
+        # false about an inherited environment variable. The remedies differ
+        # too: this one is undoable, because the source is a gap in an old
+        # file rather than a verdict on a file just read. See
+        # ``clustrix.config.CONFIG_SOURCE_UNRECORDED_PROVENANCE``.
+        return (
+            f"the stored credential names no host, and cluster_host="
+            f"{config.cluster_host!r} came out of a profile store written "
+            f"before clustrix recorded where each profile came from, so "
+            f"where this hostname came from is unknown. It matters because "
+            f"selecting a profile copies whatever is loaded into the "
+            f"clustrix configuration directory, so a profile a repository "
+            f"shipped sits there looking exactly like one you made. Nothing "
+            f"has been deleted and every other way of connecting still "
+            f"works. Two things clear it: set "
+            f"SSH_HOST={config.cluster_host!r} in the credential file, which "
+            f"is you naming the host that may receive the secret, or -- "
+            f"after checking that every profile in the store is one you "
+            f"recognise -- run clustrix.adopt_profile_store() once and start "
+            f"a new process, which records the answer that is missing and is "
+            f"not needed again"
+        )
+
     return (
         f"the stored credential names no host, and cluster_host="
-        f"{config.cluster_host!r} came from {get_config_source(config)} -- "
+        f"{config.cluster_host!r} came from {source} -- "
         f"a file chosen by where the process runs or by an inherited "
         f"environment variable, not by you. That is settled for the life of "
         f"this process: passing "

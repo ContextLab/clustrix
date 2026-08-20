@@ -6,9 +6,10 @@ a comprehensive interface for configuring and managing cluster settings in
 Jupyter notebooks.
 """
 
+import copy
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import logging
 
 from .notebook_magic_config import (
     DEFAULT_CONFIGS,
@@ -98,8 +99,16 @@ class EnhancedClusterConfigWidget:
         indistinguishable from something the user typed, and the cluster
         password went to whoever the repository named.
         """
-        # Start with default configurations
-        self.configs = DEFAULT_CONFIGS.copy()
+        # Start with default configurations. A *deep* copy: ``.copy()`` is
+        # shallow, so the inner dicts were the module-level templates
+        # themselves and every edit reached through them. Renaming a
+        # built-in configuration wrote ``name`` into
+        # ``notebook_magic_config.DEFAULT_CONFIGS``, and every widget
+        # created afterwards in the same kernel started from the mutated
+        # template -- with a name that reloaded a different configuration
+        # over the user's edits. Found by two of this module's own tests
+        # interfering with each other.
+        self.configs = copy.deepcopy(DEFAULT_CONFIGS)
         # Where each file-derived config was found. Only written here: a
         # config the user builds or saves during the session is their own.
         self.config_source_map: Dict[str, str] = {}
@@ -301,6 +310,49 @@ class EnhancedClusterConfigWidget:
             self.config_dropdown.value = options[0]
             self._load_config_to_widgets(options[0])
 
+    #: Every mapping keyed by configuration *name*. A rename moves the
+    #: configuration between keys, so each of these has to move with it or
+    #: it describes a name that no longer exists -- and, worse, stops
+    #: describing the configuration it was about. Named once because the
+    #: cost of the list going stale is a security hole: see
+    #: ``_rename_config_metadata``.
+    _NAME_KEYED_MAPS = (
+        "config_file_map",
+        "config_source_map",
+        "config_source_host_map",
+    )
+
+    def _rename_config_metadata(self, old_name: str, new_name: str) -> None:
+        """Move the sidecars for ``old_name`` onto ``new_name``.
+
+        ``_on_config_name_change`` re-keyed ``self.configs`` and nothing
+        else, so renaming a configuration the widget had found on disk left
+        ``config_source_map`` describing a name that no longer existed.
+        ``_discovered_source_for`` looks that name up and got nothing, so
+        Apply stamped no provenance and ``configure()``'s ``runtime`` stood:
+        selecting a repository's ``./config.yml`` and typing a name into the
+        name box -- without touching the host -- was enough to have the
+        cluster password sent to the host that file named. Renaming is not
+        choosing a hostname.
+
+        An absent entry is *removed* from ``new_name`` rather than left
+        alone, so the sidecars track ``self.configs`` exactly in both
+        directions. Renaming a configuration the user built onto the name of
+        one that came off a disk must not leave the disk's provenance
+        attached to it either.
+        """
+        for attr in self._NAME_KEYED_MAPS:
+            mapping = getattr(self, attr)
+            if old_name in mapping:
+                mapping[new_name] = mapping.pop(old_name)
+            else:
+                mapping.pop(new_name, None)
+
+    def _forget_config_metadata(self, name: str) -> None:
+        """Drop the sidecars for a configuration that is going away."""
+        for attr in self._NAME_KEYED_MAPS:
+            getattr(self, attr).pop(name, None)
+
     def _on_config_name_change(self, change):
         """Handle changes to the config name field."""
         new_name = change["new"].strip()
@@ -312,10 +364,12 @@ class EnhancedClusterConfigWidget:
             and self.current_config_name in self.configs
             and new_name != self.current_config_name
         ):
-            # Rename the configuration
+            # Rename the configuration, and everything else keyed by its
+            # name along with it -- see ``_rename_config_metadata``.
             old_config = self.configs.pop(self.current_config_name)
             old_config["name"] = new_name
             self.configs[new_name] = old_config
+            self._rename_config_metadata(self.current_config_name, new_name)
             self.current_config_name = new_name
             self._update_config_dropdown()
 
@@ -791,9 +845,10 @@ class EnhancedClusterConfigWidget:
             if self.current_config_name and self.current_config_name in self.configs:
                 deleted_name = self.current_config_name
                 del self.configs[self.current_config_name]
-                # Remove from file map if it exists
-                if self.current_config_name in self.config_file_map:
-                    del self.config_file_map[self.current_config_name]
+                # And everything keyed by its name: leaving the provenance
+                # behind would attach a deleted file's source to whatever is
+                # created under that name next.
+                self._forget_config_metadata(self.current_config_name)
                 # Select a different configuration
                 remaining_configs = list(self.configs.keys())
                 if remaining_configs:

@@ -36,6 +36,7 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 ``clustrix.auth_methods.stored_credential_is_for_config``.
 """
 
+import copy
 import pathlib
 import warnings
 
@@ -756,6 +757,34 @@ def _profile_bundle(server, name="Cluster"):
     )
 
 
+def _write_profile_store(path, server, name="Cluster"):
+    """Write a store the way clustrix writes one, and return the path.
+
+    Not by hand. ``_profile_bundle`` is the *pre-provenance* file format --
+    ``profiles`` and nothing else -- which is exactly the shape route 9a made
+    untrusted, so a positive test hand-writing it would be asserting that a
+    legacy store is trusted rather than that the user's own directory is.
+    Going through ``save_to_file`` means these fixtures cannot drift away
+    from what a real session leaves on disk.
+    """
+    from clustrix.profile_manager import ProfileManager
+
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    manager = ProfileManager(config_dir=str(path.parent))
+    manager.profiles = {
+        name: ClusterConfig(
+            cluster_type="ssh",
+            cluster_host=server.host,
+            cluster_port=server.port,
+            username="victim",
+            ssh_host_key_policy="auto_add",
+        )
+    }
+    manager.active_profile = name
+    manager.save_to_file(str(path))
+    return path
+
+
 def test_a_profile_store_in_a_redirected_config_dir_never_receives_the_password(
     attacker_server, tmp_path, monkeypatch
 ):
@@ -818,9 +847,9 @@ def test_a_profile_store_in_the_real_config_dir_is_still_trusted(
     """
     env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
 
-    store = get_config_dir() / "profiles" / "profiles.yml"
-    store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    store.write_text(_profile_bundle(attacker_server), encoding="utf-8")
+    _write_profile_store(
+        get_config_dir() / "profiles" / "profiles.yml", attacker_server
+    )
 
     from clustrix.profile_manager import ProfileManager
 
@@ -1347,9 +1376,7 @@ def test_the_load_menu_still_trusts_the_store_in_the_configuration_directory(
     pytest.importorskip("ipywidgets")
     env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
 
-    store = get_config_dir() / "profiles.yml"
-    store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    store.write_text(_profile_bundle(attacker_server), encoding="utf-8")
+    _write_profile_store(get_config_dir() / "profiles.yml", attacker_server)
     monkeypatch.chdir(tmp_path)
 
     widget = _widget_loading("profiles.yml")
@@ -2198,3 +2225,149 @@ def test_case_and_a_trailing_dot_do_not_slip_past_the_host_comparison(
     assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {
         UNRELATED_ATTACKER_HOST: CONFIG_SOURCE_WORKING_DIRECTORY
     }
+
+
+# --------------------------------------------------------------------------
+# Route 9b. The rename dropped the provenance on the floor.
+#
+# ``_on_config_name_change`` re-keyed ``self.configs`` and moved
+# ``current_config_name``, and left ``config_source_map``,
+# ``config_source_host_map`` and ``config_file_map`` keyed by a name that no
+# longer existed. ``_discovered_source_for`` looks the *current* name up, so
+# it found nothing, Apply stamped no provenance and ``configure()``'s
+# ``runtime`` stood: selecting a repository's ``./config.yml`` and typing a
+# name into the name box -- without touching the host -- was enough.
+#
+# Renaming is not choosing a hostname. Measured before the fix:
+# ``config_source_map == {'config': 'working-directory'}`` while the
+# configuration was called something else, and ``_discovered_source_for``
+# returned ``None``.
+# --------------------------------------------------------------------------
+
+
+def _live_widget_fields(widget):
+    """What Apply would stamp: the live fields, exactly as it reads them."""
+    return widget._save_config_from_widgets()
+
+
+def test_renaming_a_found_configuration_does_not_launder_it(tmp_path, monkeypatch):
+    """RED before the fix: ``_discovered_source_for`` returned ``None``.
+
+    The measurement is taken at ``_discovered_source_for`` rather than
+    through ``_on_apply_config`` because on this branch Apply is dead for
+    every *named* configuration -- ``_save_config_from_widgets`` emits
+    ``name`` and ``configure()`` rejects it -- which is issue #165, fixed on
+    its own branch. The existing widget guards above reach Apply only by
+    writing ``name: ""`` into the fixture, and a rename is precisely what
+    makes the name non-empty. ``_discovered_source_for`` is the function the
+    defect is in and the only thing Apply consults about provenance, so it is
+    where the guard belongs either way.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+    # The rename, driven the way a user drives it: by typing in the name box.
+    widget.config_name.value = "my cluster"
+
+    assert widget.current_config_name == "my cluster"
+    assert "my cluster" in widget.configs
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    ), "renaming a configuration a repository shipped cleared its provenance"
+
+    # Every mapping keyed by the name moved with it; none is left describing
+    # a name that no longer exists.
+    assert widget.config_source_map == {"my cluster": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert widget.config_source_host_map == {"my cluster": UNRELATED_ATTACKER_HOST}
+    assert set(widget.config_file_map) == {"my cluster"}
+
+    # And the fix is not "condemn everything after a rename": typing your own
+    # hostname over it still works, because a hostname is only condemned by a
+    # source that actually named it.
+    widget.host_field.value = "my-own-cluster.example"
+    assert widget._discovered_source_for(_live_widget_fields(widget)) is None
+
+
+def test_renaming_onto_a_name_that_came_off_a_disk_does_not_inherit_it(
+    tmp_path, monkeypatch
+):
+    """The other direction: a stale entry must not attach to someone else.
+
+    ``self.configs`` is re-keyed unconditionally, so renaming a configuration
+    the user built onto the name of one that was found on disk leaves that
+    disk's provenance sitting on a configuration it was never about. The
+    sidecars track ``self.configs`` in both directions.
+
+    (That the rename destroys the other configuration at all is issue #171,
+    filed separately and left alone here.)
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+
+    # Select a configuration the widget built in, not one off a disk, and
+    # rename it onto the found one's name.
+    widget.config_dropdown.value = "Local Single-core"
+    widget.config_name.value = "config"
+
+    assert widget.current_config_name == "config"
+    assert widget.config_source_map == {}
+    assert widget.config_source_host_map == {}
+    assert widget._discovered_source_for(_live_widget_fields(widget)) is None
+
+
+def test_deleting_a_configuration_forgets_where_it_came_from(tmp_path, monkeypatch):
+    """A deleted file's provenance must not attach to the next thing named that.
+
+    ``_on_delete_config`` already dropped ``config_file_map`` -- the two
+    source maps were simply forgotten when they were added.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+
+    widget._on_delete_config(None)
+
+    assert "config" not in widget.configs
+    assert widget.config_source_map == {}
+    assert widget.config_source_host_map == {}
+    assert widget.config_file_map == {}
+
+
+def test_a_rename_in_one_widget_does_not_edit_the_next_widget_s_templates(
+    tmp_path, monkeypatch
+):
+    """``DEFAULT_CONFIGS.copy()`` is shallow, so the inner dicts were shared.
+
+    Found by the two rename tests above interfering with each other:
+    renaming a built-in configuration wrote ``name`` into the module-level
+    template, and every widget built afterwards in the same kernel started
+    from it -- so a fresh widget offered a "Local Single-core" whose name
+    field said something else, and typing in that field renamed a
+    configuration the user had not touched.
+    """
+    pytest.importorskip("ipywidgets")
+    import clustrix.notebook_magic_config as notebook_magic_config
+
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+    before = copy.deepcopy(notebook_magic_config.DEFAULT_CONFIGS)
+
+    widget = _clusterfy_widget()
+    widget.config_dropdown.value = "Local Single-core"
+    widget.config_name.value = "renamed by me"
+    widget.cores_field.value = 17
+
+    assert notebook_magic_config.DEFAULT_CONFIGS == before
+
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    assert "renamed by me" not in EnhancedClusterConfigWidget().configs

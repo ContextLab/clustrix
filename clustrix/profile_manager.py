@@ -11,6 +11,7 @@ from dataclasses import asdict, fields as dataclass_fields
 from .config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
     CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
+    CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     CONFIG_SOURCES,
     UNTRUSTED_CONFIG_SOURCES,
     ClusterConfig,
@@ -204,6 +205,8 @@ def _restored_profile_source(file_source: str, recorded: Any) -> str:
       raised on. Refusing to restore would cost the user every profile they
       have; refusing to *trust* costs one credential release the message
       explains.
+    * **nothing recorded at all is not an answer, and must not be resolved
+      into one.** See below.
 
     Persisting the source rather than refusing to persist an untrusted
     profile at all is the deliberate choice. A user may legitimately want to
@@ -212,14 +215,125 @@ def _restored_profile_source(file_source: str, recorded: Any) -> str:
     something they can see in the widget without their asking. Keeping it and
     keeping *why it is refused* preserves the profile and the refusal
     together, which is the honest pair.
+
+    **Absence fails closed.** Every store written before
+    :data:`PROFILE_SOURCES_KEY` existed records nothing, and resolving that
+    silence to ``file_source`` meant the store a pre-fix clustrix had
+    *already* laundered came back ``user-config-dir``, trusted, credential
+    released -- so the fix protected nobody who was already affected. It also
+    put two opposite defaults in one subsystem:
+    :func:`clustrix.config.get_config_source` reads a missing record as
+    *untrusted*, and this read it as trusted.
+
+    A store version key was the other candidate and does no work here. An
+    unversioned store would have to fail closed anyway -- absence of the
+    version key is exactly as forgeable as absence of the source -- so the
+    key would only restate what absence already says, in a second mechanism
+    that can disagree with the first. Re-deriving provenance from where the
+    file now sits, the third candidate, *is* the defect written down.
+
+    What the silence resolves to depends on one thing: whether anybody named
+    this file.
+
+    * ``file_source`` is already untrusted -- the store was discovered in a
+      working directory or a redirected config directory. That is not
+      silence, it is knowledge about the file, and it is the answer.
+    * ``explicit-file`` -- a caller passed this path. That is the user saying
+      "these profiles are mine" about a file they identified, which is the
+      same act ``load_from_file``'s default already treats as authorisation
+      for a bundle carrying no sources at all. It is also the only way back:
+      see :data:`clustrix.config.CONFIG_SOURCE_UNRECORDED_PROVENANCE`.
+    * otherwise -- ``user-config-dir``, the store ``_restore`` found by
+      itself. Trusted, but *discovered*: nobody named it, and route 8's whole
+      point is that a profile arrives in that directory by being copied
+      there. Unknown, and it says so.
+
+    A recorded ``unrecorded-provenance`` re-enters the same branch rather
+    than being believed as an untrusted verdict, so re-persisting a legacy
+    store does not turn "we do not know" into "we know it is bad" -- which
+    would be permanent, since a recorded untrusted source may not be
+    upgraded.
     """
-    if recorded is None:
-        return file_source
+    if recorded is None or recorded == CONFIG_SOURCE_UNRECORDED_PROVENANCE:
+        if file_source in UNTRUSTED_CONFIG_SOURCES:
+            return file_source
+        if file_source == CONFIG_SOURCE_EXPLICIT_FILE:
+            return file_source
+        return CONFIG_SOURCE_UNRECORDED_PROVENANCE
     if not isinstance(recorded, str) or recorded not in CONFIG_SOURCES:
         return CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
     if recorded in UNTRUSTED_CONFIG_SOURCES:
         return recorded
     return file_source
+
+
+def adopt_profile_store(store_path: Optional[str] = None) -> List[str]:
+    """Say, once, that the profiles in a store are yours. Returns their names.
+
+    The way back from :data:`~clustrix.config.CONFIG_SOURCE_UNRECORDED_PROVENANCE`.
+    A store written before clustrix recorded provenance says nothing about
+    where its profiles came from, and silence fails closed -- see
+    :func:`_restored_profile_source`. This is the user supplying the answer
+    that is missing, for a file they name, after looking at what is in it.
+
+    It works on the **file**, not on a loaded ``ProfileManager``, and that is
+    the point rather than a convenience. Restoring a store marks its
+    hostnames untrusted process-wide, and that record deliberately has no way
+    back through any function call -- a widget's Apply button is a
+    ``configure()`` call, so a rule that let one clear it would reopen the
+    laundering route. Rewriting the file records the answer before anything
+    reads it, so the next process starts from a store that knows.
+
+    It is not a way to grant trust, only to stop withholding it. An entry
+    that already records a source is left exactly as it is, so a profile a
+    repository shipped -- ``working-directory``, ``redirected-config-dir`` --
+    stays refused however often this is run, and a store adopted from a
+    redirected configuration directory still loads untrusted, because the
+    directory it sits in is what decides that. The most this can say is
+    ``explicit-file``, which is what naming a path to
+    :meth:`ProfileManager.load_from_file` already means.
+
+    Args:
+        store_path: the store to adopt. Defaults to the one
+            :class:`ProfileManager` uses, under the clustrix configuration
+            directory.
+
+    Returns:
+        The profiles whose provenance this recorded, in file order. An empty
+        list means every profile already had an answer and nothing changed.
+    """
+    if store_path is None:
+        path = get_config_dir() / "profiles" / ProfileManager.STORE_FILENAME
+    else:
+        path = Path(store_path).expanduser()
+
+    if not path.exists():
+        raise FileNotFoundError(f"No profile store at {path}")
+
+    with open(path, encoding="utf-8") as handle:
+        if path.suffix.lower() == ".json":
+            data = json.load(handle)
+        else:
+            data = yaml.safe_load(handle)
+
+    profiles = data.get("profiles") if isinstance(data, dict) else None
+    if not isinstance(profiles, dict):
+        raise ValueError(f"{path} does not contain a profile bundle")
+
+    recorded = data.get(PROFILE_SOURCES_KEY)
+    if not isinstance(recorded, dict):
+        recorded = {}
+
+    adopted = []
+    for name in profiles:
+        existing = recorded.get(name)
+        if existing is None or existing == CONFIG_SOURCE_UNRECORDED_PROVENANCE:
+            recorded[name] = CONFIG_SOURCE_EXPLICIT_FILE
+            adopted.append(name)
+
+    data[PROFILE_SOURCES_KEY] = recorded
+    write_config_file_securely(path, data)
+    return adopted
 
 
 class ProfileManager:
@@ -643,10 +757,47 @@ class ProfileManager:
         # process boundary and a profile a repository shipped came back
         # trusted merely because a mutator had since copied it into the
         # user's own configuration directory.
+        unrecorded = []
         for name, config in loaded.items():
-            set_config_source(
-                config,
-                _restored_profile_source(source, recorded_sources.get(name)),
+            restored = _restored_profile_source(source, recorded_sources.get(name))
+            if restored == CONFIG_SOURCE_UNRECORDED_PROVENANCE and config.cluster_host:
+                # Only the ones that name a host. Provenance decides who may
+                # receive a credential, so a profile naming nobody has
+                # nothing at stake, and listing the built-in templates --
+                # which a pre-fix ``_persist`` also copied into the store --
+                # would bury the one entry the user has to look at.
+                unrecorded.append(name)
+            # ``record_host`` is left at its default even for
+            # ``unrecorded-provenance``, and that is the load-bearing part of
+            # closing route 9a rather than merely labelling it. Marking the
+            # *object* untrusted stops a direct use of the profile and
+            # nothing else: the ordinary way to use a profile is to apply it,
+            # and both widgets' Apply is ``configure(**...)`` from the
+            # profile's own fields, which builds a fresh object whose own
+            # source is ``runtime``. Measured: with the hostname left
+            # unrecorded, a pre-fix store still authenticated the sentinel to
+            # the host a repository's bundle named. The hostname is what
+            # receives the credential, so the hostname is what has to carry
+            # the doubt.
+            #
+            # The cost is that the doubt then outlives every rebuild in the
+            # process, which is why it has to be undoable at all: that is
+            # ``adopt_profile_store``, which works on the file and so does
+            # not have to argue with a record that has no way back.
+            set_config_source(config, restored)
+
+        if unrecorded:
+            warnings.warn(
+                f"{len(unrecorded)} profile(s) in {filepath} predate clustrix "
+                f"recording where each profile came from ("
+                f"{', '.join(sorted(unrecorded))}), so clustrix does not know "
+                f"whether you created them or something else wrote them "
+                f"there. They still load and every other way of connecting "
+                f"still works; what is refused is releasing a stored "
+                f"credential that names no host to their cluster_host. Check "
+                f"that you recognise all of them, then run "
+                f"clustrix.adopt_profile_store() once and start a new "
+                f"process."
             )
 
         if not loaded:
