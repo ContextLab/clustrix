@@ -14,9 +14,9 @@ script directly:
   documented a repository reorganization rather than the package, and has been
   deleted along with the rest of the version-to-version prose.
 - ``docs/PRICING_API_REFERENCE.md`` and ``docs/PRICING_USER_GUIDE.md``
-  documented ``clustrix.pricing_clients.performance_monitor`` and
-  ``.resilience``; the whole pricing-client tree has since been deleted
-  along with the cloud backends it served.
+  documented a pricing-client API for the cloud backends. Neither the API
+  nor the backends are part of the package, and both files have been
+  deleted; the examples in them imported modules that cannot be imported.
 
 Per code block:
 

@@ -7,6 +7,11 @@ false claim that it had been migrated to ``scripts/aws/`` -- that directory
 never existed until this file. See GitHub issue #95. The original source
 was recovered from git history (``git show b9c836f^:cleanup_test_resources.py``).
 
+Clustrix does not create AWS resources -- there is no AWS backend and no
+provisioner in the package. This is standalone operator tooling for an
+account that already holds clustrix-tagged networking, run by hand when
+something that should have been torn down is still on the bill.
+
 WHAT THIS DELETES
 ------------------
 NAT gateways, their Elastic IPs, subnets, non-default security groups,
@@ -23,9 +28,9 @@ SAFETY
 IDENTIFICATION / TAGGING CONVENTION
 ------------------------------------
 A VPC is only eligible for cleanup if it carries the tag
-``clustrix:managed=true``. This is the exact tag that
-``clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner`` applies
-to every VPC it creates (see ``clustrix/kubernetes/aws_provisioner.py``).
+``clustrix:managed=true``. That tag is the whole of the identification: it
+is what marks a VPC as clustrix's to delete, and a VPC without it is out of
+scope no matter what else is true of it.
 NAT gateways, subnets, security groups, route tables, and internet gateways
 are only deleted when they belong to such a tagged VPC. Untagged VPCs --
 including the account's default VPC and anything created by hand or by
@@ -68,11 +73,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Delete NAT gateways, VPCs, and their dependent networking "
-            "resources that were created by Clustrix's AWS EKS provisioner. "
-            "Defaults to a DRY RUN that only prints what would be deleted. "
-            f"Only ever touches VPCs tagged {MANAGED_TAG_KEY}="
-            f"{MANAGED_TAG_VALUE} (the tag clustrix.kubernetes."
-            "aws_provisioner applies to every VPC it creates) -- nothing "
+            "resources tagged as Clustrix-managed. Defaults to a DRY RUN "
+            "that only prints what would be deleted. Only ever touches "
+            f"VPCs tagged {MANAGED_TAG_KEY}={MANAGED_TAG_VALUE} -- nothing "
             "else is ever deleted, regardless of naming."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,

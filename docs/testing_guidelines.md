@@ -305,7 +305,7 @@ pytest --cov=clustrix --cov-report=html
 ### Using Test Infrastructure
 
 ```bash
-# Bring the local services up (SSH server, SLURM, MinIO, PostgreSQL, Redis)
+# Bring the local services up (SSH server, SLURM)
 python tests/infrastructure/setup_test_infrastructure.py setup
 
 # See what is running

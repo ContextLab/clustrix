@@ -110,8 +110,8 @@ python tests/infrastructure/setup_test_infrastructure.py status
 docker ps
 ```
 
-`tests/infrastructure/docker-compose.yml` defines the services: an SSH server,
-a SLURM container, MinIO, PostgreSQL and Redis. Tear them down again with
+`tests/infrastructure/docker-compose.yml` defines the services: an SSH server
+and a SLURM container. Tear them down again with
 `... setup_test_infrastructure.py teardown`.
 
 ### Step 4: Rewrite
@@ -433,8 +433,7 @@ python tests/infrastructure/setup_test_infrastructure.py status
 ```
 
 That reports on the containers defined in
-`tests/infrastructure/docker-compose.yml` — SSH server, SLURM, MinIO,
-PostgreSQL and Redis.
+`tests/infrastructure/docker-compose.yml` — SSH server and SLURM.
 
 ## Checklist
 

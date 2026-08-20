@@ -437,17 +437,12 @@ class TestDeletePathUnreachableWithoutExecuteFlag:
         ), f"destructive call(s) reachable at module import time: {module_scope_calls}"
 
 
-class TestTaggingConventionMatchesProvisioner:
-    """The scripts must honour the exact tag/name convention that
-    clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner used,
-    per issue #95 ('Whatever tagging/naming convention the original used,
-    honour it and state it in --help').
-
-    The provisioner itself has been removed with the Kubernetes/AWS backends
-    (issues #142, #143), so the cross-check against its source is gone. These
-    scripts are kept because resources provisioned by earlier versions of
-    clustrix are still out there carrying these tags and still need deleting;
-    the constants below are what identifies them.
+class TestTaggingConvention:
+    """The tags and role names below are the scripts' entire safety model:
+    a resource that does not carry them is out of scope, and a resource that
+    does is what these scripts exist to delete. Nothing in the package emits
+    these tags, so there is no source to cross-check against -- the constants
+    are the convention, and issue #95 requires that --help state them.
     """
 
     def test_cleanup_uses_clustrix_managed_tag(self):
@@ -461,7 +456,7 @@ class TestTaggingConventionMatchesProvisioner:
         assert module.MANAGED_TAG_VALUE == "true"
         assert module.CLUSTER_TAG_KEY == "clustrix:cluster"
 
-    def test_destroy_iam_role_names_match_provisioner(self):
+    def test_destroy_iam_role_names(self):
         module = _load_module(DESTROY_SCRIPT)
         cluster_role, node_role = module.iam_role_names("demo-cluster")
         assert cluster_role == "clustrix-eks-cluster-role-demo-cluster"

@@ -872,9 +872,6 @@ Clustrix provides Docker-based local test infrastructure for cost-free testing:
 
 - **SSH Server**: OpenSSH test server on port 2222
 - **SLURM Mock**: Simulated SLURM scheduler
-- **MinIO**: S3-compatible object storage
-- **PostgreSQL**: Database for state management
-- **Redis**: Cache and message queue
 
 ### Test Categories
 

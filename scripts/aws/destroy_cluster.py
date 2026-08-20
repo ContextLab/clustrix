@@ -7,6 +7,11 @@ claim that it had been migrated to ``scripts/aws/`` -- that directory never
 existed until this file. See GitHub issue #95. The original source was
 recovered from git history (``git show b9c836f^:destroy_cluster.py``).
 
+Clustrix does not create EKS clusters -- there is no AWS backend and no
+provisioner in the package. This is standalone operator tooling for an
+account that already holds a clustrix-tagged cluster, run by hand when
+something that should have been torn down is still on the bill.
+
 WHAT THIS DELETES
 ------------------
 The named EKS cluster's node groups, the EKS cluster itself, its VPC and
@@ -24,9 +29,7 @@ SAFETY
 
 IDENTIFICATION / TAGGING CONVENTION
 ------------------------------------
-This script only recognizes resources created by
-``clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner``
-(see ``clustrix/kubernetes/aws_provisioner.py``), which tags/names them as:
+This script only recognizes resources carrying Clustrix's tags and names:
   * EKS cluster: tagged clustrix:managed=true, clustrix:cluster=<name>
   * VPC: tagged clustrix:managed=true, clustrix:cluster=<name>
   * IAM roles: named exactly "clustrix-eks-cluster-role-<name>" and
@@ -63,9 +66,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "cluster, its VPC, and its IAM roles). Defaults to a DRY RUN "
             "that only prints what would be deleted. Refuses to act unless "
             f"the cluster is tagged {MANAGED_TAG_KEY}={MANAGED_TAG_VALUE} "
-            f"and {CLUSTER_TAG_KEY}=<cluster_name> -- the tags "
-            "clustrix.kubernetes.aws_provisioner applies to every cluster "
-            "it creates."
+            f"and {CLUSTER_TAG_KEY}=<cluster_name> -- an untagged cluster "
+            "is never touched, regardless of its name."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -144,8 +146,8 @@ def get_clients(region: str):
 
 
 def iam_role_names(cluster_name: str) -> tuple:
-    """The exact IAM role names clustrix.kubernetes.aws_provisioner creates
-    for a given cluster."""
+    """The exact IAM role names a Clustrix-managed cluster carries: its
+    cluster role and its node role."""
     return (
         f"clustrix-eks-cluster-role-{cluster_name}",
         f"clustrix-eks-node-role-{cluster_name}",
