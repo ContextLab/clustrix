@@ -23,6 +23,39 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def write_text_securely(path: Path, text: str) -> None:
+    """Write ``text`` to ``path`` so it is never readable by anyone else.
+
+    ``path.write_text(...)`` followed by ``path.chmod(0o600)`` looks
+    equivalent and is not: the file exists, with the credentials already in
+    it, at ``0o666 & ~umask`` for the whole window between the two calls.
+    With the default umask that is mode 0644 -- world readable -- and any
+    other local process can win that race (issue #111).
+
+    So the mode is supplied to ``os.open()`` itself, meaning a newly created
+    file is never wider than 0600 even momentarily, and re-applied with
+    ``fchmod()`` before any content is written, so overwriting a
+    pre-existing, more permissive file is tightened too. This mirrors
+    ``clustrix.config._write_config_file_securely``, including its Windows
+    caveat: ``os.fchmod`` does not exist there before Python 3.13, and
+    ``chmod`` only toggles the read-only attribute rather than restricting
+    who may read, so on Windows the file inherits the directory's ACL.
+    """
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    fd = os.open(str(path), flags, 0o600)
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, 0o600)
+        handle = os.fdopen(fd, "w", encoding="utf-8")
+    except BaseException:
+        # Nothing owns the descriptor yet, so it would otherwise leak; on
+        # Windows a leaked handle also makes the file undeletable.
+        os.close(fd)
+        raise
+    with handle as f:
+        f.write(text)
+
+
 class CredentialSource(ABC):
     """Abstract base class for credential sources."""
 
@@ -257,8 +290,7 @@ class FlexibleCredentialManager:
             # Explicit UTF-8: the template contains non-ASCII characters,
             # and the default locale encoding on Windows (cp1252) cannot
             # encode them -- which left a zero-byte .env behind.
-            self.env_file.write_text(template, encoding="utf-8")
-            self.env_file.chmod(0o600)  # Owner read/write only
+            write_text_securely(self.env_file, template)
 
         except Exception as e:
             logger.warning(f"Failed to create .env template: {e}")

@@ -17,7 +17,11 @@ try:
 except ImportError:
     HAS_CLICK = False
 
-from .credential_manager import FlexibleCredentialManager, get_credential_manager
+from .credential_manager import (
+    FlexibleCredentialManager,
+    get_credential_manager,
+    write_text_securely,
+)
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -249,8 +253,7 @@ def _write_credentials_to_env_file(env_file: Path, credentials: Dict[str, str]) 
 
         # Write with atomic operation
         temp_file = env_file.with_suffix(".tmp")
-        temp_file.write_text(updated_content, encoding="utf-8")
-        temp_file.chmod(0o600)  # Secure permissions
+        write_text_securely(temp_file, updated_content)
 
         # Atomic replacement
         temp_file.replace(env_file)
