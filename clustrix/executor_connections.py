@@ -26,9 +26,53 @@ class ConnectionManager:
             config: ClusterConfig instance with connection settings
         """
         self.config = config
-        self.ssh_client = None
-        self.sftp_client = None
+        self.ssh_client: Optional[paramiko.SSHClient] = None
+        # Opened on first read of the `sftp_client` property, not at connect
+        # time -- see that property for why.
+        self._sftp_client: Optional[paramiko.SFTPClient] = None
         self._remote_home = None  # cache for resolve_remote_path()
+
+    @property
+    def sftp_client(self) -> Optional[paramiko.SFTPClient]:
+        """A long-lived SFTP channel, opened on first use.
+
+        ``setup_ssh_connection`` used to call ``open_sftp()`` eagerly and hold
+        the result for the life of the connection, while every operation in
+        this class opened its own channel -- so the eager one cost a channel
+        on every connection and was never read by shipped code. It is still
+        part of the public surface (``ClusterExecutor.sftp_client`` exposes
+        it, and tests use it to inspect the far end), so it is kept, but
+        deferred: a connection that nobody asks for SFTP on now opens no
+        channel at all.
+
+        The per-call sites deliberately do *not* reuse this. ``SFTPClient``
+        multiplexes requests over one channel keyed by request id and is not
+        thread-safe; a channel per call is what makes two concurrent uploads
+        on one connection safe, and sharing this one would trade a real
+        correctness property for one saved channel.
+
+        Returns ``None`` when there is no SSH connection, rather than opening
+        one: reading an attribute must not dial out.
+        """
+        if self._sftp_client is None and self.ssh_client is not None:
+            self._sftp_client = self.ssh_client.open_sftp()
+        return self._sftp_client
+
+    @sftp_client.setter
+    def sftp_client(self, value: Optional[paramiko.SFTPClient]) -> None:
+        self._sftp_client = value
+
+    def __enter__(self) -> "ConnectionManager":
+        """Connect, and guarantee the transport is closed on the way out.
+
+        ``disconnect()`` previously ran only from ``ClusterExecutor.__del__``,
+        which the interpreter may call late or not at all.
+        """
+        self.connect()
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.disconnect()
 
     def setup_ssh_connection(self):
         """Setup SSH connection to cluster."""
@@ -72,12 +116,23 @@ class ConnectionManager:
                     elif "key_file" in ssh_credentials:
                         connect_kwargs["key_filename"] = ssh_credentials["key_file"]
                         logger.info("Using SSH key from credential manager")
-            except Exception as e:
-                logger.debug(f"Could not load SSH credentials from manager: {e}")
-                # Fall back to SSH agent or default keys
+            except Exception:
+                # Log and continue: the caller still gets a correct answer.
+                # There is another credential source below this one (the SSH
+                # agent and the default key files), and if none of them
+                # authenticates, `connect()` raises AuthenticationException a
+                # few lines down -- nothing proceeds on a false premise. But
+                # `debug` was too quiet for a broken keychain or an
+                # unreadable .env: the eventual auth failure names none of
+                # that, so the reason has to be visible at `warning`.
+                logger.warning(
+                    "Could not load SSH credentials from the credential "
+                    "manager; falling back to the SSH agent and default "
+                    "keys.",
+                    exc_info=True,
+                )
 
         self.ssh_client.connect(**connect_kwargs)
-        self.sftp_client = self.ssh_client.open_sftp()
 
     def execute_remote_command(self, command: str, check: bool = False) -> tuple:
         """Execute command on remote cluster.
@@ -189,9 +244,30 @@ class ConnectionManager:
             sftp.close()
 
     def remote_file_exists(self, remote_path: str) -> bool:
-        """Check if file exists on remote cluster."""
+        """Check if file exists on remote cluster.
+
+        ``False`` means one thing only: the server answered, and said there is
+        no such file. Everything else raises.
+
+        This method is the cautionary example for the whole class. Its old
+        body answered ``False`` for *any* exception, so "the transport is
+        dead", "you may not read that directory" and "I could not open a
+        channel" were all reported as "the file is not there" -- and the
+        polling loops in ``executor_scheduler_status`` read that as "the job
+        has not finished yet", so a broken connection presented as a job that
+        ran forever. Swallowing also hid the channel leak below.
+        """
+        # Raise rather than answer ``False``: with no connection there is no
+        # evidence about the file at all, and the callers here poll in a loop
+        # on the answer.
         if self.ssh_client is None:
-            return False
+            raise RuntimeError(
+                "SSH client not connected. Call setup_ssh_connection() first."
+            )
+        # Opened outside the try: a channel that failed to open is not one to
+        # close, and failing to open one says nothing about the file, so it
+        # propagates.
+        sftp = self.ssh_client.open_sftp()
         # The close has to be in a finally, and this method is the reason:
         # a missing file is its *expected* answer, not an error, and
         # sftp.stat raises for it. With the close inside the try, every
@@ -200,13 +276,13 @@ class ConnectionManager:
         # -- so a submitter polling for a result file ran out of channels
         # with nothing in the log to say why.
         try:
-            sftp = self.ssh_client.open_sftp()
-        except Exception:
-            return False
-        try:
             sftp.stat(remote_path)
             return True
-        except Exception:
+        except FileNotFoundError:
+            # The one exception that *is* an answer. paramiko maps the
+            # server's SFTP_NO_SUCH_FILE onto errno ENOENT, which Python
+            # raises as FileNotFoundError; PermissionError and friends are
+            # deliberately not caught here.
             return False
         finally:
             sftp.close()
@@ -218,13 +294,28 @@ class ConnectionManager:
                 self.setup_ssh_connection()
 
     def disconnect(self):
-        """Disconnect from cluster."""
+        """Release every OS resource this manager holds.
+
+        The attributes are cleared *before* anything is closed, and the
+        transport close sits in a ``finally``: a previous version closed the
+        SFTP channel first and left ``ssh_client`` set, so an SFTP channel
+        that refused to close leaked the whole transport, and a retry
+        re-closed a half-closed object.
+        """
         # A later connect() may use a different username, and a home directory
         # cached from the previous account would be silently wrong.
         self._remote_home = None
-        if self.sftp_client:
-            self.sftp_client.close()
-            self.sftp_client = None
-        if self.ssh_client:
-            self.ssh_client.close()
-            self.ssh_client = None
+        sftp, self._sftp_client = self._sftp_client, None
+        ssh, self.ssh_client = self.ssh_client, None
+        try:
+            if sftp is not None:
+                sftp.close()
+        except Exception:
+            # Log and continue: closing the transport below reclaims this
+            # channel's descriptor anyway, so the caller's answer -- "this
+            # connection is now closed" -- stays true. Raising here would
+            # skip the transport close and make the leak worse.
+            logger.warning("Closing the SFTP channel failed", exc_info=True)
+        finally:
+            if ssh is not None:
+                ssh.close()
