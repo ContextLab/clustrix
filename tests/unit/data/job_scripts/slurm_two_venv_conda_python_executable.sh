@@ -8,27 +8,6 @@
 cd /remote/job
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
 source /opt/conda/etc/profile.d/conda.sh
-# clustrix: dill embeds CPython bytecode, which cannot be loaded by a
-# different minor version. clustrix cannot see inside an environment it
-# did not build, so the versions are compared here, on the node that
-# will run the job, before any of it runs.
-conda run -n prod python3.11 -c "
-import sys
-_want = (3, 12)
-_got = sys.version_info[:2]
-if _got != _want:
-    sys.stderr.write(
-        'clustrix: this job was submitted from Python %d.%d, but conda '
-        'environment prod runs Python %d.%d. The function, its '
-        'arguments and its result travel as dill bytes, which embed '
-        'CPython bytecode and cannot be loaded by a different minor '
-        'version, so this job would fail part way through with an '
-        'unrecognisable error from inside the unpickler. Point '
-        'environment= (or conda_env_name=) at an environment on Python '
-        '%d.%d, or submit from Python %d.%d.'
-        % (_want + _got + _want + _got))
-    sys.exit(1)
-" || exit 1
 # Two-venv approach for cross-version compatibility
 # VENV1: Serialization/deserialization with compatible Python
 # VENV2: Function execution with proper environment
@@ -149,8 +128,8 @@ except Exception as e:
 
 # Step 2: Use VENV2 to execute the function
 # No deactivation needed for conda run
-# Using conda environment prod
-conda run -n prod python3.11 -c "
+# Using conda environment clustrix_venv2_abc123
+conda run -n clustrix_venv2_abc123 python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
 import pickle

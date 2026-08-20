@@ -1,18 +1,36 @@
 #!/bin/bash
-#SBATCH --job-name=clustrix
-#SBATCH --output=/remote/job/slurm-%j.out
-#SBATCH --error=/remote/job/slurm-%j.err
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=4G
-#SBATCH --time=01:00:00
+cd /remote/job
+
 cd /remote/job
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
-source /opt/conda/etc/profile.d/conda.sh
+# clustrix: a batch shell does not initialise conda, and this job was
+# not preceded by environment replication, so no conda installation
+# was measured for this cluster. Find one now, or stop with a reason.
+_clustrix_conda_base() { command -v conda >/dev/null 2>&1 || return 0; _clustrix_base_out=$( if command -v timeout >/dev/null 2>&1; then timeout 10 conda info --base 2>/dev/null; else conda info --base 2>/dev/null; fi | tr -d "\r" | grep -E "^[[:space:]]*/" | head -1 ); set -- $_clustrix_base_out; [ $# -ge 1 ] && printf "%s\n" "$*"; return 0; }
+_clustrix_conda_works() { command -v conda >/dev/null 2>&1 || return 1; if command -v timeout >/dev/null 2>&1; then timeout 10 conda --version >/dev/null 2>&1; else conda --version >/dev/null 2>&1; fi; }
+_clustrix_conda_sh=""
+if ! _clustrix_conda_works; then
+  for _clustrix_base in "${CONDA_PREFIX:-}" "$(_clustrix_conda_base)" "${HOME:-}/miniconda3" "${HOME:-}/anaconda3" "${HOME:-}/miniforge3" /opt/conda /usr/local/miniconda3 /usr/local/anaconda3; do
+    if [ -n "$_clustrix_base" ] && [ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then
+      _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"
+      break
+    fi
+  done
+fi
+if [ -n "$_clustrix_conda_sh" ]; then
+  . "$_clustrix_conda_sh" || true
+fi
+if ! _clustrix_conda_works; then
+  echo 'clustrix: cannot run this job in conda environment prod: no conda installation was found on this node.' >&2
+  echo 'clustrix: looked for etc/profile.d/conda.sh under $CONDA_PREFIX, $(conda info --base), $HOME/miniconda3, $HOME/anaconda3, $HOME/miniforge3, /opt/conda, /usr/local/miniconda3, /usr/local/anaconda3.' >&2
+  echo 'clustrix: if this cluster initialises conda some other way, put that in module_loads (e.g. module_loads=["anaconda"]) or pre_execution_commands; both run before this point.' >&2
+  exit 1
+fi
 # clustrix: dill embeds CPython bytecode, which cannot be loaded by a
 # different minor version. clustrix cannot see inside an environment it
 # did not build, so the versions are compared here, on the node that
 # will run the job, before any of it runs.
-conda run -n prod python3.11 -c "
+conda run -n prod python -c "
 import sys
 _want = (3, 12)
 _got = sys.version_info[:2]
@@ -34,8 +52,8 @@ if _got != _want:
 # VENV2: Function execution with proper environment
 
 # Step 1: Use VENV1 to deserialize function data
-# Using conda environment clustrix_venv1_abc123
-conda run -n clustrix_venv1_abc123 python -c "
+source /remote/job/venv1_serialization/bin/activate
+python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
 import pickle
@@ -148,9 +166,9 @@ except Exception as e:
 "
 
 # Step 2: Use VENV2 to execute the function
-# No deactivation needed for conda run
+deactivate
 # Using conda environment prod
-conda run -n prod python3.11 -c "
+conda run -n prod python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
 import pickle
@@ -228,8 +246,8 @@ except Exception as e:
 
 # Step 3: Use VENV1 to serialize the result
 # No deactivation needed for conda run
-# Using conda environment clustrix_venv1_abc123
-conda run -n clustrix_venv1_abc123 python -c "
+source /remote/job/venv1_serialization/bin/activate
+python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
 import pickle

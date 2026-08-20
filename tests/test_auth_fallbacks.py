@@ -55,6 +55,25 @@ class TestDetectEnvironment:
             assert detect_environment() == "script"
 
 
+#: ``@patch("tkinter.Tk")`` imports tkinter to resolve its target, so these
+#: tests need the module to exist -- not a display, the module. A CPython
+#: build without ``_tkinter`` (Homebrew's ``python@3.12`` without
+#: ``python-tk@3.12``, for instance) makes all three fail on the import rather
+#: than on anything they assert. Nothing about the assertions is relaxed: on
+#: an interpreter that has tkinter, including CI's, they run exactly as
+#: before.
+try:
+    import tkinter  # noqa: F401
+
+    HAS_TKINTER = True
+except Exception:  # pragma: no cover - depends on how CPython was built
+    HAS_TKINTER = False
+
+
+@pytest.mark.skipif(
+    not HAS_TKINTER,
+    reason="this interpreter has no _tkinter, so tkinter.Tk cannot be patched",
+)
 class TestGetPasswordGui:
     """Test GUI password retrieval."""
 

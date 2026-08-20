@@ -10,19 +10,19 @@ cd /remote/job
 # clustrix: a batch shell does not initialise conda, and this job was
 # not preceded by environment replication, so no conda installation
 # was measured for this cluster. Find one now, or stop with a reason.
-_clustrix_conda_base() { command -v conda >/dev/null 2>&1 || return 0; if command -v timeout >/dev/null 2>&1; then timeout 10 conda info --base 2>/dev/null; else conda info --base 2>/dev/null; fi | grep -E "^/" | head -1 || true; return 0; }
+_clustrix_conda_base() { command -v conda >/dev/null 2>&1 || return 0; _clustrix_base_out=$( if command -v timeout >/dev/null 2>&1; then timeout 10 conda info --base 2>/dev/null; else conda info --base 2>/dev/null; fi | tr -d "\r" | grep -E "^[[:space:]]*/" | head -1 ); set -- $_clustrix_base_out; [ $# -ge 1 ] && printf "%s\n" "$*"; return 0; }
 _clustrix_conda_works() { command -v conda >/dev/null 2>&1 || return 1; if command -v timeout >/dev/null 2>&1; then timeout 10 conda --version >/dev/null 2>&1; else conda --version >/dev/null 2>&1; fi; }
+_clustrix_conda_sh=""
 if ! _clustrix_conda_works; then
-  _clustrix_conda_sh=""
   for _clustrix_base in "${CONDA_PREFIX:-}" "$(_clustrix_conda_base)" "${HOME:-}/miniconda3" "${HOME:-}/anaconda3" "${HOME:-}/miniforge3" /opt/conda /usr/local/miniconda3 /usr/local/anaconda3; do
     if [ -n "$_clustrix_base" ] && [ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then
       _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"
       break
     fi
   done
-  if [ -n "$_clustrix_conda_sh" ]; then
-    . "$_clustrix_conda_sh" || true
-  fi
+fi
+if [ -n "$_clustrix_conda_sh" ]; then
+  . "$_clustrix_conda_sh" || true
 fi
 if ! _clustrix_conda_works; then
   echo 'clustrix: cannot run this job in conda environment legacy: no conda installation was found on this node.' >&2
@@ -30,6 +30,27 @@ if ! _clustrix_conda_works; then
   echo 'clustrix: if this cluster initialises conda some other way, put that in module_loads (e.g. module_loads=["anaconda"]) or pre_execution_commands; both run before this point.' >&2
   exit 1
 fi
+# clustrix: dill embeds CPython bytecode, which cannot be loaded by a
+# different minor version. clustrix cannot see inside an environment it
+# did not build, so the versions are compared here, on the node that
+# will run the job, before any of it runs.
+conda run -n legacy python -c "
+import sys
+_want = (3, 12)
+_got = sys.version_info[:2]
+if _got != _want:
+    sys.stderr.write(
+        'clustrix: this job was submitted from Python %d.%d, but conda '
+        'environment legacy runs Python %d.%d. The function, its '
+        'arguments and its result travel as dill bytes, which embed '
+        'CPython bytecode and cannot be loaded by a different minor '
+        'version, so this job would fail part way through with an '
+        'unrecognisable error from inside the unpickler. Point '
+        'environment= (or conda_env_name=) at an environment on Python '
+        '%d.%d, or submit from Python %d.%d.'
+        % (_want + _got + _want + _got))
+    sys.exit(1)
+" || exit 1
 conda run -n legacy python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')

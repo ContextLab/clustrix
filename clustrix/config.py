@@ -211,6 +211,7 @@ class ClusterConfig:
             )
 
         validate_cluster_type(self.cluster_type)
+        validate_conda_env_name(self.conda_env_name)
 
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
@@ -319,6 +320,29 @@ def _removed_setting_reason(name: str) -> Optional[str]:
             where = f" (see issue #{issue})" if issue else ""
             return f"{name} configured {what}, which has been removed{where}"
     return None
+
+
+def validate_conda_env_name(
+    value: Optional[str], source: str = "conda_env_name"
+) -> None:
+    """Refuse a ``conda_env_name`` that is not an environment name.
+
+    Run here, and from ``configure()``, so the claim that a path is "refused
+    at configuration time" is true. It was not: ``configure(conda_env_name=
+    "/scratch/envs/prod")`` was accepted and the refusal came from
+    ``resolve_named_environment`` at submission -- after the job directory had
+    been created on the cluster, the signing key written and the pickle
+    uploaded. The rules themselves are ``utils.validate_environment_name``'s,
+    imported late because ``utils`` imports this module.
+
+    An unset or empty value is not a name and not an error: it means "no
+    environment was named", which is the default.
+    """
+    if value is None or not str(value).strip():
+        return
+    from .utils import validate_environment_name
+
+    validate_environment_name(source, str(value).strip())
 
 
 def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:
@@ -586,6 +610,12 @@ def configure(**kwargs) -> None:
         # never going to be used.
         validate_cluster_type(kwargs["cluster_type"])
 
+    if "conda_env_name" in kwargs:
+        # Same reason, and the same setattr: without this the refusal happens
+        # at submission, with the job directory already created on the
+        # cluster and the pickle already uploaded.
+        validate_conda_env_name(kwargs["conda_env_name"])
+
     for key, value in kwargs.items():
         setattr(_config, key, value)
 
@@ -642,6 +672,11 @@ def load_config(config_path: str) -> None:
     if "cluster_type" in config_data:
         validate_cluster_type(
             config_data["cluster_type"], source=f"{config_path}: cluster_type"
+        )
+
+    if "conda_env_name" in config_data:
+        validate_conda_env_name(
+            config_data["conda_env_name"], source=f"{config_path}: conda_env_name"
         )
 
     _config = ClusterConfig(**config_data)

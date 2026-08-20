@@ -353,6 +353,20 @@ Paths and the remote environment
        (it would parse as an option to ``conda run``), and so is anything
        longer than 255 characters.
 
+       **The environment has to be on your Python minor version.** dill and
+       cloudpickle embed CPython bytecode, and that bytecode cannot be loaded
+       by a different minor version -- a function pickled under 3.12 and
+       opened under 3.11 fails inside the unpickler with an error that names
+       neither the environment nor the version. Clustrix pins the
+       environments it builds itself, but it cannot see inside one you named,
+       and it does not know where conda is on the compute node until the job
+       gets there. So the generated script asks: before anything else runs,
+       it compares the environment's ``sys.version_info[:2]`` with the
+       submitting interpreter's and stops the job with a message naming both
+       versions if they differ. Point ``conda_env_name`` at an environment
+       built on the same minor version you submit from, or submit from a
+       matching one.
+
        **Prefix environments are not supported.** conda can address an
        environment by path with ``conda run -p /path/to/env``; clustrix only
        ever emits ``-n``, so a path here is refused when you set it rather

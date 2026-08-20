@@ -109,7 +109,10 @@ _MAX_ENV_NAME_LENGTH = 255
 #: whole job because nothing had a timeout) and reduced to the first line
 #: that is an absolute path, because conda prefixes that output with an
 #: upgrade warning often enough that taking the whole thing silently defeated
-#: the entry.
+#: the entry. The line is then stripped of a trailing CR and of surrounding
+#: whitespace: ``conda`` invoked through a wrapper that came off a Windows
+#: checkout prints ``/opt/conda\r``, and ``[ -f "/opt/conda\r/etc/..." ]`` is
+#: false, so the entry lost to whatever came after it.
 #:
 #: ``_clustrix_conda_works`` is the difference between "conda is a name on
 #: PATH" and "conda can run this job". At sites where conda is a wrapper that
@@ -121,10 +124,15 @@ _MAX_ENV_NAME_LENGTH = 255
 _CONDA_SHELL_HELPERS = (
     "_clustrix_conda_base() { "
     "command -v conda >/dev/null 2>&1 || return 0; "
+    "_clustrix_base_out=$( "
     "if command -v timeout >/dev/null 2>&1; then "
     "timeout 10 conda info --base 2>/dev/null; "
     "else conda info --base 2>/dev/null; fi "
-    '| grep -E "^/" | head -1 || true; return 0; }',
+    '| tr -d "\\r" | grep -E "^[[:space:]]*/" | head -1 ); '
+    # Word splitting on the default IFS is the trim: it drops leading and
+    # trailing spaces and tabs, and "$*" puts a path containing a space back
+    # together rather than truncating it at the space.
+    "set -- $_clustrix_base_out; " '[ $# -ge 1 ] && printf "%s\\n" "$*"; return 0; }',
     "_clustrix_conda_works() { "
     "command -v conda >/dev/null 2>&1 || return 1; "
     "if command -v timeout >/dev/null 2>&1; then "
@@ -172,6 +180,46 @@ _CONDA_SEARCH_WORDS = " ".join(word for word, _ in _CONDA_SEARCH_LOCATIONS)
 #: works. Written with single quotes around it in the script, so the ``$``
 #: below is printed rather than expanded.
 _CONDA_SEARCH_LOCATIONS_HUMAN = ", ".join(human for _, human in _CONDA_SEARCH_LOCATIONS)
+
+
+def _conda_search_lines(found_var: str = "_clustrix_conda_sh") -> list:
+    """Shell that sets ``found_var`` to a ``conda.sh``, or leaves it empty.
+
+    The one implementation of the search, used by both callers. The SSH probe
+    in ``setup_two_venv_environment`` runs it while *preparing* a job, and
+    ``_conda_discovery_lines`` writes it into the job script for the case
+    where no probe ever ran. They had a copy each, and the copies diverged in
+    both of the ways that matters:
+
+    * **Order.** A conda that already works is left alone: the search runs
+      only inside ``if ! _clustrix_conda_works``. Searching first means a site
+      conda on ``PATH`` -- whose base holds no ``etc/profile.d/conda.sh`` --
+      loses to the user's ``~/miniconda3``, and ``conda run -n <name>`` then
+      resolves in the wrong installation entirely. The script was fixed for
+      this; the probe was not, and the probe's answer is used unconditionally
+      afterwards.
+    * **Syntax.** The probe pasted the helper definitions together with a
+      space (``... } _clustrix_conda_works() { ...``), which is a bash syntax
+      error, so *the whole probe died before it looked anywhere* -- on every
+      cluster, conda or not. ``conda_setup_prefix`` was therefore always the
+      empty string, and every ``conda create`` in the two-venv setup ran in a
+      shell where conda had never been initialised. Emitting the program as
+      separate lines from one place is what stops that from being possible.
+
+    Requires ``_CONDA_SHELL_HELPERS`` to have been emitted first.
+    """
+    return [
+        f'{found_var}=""',
+        "if ! _clustrix_conda_works; then",
+        f"  for _clustrix_base in {_CONDA_SEARCH_WORDS}; do",
+        '    if [ -n "$_clustrix_base" ] && '
+        '[ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then',
+        f'      {found_var}="$_clustrix_base/etc/profile.d/conda.sh"',
+        "      break",
+        "    fi",
+        "  done",
+        "fi",
+    ]
 
 
 def validate_shell_fragment(config_key: str, value: Any) -> str:
@@ -1665,17 +1713,28 @@ def setup_two_venv_environment(
     # took longer than venv_setup_timeout and failed.
     conda_available = False
     conda_setup_prefix = ""
-    conda_probe = (
-        "bash -lc '"
-        f"{' '.join(_CONDA_SHELL_HELPERS)} "
-        f"for p in {_CONDA_SEARCH_WORDS}; do "
-        'if [ -n "$p" ] && [ -f "$p/etc/profile.d/conda.sh" ]; then '
-        'echo "$p/etc/profile.d/conda.sh"; exit 0; fi; done; '
-        # An uninitialised conda wrapper names conda.sh in the very error it
-        # prints, which at some sites is the only pointer available.
-        'conda --version 2>&1 | grep -oE "/[^ ]*/etc/profile.d/conda.sh" | head -1'
-        "'"
+    # One program, one line per statement. Pasted together with spaces this
+    # was `... } _clustrix_conda_works() { ...`, a bash syntax error, and the
+    # probe died before it looked anywhere -- see _conda_search_lines. No
+    # fragment contains a single quote, which is what makes the bash -lc
+    # wrapper below safe.
+    probe_program = (
+        list(_CONDA_SHELL_HELPERS)
+        + _conda_search_lines()
+        + [
+            'if [ -n "$_clustrix_conda_sh" ]; then',
+            '  echo "$_clustrix_conda_sh"',
+            "  exit 0",
+            "fi",
+            # Nothing to source: either conda already runs here, or it does
+            # not and the last resort below is all that is left. An
+            # uninitialised conda wrapper names conda.sh in the very error it
+            # prints, which at some sites is the only pointer available.
+            "_clustrix_conda_works && exit 0",
+            'conda --version 2>&1 | grep -oE "/[^ ]*/etc/profile.d/conda.sh" | head -1',
+        ]
     )
+    conda_probe = "bash -lc '" + "\n".join(probe_program) + "'"
     stdin, stdout, stderr = ssh_client.exec_command(conda_probe)
     conda_sh = ""
     for line in stdout.read().decode().splitlines():
@@ -2398,12 +2457,9 @@ def _conda_discovery_lines(named_env: str) -> list:
 
     Three orderings matter here, and each was wrong once:
 
-    * A conda that already works is left alone, so the search runs *inside*
-      ``if ! _clustrix_conda_works``. With the search first, a site that puts
-      a module-loaded conda on PATH -- whose base holds no
-      ``etc/profile.d/conda.sh`` -- had the user's ``~/miniconda3`` sourced
-      over the top of it, and ``-n <name>`` then resolved in the wrong
-      installation entirely.
+    * A conda that already works is left alone -- see ``_conda_search_lines``,
+      which is where that ordering now lives for this caller and for the SSH
+      probe alike.
     * Sourcing is checked by its *effect*, not its exit status. A ``conda.sh``
       that is unreadable or truncated leaves ``conda`` still missing, and the
       old shape took the "sourced it, all good" branch and skipped the
@@ -2419,22 +2475,13 @@ def _conda_discovery_lines(named_env: str) -> list:
             "# was measured for this cluster. Find one now, or stop with a reason.",
         ]
         + list(_CONDA_SHELL_HELPERS)
+        + _conda_search_lines()
         + [
-            "if ! _clustrix_conda_works; then",
-            '  _clustrix_conda_sh=""',
-            f"  for _clustrix_base in {_CONDA_SEARCH_WORDS}; do",
-            '    if [ -n "$_clustrix_base" ] && '
-            '[ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then',
-            '      _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"',
-            "      break",
-            "    fi",
-            "  done",
-            '  if [ -n "$_clustrix_conda_sh" ]; then',
+            'if [ -n "$_clustrix_conda_sh" ]; then',
             # `|| true` so that a conda.sh which fails part way through does
             # not take the job down before the message below can explain it,
             # and so that `set -e` from pre_execution_commands cannot either.
-            '    . "$_clustrix_conda_sh" || true',
-            "  fi",
+            '  . "$_clustrix_conda_sh" || true',
             "fi",
             "if ! _clustrix_conda_works; then",
             f"  echo 'clustrix: cannot run this job in conda environment "
@@ -2448,6 +2495,70 @@ def _conda_discovery_lines(named_env: str) -> list:
             "fi",
         ]
     )
+
+
+def named_environment_version_guard(named_env: str, python_cmd: str) -> list:
+    """Stop a named environment whose Python minor version is not ours.
+
+    dill and cloudpickle embed CPython bytecode, and that bytecode does not
+    load across minor versions: a function pickled under 3.12 and opened under
+    3.11 raises ``ValueError: unknown opcode`` somewhere inside the unpickler,
+    naming neither the environment nor the version. Every *other* path already
+    refuses this before the job runs -- ``_select_remote_python`` refuses at
+    submit time, and ``setup_two_venv_environment`` pins both conda
+    environments to the local version. The named path had a check only by
+    accident, through the environment replication it now skips, so pointing
+    ``environment=`` at an environment built on another minor version became
+    an unexplained remote failure.
+
+    **Why this is emitted into the script rather than checked at submit time.**
+    Checking at submission means asking the *login* node, over the SSH session,
+    what ``conda run -n <name> python`` reports. Three things are wrong with
+    that, and all three are the reason ``_conda_discovery_lines`` exists:
+
+    1. On this path clustrix has not found conda at all -- that is the whole
+       point of the discovery block -- so the login node may have no ``conda``
+       to ask, and a job that would have run fine would be refused.
+    2. The login node and the compute node are frequently not the same image,
+       and it is the compute node that has to load the bytecode.
+    3. It costs an extra SSH round trip on every submission, to answer a
+       question the job is about to answer for free on the machine where the
+       answer counts.
+
+    So the check runs on the node that will execute, inside the environment
+    that will execute, and fails loudly with both versions and the two
+    settings that fix it. ``named_env`` has been through
+    ``validate_environment_name``, so it carries no quote, no ``$``, no
+    backtick and no whitespace, and is safe both in the double-quoted shell
+    string and in the single-quoted Python literal below.
+    """
+    want = (sys.version_info.major, sys.version_info.minor)
+    return [
+        "# clustrix: dill embeds CPython bytecode, which cannot be loaded by a",
+        "# different minor version. clustrix cannot see inside an environment it",
+        "# did not build, so the versions are compared here, on the node that",
+        "# will run the job, before any of it runs.",
+        f'conda run -n {shlex.quote(named_env)} {python_cmd} -c "',
+        "import sys",
+        f"_want = {want!r}",
+        "_got = sys.version_info[:2]",
+        "if _got != _want:",
+        "    sys.stderr.write(",
+        "        'clustrix: this job was submitted from Python %d.%d, but conda '",
+        f"        'environment {named_env} runs Python %d.%d. The function, its '",
+        "        'arguments and its result travel as dill bytes, which embed '",
+        "        'CPython bytecode and cannot be loaded by a different minor '",
+        "        'version, so this job would fail part way through with an '",
+        "        'unrecognisable error from inside the unpickler. Point '",
+        "        'environment= (or conda_env_name=) at an environment on Python '",
+        "        '%d.%d, or submit from Python %d.%d.'",
+        "        % (_want + _got + _want + _got))",
+        "    sys.exit(1)",
+        # `|| exit 1` rather than relying on `set -e`, which a generated
+        # script cannot assume: nothing here turns it on and
+        # `pre_execution_commands` may well have turned it off.
+        '" || exit 1',
+    ]
 
 
 def generate_two_venv_execution_commands(
@@ -3066,6 +3177,11 @@ def job_execution_lines(
             conda_env2_name = named_env
         script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(conda_activation_lines(config, named_env))
+        if named_env:
+            # VENV2 is now an environment clustrix did not build, so nothing
+            # has pinned its Python version to this one. See
+            # named_environment_version_guard.
+            script_lines.extend(named_environment_version_guard(named_env, python_cmd))
         script_lines.extend(
             generate_two_venv_execution_commands(
                 remote_job_dir,
@@ -3094,6 +3210,10 @@ def job_execution_lines(
                 # on every SLURM cluster there is. This was the flagship path
                 # of #164 and it could not have worked as first written.
                 + conda_activation_lines(config, named_env)
+                # Same reason as the two-venv branch: this environment was
+                # not built by clustrix, so its Python version is unknown
+                # until the job asks it.
+                + named_environment_version_guard(named_env, python_cmd)
                 + [f'conda run -n {shlex.quote(named_env)} {python_cmd} -c "']
             )
         else:

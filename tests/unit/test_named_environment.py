@@ -13,6 +13,7 @@ named.
 """
 
 import logging
+import re
 import shlex
 from pathlib import Path
 
@@ -314,6 +315,14 @@ REPLICATION_SCENARIOS = {
     "ssh_two_venv_conda": ("ssh", {"venv_info": dict(CONDA_VENV_INFO)}),
     "slurm_two_venv_plain": ("slurm", {"venv_info": dict(PLAIN_VENV_INFO)}),
     "ssh_two_venv_plain": ("ssh", {"venv_info": dict(PLAIN_VENV_INFO)}),
+    # `python_executable` on the replication path: the user's setting reaches
+    # the single-venv launch line and must NOT reach VENV2, which clustrix
+    # built at a pinned version. Nothing pinned that before.
+    "slurm_python_executable": ("slurm", {"python_executable": "python3.11"}),
+    "slurm_two_venv_conda_python_executable": (
+        "slurm",
+        {"venv_info": dict(CONDA_VENV_INFO), "python_executable": "python3.11"},
+    ),
     "slurm_with_setup_lines": (
         "slurm",
         {
@@ -1116,6 +1125,212 @@ def test_conda_info_base_cannot_hang_the_job_or_be_defeated_by_a_warning(tmp_pat
     assert result.stdout.strip() == "BASE=/real/conda/base", result.stdout
 
 
+@pytest.mark.parametrize(
+    "printed",
+    [
+        # A conda wrapper that came off a Windows checkout, or output piped
+        # through a tool that keeps CRLF. `[ -f "/real/conda/base\r/etc/..." ]`
+        # is false, so the entry lost to whatever came after it in the list.
+        "/real/conda/base\r\n",
+        "   /real/conda/base\n",
+        "/real/conda/base   \n",
+        "\t/real/conda/base\t\r\n",
+    ],
+)
+def test_conda_info_base_output_is_stripped_of_cr_and_surrounding_space(
+    tmp_path, printed
+):
+    """Whatever conda decorates the line with, the answer is the path.
+
+    Not silent -- the entry falls through to the next candidate loudly enough
+    to end in the diagnostic -- but wrong, and wrong in a way that sends the
+    job to a different conda installation than the one it asked.
+    """
+    import subprocess
+
+    from clustrix.utils import _CONDA_SHELL_HELPERS
+
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    conda = bindir / "conda"
+    conda.write_text(
+        "#!/bin/bash\n"
+        'if [ "$1" = "info" ]; then\n'
+        f"  printf '%s' {shlex.quote(printed)}\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 0\n"
+    )
+    conda.chmod(0o755)
+    script_path = tmp_path / "probe.sh"
+    script_path.write_text(
+        "\n".join(_CONDA_SHELL_HELPERS) + '\necho "BASE=[$(_clustrix_conda_base)]"\n'
+    )
+    result = subprocess.run(
+        ["bash", str(script_path)],
+        capture_output=True,
+        text=True,
+        env={"HOME": str(tmp_path), "PATH": f"{bindir}:/usr/bin:/bin"},
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "BASE=[/real/conda/base]", repr(result.stdout)
+
+
+class TestTheNamedEnvironmentVersionGuard:
+    """A named environment on the wrong Python minor version must be refused.
+
+    dill embeds CPython bytecode, and that bytecode does not load across minor
+    versions. Every other path refuses this before the job runs;
+    ``_select_remote_python`` at submit time, and both conda environments
+    pinned to the local version by ``setup_two_venv_environment``. The named
+    path had that check only as a side effect of the environment replication
+    it now skips, so for a while it had none at all.
+
+    Run as real bash against a real interpreter, because the guard is shell
+    wrapping a ``python -c`` and the interesting part is whether the exit
+    status reaches the job.
+    """
+
+    @staticmethod
+    def _run(tmp_path, remote_version):
+        """Run the guard with a fake ``conda`` that runs a chosen Python."""
+        import subprocess
+        import sys
+
+        from clustrix.utils import named_environment_version_guard
+
+        bindir = tmp_path / "bin"
+        bindir.mkdir()
+        # `conda run -n prod python -c "..."` -> run the body under a Python
+        # that reports `remote_version`, whatever this interpreter is.
+        shim = bindir / "fakepython"
+        shim.write_text(
+            "#!/usr/bin/env python3\n"
+            "import sys\n"
+            f"sys.version_info = tuple({remote_version!r}) + (0, 'final', 0)\n"
+            "exec(sys.argv[2])\n"
+        )
+        shim.chmod(0o755)
+        conda = bindir / "conda"
+        conda.write_text(
+            "#!/bin/bash\n"
+            "# conda run -n <name> <python> -c <body>: drop the first four\n"
+            "shift 4\n"
+            f'exec {shim} "$@"\n'
+        )
+        conda.chmod(0o755)
+        script = tmp_path / "guard.sh"
+        script.write_text(
+            "\n".join(named_environment_version_guard("prod", "python"))
+            + "\necho REACHED_THE_JOB\n"
+        )
+        return subprocess.run(
+            ["bash", str(script)],
+            capture_output=True,
+            text=True,
+            env={"HOME": str(tmp_path), "PATH": f"{bindir}:/usr/bin:/bin"},
+        )
+
+    def test_a_matching_minor_version_lets_the_job_through(self, tmp_path):
+        import sys
+
+        result = self._run(tmp_path, list(sys.version_info[:2]))
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "REACHED_THE_JOB" in result.stdout
+
+    def test_a_different_minor_version_stops_the_job(self, tmp_path):
+        import sys
+
+        other = [sys.version_info.major, sys.version_info.minor + 1]
+        result = self._run(tmp_path, other)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "REACHED_THE_JOB" not in result.stdout, (
+            "the guard printed a diagnostic and then let the job run anyway; "
+            "the failure it prevents is silent, so this has to stop the job"
+        )
+
+    def test_the_diagnostic_names_both_versions_and_the_way_out(self, tmp_path):
+        import sys
+
+        other = [sys.version_info.major, sys.version_info.minor + 1]
+        result = self._run(tmp_path, other)
+        message = result.stderr
+        assert f"{sys.version_info.major}.{sys.version_info.minor}" in message
+        assert f"{other[0]}.{other[1]}" in message
+        assert "prod" in message
+        assert "environment=" in message and "conda_env_name=" in message
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_the_guard_is_emitted_on_both_named_branches(self, cluster_type):
+        single = script(cluster_type, environment="prod")
+        two_venv = script(
+            cluster_type, environment="prod", venv_info=dict(CONDA_VENV_INFO)
+        )
+        for text in (single, two_venv):
+            assert "_got = sys.version_info[:2]" in text, text
+
+    def test_the_guard_is_not_emitted_when_no_environment_is_named(self):
+        assert "_got = sys.version_info[:2]" not in script("slurm")
+        assert "_got = sys.version_info[:2]" not in script(
+            "slurm", venv_info=dict(CONDA_VENV_INFO)
+        )
+
+
+class TestAPathIsRefusedAtConfigurationTime:
+    """Where #164 said the refusal happens, and where it actually happened.
+
+    ``conda_env_name`` was validated only by ``resolve_named_environment``, at
+    submission -- by which point the job directory exists on the cluster, the
+    result-signing key has been written into it and the pickled function has
+    been uploaded. The commit that introduced the validation claimed it
+    happened "at configuration time". Now it does.
+    """
+
+    BAD = ["/scratch/envs/prod", "p:rod", ".", "..", "--no-capture-output", "a b"]
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_configure_refuses_it(self, bad):
+        from clustrix.config import configure
+
+        with pytest.raises(ValueError, match="conda_env_name"):
+            configure(conda_env_name=bad)
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_the_constructor_refuses_it(self, bad):
+        with pytest.raises(ValueError, match="conda_env_name"):
+            ClusterConfig(conda_env_name=bad)
+
+    @pytest.mark.parametrize("bad", BAD)
+    def test_a_configuration_file_refuses_it(self, tmp_path, bad):
+        import json
+
+        from clustrix.config import load_config
+
+        path = tmp_path / "clustrix.yml"
+        path.write_text(json.dumps({"cluster_type": "slurm", "conda_env_name": bad}))
+        with pytest.raises(ValueError, match="conda_env_name"):
+            load_config(str(path))
+
+    def test_a_real_name_is_still_accepted_everywhere(self, tmp_path):
+        import json
+
+        from clustrix.config import configure, get_config, load_config
+
+        configure(conda_env_name="prod")
+        assert get_config().conda_env_name == "prod"
+        assert ClusterConfig(conda_env_name="análisis").conda_env_name == "análisis"
+        path = tmp_path / "clustrix.json"
+        path.write_text(json.dumps({"conda_env_name": "prod"}))
+        load_config(str(path))
+        assert get_config().conda_env_name == "prod"
+
+    def test_leaving_it_unset_is_not_an_error(self):
+        from clustrix.config import configure
+
+        configure(conda_env_name=None)
+        assert ClusterConfig().conda_env_name is None
+
+
 #: Scenarios that exist *because* of #164: every one of them names an
 #: environment, so every one of them takes a branch the replication goldens
 #: above can never reach. Those goldens prove the old path is unchanged and
@@ -1154,6 +1369,14 @@ NAMED_SCENARIOS = {
         {"environment": "prod"},
         {"venv_info": dict(PLAIN_VENV_INFO)},
     ),
+    # The SSH half of the plain two-venv named path had no golden at all, and
+    # it is the one shape where VENV2 being handed VENV1's interpreter reads
+    # as an ordinary path rather than as a nested `conda run`.
+    "ssh_named_two_venv_plain": (
+        "ssh",
+        {"environment": "prod"},
+        {"venv_info": dict(PLAIN_VENV_INFO)},
+    ),
     "slurm_named_via_config": ("slurm", {}, {"conda_env_name": "legacy"}),
     "slurm_named_with_setup_lines": (
         "slurm",
@@ -1178,11 +1401,44 @@ def named_script(name):
     )
 
 
+#: The one line in a named job script that depends on which interpreter
+#: generated it. The guard has to name the *submitting* version -- that is the
+#: version the dill payload's bytecode is locked to -- so a golden committed
+#: from 3.12 would fail for a contributor on 3.11 for no reason at all. Both
+#: sides of the comparison are normalised through this and through nothing
+#: else, so every other byte is still pinned exactly; the value itself is
+#: asserted separately by
+#: ``test_the_version_guard_names_the_submitting_interpreter``.
+_LOCAL_PY_LITERAL = re.compile(r"^_want = \(\d+, \d+\)$", re.M)
+
+
+def _normalise_local_python(text):
+    return _LOCAL_PY_LITERAL.sub("_want = (LOCAL_MAJOR, LOCAL_MINOR)", text)
+
+
 @pytest.mark.parametrize("name", sorted(NAMED_SCENARIOS))
 def test_the_named_environment_branches_are_pinned_byte_for_byte(name):
     golden = GOLDEN_DIR / f"{name}.sh"
     assert golden.exists(), f"missing golden {golden}"
-    assert named_script(name) == golden.read_text()
+    assert _normalise_local_python(named_script(name)) == _normalise_local_python(
+        golden.read_text()
+    )
+
+
+@pytest.mark.parametrize("name", sorted(NAMED_SCENARIOS))
+def test_the_version_guard_names_the_submitting_interpreter(name):
+    """What the normalisation above deliberately does not check.
+
+    dill's payload carries the bytecode of the interpreter that wrote it, so
+    the version the guard demands is this process's, not the golden's.
+    """
+    import sys
+
+    want = f"_want = ({sys.version_info.major}, {sys.version_info.minor})"
+    assert want in named_script(name), (
+        f"the named job script does not demand this interpreter's version: "
+        f"expected {want!r}"
+    )
 
 
 @pytest.mark.parametrize("name", sorted(NAMED_SCENARIOS))
