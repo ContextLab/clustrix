@@ -37,11 +37,17 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 """
 
 import copy
+import json
+import os
 import pathlib
+import subprocess
+import sys
+import textwrap
 import warnings
 
 import pytest
 
+import clustrix
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
 from clustrix.auth_methods import stored_credential_is_for_config
@@ -2587,6 +2593,19 @@ def test_pasting_over_a_found_configuration_does_not_launder_it(tmp_path, monkey
     is very often text a repository's README told them to paste, so clearing
     the provenance here would be a second copy of route 11 with the file
     replaced by an instruction.
+
+    Stated precisely, because "the paste door fails closed" was an
+    overstatement: it **fails closed against a host-preserving paste**, and
+    only that. The provenance is retained on the name, but
+    ``_discovered_source_for`` condemns a configuration only while the live
+    host is still the host the file named, so changing the hostname by one
+    character returns ``None`` and Apply stamps ``runtime`` -- in the
+    single- and multi-configuration branches alike. That is not a hole; it
+    is the declared rule that a hostname is only condemned by a source that
+    actually named it (see
+    ``test_typing_your_own_hostname_over_a_found_config_does_not_condemn_it``),
+    and pasting a hostname is typing it. The converse is what matters here
+    and is what this test measures.
     """
     pytest.importorskip("ipywidgets")
     _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
@@ -2628,3 +2647,521 @@ def test_saving_a_found_configuration_to_your_own_directory_does_not_adopt_it(
     assert widget._discovered_source_for(_live_widget_fields(widget)) == (
         CONFIG_SOURCE_WORKING_DIRECTORY
     )
+
+
+# --------------------------------------------------------------------------
+# Route 12. The laundering happens on disk, one restart later.
+#
+# Every in-memory door above is closed, and the audit that closed them could
+# not see this one: after Save, every sidecar is still correct. Save writes
+# into ``get_config_dir()``, and ``detect_config_files`` infers trust from
+# exactly that directory, so the *next* session re-derives the source from
+# where the file now sits and gets ``user-config-dir``.
+#
+# The precondition is attacker-controlled, because the filename comes from
+# the configuration's own ``name``: ``""`` and ``Config`` both save as
+# ``config.yml``, ``clustrix`` saves as ``clustrix.yml``, and all three are
+# names ``detect_config_files`` looks for. ``My Cluster`` saves as
+# ``my_cluster.yml`` and does not promote.
+#
+# A save also writes *every* configuration in the dropdown, verbatim, so the
+# entry that reaches the wire need not be the one the user selected.
+#
+# Two real interpreters, each with its own ``$HOME``, and the only channel
+# between them is the file Save wrote. The host is a real ``LocalSSHServer``
+# that accepts the sentinel and nothing else, so an entry in
+# ``authentications`` is a measurement rather than an inference.
+# --------------------------------------------------------------------------
+
+_ROUTE_12_REPO_ROOT = str(pathlib.Path(clustrix.__file__).parent.parent)
+
+
+def _session(script, home, cwd, extra_env=None):
+    """Run ``script`` in a real fresh interpreter rooted at ``home``."""
+    environment = dict(os.environ)
+    environment.pop("CLUSTRIX_CONFIG_DIR", None)
+    for name in SSH_ENV_NAMES:
+        environment.pop(name, None)
+    environment["HOME"] = str(home)
+    environment["USERPROFILE"] = str(home)
+    environment["PYTHONPATH"] = _ROUTE_12_REPO_ROOT
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment.update(extra_env or {})
+    completed = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(script)],
+        env=environment,
+        cwd=str(cwd),
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert completed.returncode == 0, (
+        f"session failed ({completed.returncode}):\n"
+        f"--- stdout ---\n{completed.stdout}\n--- stderr ---\n{completed.stderr}"
+    )
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+#: Session one: the user opens the widget inside the cloned repository,
+#: selects the configuration the project ships, and presses Save.
+_ROUTE_12_SESSION_ONE = """
+    import json
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    widget.config_dropdown.value = "Config"
+    before = dict(widget.config_source_map)
+    widget._on_save_config(None)
+    print(json.dumps({
+        "source_map_before": before,
+        "source_map_after": dict(widget.config_source_map),
+        "current": widget.current_config_name,
+    }))
+"""
+
+#: Session two: a fresh widget somewhere else entirely, which has never seen
+#: the repository. It selects a configuration, applies it and connects.
+_ROUTE_12_SESSION_TWO = """
+    import json, os
+    from clustrix.config import (
+        config_source_is_trusted,
+        configure,
+        get_config,
+        get_config_source,
+    )
+    from clustrix.executor_connections import ConnectionManager
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    # The user's own documented setting, and a configure() call naming no
+    # host, so it stamps nothing: _save_config_from_widgets never emits
+    # ssh_host_key_policy, and without it the connection never gets as far
+    # as offering a password.
+    configure(ssh_host_key_policy="auto_add")
+
+    widget = EnhancedClusterConfigWidget()
+    options = list(widget.config_dropdown.options)
+    source_map = dict(widget.config_source_map)
+    widget.config_dropdown.value = os.environ["CLUSTRIX_TEST_PICK"]
+    widget._on_apply_config(None)
+    applied = {
+        "host": get_config().cluster_host,
+        "source": get_config_source(get_config()),
+        "trusted": config_source_is_trusted(get_config()),
+    }
+    manager = ConnectionManager(get_config())
+    try:
+        manager.setup_ssh_connection()
+        authenticated = manager.ssh_client.get_transport().is_authenticated()
+    except Exception:
+        authenticated = False
+    finally:
+        manager.disconnect()
+    print(json.dumps({
+        "options": options,
+        "source_map": source_map,
+        "applied": applied,
+        "authenticated": authenticated,
+    }))
+"""
+
+
+def _route_12_home(tmp_path):
+    """A throwaway ``$HOME`` holding the documented ``.env`` and nothing else."""
+    home = tmp_path / "home"
+    (home / ".clustrix").mkdir(mode=0o700, parents=True)
+    env_path = home / ".clustrix" / ".env"
+    env_path.write_text(f"SSH_PASSWORD={SENTINEL_PASSWORD}\n", encoding="utf-8")
+    env_path.chmod(0o600)
+    return home
+
+
+def test_saving_a_found_configuration_does_not_promote_it_across_a_restart(
+    attacker_server, tmp_path
+):
+    """Route 12. RED before the fix: ``user-config-dir``, and the leak.
+
+    Measured before it, on the wire: session two's ``config_source_map`` was
+    ``{'Config': 'user-config-dir', 'project': 'user-config-dir'}``, Apply
+    stamped ``user-config-dir``, ``config_source_is_trusted`` was ``True``
+    and ``attacker_server.authentications`` held ``('victim', 'password')``.
+
+    ``project`` is the entry the user never selected. It rides along because
+    a save writes every configuration in the dropdown verbatim, and it is
+    the one that reaches the wire because it carries ``name: ''`` -- the
+    only state in which Apply applies anything, since
+    ``_save_config_from_widgets`` emits ``name`` and ``configure()`` rejects
+    it (issue #165). ``Config`` is what drives the *filename*: it is the
+    entry the user selects, and ``Config`` saves as ``config.yml``.
+    """
+    pytest.importorskip("ipywidgets")
+    home = _route_12_home(tmp_path)
+    repository = tmp_path / "cloned-repository"
+    repository.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    entry = [
+        "  cluster_type: ssh",
+        f"  cluster_host: {attacker_server.host}",
+        f"  cluster_port: {attacker_server.port}",
+        "  username: victim",
+        "  ssh_host_key_policy: auto_add",
+    ]
+    (repository / "config.yml").write_text(
+        "\n".join(["Config:"] + entry + ["project:"] + entry + ["  name: ''"]) + "\n",
+        encoding="utf-8",
+    )
+
+    first = _session(_ROUTE_12_SESSION_ONE, home, repository)
+    assert first["source_map_before"] == {
+        "Config": CONFIG_SOURCE_WORKING_DIRECTORY,
+        "project": CONFIG_SOURCE_WORKING_DIRECTORY,
+    }
+    # The in-memory invariant the audit checked really does still hold, so
+    # this test says something the audit could not have.
+    assert first["source_map_after"] == first["source_map_before"]
+    written = home / ".clustrix" / "config.yml"
+    assert written.exists(), "Save did not write the promoting filename"
+
+    second = _session(
+        _ROUTE_12_SESSION_TWO,
+        home,
+        elsewhere,
+        {"CLUSTRIX_TEST_PICK": "project"},
+    )
+    assert second["applied"]["host"] == attacker_server.host
+    assert attacker_server.authentications == [], (
+        "the stored password was sent to a host a cloned repository named, "
+        "because Save had copied its configuration into the user's own "
+        "configuration directory: " + repr(attacker_server.authentications)
+    )
+    assert not second["authenticated"]
+    assert second["source_map"] == {
+        "Config": CONFIG_SOURCE_WORKING_DIRECTORY,
+        "project": CONFIG_SOURCE_WORKING_DIRECTORY,
+    }, "pressing Save promoted a configuration the repository shipped"
+    assert second["applied"]["source"] == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert second["applied"]["trusted"] is False
+
+
+def test_saving_a_configuration_you_built_yourself_is_still_yours_next_session(
+    attacker_server, tmp_path
+):
+    """The control. Without it the fix could be "record everything as bad".
+
+    Nothing is discovered here: the user picks a template, types their own
+    hostname and saves it as ``config.yml``. Nothing is recorded in the
+    file, the next session derives ``user-config-dir`` from where it sits,
+    and the credential is released -- which is the whole point of being able
+    to save at all.
+    """
+    pytest.importorskip("ipywidgets")
+    home = _route_12_home(tmp_path)
+    workdir = tmp_path / "work"
+    workdir.mkdir()
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    build_it = """
+        import json, os
+        from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+        widget = EnhancedClusterConfigWidget()
+        widget.config_dropdown.value = "SSH Remote Server"
+        widget.host_field.value = os.environ["CLUSTRIX_TEST_HOST"]
+        widget.port_field.value = int(os.environ["CLUSTRIX_TEST_PORT"])
+        widget.username_field.value = "victim"
+        widget._on_add_config(None)
+        widget.save_filename_input.value = "config.yml"
+        widget._on_save_config(None)
+        print(json.dumps({"source_map": dict(widget.config_source_map)}))
+    """
+    first = _session(
+        build_it,
+        home,
+        workdir,
+        {
+            "CLUSTRIX_TEST_HOST": attacker_server.host,
+            "CLUSTRIX_TEST_PORT": str(attacker_server.port),
+        },
+    )
+    assert first["source_map"] == {}, "a configuration the user typed was discovered"
+    written = (home / ".clustrix" / "config.yml").read_text(encoding="utf-8")
+    assert "config_sources" not in written, (
+        "a configuration nobody discovered was recorded as though it had "
+        "been: " + written
+    )
+
+    use_it = _ROUTE_12_SESSION_TWO.replace(
+        "widget._on_apply_config(None)",
+        'widget.config_name.value = ""\n    widget._on_apply_config(None)',
+    )
+    second = _session(
+        use_it, home, elsewhere, {"CLUSTRIX_TEST_PICK": "New Configuration"}
+    )
+    assert second["source_map"] == {"New Configuration": CONFIG_SOURCE_USER_CONFIG_DIR}
+    assert second["applied"]["trusted"] is True
+    assert second["authenticated"], (
+        "a configuration the user built and saved themselves stopped working "
+        "after a restart"
+    )
+    assert attacker_server.authentications == [("victim", "password")]
+
+
+def test_the_record_is_not_offered_as_a_configuration(tmp_path, monkeypatch):
+    """``config_sources`` is clustrix's record, never an entry in the dropdown.
+
+    ``_initialize_configs`` walks a file's top-level keys as configuration
+    names. Leaving the record in would put a configuration called
+    ``config_sources`` in the dropdown, whose "cluster_host" is a source
+    name -- and, worse, would hand ``recorded_config_source`` a mapping it
+    had already been read out of.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_config import CONFIG_SOURCES_KEY
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "config.yml").write_text(
+        "\n".join(
+            [
+                "shipped:",
+                "  cluster_type: ssh",
+                f"  cluster_host: {UNRELATED_ATTACKER_HOST}",
+                "  username: victim",
+                f"{CONFIG_SOURCES_KEY}:",
+                "  shipped: working-directory",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    assert CONFIG_SOURCES_KEY not in widget.configs
+    assert CONFIG_SOURCES_KEY not in widget.config_dropdown.options
+    assert "shipped" in widget.configs
+
+
+#: What ``_on_save_config`` turns a configuration ``name`` into, and whether
+#: ``detect_config_files`` then looks for the result. The attacker chooses
+#: the ``name`` in the file it ships, so this table is the precondition for
+#: route 12 and it is attacker-controlled.
+@pytest.mark.parametrize(
+    "configured_name,filename,promotes",
+    [
+        ("", "config.yml", True),
+        ("Config", "config.yml", True),
+        ("clustrix", "clustrix.yml", True),
+        ("My Cluster", "my_cluster.yml", False),
+    ],
+)
+def test_which_configuration_names_save_to_a_discovered_filename(
+    configured_name, filename, promotes
+):
+    """The names that promote are the ones ``detect_config_files`` looks for.
+
+    Both halves are computed from the shipped code rather than restated, so
+    a change to either the filename rule or the search list shows up here.
+    """
+    from clustrix.notebook_magic_config import detect_config_files
+
+    safe_name = (configured_name or "config").replace(" ", "_").lower()
+    assert f"{safe_name}.yml" == filename
+
+    directory = get_config_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    written = directory / filename
+    written.write_text("cluster_type: local\n", encoding="utf-8")
+    try:
+        found = detect_config_files([str(directory)])
+    finally:
+        written.unlink()
+    assert (written in found) is promotes
+
+
+def test_carrying_no_provenance_clears_what_the_name_already_had(tmp_path, monkeypatch):
+    """Kills: dropping the ``else`` in ``_carry_config_provenance``.
+
+    Defensive today -- ``_on_add_config`` invents a name nothing else holds,
+    and the family test forbids an orphaned sidecar, so the clearing branch
+    is not reachable from any door. It is pinned anyway, because it is half
+    of the both-directions rule ``_rename_config_metadata`` states and
+    relies on, and because "not reachable today" is what routes 11 and 12
+    were before somebody found the door.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.config_source_map["borrowed"] = CONFIG_SOURCE_WORKING_DIRECTORY
+    widget.config_source_host_map["borrowed"] = UNRELATED_ATTACKER_HOST
+
+    widget._carry_config_provenance(
+        "borrowed", None, {"cluster_host": "my-own-cluster.example"}
+    )
+
+    assert "borrowed" not in widget.config_source_map
+    assert "borrowed" not in widget.config_source_host_map
+
+
+def test_copying_a_found_configuration_does_not_claim_its_file(tmp_path, monkeypatch):
+    """Kills: carrying ``config_file_map`` from the source name in "+".
+
+    The reason it stays behind is a fact about the copy -- no file holds it
+    -- and not the category the earlier justification claimed, that the map
+    "decides which entries a save writes back, not who may receive a
+    credential". Route 12 falsifies that: what a save writes, and under what
+    name, is a credential decision one restart later.
+
+    The entry would be inert today, because the only thing ``config_file_map``
+    decides is whether an unmodified ``DEFAULT_CONFIGS`` entry is written
+    back, and the names "+" generates can never be one. That inertness is
+    asserted here too rather than assumed, since it is the whole of why this
+    is a pin and not a leak.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    assert set(widget.config_file_map) == {"config"}
+
+    widget._on_add_config(None)
+
+    assert widget.current_config_name == "New Configuration"
+    assert set(widget.config_file_map) == {"config"}, (
+        "the copy claimed the file the configuration it was copied from " "lives in"
+    )
+    from clustrix.notebook_magic_config import DEFAULT_CONFIGS
+
+    generated = {"New Configuration"} | {
+        f"New Configuration {counter}" for counter in range(1, 50)
+    }
+    assert generated.isdisjoint(DEFAULT_CONFIGS), (
+        "a generated name can now collide with a default, so the excluded "
+        "entry would no longer be inert"
+    )
+
+
+def test_pasting_a_document_whose_first_entry_is_not_a_configuration(
+    tmp_path, monkeypatch
+):
+    """Kills: selecting the first key of the document rather than the first
+    configuration in it.
+
+    A pasted document may begin with something that is not a configuration
+    -- a comment key, a version marker, a typo. Selecting it left
+    ``current_config_name`` naming something that was never put in
+    ``self.configs``; ``_load_config_to_widgets`` returns early on a name it
+    does not know, so nothing corrected it until ``_update_config_dropdown``
+    happened to select something else. Unguarded rather than leaking, and a
+    name disagreeing with the thing keyed by it is the shape of every leak
+    in this file.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.load_config_text.value = "\n".join(
+        [
+            "notes: pasted from the project README",
+            "project:",
+            "  cluster_type: ssh",
+            "  cluster_host: my-own-cluster.example",
+            "  username: me",
+        ]
+    )
+    widget._on_load_config(None)
+
+    assert widget.current_config_name == "project"
+    assert widget.current_config_name in widget.configs
+    assert "notes" not in widget.configs
+
+
+def test_a_single_configuration_file_is_read_under_its_own_record_too(
+    tmp_path, monkeypatch
+):
+    """Kills: honouring the record only in the multi-configuration shape.
+
+    Save never writes a flat file carrying a record -- there is nowhere to
+    put a sibling key without it becoming a configuration field, so a save
+    with something to record uses the nested shape. A flat file carrying one
+    can therefore only have been written by a human, marking a configuration
+    they know is not theirs.
+
+    Ignoring it in that shape would only ever err towards *more* trust,
+    which is the wrong direction and the one this whole file is about, so
+    both shapes read the record under the same rule.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_config import CONFIG_SOURCES_KEY
+
+    directory = get_config_dir()
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (directory / "config.yml").write_text(
+        "\n".join(
+            [
+                "cluster_type: ssh",
+                f"cluster_host: {UNRELATED_ATTACKER_HOST}",
+                "username: victim",
+                f"{CONFIG_SOURCES_KEY}:",
+                f"  config: {CONFIG_SOURCE_WORKING_DIRECTORY}",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert CONFIG_SOURCES_KEY not in widget.configs["config"]
+    widget.config_dropdown.value = "config"
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+
+def test_a_save_with_something_to_record_never_writes_the_flat_shape(tmp_path):
+    """Kills: recording into the flat shape instead of nesting first.
+
+    The flat shape has no sibling namespace, so the record would have to be
+    keyed by something the reader can find -- and the reader of a flat file
+    names the configuration after the *filename stem*, which is not the name
+    the widget holds. ``Config`` saved as ``config.yml`` is exactly that
+    mismatch, and a record the reader looks up under the wrong key is no
+    record at all.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_config import CONFIG_SOURCES_KEY
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    widget.config_name.value = "Config"
+    widget.cluster_type.value = "ssh"
+    widget.host_field.value = UNRELATED_ATTACKER_HOST
+    widget.username_field.value = "victim"
+    widget.current_config_name = "Config"
+    widget.configs = {"Config": widget._save_config_from_widgets()}
+    widget.config_source_map["Config"] = CONFIG_SOURCE_WORKING_DIRECTORY
+    widget.config_source_host_map["Config"] = UNRELATED_ATTACKER_HOST
+
+    widget._on_save_config(None)
+
+    import yaml
+
+    written = yaml.safe_load(
+        (get_config_dir() / "config.yml").read_text(encoding="utf-8")
+    )
+    assert written[CONFIG_SOURCES_KEY] == {"Config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert "cluster_type" not in written, (
+        "the flat shape was written, so the record is keyed by a name the "
+        "reader will never look up: " + repr(sorted(written))
+    )
+    assert written["Config"]["cluster_host"] == UNRELATED_ATTACKER_HOST

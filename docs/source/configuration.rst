@@ -115,6 +115,35 @@ automatically. Changing directory does not reload it.
    host field does lift it -- for that hostname -- because a host is only
    refused by a file that actually named it.
 
+   Pasting is the one worth stating precisely, because it is the user
+   typing: the refusal survives a paste that *keeps* the hostname the found
+   file named, and a paste that changes the hostname is you naming a host,
+   which lifts it for that host exactly as the host field does.
+
+   **Saving is where that has to survive a restart.** *Save configuration*
+   writes into ``~/.clustrix``, and that is a directory the widget infers
+   trust from when it looks for configurations next time -- so without care,
+   pressing Save would promote a configuration a repository shipped to one
+   you chose, one session later, with nothing left on disk to say otherwise.
+   It is also not only the configuration you selected: a save writes every
+   configuration in the dropdown, verbatim, including ones you never opened.
+
+   So the widget writes the source down beside the configurations, under a
+   top-level ``config_sources`` key, and reads it back the next time. It
+   behaves exactly like the profile store's record below: it can only ever
+   *lower* trust -- a file claiming ``runtime`` for its own configurations is
+   ignored -- so a project's configuration you deliberately keep is kept,
+   along with the reason it is not handed your credential.
+
+   **To adopt a project's configuration on purpose**, do what
+   ``clustrix`` already tells you to do for a working-directory file: put
+   the settings into ``~/.clustrix/config.yml`` *yourself* and start a new
+   process. A file you wrote records nothing, and a file that records
+   nothing is yours -- which is the whole difference between moving a
+   configuration and pressing a button that moves it for you. If you would
+   rather keep the file where it is, ``SSH_HOST=<host>`` in the credential
+   file is authorisation for that one host, as always.
+
    The cost is a refusal when a ``./clustrix.yml`` names the host you were
    going to use anyway. Those two cases are genuinely indistinguishable, so
    the refusal is the safe half of the pair, and the two remedies above are

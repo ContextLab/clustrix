@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from .notebook_magic_config import (
+    CONFIG_SOURCES_KEY,
     DEFAULT_CONFIGS,
     config_source_for_detected_file,
+    config_source_for_saved_entry,
     detect_config_files,
     load_config_from_file,
+    recorded_config_source,
     validate_ip_address,
     validate_hostname,
 )
@@ -30,6 +33,7 @@ except ImportError:
     from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import (
+    UNTRUSTED_CONFIG_SOURCES,
     configure,
     get_config,
     get_config_dir,
@@ -98,6 +102,13 @@ class EnhancedClusterConfigWidget:
         Apply can say so; without that the dict reached ``configure()``
         indistinguishable from something the user typed, and the cluster
         password went to whoever the repository named.
+
+        Where it was found is not the whole answer, though, because Save
+        moves files: a configuration this widget wrote into the
+        configuration directory says so in the file itself, and that record
+        may only ever lower the verdict this computes from the location. See
+        :data:`~clustrix.notebook_magic_config.CONFIG_SOURCES_KEY` for route
+        12, which is what happens when it does not.
         """
         # Start with default configurations. A *deep* copy: ``.copy()`` is
         # shallow, so the inner dicts were the module-level templates
@@ -122,13 +133,20 @@ class EnhancedClusterConfigWidget:
             source = config_source_for_detected_file(config_file)
             file_configs = load_config_from_file(config_file)
             if isinstance(file_configs, dict):
+                # Provenance the file carries about its own entries, removed
+                # before anything else looks at the mapping: it is clustrix's
+                # record, never a configuration, and leaving it in would put
+                # a configuration called ``config_sources`` in the dropdown.
+                recorded = file_configs.pop(CONFIG_SOURCES_KEY, None)
                 # Handle both single config and multiple configs in file
                 if "cluster_type" in file_configs:
                     # Single config - use filename as config name
                     config_name = config_file.stem
                     self.configs[config_name] = file_configs
                     self.config_file_map[config_name] = config_file
-                    self.config_source_map[config_name] = source
+                    self.config_source_map[config_name] = config_source_for_saved_entry(
+                        source, recorded_config_source(recorded, config_name)
+                    )
                     self.config_source_host_map[config_name] = normalize_hostname(
                         file_configs.get("cluster_host")
                     )
@@ -138,7 +156,11 @@ class EnhancedClusterConfigWidget:
                         if isinstance(config, dict):
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
-                            self.config_source_map[name] = source
+                            self.config_source_map[name] = (
+                                config_source_for_saved_entry(
+                                    source, recorded_config_source(recorded, name)
+                                )
+                            )
                             self.config_source_host_map[name] = normalize_hostname(
                                 config.get("cluster_host")
                             )
@@ -864,10 +886,19 @@ class EnhancedClusterConfigWidget:
             # configuration is not choosing a hostname, exactly as renaming
             # one is not (see ``_rename_config_metadata``).
             #
-            # ``config_file_map`` deliberately does *not* come along: the
-            # copy is a new configuration that no file holds, and it decides
-            # which entries a save writes back, not who may receive a
-            # credential.
+            # ``config_file_map`` deliberately does *not* come along,
+            # because the copy is a new configuration that no file holds.
+            #
+            # The earlier reason given here -- that the map "decides which
+            # entries a save writes back, not who may receive a credential"
+            # -- was wrong, and route 12 is what falsifies it: what a save
+            # writes, and under what name, *is* a credential decision one
+            # restart later. So the exclusion rests on the fact rather than
+            # on the category. It is inert today as well, since the names
+            # generated here can never collide with ``DEFAULT_CONFIGS`` and
+            # that collision is the only thing the map decides -- but
+            # "inert today" is how routes 11 and 12 both started, so it is
+            # pinned by a test rather than by this comment.
             config_data = self._save_config_from_widgets()
             discovered_source = self._discovered_source_for(config_data)
             config_data["name"] = config_name
@@ -1021,6 +1052,48 @@ class EnhancedClusterConfigWidget:
             )
         return redacted
 
+    def _record_discovered_sources(
+        self, save_data: Dict[str, Any], single_config: bool
+    ) -> Dict[str, Any]:
+        """Write the untrusted sources into the file, or leave it unchanged.
+
+        Route 12. Save writes into :func:`get_config_dir`, and
+        :func:`detect_config_files` infers trust from that directory, so
+        pressing Save promoted a configuration a repository shipped to one
+        the user chose -- not in this session, where every sidecar stayed
+        correct, but in the next one, where the only evidence left was where
+        the file now sat. See
+        :data:`~clustrix.notebook_magic_config.CONFIG_SOURCES_KEY`.
+
+        Only untrusted sources are written. A trusted one would be re-derived
+        identically from the file's own location, and a record that could
+        raise trust is the laundering route this is here to close -- so the
+        key never carries one, and
+        :func:`~clustrix.notebook_magic_config.config_source_for_saved_entry`
+        would ignore it if it did.
+
+        The single-configuration shape has no room for a sibling key without
+        the record becoming a configuration field, so a save that has
+        something to record uses the nested shape instead. That is the
+        widget's own other shape and it reads both; the flat one is reserved
+        for files that record nothing, which is every file a user writes by
+        hand.
+        """
+        if single_config and self.current_config_name:
+            names = {self.current_config_name}
+        else:
+            names = set(save_data)
+        recorded = {
+            name: self.config_source_map[name]
+            for name in sorted(names)
+            if self.config_source_map.get(name) in UNTRUSTED_CONFIG_SOURCES
+        }
+        if not recorded:
+            return save_data
+        if single_config and self.current_config_name:
+            save_data = {self.current_config_name: save_data}
+        return {**save_data, CONFIG_SOURCES_KEY: recorded}
+
     def _on_save_config(self, button):
         """Save configuration to file."""
         with self.status_output:
@@ -1082,6 +1155,9 @@ class EnhancedClusterConfigWidget:
                 import yaml
 
                 save_data = self._redact_for_save(save_data, bool(single_config))
+                save_data = self._record_discovered_sources(
+                    save_data, bool(single_config)
+                )
                 write_text_securely(
                     file_path,
                     yaml.dump(save_data, default_flow_style=False, sort_keys=False),
@@ -1160,17 +1236,29 @@ class EnhancedClusterConfigWidget:
                     self._update_config_dropdown()
                     print(f"✅ Loaded configuration: '{config_name}'")
                 else:
-                    # Multiple configurations
+                    # Multiple configurations. The first *loaded* one is
+                    # selected, not the first key of the pasted document:
+                    # a document whose first entry is not a configuration --
+                    # a comment key, a version marker, a typo -- left
+                    # ``current_config_name`` naming something that is not in
+                    # ``self.configs`` at all. ``_load_config_to_widgets``
+                    # returns early on a name it does not know, so nothing
+                    # corrected it until ``_update_config_dropdown`` happened
+                    # to select something else. That self-heal is a
+                    # coincidence of ordering, and every leak in this file so
+                    # far has been a name and the thing keyed by it
+                    # disagreeing.
                     loaded_count = 0
+                    first_config = None
                     for name, config in data.items():
                         if isinstance(config, dict) and "cluster_type" in config:
                             config["name"] = name
                             self.configs[name] = config
                             loaded_count += 1
+                            if first_config is None:
+                                first_config = name
 
-                    if loaded_count > 0:
-                        # Load the first configuration
-                        first_config = next(iter(data.keys()))
+                    if first_config is not None:
                         self.current_config_name = first_config
                         self._load_config_to_widgets(first_config)
                         self._update_config_dropdown()

@@ -886,3 +886,98 @@ def test_the_store_records_where_the_hostname_came_from_not_where_the_object_did
         "the reading process condemned the hostname by itself, so this says "
         "nothing about what the store recorded"
     )
+
+
+# --------------------------------------------------------------------------
+# The widget's configuration file records the same thing the profile store
+# does, under the same downgrade-only rule, for the same reason: route 12 is
+# route 8 with the profile store replaced by ``~/.clustrix/config.yml``.
+#
+# One rule differs, deliberately. A profile store is only ever written by
+# clustrix, so silence there means a version that did not record and has to
+# fail closed. A configuration file is a file users write by hand -- moving
+# settings into ``~/.clustrix/config.yml`` is the remedy
+# ``_load_default_config``'s own warning names -- so silence here means "a
+# human put this here", and that is the trusted case.
+# --------------------------------------------------------------------------
+
+
+def test_an_untrusted_recorded_source_is_believed_over_the_location():
+    """The whole point: Save moves the file, the record moves with it."""
+    from clustrix.notebook_magic_config import config_source_for_saved_entry
+
+    assert (
+        config_source_for_saved_entry(
+            CONFIG_SOURCE_USER_CONFIG_DIR, CONFIG_SOURCE_WORKING_DIRECTORY
+        )
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+
+@pytest.mark.parametrize(
+    "recorded",
+    [CONFIG_SOURCE_EXPLICIT_FILE, CONFIG_SOURCE_RUNTIME, CONFIG_SOURCE_USER_CONFIG_DIR],
+)
+def test_a_recorded_trusted_source_cannot_promote_the_file_it_sits_in(recorded):
+    """Downgrade only. A file that could raise its own trust *is* the route."""
+    from clustrix.notebook_magic_config import config_source_for_saved_entry
+
+    assert (
+        config_source_for_saved_entry(CONFIG_SOURCE_WORKING_DIRECTORY, recorded)
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+
+@pytest.mark.parametrize("recorded", ["invented", 17, ["working-directory"], {}])
+def test_an_unrecognised_record_is_read_as_a_redirect(recorded):
+    """Refusing to load costs every configuration; refusing to trust costs one."""
+    from clustrix.notebook_magic_config import config_source_for_saved_entry
+
+    assert (
+        config_source_for_saved_entry(CONFIG_SOURCE_USER_CONFIG_DIR, recorded)
+        == CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    )
+
+
+@pytest.mark.parametrize(
+    "file_source",
+    [
+        CONFIG_SOURCE_USER_CONFIG_DIR,
+        CONFIG_SOURCE_WORKING_DIRECTORY,
+        CONFIG_SOURCE_EXPLICIT_FILE,
+    ],
+)
+def test_a_file_that_records_nothing_is_left_exactly_as_it_was_found(file_source):
+    """The hand-written file, and the explicit adoption this leaves available.
+
+    Every ``~/.clustrix/config.yml`` that exists today records nothing. Were
+    silence read as the profile store reads it, moving settings there by
+    hand -- the documented remedy -- would stop working, and there would be
+    no way to adopt a project's configuration at all.
+    """
+    from clustrix.notebook_magic_config import config_source_for_saved_entry
+
+    assert config_source_for_saved_entry(file_source, None) == file_source
+
+
+def test_a_record_that_is_not_a_mapping_condemns_every_entry_in_the_file():
+    """Kills: reading a malformed record as no record at all.
+
+    ``config_sources: x`` is a one-character edit. If it resolved to ``None``
+    per entry it would erase the record for every configuration in the file,
+    which is a promotion written as a typo.
+    """
+    from clustrix.notebook_magic_config import (
+        config_source_for_saved_entry,
+        recorded_config_source,
+    )
+
+    assert recorded_config_source("x", "anything") == "x"
+    assert (
+        config_source_for_saved_entry(
+            CONFIG_SOURCE_USER_CONFIG_DIR, recorded_config_source("x", "anything")
+        )
+        == CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    )
+    assert recorded_config_source(None, "anything") is None
+    assert recorded_config_source({"a": CONFIG_SOURCE_WORKING_DIRECTORY}, "b") is None
