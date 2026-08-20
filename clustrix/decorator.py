@@ -1,10 +1,12 @@
 import functools
 import inspect
 import logging
+import os
 import threading
-from typing import Any, Callable, Optional, Dict, List
+from dataclasses import fields
+from typing import Any, Callable, NamedTuple, Optional, Dict, List
 
-from .config import get_config
+from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
 from .local_executor import create_local_executor
@@ -16,6 +18,21 @@ logger = logging.getLogger(__name__)
 #: Cluster types that submit work over an API instead of SSH, and therefore
 #: never have a ``cluster_host``.
 HOSTLESS_CLUSTER_TYPES = frozenset({"huggingface"})
+
+#: ``ClusterConfig.default_cores`` as shipped. A value the user never touched
+#: is a resource default rather than an instruction, so it is not reported when
+#: a local route cannot use it; a value they set is (#152). Read off the
+#: dataclass so the two cannot drift apart.
+SHIPPED_DEFAULT_CORES = next(
+    f.default for f in fields(ClusterConfig) if f.name == "default_cores"
+)
+
+
+class _CoreRequest(NamedTuple):
+    """A worker count the caller asked for, and where they wrote it."""
+
+    value: int
+    where: str
 
 
 def cluster(
@@ -53,6 +70,18 @@ def cluster(
         Decorated function that executes on cluster
         If async_submit=True, returns AsyncJobResult for non-blocking execution
     """
+
+    # A core count that is not a positive integer is a caller error, and it
+    # used to be absorbed rather than reported: ``cores=0`` fell through
+    # ``cores or config.default_cores`` and silently became the default, while
+    # ``cores=-2`` reached ``ProcessPoolExecutor``, whose "max_workers must be
+    # greater than 0" was swallowed by the sequential fallback -- so the job
+    # ran on one core, and not even the cores warning fired (#152).
+    if cores is not None and (not isinstance(cores, int) or cores < 1):
+        raise ValueError(
+            f"@cluster(cores={cores!r}) is not a usable worker count: cores "
+            "must be a positive integer."
+        )
 
     def decorator(func: Callable) -> Callable:
 
@@ -130,23 +159,20 @@ def cluster(
             # exactly once on this machine, where there is no second unit of
             # work to give a second worker, and the number was simply dropped:
             # the plain local path, the async local path (one job on a thread),
-            # and ``cluster_type="local"``, which reaches LocalJobManager. Only
-            # an explicit ``@cluster(cores=N)`` is warned about; a global
-            # ``default_cores`` is a resource default rather than a per-call
-            # instruction, and warning on it would fire for every local call.
-            if cores is not None and cores > 1:
-                if execution_mode == "local" and (use_async or not should_parallelize):
-                    _warn_cores_unused(
-                        cores,
-                        "the local backend runs the decorated function once, in "
-                        "this process" + (", on a worker thread" if use_async else ""),
-                    )
-                elif execution_mode == "remote" and config.cluster_type == "local":
-                    _warn_cores_unused(
-                        cores,
-                        'cluster_type "local" runs the submitted function here '
-                        "as a single unit of work",
-                    )
+            # and ``cluster_type="local"``, which reaches LocalJobManager.
+            requested = _requested_cores(cores, config)
+            if execution_mode == "local" and (use_async or not should_parallelize):
+                _warn_cores_unused(
+                    requested,
+                    "the local backend runs the decorated function once, in "
+                    "this process" + (", on a worker thread" if use_async else ""),
+                )
+            elif execution_mode == "remote" and config.cluster_type == "local":
+                _warn_cores_unused(
+                    requested,
+                    'cluster_type "local" runs the submitted function here '
+                    "as a single unit of work",
+                )
 
             # ``auto_gpu_parallel`` no longer does anything. The path it
             # switched on returned the traces of random matrices instead of
@@ -174,7 +200,7 @@ def cluster(
                     )
                 elif should_parallelize:
                     return _execute_local_parallel(
-                        func, args, func_kwargs, job_config, requested_cores=cores
+                        func, args, func_kwargs, job_config, requested=requested
                     )
                 else:
                     # Execute locally without parallelization
@@ -457,7 +483,27 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     return "remote"
 
 
-def _warn_cores_unused(cores: Optional[int], because: str) -> None:
+def _requested_cores(cores: Optional[int], config) -> Optional[_CoreRequest]:
+    """The worker count the caller asked for, and where they asked for it.
+
+    Two places count as asking. ``@cluster(cores=N)`` is the obvious one. A
+    ``default_cores`` the user set with ``configure()`` is the other: it was
+    previously treated as never worth reporting, on the grounds that the
+    shipped default of 4 would then fire a warning on every local call. That
+    reasoning holds for the shipped value and only for it -- someone who wrote
+    ``configure(default_cores=8)`` and got one core in silence has exactly the
+    complaint #152 is about. So the shipped value is compared against, not
+    assumed: only a changed one is an instruction.
+    """
+    if cores is not None:
+        return _CoreRequest(cores, f"@cluster(cores={cores})")
+    default = getattr(config, "default_cores", None)
+    if default is not None and default != SHIPPED_DEFAULT_CORES:
+        return _CoreRequest(default, f"configure(default_cores={default})")
+    return None
+
+
+def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     """Say out loud that a requested worker count is being discarded.
 
     ``@cluster(cores=8)`` reads as "use eight workers". On every local route
@@ -465,14 +511,18 @@ def _warn_cores_unused(cores: Optional[int], because: str) -> None:
     the number used to be dropped in silence -- the shape of defect this
     project keeps finding (#152). The caller gets one message naming the
     single condition under which ``cores`` does change local behaviour.
+
+    A request of 1 is not a request for a second worker, so nothing is said
+    about it: one worker is what every one of these routes already provides.
     """
-    if cores is None or cores <= 1:
+    if request is None or request.value <= 1:
         return
     logger.warning(
-        "@cluster(cores=%s) has no effect here: %s. Locally, cores sets the "
-        "worker count only when parallel=True finds a parallelizable loop and "
-        "the function accepts the matching _parallel_<var> keyword.",
-        cores,
+        "%s has no effect here: %s. Locally, cores bounds the worker pool only "
+        "when parallel=True finds a parallelizable loop and the function "
+        "accepts the matching _parallel_<var> keyword -- and even there it is "
+        "an upper bound, not a promise that many workers will be busy.",
+        request.where,
         because,
     )
 
@@ -482,21 +532,29 @@ def _execute_local_parallel(
     args: tuple,
     kwargs: dict,
     job_config: dict,
-    requested_cores: Optional[int] = None,
+    requested: Optional[_CoreRequest] = None,
 ) -> Any:
     """
     Execute function locally with parallelization.
+
+    This is the one local route where ``cores`` changes what happens: it sizes
+    the worker pool and, through it, the number of work chunks. What it does
+    *not* do is create parallelism on its own. The pool is a bound -- the work
+    is a queue, and a chunk that costs microseconds can be pulled by the first
+    worker to reach it before its siblings have finished starting, so a run
+    with ``cores=8`` may still be observed doing its work in fewer than eight
+    processes. Wider is available; wider is not guaranteed.
 
     Args:
         func: Function to execute
         args: Function arguments
         kwargs: Function keyword arguments
         job_config: Job configuration
-        requested_cores: The value the caller wrote in ``@cluster(cores=N)``,
-            or ``None`` if they wrote nothing. ``job_config["cores"]`` cannot
-            answer that -- it has already been merged with
-            ``config.default_cores`` -- and every route out of this function
-            that declines to split the work discards the request (#152).
+        requested: What the caller asked for and where, or ``None`` if they
+            asked for nothing. ``job_config["cores"]`` cannot answer that -- it
+            has already been merged with ``config.default_cores`` -- and every
+            route out of this function that declines to split the work
+            discards the request (#152).
 
     Returns:
         Function result
@@ -508,9 +566,7 @@ def _execute_local_parallel(
 
     if not parallelizable_loops:
         # No parallelizable loops found, execute normally
-        _warn_cores_unused(
-            requested_cores, f"no parallelizable loop was found in {name}"
-        )
+        _warn_cores_unused(requested, f"no parallelizable loop was found in {name}")
         return func(*args, **kwargs)
 
     # Use the first parallelizable loop
@@ -525,12 +581,14 @@ def _execute_local_parallel(
     try:
         with local_executor:
             # Create work chunks for the loop
-            work_chunks = _create_local_work_chunks(func, args, kwargs, loop_info)
+            work_chunks = _create_local_work_chunks(
+                func, args, kwargs, loop_info, local_executor.max_workers
+            )
 
             if not work_chunks:
                 # Fallback to normal execution
                 _warn_cores_unused(
-                    requested_cores, f"the work in {name} was not split into chunks"
+                    requested, f"the work in {name} was not split into chunks"
                 )
                 return func(*args, **kwargs)
 
@@ -553,13 +611,17 @@ def _execute_local_parallel(
             f"Local parallel execution failed, falling back to sequential: {e}"
         )
         _warn_cores_unused(
-            requested_cores, f"parallel execution of {name} fell back to sequential"
+            requested, f"parallel execution of {name} fell back to sequential"
         )
         return func(*args, **kwargs)
 
 
 def _create_local_work_chunks(
-    func: Callable, args: tuple, kwargs: dict, loop_info
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    loop_info,
+    max_workers: Optional[int] = None,
 ) -> List[Dict]:
     """
     Create work chunks for local parallel execution.
@@ -569,6 +631,8 @@ def _create_local_work_chunks(
         args: Function arguments
         kwargs: Function keyword arguments
         loop_info: Information about the loop to parallelize
+        max_workers: How many workers the pool will have. ``None`` means the
+            caller does not know, and the machine's width is used instead.
 
     Returns:
         List of work chunks
@@ -616,11 +680,14 @@ def _create_local_work_chunks(
         )
         return []
 
-    # Determine chunk size (aim for reasonable number of chunks)
-    import os
-
-    max_chunks = (os.cpu_count() or 1) * 2  # Allow some oversubscription
-    chunk_size = max(1, len(loop_range) // max_chunks)
+    # Aim for two chunks per worker: one each leaves nothing to pick up when
+    # they finish at different times. The count follows the pool the caller
+    # asked for, not the machine. Deriving it from ``os.cpu_count()`` capped
+    # every run at the machine's width, so on a two-core box
+    # ``@cluster(cores=16)`` produced four chunks and twelve of the sixteen
+    # workers it sized had nothing they could ever pull (#152).
+    workers = max_workers or os.cpu_count() or 1
+    chunk_size = max(1, len(loop_range) // (workers * 2))
 
     # Create chunks
     for i in range(0, len(loop_range), chunk_size):

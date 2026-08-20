@@ -235,18 +235,22 @@ class TestResourceLimitEdgeCases:
         `pytest.raises`, and always failed with "DID NOT RAISE ValueError"
         regardless of what `zero_cores()` actually did.
 
-        `cores` is never validated for the local-execution path this test
-        exercises (no cluster_host configured, so the decorator makes a
-        direct in-process call and job_config's cores value is simply
-        unused) -- so the real, current behavior is that it runs normally.
+        This assertion has been *changed*, not relaxed. It used to assert
+        `zero_cores() == "executed"`, on the stated grounds that "`cores` is
+        never validated for the local-execution path" -- which recorded the
+        absence of validation as though it were the intended contract. It was
+        not: `cores=0` was falsy, so `cores or config.default_cores` replaced
+        it with the default and the caller got four workers they never asked
+        for, silently (#152). A worker count of zero is a caller error, and is
+        now refused where it is written.
         """
         configure(cluster_type="local")
 
-        @cluster(cores=0, memory="1GB")
-        def zero_cores():
-            return "executed"
+        with pytest.raises(ValueError, match="positive integer"):
 
-        assert zero_cores() == "executed"
+            @cluster(cores=0, memory="1GB")
+            def zero_cores():
+                return "executed"
 
     def test_excessive_resource_request(self):
         """

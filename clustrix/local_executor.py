@@ -24,9 +24,26 @@ class LocalExecutor:
         Initialize local executor.
 
         Args:
-            max_workers: Maximum number of worker processes/threads
+            max_workers: Maximum number of worker processes/threads. ``None``
+                means "as wide as this machine".
             use_threads: If True, use ThreadPoolExecutor, else ProcessPoolExecutor
+
+        Raises:
+            ValueError: If ``max_workers`` is given but is not a positive
+                integer. It used to be accepted: ``0`` is falsy, so it turned
+                into the machine's width, and a negative reached
+                ``ProcessPoolExecutor``, which raises far enough down the call
+                stack that ``_execute_local_parallel`` caught the failure and
+                ran sequentially instead (#152). Neither told the caller their
+                number was nonsense.
         """
+        if max_workers is not None and (
+            not isinstance(max_workers, int) or max_workers < 1
+        ):
+            raise ValueError(
+                f"max_workers={max_workers!r} is not a usable worker count: "
+                "it must be a positive integer, or None for one per core."
+            )
         self.max_workers = max_workers or os.cpu_count() or 4
         self.use_threads = use_threads
         self._executor = None
