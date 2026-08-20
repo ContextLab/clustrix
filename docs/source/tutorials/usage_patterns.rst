@@ -8,8 +8,8 @@ mocks) as part of this documentation's own test suite -- see
 ``scripts/check_docs_examples.py``.
 
 A key fact that shapes every pattern here: **if you don't configure a
-remote cluster, ``@cluster`` still runs your function -- just locally, in the
-calling process.** ``clustrix.decorator._choose_execution_mode`` falls back to
+remote cluster,** ``@cluster`` **still runs your function -- just locally, in
+the calling process.** ``clustrix.decorator._choose_execution_mode`` falls back to
 local execution whenever ``config.cluster_host`` is unset (SLURM/SSH) and the
 cluster type isn't one of the HTTP-API backends (currently HuggingFace Jobs). That means every example
 below runs as shown, without touching a real cluster, and the *same code*

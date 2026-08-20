@@ -38,7 +38,7 @@ verified directly against ``clustrix/filesystem.py``: each one is
 ``fs = ClusterFilesystem(config); return fs.<method>(...)``. What that
 instance actually does depends on ``config.cluster_type``:
 
-**Local (``cluster_type="local"``).** Every operation is a plain ``os`` /
+**Local** (``cluster_type="local"``). Every operation is a plain ``os`` /
 ``glob`` call against ``config.local_work_dir`` (or the current directory if
 that's unset) -- no network, no subprocess, nothing to open or close.
 
@@ -109,7 +109,7 @@ expansion is a shell feature rather than a ``glob``
 one, so ``"*.{yml,json}"`` matches a file literally named that and nothing
 else. Match each extension separately.
 
-**``cluster_du`` counts symlinks the way** ``os.walk(followlinks=False)``
+``cluster_du`` **counts symlinks the way** ``os.walk(followlinks=False)``
 plus ``os.path.getsize`` count them, on both sides. A link to a regular file
 contributes its *target's* size, counted once. A link to a directory
 contributes nothing and is never descended into, which is also why the walk
@@ -117,7 +117,7 @@ terminates: a symlink loop is the only way to build a cycle out of
 directories, and the walk does not follow them. A broken link is skipped
 rather than raising.
 
-**``FileInfo.permissions`` is always three octal digits.** ``"000"``,
+``FileInfo.permissions`` **is always three octal digits.** ``"000"``,
 ``"007"``, ``"644"`` -- a fixed width, so string comparison and slicing mean
 what they look like they mean.
 

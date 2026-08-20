@@ -40,6 +40,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
+from time import monotonic, sleep
 
 import paramiko
 import pytest
@@ -290,6 +291,40 @@ while True:
 """
 
 
+#: How long the child is allowed to import paramiko and clustrix, generate a
+#: key and append its first host key line. Generous, because none of that is
+#: what this test measures: on a loaded machine those imports alone have been
+#: observed taking over 1.5 seconds, which used to consume the whole kill
+#: window and leave the child killed before it had written anything -- the
+#: test's own "vacuous" assertion, failing for a reason that has nothing to do
+#: with the code under test.
+FIRST_WRITE_TIMEOUT = 60.0
+
+
+def _wait_until_it_is_writing(known_hosts, before, process):
+    """Block until the child has appended something, so the kill can be timed.
+
+    The kill has to land while the writer is in its append loop. Timing the
+    window from ``Popen`` measures interpreter start-up as well, and start-up
+    is the part that varies with machine load. Timing it from the first
+    observed byte measures the loop and nothing else, and the wait is not a
+    weakening of the test: it makes the "killed before it wrote anything"
+    assertion below unreachable for any reason except the writer genuinely
+    never writing.
+    """
+    deadline = monotonic() + FIRST_WRITE_TIMEOUT
+    while monotonic() < deadline:
+        if len(known_hosts.read_text()) > len(before):
+            return
+        if process.poll() is not None:
+            raise AssertionError(
+                "the writer exited on its own before appending anything: "
+                f"{process.communicate()[1].decode()}"
+            )
+        sleep(0.01)
+    raise AssertionError(f"the writer appended nothing within {FIRST_WRITE_TIMEOUT}s")
+
+
 @pytest.mark.parametrize("round_number", range(6))
 def test_a_killed_writer_never_leaves_a_broken_file(round_number):
     """SIGKILL a real process mid-write and require the file to still parse.
@@ -312,6 +347,7 @@ def test_a_killed_writer_never_leaves_a_broken_file(round_number):
         stderr=subprocess.PIPE,
     )
     try:
+        _wait_until_it_is_writing(known_hosts, before, process)
         process.wait(timeout=random.uniform(1.0, 2.0))
     except subprocess.TimeoutExpired:
         process.kill()

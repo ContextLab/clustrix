@@ -212,7 +212,15 @@ jobs:
       run: |
         cd docs
         make html
-        
+
+    # Sphinx inline markup does not nest: a ``literal`` inside a **bold**
+    # span renders as plain text, backticks and all, and `sphinx -W` builds
+    # it happily. Only the built HTML shows it, and only the built HTML has
+    # the .rst, the docstring and the nbsphinx-converted notebook cases in
+    # one place -- so this checks the output of the step above.
+    - name: Check documentation for nested inline markup
+      run: python scripts/check_docs_markup.py docs/build/html
+
     - name: Test notebook execution
       run: |
         pip install jupyter nbconvert

@@ -31,7 +31,7 @@ Every function below (``cluster_ls``, ``cluster_stat``, ...) builds a fresh
 it, and lets it go. What that operation does depends entirely on
 ``config.cluster_type``:
 
-- **``cluster_type="local"``**: a plain ``os``/``glob`` call against
+- **Local** (``cluster_type="local"``): a plain ``os``/``glob`` call against
   ``config.local_work_dir`` (or the current directory). No network
   involved, nothing to connect or disconnect.
 - **Anything else (SLURM, SSH)**: an operation over

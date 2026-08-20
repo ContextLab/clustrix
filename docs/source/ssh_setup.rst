@@ -101,8 +101,8 @@ happens to you.
 Every SSH connection clustrix makes -- for key setup, for job submission, for
 file transfer -- checks the remote host's SSH key against your local
 ``known_hosts`` files (``/etc/ssh/ssh_known_hosts`` and
-``~/.ssh/known_hosts``) before doing anything else. **By default
-(``ssh_host_key_policy="reject"``), a host key that isn't already recorded
+``~/.ssh/known_hosts``) before doing anything else. By default
+(``ssh_host_key_policy="reject"``), **a host key that isn't already recorded
 there causes clustrix to refuse the connection outright.** This is not a
 prompt you can click through; it is a hard failure with an actionable
 message:

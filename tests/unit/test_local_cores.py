@@ -43,7 +43,7 @@ import pytest
 
 from clustrix import cluster, configure
 from clustrix.config import get_config
-from clustrix.decorator import _create_local_work_chunks
+from clustrix.decorator import UNCONFIRMED_REPEAT_LIMIT, _create_local_work_chunks
 from clustrix.local_executor import LocalExecutor, LocalJobManager
 from clustrix.loop_analysis import find_parallelizable_loops
 from clustrix.utils import serialize_function
@@ -462,7 +462,7 @@ def test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is(
     So two things vary that a caller would not expect to vary, and both are
     asserted here as facts about today's behaviour:
 
-    * **``cores`` changes the answer.** The same call at three pool sizes comes
+    * ``cores`` **changes the answer.** The same call at three pool sizes comes
       back as three different lists, because the pool size sets the chunk count
       and the chunk count sets how the partial sums are cut. None of the three
       is the undecorated answer.
@@ -1137,6 +1137,141 @@ def test_a_filter_that_drops_the_record_does_not_spend_the_budget(attach_to, cap
     assert len(said) == 1, (
         "the filter is gone and the caller was told exactly once; got "
         f"{len(said)}: {said}"
+    )
+
+
+@pytest.mark.parametrize("attach_to", ["handler", "logger"])
+def test_a_filter_that_passes_the_record_does_not_silence_the_caller(attach_to):
+    """The gate may cost a repeat. It may never cost the message.
+
+    ``_warning_reaches_someone`` treats every filter as an obstruction because
+    it will not run caller code twice to find out. When the filter in fact
+    *passes* the record -- a level-independent tag injector, a
+    de-duplicator that lets the first of each message through, an audit filter
+    that returns True after recording -- the gate is wrong, and the direction
+    of that wrongness is the whole design: the reason is not marked delivered,
+    so it is said again next call, and the caller hears it.
+
+    That only holds while the emit sits **outside** the gate. Move
+    ``logger.warning`` inside ``if _warning_reaches_someone():`` and this
+    scenario stops producing a repeat and starts producing nothing at all --
+    a caller with a perfectly ordinary filter installed is handed exactly the
+    silence #152 is about, by the code written to end it. Nothing else in this
+    file distinguishes those two arrangements, because every other filter test
+    uses a filter that drops the record, where both arrangements look alike.
+    """
+
+    class PassEverything(logging.Filter):
+        """Sees every record, changes nothing, and lets all of them through."""
+
+        def __init__(self):
+            super().__init__()
+            self.seen = 0
+
+        def filter(self, record):
+            self.seen += 1
+            return True
+
+    said_once = cluster(cores=8)(pid_of_whole_call)
+    listening = collecting_handler(logging.WARNING)
+    benign = PassEverything()
+
+    with a_bare_logging_chain():
+        logging.getLogger("clustrix").addHandler(listening)
+        if attach_to == "handler":
+            listening.addFilter(benign)
+        else:
+            DECORATOR_LOGGER.addFilter(benign)
+        assert said_once(N)["pid"] == os.getpid()
+
+    written = listening.stream.getvalue()
+    assert "cores=8" in written, (
+        "a filter that passes everything was installed and the caller was "
+        f"told nothing at all: {written!r}"
+    )
+    assert benign.seen == 1, (
+        "the record reached the filter exactly once -- more would mean the "
+        f"gate ran caller code to make its decision (saw {benign.seen})"
+    )
+
+
+def test_an_unconfirmable_reason_repeats_but_not_forever():
+    """A repeat is the fail-safe. An unbounded repeat is the thing being fixed.
+
+    A filter the gate refuses to read never lets a reason be marked delivered,
+    so before ``UNCONFIRMED_REPEAT_LIMIT`` existed this loop produced one
+    warning per iteration -- the throttle switched off by the very caller
+    configuration it was supposed to survive. The cap bounds that, and it is
+    allowed to remove only repeats: the count is reached after the message has
+    already been delivered ``UNCONFIRMED_REPEAT_LIMIT`` times, never before the
+    first.
+    """
+
+    class PassEverything(logging.Filter):
+        def filter(self, record):
+            return True
+
+    repeats = cluster(cores=8)(pid_of_whole_call)
+    listening = collecting_handler(logging.WARNING)
+    listening.addFilter(PassEverything())
+
+    with a_bare_logging_chain():
+        logging.getLogger("clustrix").addHandler(listening)
+
+        assert repeats(N)["pid"] == os.getpid()
+        after_one = listening.stream.getvalue().count("cores=8")
+        assert after_one == 1, (
+            "the very first call must reach the caller whatever the cap says; "
+            f"got {after_one}"
+        )
+
+        for _ in range(19):
+            assert repeats(N)["pid"] == os.getpid()
+
+    written = listening.stream.getvalue()
+    said = written.count("cores=8")
+    assert said == UNCONFIRMED_REPEAT_LIMIT, (
+        f"20 calls under an unreadable filter said it {said} times; the cap "
+        f"is {UNCONFIRMED_REPEAT_LIMIT}"
+    )
+
+
+def test_the_cap_does_not_outlive_the_configuration_that_caused_it():
+    """Spending the repeats must not buy permanent silence.
+
+    The cap counts only deliveries the gate could not confirm. A caller who
+    installs a handler clustrix can vouch for -- ``basicConfig``, the filter
+    removed -- has never been told, whatever the counter says, so the confirmed
+    branch runs and they are told once. A cap checked before that branch would
+    turn "we repeated ourselves three times into a filtered logger" into "this
+    reason is now unspeakable", which is #152 rebuilt one more time.
+    """
+
+    class PassEverything(logging.Filter):
+        def filter(self, record):
+            return True
+
+    spent = cluster(cores=8)(pid_of_whole_call)
+    filtered = collecting_handler(logging.WARNING)
+    filtered.addFilter(PassEverything())
+    plain = collecting_handler(logging.WARNING)
+
+    with a_bare_logging_chain():
+        logging.getLogger("clustrix").addHandler(filtered)
+        for _ in range(20):
+            assert spent(N)["pid"] == os.getpid()
+        assert (
+            filtered.stream.getvalue().count("cores=8") == UNCONFIRMED_REPEAT_LIMIT
+        ), "the cap must have been reached, or this test proves nothing"
+
+        logging.getLogger("clustrix").handlers = [plain]
+        for _ in range(5):
+            assert spent(N)["pid"] == os.getpid()
+
+    heard = plain.stream.getvalue().count("cores=8")
+    assert heard == 1, (
+        "a listener clustrix can vouch for arrived after the cap was spent "
+        f"and was told {heard} times; expected exactly one"
     )
 
 

@@ -304,7 +304,7 @@ flipping the setting, because a repo can be public on purpose and silently
 changing someone's visibility is its own incident. Make it private yourself, or
 point ``hf_data_repo`` somewhere else.
 
-**A package at or above ``stage_max_bytes``**, with the largest file named.
+**A package at or above** ``stage_max_bytes`` -- with the largest file named.
 
 **Two different files that would land on the same name.** One would silently
 overwrite the other on the worker and the run would produce a wrong answer

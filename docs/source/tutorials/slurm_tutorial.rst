@@ -131,7 +131,7 @@ When Things Fail
   :doc:`../ssh_setup`.
 - **Editable/unreproducible local package used by the function**: refused
   at step 1, before any SSH connection is made, naming the package.
-- **``ModuleNotFoundError`` on the worker**: a package your function reaches
+- ``ModuleNotFoundError`` **on the worker**: a package your function reaches
   by *reference* (e.g. ``import mypkg; mypkg.helpers.clean(x)``) that
   clustrix's dependency walk did not detect. Vendor the code into your
   project or list it explicitly.

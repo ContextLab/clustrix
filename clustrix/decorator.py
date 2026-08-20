@@ -4,7 +4,7 @@ import logging
 import os
 import threading
 from dataclasses import fields
-from typing import Any, Callable, NamedTuple, Optional, Dict, List, Set
+from typing import Any, Callable, NamedTuple, Optional, Dict, List
 
 from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
@@ -27,17 +27,32 @@ SHIPPED_DEFAULT_CORES = next(
     f.default for f in fields(ClusterConfig) if f.name == "default_cores"
 )
 
+#: How many times one ``(where, because)`` reason may be spoken while
+#: ``_warning_reaches_someone`` is unable to confirm that anybody heard it.
+#: The gate answers "no" for a filter it refuses to run (see there), and a
+#: reason it cannot confirm is therefore never marked delivered -- which
+#: without a cap means one message per call, in exactly the tight local loop
+#: the throttle exists to protect. Three is enough to be noticed in a scrolling
+#: log and few enough not to become the noise it is warning about.
+UNCONFIRMED_REPEAT_LIMIT = 3
+
+#: Recorded against a reason whose message the gate could vouch for. Distinct
+#: from any repeat count, which counts up from zero.
+_HEARD = -1
+
 
 class _CoreRequest(NamedTuple):
     """A worker count the caller asked for, and where they wrote it.
 
-    ``reported`` is the set of ``(where, because)`` pairs this decorated
-    function has already complained about; see ``_warn_cores_unused``.
+    ``reported`` records, per ``(where, because)`` pair this decorated
+    function has complained about, how many times it has been said: ``_HEARD``
+    once a listener was confirmed, otherwise the number of unconfirmed
+    repeats so far. See ``_warn_cores_unused``.
     """
 
     value: int
     where: str
-    reported: Set[tuple]
+    reported: Dict[tuple, int]
 
 
 def cluster(
@@ -99,9 +114,9 @@ def cluster(
     def decorator(func: Callable) -> Callable:
 
         # One record per decorated function of the (request, reason) pairs
-        # already reported, so a call in a loop does not repeat itself. See
-        # ``_warn_cores_unused``.
-        cores_reported: Set[tuple] = set()
+        # already reported and how often, so a call in a loop does not repeat
+        # itself. See ``_warn_cores_unused``.
+        cores_reported: Dict[tuple, int] = {}
 
         @functools.wraps(func)
         def wrapper(*args, **func_kwargs):
@@ -502,7 +517,7 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
 
 
 def _requested_cores(
-    cores: Optional[int], config, reported: Set[tuple]
+    cores: Optional[int], config, reported: Dict[tuple, int]
 ) -> Optional[_CoreRequest]:
     """The worker count the caller asked for, and where they asked for it.
 
@@ -604,7 +619,9 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     A request of 1 is not a request for a second worker, so nothing is said
     about it: one worker is what every one of these routes already provides.
 
-    Each ``(where, because)`` pair is reported **once per decorated function**.
+    Each ``(where, because)`` pair is reported **once per decorated function**
+    once a listener has been confirmed for it (and at most
+    ``UNCONFIRMED_REPEAT_LIMIT`` times before that; see below).
     The point of the message is to tell the caller something they did not know;
     repeating it on every iteration of their loop is how a warning gets
     filtered out mentally, and the local path is exactly where a decorated
@@ -621,11 +638,24 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     ``_warning_reaches_someone`` asks the whole of that question -- see there
     for why the level test alone is only half of it.
 
-    The set of keys is not bounded, and deliberately. A key is a pair of short
-    strings, and a new one only appears when the caller changes what they asked
-    for between calls; the pathological case is a loop that calls
+    A reason the gate could not vouch for is spoken again -- but not forever.
+    The gate answers "no" to any filter it declines to run, so a filter that
+    in fact passes the record leaves the caller hearing the message while the
+    budget stays unspent; the reason is then said again on the next call, and
+    the next, which is the tight local loop this throttle exists to protect
+    with the throttle switched off. So an unconfirmed reason is spoken
+    ``UNCONFIRMED_REPEAT_LIMIT`` times and then left alone. The cap can only
+    ever remove *repeats*: the first delivery is made before any counting can
+    stop it, and a confirmed listener arriving later -- the filter removed,
+    ``basicConfig`` called -- takes the ``_warning_reaches_someone`` branch,
+    which the cap does not guard. The failure this fix exists to prevent is
+    silence, and the cap cannot cause it.
+
+    The number of keys is not bounded, and deliberately. A key is a pair of
+    short strings, and a new one only appears when the caller changes what they
+    asked for between calls; the pathological case is a loop that calls
     ``configure(default_cores=k)`` with a fresh ``k`` every iteration, which
-    retains one small tuple per distinct ``k``. Capping it would mean either
+    retains one small tuple per distinct ``k``. Capping that would mean either
     dropping keys -- and a dropped key speaks again, which is the repetition
     the throttle exists to stop -- or refusing to report a genuinely new
     request. Neither trade is worth a few hundred bytes.
@@ -633,10 +663,15 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     if request is None or request.value <= 1:
         return
     key = (request.where, because)
-    if key in request.reported:
+    spoken = request.reported.get(key, 0)
+    if spoken == _HEARD:
         return
     if _warning_reaches_someone():
-        request.reported.add(key)
+        request.reported[key] = _HEARD
+    elif spoken >= UNCONFIRMED_REPEAT_LIMIT:
+        return
+    else:
+        request.reported[key] = spoken + 1
     logger.warning(
         "%s has no effect here: %s. Locally, cores bounds the worker pool only "
         "when parallel=True finds a parallelizable loop and the function "

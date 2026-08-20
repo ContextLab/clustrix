@@ -421,7 +421,7 @@ def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
 
     What this guarantees, exactly:
 
-    * **Default (``append=False``).** The secret is written into a
+    * **Default** (``append=False``). The secret is written into a
       brand-new inode that this call created, in the destination's own
       directory, and that inode is then ``os.replace()``-d into position.
       The scratch file is created with ``O_CREAT | O_EXCL | O_NOFOLLOW``
@@ -453,7 +453,7 @@ def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
 
       The scratch file is removed if anything fails, so a failed write
       leaves neither a partial file in position nor litter beside it.
-    * **``append=True``.** The content is appended, so an existing file
+    * **Append** (``append=True``). The content is appended, so an existing file
       cannot be replaced and its mode is left alone -- this call does not
       own it. All that is guaranteed is that a file *this call creates* is
       0600 from the instant it exists. This mode exists for

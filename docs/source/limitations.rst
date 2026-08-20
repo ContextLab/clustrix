@@ -174,6 +174,12 @@ Three details of the "has no effect" message itself:
   every call, because the local path is exactly where a decorated function
   gets called in a tight loop. Change the request -- a different
   ``default_cores``, a different reason for declining -- and it speaks again.
+  That single message is spent only when clustrix can establish that some
+  handler would emit it. A logging filter is the case it cannot establish:
+  a filter is your code, and running it here to find out would run it twice
+  for every message that is logged, so clustrix assumes the worst and repeats
+  the message rather than risk losing it -- up to three times, and then it
+  stops.
 * A request of one worker is not reported. Every one of these routes already
   provides one.
 * ``configure(default_cores=4)`` -- the shipped default -- is not reported
