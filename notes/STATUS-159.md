@@ -675,3 +675,47 @@ Now rewritten to describe both literals; 0 occurrences remain in `notes/`.
 **Add to the pre-push checklist:** run the history scan as well as the
 working-tree one. The working-tree scanner passing is not evidence that the
 commits being pushed are clean.
+
+## #172's fix was largely moot in practice (red-team RT-1, 2026-08-20)
+
+The third state is **unreachable on real hardware**. `detect_gpu_capabilities`
+tries methods in sequence; when `nvidia-smi` is unreadable the next method,
+`lspci | grep -i nvidia | wc -l`, runs and re-sets `gpu_available=True`,
+clearing the inconclusive state. Probed against the real in-process SSH server
+with a real single-GPU `lspci` listing (VGA function plus its companion audio
+function):
+
+```
+gpu_available=True  gpu_detection_inconclusive=False  gpu_count=2  gpu_devices=[]
+summary = "GPU detected (2 devices), setting up GPU-enabled VENV2..."
+```
+
+That is the pre-fix defect verbatim: a confident yes, an empty device list, and
+a count of PCI **functions** rather than GPUs. The new state survives only when
+`lspci` also finds nothing — i.e. only when there is no GPU.
+
+**The tests could not see it because the fixture stubs `lspci` to `exit 1`.**
+This is a fourth instance of the campaign's recurring pattern: a test written
+for a specific defect inherits that defect's parameters and leaves the ordinary
+path uncovered, while coverage tooling reports the line covered.
+
+**RT-2**, pre-existing but now load-bearing:
+`ls -la /proc/driver/nvidia/gpus/ | wc -l` minus 2 counts the `total` line, so
+1 real GPU yields `gpu_count == 2`. It also clears `inconclusive`.
+
+**RT-3**: #169's guard misses a job-level `if:`. Adding
+`if: github.event_name == 'push'` to `status-check` silences the required
+`CI Status` context on every PR while all four tests pass — the guard only
+inspects `on.pull_request`.
+
+**RT-4**, accepted: `REQUIRED_CONTEXTS` is a hardcoded tuple, honestly labelled
+as a copy, and verified accurate against the live API today.
+
+Confirmed sound and not to be churned: the `!= 5` tightening loses no shape
+that previously gave a correct answer; all-or-nothing per response is right and
+pinned; `status-check` requiring `result == "success"` across all four jobs
+does fail on skipped/cancelled. 13 of 14 mutants were caught.
+
+Fix round dispatched. **Asking the red-team specifically whether a later
+detection method re-sets the flag is what surfaced this** — the fix itself was
+correct in isolation and would have shipped looking complete.
