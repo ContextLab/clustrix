@@ -2793,8 +2793,10 @@ def detect_gpu_capabilities(
         - gpu_available: bool -- a GPU was positively identified
         - gpu_detection_inconclusive: bool -- a GPU tool answered in a format
           this code could not read, so neither presence nor absence is known
-        - gpu_count: int
-        - gpu_devices: List[Dict] with device info
+        - gpu_count: Optional[int] -- how many GPUs, or ``None`` when a method
+          established that NVIDIA hardware is present but cannot count it
+        - gpu_devices: List[Dict] with device info; empty unless nvidia-smi
+          was readable, because no other method yields per-device detail
         - cuda_available: bool
         - cuda_version: str
         - pytorch_gpu_support: bool
@@ -2813,9 +2815,22 @@ def detect_gpu_capabilities(
     the offending lines go into ``detection_errors``, and
     ``gpu_detection_inconclusive`` is set so a caller can tell "no GPU here"
     apart from "could not tell". The remaining detection methods still run;
-    if one of them positively counts NVIDIA devices then availability *is*
-    known, ``gpu_available`` becomes ``True`` on that method's own evidence
-    and ``gpu_detection_inconclusive`` is left ``False``.
+    if one of them establishes that NVIDIA hardware is present then
+    availability *is* known, ``gpu_available`` becomes ``True`` on that
+    method's own evidence and ``gpu_detection_inconclusive`` is left
+    ``False``.
+
+    What the fallback methods do and do not license:
+
+    Each method is trusted only for what it can actually observe.
+    ``/proc/driver/nvidia/gpus/`` holds one directory per GPU, so it yields a
+    real count but no device detail. ``lspci`` yields neither: it proves
+    NVIDIA hardware is attached and cannot say how many GPUs that is, because
+    it lists PCI functions and a single card presents several. So a positive
+    ``lspci`` sets ``gpu_available`` and leaves ``gpu_count`` at ``None`` --
+    an unknown count is reported as unknown, never as the number of lines
+    that happened to match. Neither fallback ever fills ``gpu_devices``; a
+    caller is not handed a device list that was not read off a device.
 
     It does not raise. Unlike ``_select_remote_python``, where no compatible
     interpreter means no job can run at all, a caller here can proceed
@@ -2912,18 +2927,25 @@ def detect_gpu_capabilities(
         gpu_info["detection_errors"].append(f"CUDA detection failed: {str(e)}")
 
     # Method 3: Check /proc/driver/nvidia if nvidia-smi fails
+    #
+    # The NVIDIA kernel driver creates exactly one directory per GPU under
+    # /proc/driver/nvidia/gpus/, named after the device's PCI address, so a
+    # plain listing is one line per GPU and counting the lines is a real
+    # answer. This used to run `ls -la` and subtract 2 for `.` and `..`,
+    # which forgot the `total` line `-l` prints: one GPU came back as two.
+    # `ls` without `-a` and without `-l` emits neither, so there is nothing
+    # to subtract and nothing to get wrong.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(
-                "ls -la /proc/driver/nvidia/gpus/ 2>/dev/null | wc -l"
+                "ls /proc/driver/nvidia/gpus/ 2>/dev/null | wc -l"
             )
             exit_status = stdout.channel.recv_exit_status()
 
             if exit_status == 0:
                 gpu_count_str = stdout.read().decode().strip()
                 try:
-                    # Subtract 2 for . and .. entries
-                    gpu_count = max(0, int(gpu_count_str) - 2)
+                    gpu_count = int(gpu_count_str)
                     if gpu_count > 0:
                         gpu_info["gpu_available"] = True
                         gpu_info["gpu_count"] = gpu_count
@@ -2936,6 +2958,16 @@ def detect_gpu_capabilities(
             )
 
     # Method 4: Check for GPU via lspci (fallback)
+    #
+    # lspci answers "is NVIDIA hardware attached to this bus", which is real
+    # evidence of presence, and nothing else. It cannot answer "how many
+    # GPUs": every matching line is a PCI *function*, and one consumer card
+    # presents at least two of them -- the VGA controller and its companion
+    # HD Audio device -- so `grep -c` on a single-GPU host says 2. That
+    # number used to be assigned to `gpu_count` and printed to the user as
+    # "GPU detected (2 devices)". The count is not knowable from here, so it
+    # is left `None` rather than invented, and `gpu_devices` stays empty
+    # because lspci yields no per-device memory or compute capability.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(
@@ -2946,13 +2978,13 @@ def detect_gpu_capabilities(
             if exit_status == 0:
                 nvidia_count_str = stdout.read().decode().strip()
                 try:
-                    nvidia_count = int(nvidia_count_str)
-                    if nvidia_count > 0:
-                        gpu_info["gpu_available"] = True
-                        gpu_info["gpu_count"] = nvidia_count
-                        gpu_info["detection_method"] = "lspci"
+                    matching_functions = int(nvidia_count_str)
                 except ValueError:
-                    pass
+                    matching_functions = 0
+                if matching_functions > 0:
+                    gpu_info["gpu_available"] = True
+                    gpu_info["gpu_count"] = None
+                    gpu_info["detection_method"] = "lspci"
         except Exception as e:
             gpu_info["detection_errors"].append(f"lspci detection failed: {str(e)}")
 
@@ -2969,17 +3001,32 @@ def detect_gpu_capabilities(
 def gpu_detection_summary(gpu_info: Dict[str, Any]) -> str:
     """Say what GPU detection established -- including "nothing".
 
-    Three outcomes, three sentences. "Could not determine" is not a wordier
-    way of saying "no GPUs detected": one means the cluster answered and the
-    answer was no, the other means clustrix could not read the answer, and a
-    user deciding whether to install a GPU build themselves needs to know
-    which one they have.
+    "Could not determine" is not a wordier way of saying "no GPUs detected":
+    one means the cluster answered and the answer was no, the other means
+    clustrix could not read the answer, and a user deciding whether to
+    install a GPU build themselves needs to know which one they have.
+
+    "Yes" is not one sentence either, because the methods do not all
+    establish the same thing. Only nvidia-smi produces a device list;
+    ``/proc/driver/nvidia`` produces a count and nothing else; ``lspci``
+    produces neither, and the sentence for it must not contain a number,
+    since the only number available there is a count of PCI functions.
     """
     if gpu_info.get("gpu_available", False):
-        return (
-            f"GPU detected ({gpu_info.get('gpu_count', 0)} devices), "
-            "setting up GPU-enabled VENV2..."
-        )
+        count = gpu_info.get("gpu_count")
+        method = gpu_info.get("detection_method", "unknown")
+        if count is None:
+            return (
+                f"NVIDIA hardware detected by {method}, which cannot count "
+                "devices, so the number of GPUs is unknown. Setting up "
+                "GPU-enabled VENV2..."
+            )
+        if not gpu_info.get("gpu_devices"):
+            return (
+                f"GPU detected ({count} devices) by {method}, which reports "
+                "no per-device details. Setting up GPU-enabled VENV2..."
+            )
+        return f"GPU detected ({count} devices), setting up GPU-enabled VENV2..."
     if gpu_info.get("gpu_detection_inconclusive", False):
         return (
             "Could not determine whether this cluster has GPUs: "

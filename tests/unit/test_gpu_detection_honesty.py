@@ -38,18 +38,62 @@ PASSWORD = "hunter2"
 WELL_FORMED = "0, NVIDIA A100-SXM4-40GB, 40536, 40122, 8.0\n1, NVIDIA A100-SXM4-40GB, 40536, 39980, 8.0"
 
 
+# What `lspci` really prints on a host with one consumer NVIDIA card. The
+# card is a single GPU but two PCI functions -- the display controller and
+# the HD Audio device that ships on the same die -- so `grep -i nvidia | wc
+# -l` says 2. Counting these lines is counting functions, not GPUs.
+LSPCI_ONE_CONSUMER_GPU = """00:00.0 Host bridge: Intel Corporation Xeon E3-1200 v6/7th Gen Core Processor Host Bridge/DRAM Registers (rev 05)
+00:1f.3 Audio device: Intel Corporation 200 Series PCH HD Audio
+01:00.0 VGA compatible controller: NVIDIA Corporation GA102 [GeForce RTX 3090] (rev a1)
+01:00.1 Audio device: NVIDIA Corporation GA102 High Definition Audio Controller (rev a1)
+"""
+
+
 def _write_executable(path, body):
     path.write_text(body)
     path.chmod(path.stat().st_mode | stat.S_IEXEC | stat.S_IXGRP | stat.S_IXOTH)
 
 
+def _install_proc_gpus_shim(bindir, base, pci_addresses):
+    """Make ``/proc/driver/nvidia/gpus/`` real, for whatever ``ls`` is asked.
+
+    The NVIDIA driver puts one directory per GPU under that path, named after
+    the device's PCI address. macOS has no ``/proc`` and the path cannot be
+    created, so a real directory is built elsewhere and ``ls`` is shadowed by
+    a shim that rewrites that one argument and hands everything else --
+    including the flags the shipped code chose -- to the real ``/bin/ls``.
+    Nothing about the listing is hand-written: the bytes clustrix parses are
+    the bytes ``ls`` produces for a directory that really has that shape.
+    """
+    gpus = base / "proc_nvidia_gpus"
+    gpus.mkdir()
+    for address in pci_addresses:
+        (gpus / address).mkdir()
+    _write_executable(
+        bindir / "ls",
+        "#!/bin/sh\n"
+        "n=$#\n"
+        "i=0\n"
+        "while [ $i -lt $n ]; do\n"
+        '  a="$1"; shift\n'
+        '  case "$a" in\n'
+        f'    /proc/driver/nvidia/gpus*) a="{gpus}" ;;\n'
+        "  esac\n"
+        '  set -- "$@" "$a"\n'
+        "  i=$((i+1))\n"
+        "done\n"
+        'exec /bin/ls "$@"\n',
+    )
+
+
 @contextmanager
-def gpu_info(tmp_path, smi_stdout, smi_exit=0):
+def gpu_info(tmp_path, smi_stdout, smi_exit=0, lspci_stdout=None, proc_gpus=None):
     """Run the real detection against a real host whose nvidia-smi says this.
 
-    ``nvcc`` and ``lspci`` are shadowed with silent stubs so the answer comes
-    from the response under test rather than from whatever hardware happens to
-    be running the suite.
+    ``nvcc`` is shadowed with a silent stub, and ``lspci`` and the
+    ``/proc/driver/nvidia/gpus/`` listing answer whatever the caller asks for
+    -- by default, nothing -- so the answer comes from the responses under
+    test rather than from whatever hardware happens to be running the suite.
     """
     # A fresh directory per call, so one test can stand up several hosts.
     base = Path(tempfile.mkdtemp(dir=str(tmp_path)))
@@ -62,7 +106,14 @@ def gpu_info(tmp_path, smi_stdout, smi_exit=0):
         f'#!/bin/sh\ncat "{payload}"\nexit {smi_exit}\n',
     )
     _write_executable(bindir / "nvcc", "#!/bin/sh\nexit 1\n")
-    _write_executable(bindir / "lspci", "#!/bin/sh\nexit 1\n")
+    if lspci_stdout is None:
+        _write_executable(bindir / "lspci", "#!/bin/sh\nexit 1\n")
+    else:
+        lspci_payload = bindir / "lspci_payload"
+        lspci_payload.write_text(lspci_stdout)
+        _write_executable(bindir / "lspci", f'#!/bin/sh\ncat "{lspci_payload}"\n')
+    if proc_gpus is not None:
+        _install_proc_gpus_shim(bindir, base, proc_gpus)
 
     root = base / "served"
     root.mkdir()
@@ -202,3 +253,138 @@ def test_the_setup_message_distinguishes_no_from_could_not_tell(tmp_path):
         assert "No GPUs detected" not in message
         # The response that could not be read is quoted, not summarised away.
         assert "40536 MiB" in message
+
+
+# The fallback methods (#172, adversarial review RT-1/RT-2).
+#
+# The tests above shadow `lspci` with `exit 1` and leave
+# `/proc/driver/nvidia/gpus/` absent, which is what a host with no GPU looks
+# like. On a host that *does* have one, the fallbacks run after an unreadable
+# nvidia-smi and answer with their own evidence -- and the two of them can
+# establish different things. Nothing below is stubbed at the Python level:
+# a real `lspci` on the server's PATH prints a real listing, and the
+# `/proc/driver/nvidia/gpus/` listing comes from the real `ls` reading a real
+# directory that really has one entry per GPU.
+
+
+def test_lspci_reports_presence_without_inventing_a_count(tmp_path):
+    """One card, two PCI functions: "2" is not a number of GPUs.
+
+    `lspci | grep -i nvidia | wc -l` counts PCI functions. A single consumer
+    card presents the display controller and its companion HD Audio device,
+    so the count is 2 on a one-GPU host -- and it was 2 that got assigned to
+    ``gpu_count`` and printed as "GPU detected (2 devices)". lspci cannot
+    count GPUs, so the count must be reported as unknown.
+    """
+    unreadable = "0, NVIDIA A100-SXM4-40GB, 40536 MiB, 40122 MiB, 8.0"
+    with gpu_info(tmp_path, unreadable, lspci_stdout=LSPCI_ONE_CONSUMER_GPU) as info:
+        # lspci really does prove NVIDIA hardware is attached.
+        assert info["gpu_available"] is True
+        assert info["detection_method"] == "lspci"
+        # ...and really cannot say how many GPUs that is.
+        assert info["gpu_count"] is None
+        assert info["gpu_count"] != 2
+        # No device list was read off any device.
+        assert info["gpu_devices"] == []
+
+
+def test_lspci_message_states_no_number_it_does_not_have(tmp_path):
+    """The sentence the user reads must not contain a fabricated count."""
+    unreadable = "0, NVIDIA A100-SXM4-40GB, 40536 MiB, 40122 MiB, 8.0"
+    with gpu_info(tmp_path, unreadable, lspci_stdout=LSPCI_ONE_CONSUMER_GPU) as info:
+        message = gpu_detection_summary(info)
+        assert "2 devices" not in message
+        assert "devices)" not in message
+        assert "unknown" in message
+        assert "lspci" in message
+
+
+def test_the_inconclusive_state_survives_when_nothing_else_can_tell(tmp_path):
+    """No NVIDIA on the bus and no driver directory: "could not tell" stands.
+
+    This is the state RT-1 found unreachable: every earlier test reached it
+    only because `lspci` was stubbed to fail, so it was never shown to
+    survive a fallback that actually ran and found nothing.
+    """
+    unreadable = "0, NVIDIA A100-SXM4-40GB, 40536 MiB, 40122 MiB, 8.0"
+    lspci_no_nvidia = (
+        "00:00.0 Host bridge: Intel Corporation Xeon E3-1200 v6/7th Gen Core "
+        "Processor Host Bridge/DRAM Registers (rev 05)\n"
+        "00:02.0 VGA compatible controller: Intel Corporation HD Graphics 630 (rev 04)\n"
+    )
+    with gpu_info(
+        tmp_path, unreadable, lspci_stdout=lspci_no_nvidia, proc_gpus=[]
+    ) as info:
+        assert info["gpu_available"] is False
+        assert info["gpu_detection_inconclusive"] is True
+        assert info["gpu_count"] == 0
+        assert gpu_detection_summary(info).startswith(
+            "Could not determine whether this cluster has GPUs"
+        )
+
+
+@pytest.mark.parametrize(
+    "pci_addresses,expected",
+    [
+        (["0000:01:00.0"], 1),
+        (["0000:07:00.0", "0000:0a:00.0"], 2),
+        (
+            [
+                "0000:07:00.0",
+                "0000:0a:00.0",
+                "0000:47:00.0",
+                "0000:4d:00.0",
+            ],
+            4,
+        ),
+    ],
+)
+def test_proc_driver_counts_gpus_not_listing_decorations(
+    tmp_path, pci_addresses, expected
+):
+    """One directory per GPU means one line per GPU -- and nothing else.
+
+    This ran `ls -la` and subtracted 2 for `.` and `..`, which forgot the
+    ``total`` line that ``-l`` prints, so a machine with one GPU was reported
+    as having two. The listing here is produced by the real ``ls`` against a
+    real directory with exactly ``len(pci_addresses)`` entries, so whatever
+    the shipped command asks for is what gets parsed.
+    """
+    with gpu_info(tmp_path, "", smi_exit=9, proc_gpus=pci_addresses) as info:
+        assert info["gpu_available"] is True
+        assert info["detection_method"] == "/proc/driver/nvidia"
+        assert info["gpu_count"] == expected
+        # A count, but still no device detail -- and the message says so.
+        assert info["gpu_devices"] == []
+        message = gpu_detection_summary(info)
+        assert f"GPU detected ({expected} devices)" in message
+        assert "no per-device details" in message
+
+
+def test_proc_driver_wins_over_lspci_because_it_can_count(tmp_path):
+    """Both fallbacks available: the one that can count is the one that does."""
+    with gpu_info(
+        tmp_path,
+        "",
+        smi_exit=9,
+        lspci_stdout=LSPCI_ONE_CONSUMER_GPU,
+        proc_gpus=["0000:01:00.0"],
+    ) as info:
+        assert info["detection_method"] == "/proc/driver/nvidia"
+        assert info["gpu_count"] == 1
+
+
+def test_nvidia_smi_still_owns_the_device_list(tmp_path):
+    """A readable nvidia-smi is not overridden by a fallback's coarser answer."""
+    with gpu_info(
+        tmp_path,
+        WELL_FORMED,
+        lspci_stdout=LSPCI_ONE_CONSUMER_GPU,
+        proc_gpus=["0000:01:00.0"],
+    ) as info:
+        assert info["detection_method"] == "nvidia-smi"
+        assert info["gpu_count"] == 2
+        assert len(info["gpu_devices"]) == 2
+        assert gpu_detection_summary(info) == (
+            "GPU detected (2 devices), setting up GPU-enabled VENV2..."
+        )
