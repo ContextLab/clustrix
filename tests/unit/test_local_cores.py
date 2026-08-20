@@ -31,10 +31,12 @@ Nothing here is mocked. Every test drives the real decorator, the real
 ``LocalExecutor`` pool and the real ``LocalJobManager``.
 """
 
+import io
 import logging
 import multiprocessing
 import os
 import threading
+from contextlib import contextmanager
 from time import monotonic, sleep
 
 import pytest
@@ -297,8 +299,14 @@ def test_the_call_site_hands_the_pool_size_to_the_chunker(cores, machine_with_tw
     without reaching inside anything. Two contracts are asserted, and both are
     machine-independent because the machine is pinned:
 
-    * every worker is offered at least two chunks (see
-      ``test_a_worker_is_offered_more_than_one_chunk`` for why two);
+    * every worker is offered exactly two chunks (see
+      ``test_a_worker_is_offered_more_than_one_chunk`` for why two). The
+      equality holds because ``N`` is divisible by ``2 * cores`` for every
+      count parametrised here, and only for that reason: ``chunk_size`` is a
+      floor, so a remainder becomes a further chunk. Adding ``cores=3`` to the
+      list would cut ``N == 64`` into seven pieces against ``2 * 3 == 6``.
+      A new pool size has to satisfy ``N % (2 * cores) == 0``, or this
+      assertion has to loosen with it;
     * the count moves when ``cores`` moves, while ``os.cpu_count()`` does not.
     """
     result = cluster(parallel=True, cores=cores)(pids_of_slice)(N)
@@ -887,6 +895,248 @@ def test_a_null_handler_does_not_spend_the_budget_either(caplog):
     assert len(said) == 1, (
         "the caller replaced the NullHandler with one that emits and was told "
         f"exactly once; got {len(said)}: {said}"
+    )
+
+
+DECORATOR_LOGGER = logging.getLogger("clustrix.decorator")
+
+
+@contextmanager
+def a_bare_logging_chain():
+    """Run the block with the ``clustrix.decorator`` logging chain emptied.
+
+    A test about what happens when nothing is listening cannot leave pytest's
+    own root handlers in place: the record would genuinely be delivered, which
+    is a different situation from the one under test. Every logger from
+    ``clustrix.decorator`` up to the root is stripped of handlers and filters
+    and set to propagate, ``clustrix.decorator`` is pinned at ``WARNING`` so
+    that no inherited level can decide the answer instead of the thing being
+    tested, and ``logging.lastResort`` -- a module global, and therefore
+    everybody's -- is saved along with them. The block attaches whatever the
+    scenario needs; everything is put back afterwards.
+    """
+    chain = [DECORATOR_LOGGER, logging.getLogger("clustrix"), logging.root]
+    saved = [(lg, lg.handlers, lg.filters, lg.level, lg.propagate) for lg in chain]
+    saved_last_resort = logging.lastResort
+    saved_last_resort_level = (
+        None if saved_last_resort is None else saved_last_resort.level
+    )
+    for one in chain:
+        one.handlers = []
+        one.filters = []
+        one.propagate = True
+    DECORATOR_LOGGER.setLevel(logging.WARNING)
+    try:
+        yield
+    finally:
+        logging.lastResort = saved_last_resort
+        if saved_last_resort is not None:
+            saved_last_resort.level = saved_last_resort_level
+        for one, handlers, filters, level, propagate in saved:
+            one.handlers = handlers
+            one.filters = filters
+            one.level = level
+            one.propagate = propagate
+
+
+def collecting_handler(level=logging.WARNING):
+    """A real handler that writes somewhere the test can read back."""
+    handler = logging.StreamHandler(io.StringIO())
+    handler.setLevel(level)
+    return handler
+
+
+def test_a_handler_that_is_too_high_to_emit_does_not_spend_the_budget(caplog):
+    """The handler's level is a second gate, and it is not the logger's level.
+
+    A ``clustrix`` logger carrying a single ``ERROR``-level file handler is an
+    ordinary production setup -- an application that wants library errors on
+    disk and nothing else. ``isEnabledFor(WARNING)`` says yes, because the
+    *logger* level is untouched; ``callHandlers`` then finds the handler,
+    declines to emit because ``WARNING < ERROR``, and *because it found one*
+    does not fall back to ``logging.lastResort``. Nothing is emitted.
+
+    This is the case where asking the handler gate about ``ERROR`` rather than
+    ``WARNING`` -- the same one-notch slip that
+    ``test_a_warning_nobody_could_hear_does_not_spend_the_budget`` pins for the
+    logger level -- reads as "somebody can hear this", spends the single
+    message on a record nothing received, and hands the caller permanent
+    silence the moment they add the handler that would have shown it. That is
+    #152's own defect rebuilt inside the fix for it.
+    """
+    said_once = cluster(cores=8)(pid_of_whole_call)
+    too_high = collecting_handler(logging.ERROR)
+
+    with a_bare_logging_chain():
+        logging.getLogger("clustrix").addHandler(too_high)
+        assert DECORATOR_LOGGER.isEnabledFor(logging.WARNING), (
+            "the level must be on, or this test would pass because the record "
+            "was never made rather than because the handler refused it"
+        )
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+
+    written = too_high.stream.getvalue()
+    assert (
+        "cores=8" not in written
+    ), f"an ERROR-level handler emitted a WARNING record: {written!r}"
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "the caller added a handler that emits and was told exactly once; got "
+        f"{len(said)}: {said}"
+    )
+
+
+def test_an_ancestor_handler_behind_propagate_false_does_not_spend_the_budget(
+    caplog,
+):
+    """``propagate = False`` ends the walk, and the walk must end with it.
+
+    ``logging.getLogger("clustrix.decorator").propagate = False`` is how an
+    application says "this logger's records stop here". ``callHandlers`` obeys
+    it literally: it visits ``clustrix.decorator``'s own handlers and then
+    stops, never reaching the emitting handler an ancestor carries. So with a
+    ``NullHandler`` here and a real handler on ``clustrix``, nothing is
+    emitted -- a handler was found, so ``lastResort`` stays out of it too.
+
+    A gate that walked to the root regardless would see the ancestor's real
+    handler, answer "somebody can hear this", and spend the one message on a
+    record that stopped one logger short of it.
+    """
+    said_once = cluster(cores=8)(pid_of_whole_call)
+    unreachable = collecting_handler(logging.WARNING)
+
+    with a_bare_logging_chain():
+        DECORATOR_LOGGER.addHandler(logging.NullHandler())
+        DECORATOR_LOGGER.propagate = False
+        logging.getLogger("clustrix").addHandler(unreachable)
+        assert DECORATOR_LOGGER.isEnabledFor(
+            logging.WARNING
+        ), "the level must be on, or this test would pass for the wrong reason"
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+
+    written = unreachable.stream.getvalue()
+    assert (
+        "cores=8" not in written
+    ), f"propagate=False was set and a record crossed it anyway: {written!r}"
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "the caller let records propagate again and was told exactly once; got "
+        f"{len(said)}: {said}"
+    )
+
+
+@pytest.mark.parametrize("last_resort_state", ["removed", "raised"])
+def test_a_last_resort_that_cannot_emit_does_not_spend_the_budget(
+    last_resort_state, caplog, capsys
+):
+    """With no handlers at all, ``lastResort`` decides -- and it can say no.
+
+    When ``callHandlers`` finds no handler anywhere in the chain it falls back
+    to ``logging.lastResort``, a module-level ``_StderrHandler`` that ships at
+    ``WARNING``. That fallback is the reason an unconfigured script still sees
+    this message, so the gate has to account for it. But it is a global anyone
+    may change, and both of the ways it can be silenced are exercised here
+    because they are separate halves of one expression: ``logging.lastResort =
+    None`` is the documented way to turn the fallback off entirely, and raising
+    its level is what an application does when it wants stderr quieter. A gate
+    that answered "yes" for a bare chain without asking these questions would
+    spend the message into a void on exactly the setup -- no handlers
+    configured -- where the caller is least likely to have another way of
+    finding out.
+    """
+    said_once = cluster(cores=8)(pid_of_whole_call)
+
+    with a_bare_logging_chain():
+        if last_resort_state == "removed":
+            logging.lastResort = None
+        else:
+            logging.lastResort.setLevel(logging.ERROR)
+        assert DECORATOR_LOGGER.isEnabledFor(
+            logging.WARNING
+        ), "the level must be on, or this test would pass for the wrong reason"
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+
+    stderr = capsys.readouterr().err
+    assert (
+        "cores=8" not in stderr
+    ), f"lastResort was silenced and still wrote the message: {stderr!r}"
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "handlers came back and the caller was told exactly once; got "
+        f"{len(said)}: {said}"
+    )
+
+
+@pytest.mark.parametrize("attach_to", ["handler", "logger"])
+def test_a_filter_that_drops_the_record_does_not_spend_the_budget(attach_to, caplog):
+    """A filter can throw the record away after every level test has passed.
+
+    Two of them can, at two different points, and both are pinned because the
+    code has to know about both: ``Logger.handle`` runs *this logger's* filters
+    before ``callHandlers`` gets the record at all, and ``Handler.handle`` runs
+    each handler's filters after the level test and before ``emit``. Level
+    checks alone see neither, so a gate built only from levels answers
+    "somebody can hear this" and spends the single message on a record that was
+    discarded -- #152's silence, again, rebuilt inside the fix for it.
+
+    ``_warning_reaches_someone`` does not run the filter to find out, and says
+    so: a filter is arbitrary caller code, and asking it twice per message
+    would corrupt any filter that counts or rate-limits. It treats a filter as
+    an obstruction instead, which is exact when the filter drops the record --
+    the case here -- and pessimistic when the filter passes it, costing a
+    repeated message rather than a lost one.
+    """
+
+    class DropEverything(logging.Filter):
+        def filter(self, record):
+            return False
+
+    said_once = cluster(cores=8)(pid_of_whole_call)
+    filtered = collecting_handler(logging.WARNING)
+    if attach_to == "handler":
+        filtered.addFilter(DropEverything())
+
+    with a_bare_logging_chain():
+        logging.getLogger("clustrix").addHandler(filtered)
+        if attach_to == "logger":
+            DECORATOR_LOGGER.addFilter(DropEverything())
+        assert DECORATOR_LOGGER.isEnabledFor(
+            logging.WARNING
+        ), "the level must be on, or this test would pass for the wrong reason"
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+
+    written = filtered.stream.getvalue()
+    assert (
+        "cores=8" not in written
+    ), f"a filter said no and the record was emitted anyway: {written!r}"
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "the filter is gone and the caller was told exactly once; got "
+        f"{len(said)}: {said}"
     )
 
 

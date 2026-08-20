@@ -539,8 +539,29 @@ def _warning_reaches_someone() -> bool:
 
     This walks the chain ``Logger.callHandlers`` walks and asks the same
     questions of it, so the two cannot disagree.
+
+    **Filters are the one question this cannot answer, so it declines to
+    guess.** ``Logger.handle`` runs this logger's own filters before
+    ``callHandlers``, and ``Handler.handle`` runs each handler's filters before
+    ``emit``; either can drop the record. A filter is arbitrary caller code
+    that takes a ``LogRecord``, so the only way to learn its verdict is to
+    build the record and run it -- and running it here would run it twice for
+    every message that does get logged. That is not free: a filter that counts,
+    rate-limits, de-duplicates or mutates the record would see double, and a
+    rate-limiting filter would have its own budget spent by the very check that
+    exists to protect a budget. So a filter that stands between this record and
+    a handler makes the answer "no": the reason stays unreported and speaks
+    again next time. That direction is deliberate. Being wrong towards *False*
+    costs a repeated message; being wrong towards *True* spends the one message
+    on a record nothing received, which is #152's silence rebuilt inside the
+    fix for it (see ``_warn_cores_unused``). Only filters on this logger and on
+    the handlers themselves count -- ``callHandlers`` never consults an
+    ancestor logger's filters, so neither does this.
     """
     if not logger.isEnabledFor(logging.WARNING):
+        return False
+
+    if logger.filters:
         return False
 
     current: Optional[logging.Logger] = logger
@@ -548,8 +569,10 @@ def _warning_reaches_someone() -> bool:
     while current is not None:
         for handler in current.handlers:
             found_a_handler = True
-            if handler.level <= logging.WARNING and not isinstance(
-                handler, logging.NullHandler
+            if (
+                handler.level <= logging.WARNING
+                and not handler.filters
+                and not isinstance(handler, logging.NullHandler)
             ):
                 return True
         if not current.propagate:
@@ -562,7 +585,11 @@ def _warning_reaches_someone() -> bool:
         return False
 
     last_resort = logging.lastResort
-    return last_resort is not None and last_resort.level <= logging.WARNING
+    return (
+        last_resort is not None
+        and last_resort.level <= logging.WARNING
+        and not last_resort.filters
+    )
 
 
 def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:

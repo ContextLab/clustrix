@@ -302,10 +302,18 @@ Either path declines, and logs at ``INFO``, when the function cannot accept
 its chunk. Neither injects the keyword regardless; a function that declares
 neither the parameter nor ``**kwargs`` simply runs whole.
 
-Both paths also require the loop's range to be a **literal** ``range(<int>)``.
-A range whose bound is only known at run time -- ``range(n)``,
-``range(len(data))`` -- is declined, because there is no way to split a bound
-the analysis cannot read.
+Both paths also require the loop's bound to be something the analysis can work
+out *before* the function runs -- which is not the same as requiring a
+literal. ``SafeRangeEvaluator`` resolves a bare name against the call's bound
+arguments, so ``range(n)`` is accepted whenever ``n`` is an integer argument of
+the decorated function, and so is arithmetic over one, ``range(n + 1)``. What
+is declined is a bound that cannot be reduced to an integer without running
+something:
+
+* a call -- ``range(len(data))`` is the common one;
+* a name computed in the body rather than passed in -- ``m = n * 2`` followed
+  by ``range(m)``, because only the arguments are in scope for the evaluator;
+* a bound that is not an ``int`` at all, such as ``n=8.0``.
 
 When ``_create_local_work_chunks`` splits a loop, it hands each chunk to your
 function as a keyword argument named ``_parallel_<loop variable>``. A function
@@ -334,7 +342,11 @@ This is the trap most likely to produce a wrong answer rather than an error.
 
 So a function that returns a scalar returns a *list of scalars* when it is
 parallelized, and the length of that list is the number of chunks the work was
-cut into: two per worker, and the worker count is the ``cores`` you asked for.
+cut into -- roughly two per worker, the worker count being the ``cores`` you
+asked for. Exactly two per worker only when ``2 * cores`` divides the loop's
+length: ``chunk_size`` is a floor, so any remainder becomes a further chunk. A
+100-iteration loop across three workers is cut into seven pieces rather than
+six, and a 10-iteration loop across four workers into ten rather than eight.
 
 The "exactly one chunk" line is the helper's contract rather than something
 you can provoke today: work is only split when the loop runs at least three
@@ -346,7 +358,7 @@ Two consequences catch people out, and neither is a difference between a
 parallel run and a sequential one -- they are differences *between parallel
 runs*.
 
-**Changing ``cores`` alone changes the answer.** The chunk count follows the
+**Changing the** ``cores`` **count alone changes the answer.** The chunk count follows the
 pool size, so the same call cut a different number of ways returns a different
 list:
 
@@ -694,23 +706,24 @@ Smaller sharp edges
   than pretending otherwise.
 * **A conda environment name proves nothing.** Reuse requires the
   ``.clustrix_ready`` marker, written only after every install succeeded.
-* **``pre_execution_commands`` is not validated or quoted.** It is a raw shell
+* ``pre_execution_commands`` **is not validated or quoted.** It is a raw shell
   injection point by design. ``module_loads`` and ``environment_variables``
   keys *are* validated and will refuse metacharacters.
-* **``cores`` must be a positive integer.** ``@cluster(cores=0)`` and
+* ``cores`` **must be a positive integer.** ``@cluster(cores=0)`` and
   ``@cluster(cores=-2)`` raise ``ValueError`` at decoration time rather than
   falling through the ``cores or config.default_cores`` merge. Booleans are
   refused as well, at the decorator and at
   :class:`~clustrix.local_executor.LocalExecutor`: ``bool`` subclasses
   ``int``, so ``cores=True`` would otherwise pass the type check and be read
   as a request for one worker.
-* **Unknown ``@cluster`` keywords are warned about, not rejected.** The
+* **Unknown** ``@cluster`` **keywords are warned about, not rejected.** The
   warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
   a keyword name is easy to miss if nothing is watching that logger. This is
   how ``@cluster(cluster_type="local")`` fails: ``cluster_type`` is a
   *configuration* setting, not a decorator keyword, so the decorator warns and
   ignores it. Use ``configure(cluster_type="local")``.
-* **Some recognised ``@cluster`` keywords are still ignored by their backend.**
+* **Some recognised** ``@cluster`` **keywords are still ignored by their
+  backend.**
   ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted and placed in
   ``job_config``, but ``HFJobsManager`` resolves them from configuration
   instead. This produces no warning, because the keywords *are* on the
