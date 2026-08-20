@@ -14,6 +14,7 @@ from .config import (
     config_built_from_file,
     config_source_for_discovered_path,
     get_config_dir,
+    set_config_source,
     strip_secret_fields,
     write_config_file_securely,
 )
@@ -549,6 +550,19 @@ class ProfileManager:
                         f"{', '.join(sorted(unknown))}"
                     )
                 loaded[name] = ClusterConfig(**config_dict)
+
+        # This loader opened the file, so it -- and not the constructor --
+        # is what may say so permanently. ``__post_init__`` infers a source
+        # and stamps the object with it, but passes ``record_host=False``:
+        # inference is not good enough to refuse a hostname for the life of
+        # the process, and doing that on a guess is what made an unrelated
+        # untrusted read in another thread deny the user their own cluster.
+        # Here there is no guess -- ``source`` names the file just parsed --
+        # so the hostname goes into the record and a later rebuild (Apply's
+        # ``configure(**asdict(cfg))``, ``dataclasses.replace``) cannot
+        # launder it back to ``runtime``.
+        for config in loaded.values():
+            set_config_source(config, source)
 
         if not loaded:
             raise ValueError(f"{filepath} contains no profiles")

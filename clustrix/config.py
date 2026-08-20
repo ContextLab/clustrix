@@ -245,7 +245,15 @@ class ClusterConfig:
         # Python however it is spelled, so every loader declares itself with
         # ``config_built_from_file`` and this picks the declaration up. See
         # ``CONFIG_SOURCE_*`` below.
-        set_config_source(self, _source_being_read())
+        #
+        # ``record_host=False`` because this is a *construction*, and what it
+        # can establish is bounded by that. "Something untrusted is being read
+        # nearby, so distrust this object" costs one refusal and is reversible
+        # by building another object. "This hostname was named by a file, so
+        # refuse it process-wide forever" is a far stronger claim with no way
+        # back, and only the loader that opened the file can make it -- which
+        # it does, explicitly. See ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES``.
+        set_config_source(self, _source_being_read(), record_host=False)
 
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
@@ -860,6 +868,25 @@ def normalize_hostname(hostname: object) -> str:
 #: Append-only within a process, and there is deliberately no public way to
 #: clear it -- a "forget that this was untrusted" API is just the laundering
 #: route again with a friendlier name.
+#:
+#: **Which is why nothing may be written here on a guess.** "This
+#: *construction* could not prove where it came from, so treat the object as
+#: untrusted" is a cheap, reversible, per-object judgement. "This *hostname*
+#: was named by a file, so refuse it process-wide forever" is a much stronger
+#: claim, and because there is no way back from it, it may only follow from a
+#: construction that is *actually inside* a declared file read. The
+#: process-wide fallback in :func:`_source_being_read` is a guess -- it fires
+#: for any construction anywhere in the process that happens to overlap an
+#: unrelated untrusted read -- and it therefore reaches
+#: :func:`set_config_source` with ``record_host=False``.
+#:
+#: Before that separation, twelve threads doing nothing but
+#: ``ClusterConfig(cluster_host=...)`` while twelve others opened and closed
+#: an unrelated working-directory read had 96,739 of 96,740 constructions
+#: over-tainted, and -- far worse -- the hostname stayed refused after the
+#: overlap ended, with no API able to clear it. A momentary benign overlap
+#: permanently denying the documented workflow is how a security control gets
+#: ripped out; a suspended generator reproduces it with no threads at all.
 _HOSTS_NAMED_BY_UNTRUSTED_SOURCES: Dict[str, str] = {}
 
 
@@ -898,6 +925,20 @@ _CONFIG_SOURCE_BEING_READ: contextvars.ContextVar[str] = contextvars.ContextVar(
 #: global -- shared by every thread -- and deliberately consulted only when
 #: the calling context declares nothing, so it does not cost the ContextVar
 #: its precision. See :func:`_source_being_read`.
+#:
+#: "Anywhere in this process" has to mean every untrusted read there is, and
+#: for a while it did not: the automatic search in :func:`_load_default_config`
+#: reached the file through :func:`load_config`, whose own declaration is
+#: ``explicit-file`` -- trusted, so nothing was recorded here -- and fixed the
+#: provenance up afterwards with :func:`set_config_source`. The guard
+#: therefore covered ``ProfileManager._restore`` and the widget's Load button
+#: and gave *zero* cover to the working-directory and redirected searches,
+#: which are the reads it was built for. That search now declares itself
+#: around the whole read.
+#:
+#: Consulting it is a *guess* about a construction that declared nothing, so
+#: what it may conclude is bounded: untrusted for that one object, never a
+#: write to :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`.
 _UNTRUSTED_LOADS_IN_FLIGHT: Dict[str, int] = {}
 _UNTRUSTED_LOADS_LOCK = threading.Lock()
 
@@ -905,13 +946,23 @@ _UNTRUSTED_LOADS_LOCK = threading.Lock()
 def _source_being_read() -> str:
     """The source to stamp on a ``ClusterConfig`` being constructed now.
 
-    The declaration of the calling context when there is one. When there is
-    not -- which is the honest answer for a script constructing a config,
-    and the *wrong* one for work a loader handed to another thread -- an
-    untrusted read in flight elsewhere in the process wins, because the two
-    cases are indistinguishable from here and only one of them is safe to
-    guess at. Over-distrusting costs a refusal whose message explains
-    itself; under-distrusting costs the cluster password.
+    The declaration of the calling context when there is one, and that is a
+    fact: this construction is lexically (or dynamically) inside a loader's
+    block, so its values came off a disk.
+
+    When there is not -- which is the honest answer for a script constructing
+    a config, and the *wrong* one for work a loader handed to another thread
+    -- an untrusted read in flight elsewhere in the process wins, because the
+    two cases are indistinguishable from here and only one of them is safe to
+    guess at. Under-distrusting costs the cluster password.
+
+    Both answers are about *this object* and nothing wider. Neither the
+    declaration nor the fallback is grounds for writing the hostname into
+    :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`, which is why the caller passes
+    ``record_host=False``: the declaration outlives its own frame when a
+    generator suspends inside the block, and the fallback is a guess about
+    every construction anywhere in the process. Only a loader holding the
+    file it read may make the permanent claim.
     """
     declared = _CONFIG_SOURCE_BEING_READ.get()
     if declared != CONFIG_SOURCE_RUNTIME:
@@ -978,11 +1029,21 @@ def config_built_from_file(source: str) -> Iterator[None]:
         _CONFIG_SOURCE_BEING_READ.reset(token)
 
 
-def set_config_source(config: ClusterConfig, source: str) -> None:
+def set_config_source(
+    config: ClusterConfig, source: str, *, record_host: bool = True
+) -> None:
     """Record where ``config`` was read from.
 
     An untrusted source additionally taints the hostname it named, for the
-    reasons set out on :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`.
+    reasons set out on :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES` -- unless
+    ``record_host`` is False, which means the caller inferred the source
+    rather than being told it. Such a caller may mark *this object*
+    untrusted, because that is a judgement about one construction and costs
+    one refusal; it may not write the hostname into a record that has no way
+    back, because that is a claim about every future use of the name. Every
+    loader in the tree knows which file it opened and so leaves the default
+    alone; the only caller that passes False is ``__post_init__``, whose
+    source is inferred rather than known.
     """
     if source not in CONFIG_SOURCES:
         raise ValueError(
@@ -997,7 +1058,7 @@ def set_config_source(config: ClusterConfig, source: str) -> None:
     # an object that lost the attribute reads as untrusted rather than
     # falling back to a trusted class value. See ``get_config_source``.
     setattr(config, "_clustrix_config_source", source)
-    if source in UNTRUSTED_CONFIG_SOURCES:
+    if record_host and source in UNTRUSTED_CONFIG_SOURCES:
         host = normalize_hostname(getattr(config, "cluster_host", None))
         if host:
             _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.setdefault(host, source)
@@ -1360,7 +1421,17 @@ def _load_default_config():
     for path, source in candidates:
         if path.exists():
             try:
-                load_config(str(path))
+                # Declared around the whole read, not just stamped after it.
+                # ``load_config`` declares ``explicit-file`` for its own
+                # construction -- the caller named the path, from its point of
+                # view -- and that inner declaration rightly wins for the
+                # object it builds, which this then corrects below. But the
+                # inner declaration is *trusted*, so without this outer one
+                # nothing goes into ``_UNTRUSTED_LOADS_IN_FLIGHT`` and the
+                # thread guard gave the working-directory and redirected
+                # searches -- the two reads it exists for -- no cover at all.
+                with config_built_from_file(source):
+                    load_config(str(path))
             except Exception:
                 continue
             set_config_source(_config, source)

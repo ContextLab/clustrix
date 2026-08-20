@@ -1448,47 +1448,83 @@ def test_the_process_wide_record_does_not_outlive_the_read():
     assert get_config_source(ClusterConfig()) == CONFIG_SOURCE_RUNTIME
 
 
-def test_no_loader_delegates_construction_across_a_process_boundary():
-    """The half of the hole nothing inside one interpreter can close.
-
-    A ``spawn``ed child starts a fresh interpreter: it has neither the
-    ContextVar nor the process-wide record, so a ``ClusterConfig`` it builds
-    for a loader in the parent reads ``runtime``. There is no mechanism that
-    follows a declaration across that boundary, so the defence is that no
-    shipped loader crosses it -- and this fails the moment one starts to.
-
-    Checked over the abstract syntax tree rather than the text, so the prose
-    above (which names ``ProcessPoolExecutor``) is not itself a finding.
-    """
-    import ast
-
-    package = pathlib.Path(config_module.__file__).parent
-    delegating = {
+#: Names that, appearing in a module which declares configuration reads,
+#: mean somebody has started handing work to another *process*.
+DELEGATING_NAMES = frozenset(
+    {
         "multiprocessing",
         "ProcessPoolExecutor",
         "billiard",
         "loky",
         "joblib",
     }
+)
+
+
+def _delegating_names(text):
+    """Which of :data:`DELEGATING_NAMES` this source refers to.
+
+    Over the abstract syntax tree rather than the text, so prose naming
+    ``ProcessPoolExecutor`` is not itself a finding.
+
+    An ``Attribute`` counts only when the thing it hangs off is a module
+    path -- ``futures.ProcessPoolExecutor``,
+    ``concurrent.futures.ProcessPoolExecutor``. ``self.joblib`` and
+    ``self.multiprocessing`` are a method and an attribute of the object, so
+    a module that happened to define ``def joblib(self)`` failed this check
+    while delegating nothing anywhere.
+    """
+    import ast
+
+    referenced = set()
+    for node in ast.walk(ast.parse(text)):
+        if isinstance(node, ast.Name):
+            referenced.add(node.id)
+        elif isinstance(node, ast.Attribute):
+            root = node.value
+            while isinstance(root, ast.Attribute):
+                root = root.value
+            if isinstance(root, ast.Name) and root.id not in ("self", "cls"):
+                referenced.add(node.attr)
+        elif isinstance(node, ast.Import):
+            referenced.update(a.name.split(".")[0] for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            referenced.add((node.module or "").split(".")[0])
+            referenced.update(a.name for a in node.names)
+    return referenced & DELEGATING_NAMES
+
+
+def test_no_declaring_module_has_started_delegating_to_another_process():
+    """A regression canary, and deliberately **not** a control.
+
+    A ``spawn``ed child starts a fresh interpreter: it has neither the
+    ContextVar nor the process-wide record, so a ``ClusterConfig`` it builds
+    for a loader in the parent reads ``runtime``. Nothing inside one
+    interpreter can follow a declaration across that boundary, so the only
+    available defence is that no shipped loader crosses it.
+
+    **What this does not do.** It is a name check, and a name check is
+    evaded by anything that does not spell the name:
+    ``importlib.import_module("multi" + "processing")``, ``__import__``, a
+    re-export shim, a pool handed in as an argument, and -- the same
+    interpreter boundary by a different door, entirely unguarded here --
+    ``subprocess.run`` or ``os.fork`` followed by an exec. So it detects
+    "somebody added multiprocessing to config.py", which is the realistic
+    regression, and it detects nothing an adversary does on purpose. Do not
+    cite it as a guarantee that the boundary is closed; it is not one.
+
+    It does correctly ignore prose, ``ThreadPoolExecutor`` (a thread stays
+    inside this interpreter and is covered by the process-wide record), and
+    modules that declare no reads at all.
+    """
+    package = pathlib.Path(config_module.__file__).parent
 
     offenders = {}
     for path in sorted(package.glob("*.py")):
         text = path.read_text(encoding="utf-8")
         if "config_built_from_file" not in text:
             continue
-        tree = ast.parse(text)
-        referenced = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name):
-                referenced.add(node.id)
-            elif isinstance(node, ast.Attribute):
-                referenced.add(node.attr)
-            elif isinstance(node, ast.Import):
-                referenced.update(a.name.split(".")[0] for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                referenced.add((node.module or "").split(".")[0])
-                referenced.update(a.name for a in node.names)
-        found = referenced & delegating
+        found = _delegating_names(text)
         if found:
             offenders[path.name] = sorted(found)
 
@@ -1496,6 +1532,40 @@ def test_no_loader_delegates_construction_across_a_process_boundary():
         "a module that declares configuration reads now also delegates work "
         "to another process; a ClusterConfig built there would come back "
         "marked runtime, i.e. trusted: " + repr(offenders)
+    )
+
+
+def test_the_canary_does_not_fire_on_a_method_of_the_object_itself():
+    """Kills: matching every ``ast.Attribute.attr`` regardless of its root.
+
+    A canary that cries at ``def joblib(self)`` is a canary somebody deletes.
+    """
+    assert (
+        _delegating_names(
+            "class Loader:\n"
+            "    def joblib(self):\n"
+            "        return self.multiprocessing\n"
+        )
+        == set()
+    )
+
+    # And it still sees the real thing, spelled either way.
+    assert _delegating_names(
+        "from concurrent import futures\nfutures.ProcessPoolExecutor()\n"
+    ) == {"ProcessPoolExecutor"}
+    assert _delegating_names("import concurrent.futures\n") == set()
+    assert _delegating_names("import multiprocessing\n") == {"multiprocessing"}
+    assert _delegating_names("import multiprocessing.pool as p\np.Pool()\n") == {
+        "multiprocessing"
+    }
+
+    # A thread stays inside this interpreter, so it is not a finding.
+    assert (
+        _delegating_names(
+            "from concurrent.futures import ThreadPoolExecutor\n"
+            "ThreadPoolExecutor()\n"
+        )
+        == set()
     )
 
 
@@ -1516,3 +1586,451 @@ def test_the_documented_remedy_names_a_file_the_reader_controls():
     assert "``<config dir>/.env``" not in configuration
     assert "``~/.clustrix/.env``" in configuration
     assert "``~/.clustrix/.env``" in quickstart
+
+
+# --------------------------------------------------------------------------
+# A momentary overlap must not deny the documented workflow forever.
+#
+# The process-wide record of untrusted reads was consulted by
+# ``__post_init__`` and its answer written straight into
+# ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES``, which is append-only and has no
+# clearing API by design. So a ``ClusterConfig(cluster_host=...)`` on one
+# thread that merely *overlapped* an unrelated untrusted read on another came
+# out untrusted **and** poisoned that hostname for the life of the process:
+# every later config naming it was refused, ``configure()`` could not clear
+# it, and the refusal message named remedies unrelated to the cause. Measured
+# at 164,509 of 164,516 constructions over-tainted in the review, 96,739 of
+# 96,740 here -- and a generator abandoned mid-block reproduces it with no
+# threads at all, because a ContextVar set inside a suspended generator stays
+# set in the caller's context.
+#
+# The separation: a *construction* may conclude "I cannot prove my origin, so
+# treat me as untrusted" -- one object, one refusal, undone by building
+# another. Only a *loader*, holding the file it just read, may conclude "this
+# hostname came off a disk" and refuse it process-wide.
+# --------------------------------------------------------------------------
+
+
+def _plain_construction_is_trusted(host):
+    """Would a fresh, ordinary ``ClusterConfig(host)`` be trusted now?"""
+    return config_module.config_source_is_trusted(
+        ClusterConfig(cluster_type="ssh", cluster_host=host)
+    )
+
+
+def test_an_unrelated_read_elsewhere_does_not_deny_the_host_for_the_process():
+    """RED before the fix: the host is refused forever afterwards.
+
+    Twelve threads opening and closing an untrusted read that has nothing to
+    do with this hostname, twelve threads doing nothing but constructing a
+    config that names it. Constructions that land inside the overlap are
+    untrusted, which is the conservative and correct call for an object whose
+    origin cannot be established. What must not survive the overlap is the
+    *hostname*: the whole point of the record is that it cannot be cleared,
+    so writing a guess into it permanently denies the user their own cluster.
+    """
+    import threading
+    import time
+
+    host = "my.real.cluster.example"
+    assert config_module.normalize_hostname(host) not in (
+        config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES
+    )
+
+    stop = threading.Event()
+    counts = []
+
+    def reader():
+        while not stop.is_set():
+            with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+                pass
+
+    def builder():
+        built = 0
+        while not stop.is_set():
+            ClusterConfig(cluster_type="ssh", cluster_host=host)
+            built += 1
+        counts.append(built)
+
+    threads = [threading.Thread(target=reader) for _ in range(12)]
+    threads += [threading.Thread(target=builder) for _ in range(12)]
+    for thread in threads:
+        thread.start()
+    time.sleep(0.75)
+    stop.set()
+    for thread in threads:
+        thread.join(30)
+
+    assert sum(counts) > 0, "the race did not actually construct anything"
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}, (
+        "an unrelated untrusted read on another thread wrote a hostname into "
+        "the permanent record, which nothing can clear"
+    )
+    assert _plain_construction_is_trusted(
+        host
+    ), "a hostname the user typed is refused after a benign overlap ended"
+
+    configure(cluster_host=host, cluster_type="ssh")
+    assert config_module.config_source_is_trusted(
+        get_config()
+    ), "configure() cannot recover a host poisoned by an unrelated read"
+
+
+def test_an_abandoned_generator_does_not_deny_the_host_for_the_process():
+    """The no-threads reproduction.
+
+    ``ContextVar.set`` inside a generator body is *not* scoped to the
+    generator frame -- PEP 550/568 were never adopted -- so a generator that
+    suspends inside ``config_built_from_file`` leaves the declaration set in
+    whoever called ``next()``. Every construction in that caller then looks
+    declared, which is a stale fact rather than a guess, and under the old
+    rule it wrote the hostname into the permanent record. Distrusting the
+    objects built during the suspension is right; refusing the hostname after
+    the generator is gone is not.
+    """
+    import gc
+
+    host = "my.other.real.cluster.example"
+
+    def suspended():
+        with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+            yield
+
+    generator = suspended()
+    next(generator)
+    during = ClusterConfig(cluster_type="ssh", cluster_host=host)
+    assert get_config_source(during) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+    del generator
+    gc.collect()
+
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+    assert (
+        config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}
+    ), "an abandoned generator poisoned a hostname permanently"
+    assert _plain_construction_is_trusted(host)
+
+
+def test_a_loader_that_read_the_file_still_denies_the_host_permanently(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """And the narrowing must not cost the control it exists to protect.
+
+    ``ProfileManager`` reads its store itself, so it is the loader and it
+    says so: the hostname in a bundle it found outside ``~/.clustrix`` is
+    refused for the life of the process, and a rebuild through
+    ``configure(**asdict(cfg))`` cannot launder it. This is the assertion
+    that fails if "only a loader may write the record" is implemented by
+    nobody writing it.
+    """
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    redirected = tmp_path / "cloned-repository" / "attacker-config"
+    redirected.mkdir(parents=True)
+    (redirected / "profiles.yml").write_text(
+        _profile_bundle(attacker_server), encoding="utf-8"
+    )
+
+    from clustrix.profile_manager import ProfileManager
+
+    profile = ProfileManager(config_dir=str(redirected)).profiles["Cluster"]
+    assert profile.cluster_host == attacker_server.host
+
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {
+        attacker_server.host: config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    }
+
+    from dataclasses import asdict
+
+    configure(**asdict(profile))
+    assert (
+        get_config_source(get_config())
+        == config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    )
+
+    authenticated = _attempt_connection()
+    assert attacker_server.authentications == [], (
+        "narrowing the permanent record let a profile bundle found outside "
+        "~/.clustrix launder its hostname: " + repr(attacker_server.authentications)
+    )
+    assert not authenticated
+
+
+# --------------------------------------------------------------------------
+# The process-wide record has to cover the read it was built for.
+# --------------------------------------------------------------------------
+
+
+def test_the_automatic_working_directory_search_declares_itself_process_wide(
+    tmp_path, monkeypatch
+):
+    """A8. RED before the fix: the record stays ``{}`` for the whole read.
+
+    The automatic search reaches the file through ``load_config``, whose own
+    declaration is ``explicit-file`` -- the caller named the path, from its
+    point of view -- and corrects the provenance afterwards with
+    ``set_config_source``. ``explicit-file`` is trusted, so nothing was ever
+    written to ``_UNTRUSTED_LOADS_IN_FLIGHT``: the guard covered
+    ``ProfileManager._restore`` and the widget's Load button and gave *zero*
+    cover to the working-directory and redirected searches, which are the two
+    reads it exists for. Latent, because the search builds one object on its
+    own thread -- but the docstring asserted otherwise, and a false invariant
+    is the thing the next change is built on.
+
+    Observed without touching the clock or patching anything: ``clustrix.yml``
+    is a real FIFO, so the loader's own ``open()`` blocks in the reader thread
+    until this test supplies the bytes. The read is genuinely in progress
+    while the assertions run.
+    """
+    import os
+    import threading
+    import time
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    fifo = repo / "clustrix.yml"
+    os.mkfifo(fifo)
+    monkeypatch.chdir(repo)
+
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+
+    def search():
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            config_module._load_default_config()
+
+    observed = {}
+    reader = threading.Thread(target=search)
+    reader.start()
+    try:
+        deadline = time.time() + 10
+        while time.time() < deadline and not config_module._UNTRUSTED_LOADS_IN_FLIGHT:
+            time.sleep(0.01)
+        observed["record"] = dict(config_module._UNTRUSTED_LOADS_IN_FLIGHT)
+        observed["delegated"] = get_config_source(
+            _built_in_a_thread("built.while.the.search.was.reading.example")
+        )
+    finally:
+        # Unblock the loader whatever happened above. Non-blocking so a
+        # reader that never arrived raises instead of hanging the suite.
+        payload = b"cluster_type: local\n"
+        deadline = time.time() + 10
+        while True:
+            try:
+                writer = os.open(fifo, os.O_WRONLY | os.O_NONBLOCK)
+            except OSError:
+                if time.time() > deadline:
+                    raise
+                time.sleep(0.01)
+            else:
+                os.write(writer, payload)
+                os.close(writer)
+                break
+        reader.join(30)
+
+    assert observed["record"] == {CONFIG_SOURCE_WORKING_DIRECTORY: 1}, (
+        "the automatic working-directory search does not declare itself in "
+        "the process-wide record, so the thread guard does not cover it"
+    )
+    assert observed["delegated"] == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+
+
+def test_an_inner_read_ending_does_not_end_the_outer_one():
+    """M5. Kills: ``pop`` on exit instead of decrementing the count.
+
+    ``test_the_process_wide_record_does_not_outlive_the_read`` cannot see
+    this: it checks ``{WD: 2}`` inside both blocks and ``{}`` after both, and
+    a ``pop`` satisfies each of those. The window the table exists for is the
+    one in between -- inner finished, **outer still reading** -- where a
+    ``pop`` clears the record and a construction the outer loader delegated
+    to a thread comes back ``runtime``, i.e. trusted.
+    """
+    with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+        with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+            pass
+        assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {
+            CONFIG_SOURCE_WORKING_DIRECTORY: 1
+        }, "a nested read ending cleared the record while the outer one ran"
+        delegated = _built_in_a_thread("delegated.by.the.outer.read.example")
+
+    assert get_config_source(delegated) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+
+
+def test_the_process_wide_record_is_written_under_its_lock():
+    """M6. Kills: replacing ``_UNTRUSTED_LOADS_LOCK`` with ``nullcontext``.
+
+    The record is a plain dict shared by every thread, and the whole point of
+    it is that threads read it while other threads write it. Holding the lock
+    here must therefore stop a read from being declared; with the lock gone
+    the declaration sails straight through and the test sees it.
+    """
+    import threading
+
+    entered = threading.Event()
+
+    def declare():
+        with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+            entered.set()
+
+    thread = threading.Thread(target=declare)
+    config_module._UNTRUSTED_LOADS_LOCK.acquire()
+    try:
+        thread.start()
+        assert not entered.wait(0.5), (
+            "a read was declared while the record's lock was held by another "
+            "thread: the record is not actually locked"
+        )
+    finally:
+        config_module._UNTRUSTED_LOADS_LOCK.release()
+
+    thread.join(30)
+    assert entered.is_set()
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+
+
+def test_two_overlapping_untrusted_reads_answer_in_a_fixed_order():
+    """M7. Kills: ``next(iter(...))`` in place of ``sorted(...)[0]``.
+
+    Two untrusted reads can overlap, and the fallback names one of them. Which
+    one changes the recorded source and therefore the message the user is
+    shown, so it may not depend on dict insertion order -- the same pair of
+    reads entered in the other order has to give the same answer. Insertion
+    order is exactly what ``next(iter(...))`` returns, so the two orderings
+    below disagree under the mutation and agree under ``sorted``.
+    """
+    redirected = config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+
+    with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+        with config_module.config_built_from_file(redirected):
+            first = _built_in_a_thread("overlapping.reads.one.example")
+
+    with config_module.config_built_from_file(redirected):
+        with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+            second = _built_in_a_thread("overlapping.reads.two.example")
+
+    assert get_config_source(first) == get_config_source(second), (
+        "which of two overlapping untrusted reads is named depends on the "
+        "order they were entered in"
+    )
+    assert get_config_source(first) == redirected
+
+
+# --------------------------------------------------------------------------
+# The fifth leak route: the ``%%clusterfy`` widget's own file discovery.
+#
+# ``EnhancedClusterConfigWidget._initialize_configs`` calls
+# ``detect_config_files()``, which globs the *working directory* for
+# ``clustrix.yml``, ``clustrix.yaml``, ``config.yml`` and ``config.yaml``.
+# The last two are not in ``_load_default_config``'s candidate list at all,
+# so ``./config.yml`` is tainted by nothing, warns about nothing, and lands
+# in ``self.configs`` as a raw dict carrying no provenance whatsoever. Apply
+# then hands that dict to ``configure()``, which means "the user typed this".
+#
+# Neither remaining friction stops an attacker. The widget re-emits ``name``,
+# which ``configure`` rejects -- so the file ships ``name: ""``, because
+# empty values are stripped before the call. And the host-key check is
+# satisfied by ``ssh_host_key_policy: auto_add``, which is the user's own
+# documented setting.
+# --------------------------------------------------------------------------
+
+
+def _clusterfy_widget_applying(config_name):
+    """Drive the real ``%%clusterfy`` widget: pick the config, press Apply."""
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    assert config_name in widget.config_dropdown.options, (
+        f"the widget did not offer {config_name!r}: "
+        f"{widget.config_dropdown.options}"
+    )
+    widget.config_dropdown.value = config_name
+    widget._on_apply_config(None)
+    return widget
+
+
+def test_the_clusterfy_widget_does_not_trust_a_config_file_it_found_in_the_cwd(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """The reproduction. RED before the fix: ``runtime``, and the leak.
+
+    Measured before it: ``taint_after_import={}``, the dropdown offers the
+    file, ``source=runtime``, ``trusted=True``, and the sentinel reaches the
+    attacker's server.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "config.yml").write_text(
+        _config_text(attacker_server, name='""'), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    # The user's own documented setting, and the only friction the widget
+    # does not carry across by itself: ``_save_config_from_widgets`` never
+    # emits ``ssh_host_key_policy``, so it has to already be in force for the
+    # connection to get as far as offering a password. Setting it here is a
+    # plain ``configure()`` call naming no host, so it stamps nothing.
+    configure(ssh_host_key_policy="auto_add")
+
+    # Nothing warns and nothing is tainted: ``config.yml`` in the working
+    # directory is not a file the automatic search looks at.
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        config_module._load_default_config()
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}
+    assert get_config().cluster_host != attacker_server.host
+
+    _clusterfy_widget_applying("config")
+
+    assert get_config().cluster_host == attacker_server.host
+
+    authenticated = _attempt_connection()
+
+    assert attacker_server.authentications == [], (
+        "the %%clusterfy widget applied a config.yml it found in the working "
+        "directory as if the user had typed it: "
+        + repr(attacker_server.authentications)
+    )
+    assert not authenticated
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_the_clusterfy_widget_still_trusts_a_config_file_in_the_config_dir(
+    attacker_server, env_file
+):
+    """And the fix does not turn Apply into a button that refuses everything.
+
+    The identical file in ``~/.clustrix`` is the user's own: they had to go
+    there to put it. This is the documented workflow, and it has to keep
+    authenticating -- a security fix that blocks it gets reverted.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    config_dir = pathlib.Path.home() / ".clustrix"
+    config_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    (config_dir / "config.yml").write_text(
+        _config_text(attacker_server, name='""'), encoding="utf-8"
+    )
+
+    # The user's own documented setting, and the only friction the widget
+    # does not carry across by itself: ``_save_config_from_widgets`` never
+    # emits ``ssh_host_key_policy``, so it has to already be in force for the
+    # connection to get as far as offering a password. Setting it here is a
+    # plain ``configure()`` call naming no host, so it stamps nothing.
+    configure(ssh_host_key_policy="auto_add")
+
+    _clusterfy_widget_applying("config")
+
+    assert get_config().cluster_host == attacker_server.host
+
+    authenticated = _attempt_connection()
+
+    assert authenticated, "the documented widget workflow stopped working"
+    assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
+    assert attacker_server.authentications == [("victim", "password")]

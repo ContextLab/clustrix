@@ -12,6 +12,7 @@ import logging
 
 from .notebook_magic_config import (
     DEFAULT_CONFIGS,
+    config_source_for_detected_file,
     detect_config_files,
     load_config_from_file,
     validate_ip_address,
@@ -29,7 +30,9 @@ except ImportError:
 
 from .config import (
     configure,
+    get_config,
     get_config_dir,
+    set_config_source,
     strip_secret_fields,
     write_text_securely,
 )
@@ -82,12 +85,27 @@ class EnhancedClusterConfigWidget:
         self._create_widgets()
 
     def _initialize_configs(self):
-        """Initialize configurations from defaults and detected files."""
+        """Initialize configurations from defaults and detected files.
+
+        ``detect_config_files`` globs the *working directory* as well as the
+        configuration directories, and for two names -- ``config.yml`` and
+        ``config.yaml`` -- that the automatic search does not look at at all.
+        So a file a cloned repository ships is picked up here, tainted by
+        nothing and announced by nothing, and lands in ``self.configs`` as a
+        plain dict. Where each one was found is recorded alongside it so that
+        Apply can say so; without that the dict reached ``configure()``
+        indistinguishable from something the user typed, and the cluster
+        password went to whoever the repository named.
+        """
         # Start with default configurations
         self.configs = DEFAULT_CONFIGS.copy()
+        # Where each file-derived config was found. Only written here: a
+        # config the user builds or saves during the session is their own.
+        self.config_source_map: Dict[str, str] = {}
         # Detect and load configuration files
         self.config_files = detect_config_files()
         for config_file in self.config_files:
+            source = config_source_for_detected_file(config_file)
             file_configs = load_config_from_file(config_file)
             if isinstance(file_configs, dict):
                 # Handle both single config and multiple configs in file
@@ -96,12 +114,14 @@ class EnhancedClusterConfigWidget:
                     config_name = config_file.stem
                     self.configs[config_name] = file_configs
                     self.config_file_map[config_name] = config_file
+                    self.config_source_map[config_name] = source
                 else:
                     # Multiple configs
                     for name, config in file_configs.items():
                         if isinstance(config, dict):
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
+                            self.config_source_map[name] = source
 
     def _create_widgets(self):
         """Create the enhanced widget interface."""
@@ -780,8 +800,19 @@ class EnhancedClusterConfigWidget:
                 # Update the config in our dictionary
                 if self.current_config_name:
                     self.configs[self.current_config_name] = config_data
-                # Apply to Clustrix
+                # Apply to Clustrix. ``configure`` means "the user typed
+                # this" and records ``runtime``, which is true of anything
+                # built in this session and false of a file the widget found
+                # by globbing. For those, the provenance recorded at
+                # discovery replaces it -- the hostname came off a disk, and
+                # a round trip through a function call is not evidence that
+                # anybody chose it.
                 configure(**config_data)
+                discovered_source = self.config_source_map.get(
+                    self.current_config_name or ""
+                )
+                if discovered_source:
+                    set_config_source(get_config(), discovered_source)
                 print("✅ Configuration applied successfully!")
 
                 # Show current config summary

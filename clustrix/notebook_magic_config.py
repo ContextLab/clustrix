@@ -7,6 +7,7 @@ for the notebook magic interface.
 
 import ipaddress
 import json
+import os
 import yaml
 import re
 from pathlib import Path
@@ -74,6 +75,41 @@ def detect_config_files(search_dirs: Optional[List[str]] = None) -> List[Path]:
                 if config_path.exists() and config_path.is_file():
                     config_files.append(config_path)
     return config_files
+
+
+def config_source_for_detected_file(path: Union[Path, str]) -> str:
+    """The provenance of a file :func:`detect_config_files` turned up.
+
+    Nobody named these files; the widget globbed for them. So a config built
+    from one carries where it was *found*, exactly as ``ProfileManager``
+    does for its store -- and until it did, ``./config.yml`` reached
+    ``configure()`` as a raw dict with no provenance at all and was applied
+    as though the user had typed it.
+
+    ``.`` is the working directory, and that is a different claim from "a
+    configuration directory somewhere else": ``git clone`` followed by ``cd``
+    is the whole of what it takes for a repository to supply the file, and
+    the message the user is shown has to name that rather than an environment
+    variable they never set. Both are untrusted, so this changes what is
+    said, not what is allowed. ``~/.clustrix`` and everywhere else are
+    classified by :func:`clustrix.config.config_source_for_discovered_path`,
+    the one comparison that knows about symlinked configuration directories.
+    """
+    from .config import (
+        CONFIG_SOURCE_WORKING_DIRECTORY,
+        config_source_for_discovered_path,
+    )
+
+    try:
+        found_in = Path(os.path.realpath(Path(path).parent))
+        cwd = Path(os.path.realpath(Path.cwd()))
+    except (OSError, RuntimeError, ValueError):
+        # Unable to establish that it is *not* the working directory is not
+        # the same as having established that it is somewhere the user chose.
+        return CONFIG_SOURCE_WORKING_DIRECTORY
+    if found_in == cwd:
+        return CONFIG_SOURCE_WORKING_DIRECTORY
+    return config_source_for_discovered_path(path)
 
 
 def _as_mapping(value: Any) -> Dict[str, Any]:
