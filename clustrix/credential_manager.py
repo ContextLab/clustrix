@@ -10,7 +10,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Optional, List, Any
 from abc import ABC, abstractmethod
-from .config import get_config_dir
+from .config import get_config_dir, write_text_securely  # noqa: F401
 
 # Try to import python-dotenv
 try:
@@ -21,84 +21,6 @@ except ImportError:
     HAS_DOTENV = False
 
 logger = logging.getLogger(__name__)
-
-
-def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
-    """Write ``text`` to ``path`` without ever exposing it to other users.
-
-    ``path.write_text(...)`` followed by ``path.chmod(0o600)`` looks
-    equivalent and is not: the file exists, with the credentials already in
-    it, at ``0o666 & ~umask`` for the whole window between the two calls.
-    With the default umask that is mode 0644 -- world readable -- and any
-    other local process can win that race (issue #111).
-
-    What this guarantees, exactly:
-
-    * **Default (``append=False``).** The secret is always written into a
-      brand-new inode that this call created. Anything already at ``path``
-      is unlinked first, then the file is created with ``O_CREAT | O_EXCL``
-      and mode ``0o600``, so it is never wider than ``0o600 & ~umask`` at
-      any instant, including the case where a file was already there. That
-      case is why the unlink is needed rather than ``O_TRUNC``: reusing a
-      pre-existing 0666 inode leaves it at 0666 between ``os.open()`` and
-      ``os.fchmod()``, and a process that opens it during that window keeps
-      a readable descriptor after the mode is narrowed -- measured, and it
-      really does read the secret back. The unlink also disposes of the
-      symlink case: ``path`` being a symlink used to mean the secret was
-      written to the link's *target* and the target was chmodded; now the
-      link itself is removed and a fresh regular file takes its place,
-      leaving the target untouched. ``O_EXCL`` and ``O_NOFOLLOW`` close
-      the remaining race -- a file or symlink planted between the unlink
-      and the open is a hard failure rather than something a secret is
-      written into.
-      ``fchmod()`` on the descriptor we exclusively own then pins the mode
-      at exactly 0600 regardless of umask, before any content is written.
-    * **``append=True``.** The content is appended, so an existing file
-      cannot be replaced and its mode is left alone -- this call does not
-      own it. All that is guaranteed is that a file *this call creates* is
-      0600 from the instant it exists. This mode exists for
-      ``~/.ssh/config`` and ``~/.ssh/known_hosts``: neither holds a secret,
-      both must keep the content already in them, and both are commonly a
-      symlink into a dotfiles repository, so ``O_NOFOLLOW`` is deliberately
-      not applied and no ``chmod`` is performed on a file the user manages.
-
-    Neither mode is atomic against an attacker who can create files in the
-    containing directory; they fail loudly instead of writing into
-    somebody else's file. Callers that need atomic replacement write to a
-    scratch path in the same directory and ``replace()`` it into position.
-
-    Windows caveat, shared with ``clustrix.config._write_config_file_securely``:
-    ``os.fchmod`` does not exist there before Python 3.13, ``os.O_NOFOLLOW``
-    does not exist at all, and ``chmod`` only toggles the read-only
-    attribute rather than restricting who may read, so on Windows the file
-    inherits the directory's ACL.
-    """
-    if append:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
-    else:
-        try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
-        flags = (
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0)  # absent on Windows
-        )
-
-    fd = os.open(str(path), flags, 0o600)
-    try:
-        if not append and hasattr(os, "fchmod"):
-            os.fchmod(fd, 0o600)
-        handle = os.fdopen(fd, "a" if append else "w", encoding="utf-8")
-    except BaseException:
-        # Nothing owns the descriptor yet, so it would otherwise leak; on
-        # Windows a leaked handle also makes the file undeletable.
-        os.close(fd)
-        raise
-    with handle as f:
-        f.write(text)
 
 
 class CredentialSource(ABC):

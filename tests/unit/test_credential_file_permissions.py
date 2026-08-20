@@ -93,6 +93,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: The modules that write credential files or the SSH configuration that
 #: points at them. None may create a file except through the helper.
 CREDENTIAL_WRITERS = (
+    "clustrix/config.py",
     "clustrix/cli_credentials.py",
     "clustrix/credential_manager.py",
     "clustrix/ssh_utils.py",
@@ -567,7 +568,14 @@ def test_there_is_exactly_one_secure_writer_in_the_package():
             if isinstance(node, ast.FunctionDef) and node.name == SANCTIONED_WRITER:
                 definitions.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
 
-    assert definitions == ["clustrix/credential_manager.py:26"], definitions
+    # Pinned to a file, not a line: the definition lives in config.py, the
+    # lowest-level module, because credential_manager imports config and the
+    # reverse would be a cycle. What matters is that there is exactly one --
+    # a second copy is a second thing to get wrong, and the copy this
+    # replaced had already drifted into missing O_NOFOLLOW and reusing a
+    # pre-existing inode.
+    assert len(definitions) == 1, definitions
+    assert definitions[0].startswith("clustrix/config.py:"), definitions
 
 
 def test_credential_writers_create_files_only_through_the_helper():
