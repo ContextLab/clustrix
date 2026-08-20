@@ -148,8 +148,17 @@ logger = logging.getLogger(__name__)
 #: Written once so the guard and its error message cannot drift apart.
 GATE_MODULE = __name__
 
-#: The branches :func:`release_credential` can answer from.
-RELEASE_SOURCES = ("stored-credential", "environment")
+#: Every branch :func:`release_credential` can answer from.
+RELEASE_SOURCES = ("stored-credential", "environment", "config-field")
+
+#: The branches a caller that names none is offered, in the order they are
+#: tried. ``"config-field"`` is deliberately absent: it exists for the two
+#: connection paths that used to read ``config.key_file`` and
+#: ``config.password`` themselves, *before* the gate, and adding it to the
+#: default would start returning ``config.password`` from the auth chain's
+#: credential-store method -- a behaviour change with no security argument
+#: behind it.
+DEFAULT_RELEASE_SOURCES = ("stored-credential", "environment")
 
 #: The functions *of this module* that may obtain a raw stored credential.
 #: A module-name check alone is satisfied by construction for anything
@@ -730,12 +739,59 @@ def _release_environment(
     return CredentialRelease(target=target, method="environment", password=password)
 
 
+def _release_config_field(
+    target: CredentialTarget, config: Optional[ClusterConfig]
+) -> Optional[CredentialRelease]:
+    """``config.key_file`` and ``config.password`` -- route 10, with a gate.
+
+    These are fields of a ``ClusterConfig``, and a ``ClusterConfig`` is
+    routinely built out of a file clustrix *found*: the automatic search
+    reads ``./clustrix.yml``, and ``key_file`` is an ordinary declared
+    field. So a cloned repository shipping
+
+        cluster_host: attacker.example
+        key_file: ~/.ssh/id_rsa
+
+    had the victim's private key offered to a host the repository chose --
+    without the gate being consulted at all, because both connection paths
+    tested these two fields *before* asking it. The order was the bug and
+    the ordering is the fix: the fields are a branch here now, checked by
+    the same rule as everything else.
+
+    Rule 2 is the applicable one. Neither field names a host, so the host
+    has to come from a source the user chose.
+    """
+    if config is None:
+        return None
+    if not config.key_file and not config.password:
+        return None
+
+    refusal = stored_credential_is_for_config(config, {}, hostname=target.hostname)
+    if refusal:
+        field = "key_file" if config.key_file else "password"
+        return CredentialRelease(
+            target=target,
+            refusal=(
+                f"config.{field} was not offered: {refusal}. The field names "
+                f"no host, so it is only used for a cluster_host you chose."
+            ),
+        )
+
+    if config.key_file:
+        return CredentialRelease(
+            target=target, method="config-key", key_path=config.key_file
+        )
+    return CredentialRelease(
+        target=target, method="config-password", password=config.password
+    )
+
+
 def release_credential(
     target: CredentialTarget,
     *,
     provider: str = "ssh",
     config: Optional[ClusterConfig] = None,
-    sources: Sequence[str] = RELEASE_SOURCES,
+    sources: Sequence[str] = DEFAULT_RELEASE_SOURCES,
 ) -> CredentialRelease:
     """The only place in clustrix where a stored secret is handed out.
 
@@ -745,29 +801,41 @@ def release_credential(
     ``key_file`` / ``password`` / ``password_env_var`` branches and must be
     the config ``target`` was built from.
 
-    Two branches, in order:
+    Three branches:
 
     1. ``"stored-credential"`` -- ``~/.clustrix/.env``, the environment, or
        GitHub Actions, gated by :func:`_stored_ssh_is_for_target`.
     2. ``"environment"`` -- ``config.password_env_var``, gated the same way.
+    3. ``"config-field"`` -- ``config.key_file`` and ``config.password``,
+       gated the same way, and **not** in
+       :data:`DEFAULT_RELEASE_SOURCES`.
 
-    ``config.password`` and ``config.key_file`` are deliberately *not*
-    branches. They are not stored credentials: they are fields of the
-    caller's own configuration object, which the caller already holds and
-    which no file it did not name can set -- ``save_to_file`` omits
-    secret-bearing fields and every loader rejects unknown keys rather than
-    inventing them. Routing them through here would mean the auth chain
-    started returning ``config.password`` from a method whose job is the
-    credential store, which is a behaviour change with no security argument
-    behind it. They are listed in :data:`SECRET_SURFACES` all the same,
-    because a reader looking for "where can a secret come from" must find
-    them.
+    **Deviation 2, and why it was wrong.** These last two used to be
+    deliberately outside the gate, on the argument that they are fields of
+    the caller's own configuration object which no file it did not name can
+    set. That premise is false. ``save_to_file`` omitting them is about
+    *writing*; nothing stops a file being *read* into them, ``key_file`` is
+    an ordinary declared field, and the automatic search reads
+    ``./clustrix.yml``. Worse, both connection paths tested
+    ``config.key_file`` and ``config.password`` **before** asking the gate,
+    so a cloned repository naming ``key_file`` in a working-directory
+    ``clustrix.yml`` bypassed it entirely and had the victim's private key
+    offered to a host the repository chose. A deviation justified by a
+    false premise is worse than no deviation. What survives of it is only
+    the *default*: routing them through here does not mean the auth chain
+    should start answering with ``config.password``, so ``"config-field"``
+    is opt-in, and the two connection paths opt in by naming it first --
+    which is also how they keep the precedence they always had.
 
-    ``sources`` narrows which branches may answer, and narrowing is all it
-    can do: every branch applies the same host and provenance checks, so a
-    caller passing a shorter tuple can only be offered *less*. The auth
-    chain uses it to keep one method per source, which is what makes its
-    per-method messages ("$SSH_PASSWORD was not offered: ...") true.
+    ``sources`` narrows which branches may answer and fixes the order they
+    are tried in. Narrowing is all it can do: every branch applies the same
+    host and provenance checks, so a caller passing a shorter tuple can
+    only be offered *less*. A member that is not in
+    :data:`RELEASE_SOURCES` raises rather than being ignored -- a typo
+    that silently widened nothing would be indistinguishable from one that
+    silently narrowed everything. The auth chain uses it to keep one method
+    per source, which is what makes its per-method messages
+    ("$SSH_PASSWORD was not offered: ...") true.
 
     Returns a :class:`CredentialRelease`, which is a secret or a reason and
     never both or neither.
@@ -779,13 +847,15 @@ def release_credential(
                 f"Known sources are {list(RELEASE_SOURCES)}."
             )
 
-    released = None
-    if "stored-credential" in sources:
-        released = _release_stored(target, provider, config)
-    if released is None and "environment" in sources:
-        released = _release_environment(target, config)
-    if released is not None:
-        return released
+    branches = {
+        "stored-credential": lambda: _release_stored(target, provider, config),
+        "environment": lambda: _release_environment(target, config),
+        "config-field": lambda: _release_config_field(target, config),
+    }
+    for source in sources:
+        released = branches[source]()
+        if released is not None:
+            return released
 
     return CredentialRelease(
         target=target,

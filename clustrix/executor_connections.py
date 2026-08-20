@@ -124,47 +124,49 @@ class ConnectionManager:
         else:
             connect_kwargs["username"] = os.getenv("USER")
 
-        # Use key file for authentication (recommended)
-        if self.config.key_file:
-            connect_kwargs["key_filename"] = self.config.key_file
-        elif self.config.password:
-            # Fallback to password authentication (not recommended)
-            connect_kwargs["password"] = self.config.password
+        # Ask the one gate -- for every credential, including this config's
+        # own ``key_file`` and ``password``.
+        #
+        # A stored credential belongs to one host, and applying it to
+        # whatever ``config.cluster_host`` says was an exfiltration path
+        # rather than a convenience: the search of the standard
+        # configuration locations includes ``./clustrix.yml``, so a cloned
+        # repository can name the host that receives the user's cluster
+        # password. ``key_file`` is an ordinary field of that same file, so
+        # testing it *before* the gate -- which is what this did -- offered
+        # the victim's private key to the same chosen host with no decision
+        # taken at all. Naming ``config-field`` first keeps the precedence
+        # this path has always had, and puts the branch behind the rule.
+        try:
+            target = CredentialTarget.for_config(self.config)
+        except ValueError as exc:
+            logger.warning("No credential can be released: %s", exc)
         else:
-            # Ask the one gate. A stored credential belongs to one host, and
-            # applying it to whatever ``config.cluster_host`` says was an
-            # exfiltration path rather than a convenience: the search of the
-            # standard configuration locations includes ``./clustrix.yml``,
-            # so a cloned repository can name the host that receives the
-            # user's cluster password. That decision is not made here any
-            # more -- it is made once, in
-            # ``clustrix.credential_release.release_credential``, whose
-            # first argument is the host about to receive the secret.
-            try:
-                target = CredentialTarget.for_config(self.config)
-            except ValueError as exc:
-                logger.warning("No credential can be released: %s", exc)
-            else:
-                release = release_credential(target, provider="ssh", config=self.config)
-                if release.refusal is not None:
-                    logger.warning(
-                        "Not using a stored SSH credential for %s: %s.",
-                        self.config.cluster_host,
-                        release.refusal,
-                    )
-                elif release.password:
-                    connect_kwargs["password"] = release.password
-                    logger.info("Using SSH password from %s", release.method)
-                elif release.key_path:
-                    # ``private_key_path`` is the name
-                    # ``resolve_provider_credentials`` actually emits (it is
-                    # the field name for ``SSH_PRIVATE_KEY_PATH``). This
-                    # tested for ``key_file``, which nothing has ever
-                    # produced, so a user whose .env named a key rather than
-                    # a password silently fell through to the agent and the
-                    # default key files.
-                    connect_kwargs["key_filename"] = release.key_path
-                    logger.info("Using SSH key from %s", release.method)
+            release = release_credential(
+                target,
+                provider="ssh",
+                config=self.config,
+                sources=("config-field", "stored-credential", "environment"),
+            )
+            if release.refusal is not None:
+                logger.warning(
+                    "Not using a stored SSH credential for %s: %s.",
+                    self.config.cluster_host,
+                    release.refusal,
+                )
+            elif release.password:
+                connect_kwargs["password"] = release.password
+                logger.info("Using SSH password from %s", release.method)
+            elif release.key_path:
+                # ``private_key_path`` is the name
+                # ``resolve_provider_credentials`` actually emits (it is
+                # the field name for ``SSH_PRIVATE_KEY_PATH``). This
+                # tested for ``key_file``, which nothing has ever
+                # produced, so a user whose .env named a key rather than
+                # a password silently fell through to the agent and the
+                # default key files.
+                connect_kwargs["key_filename"] = release.key_path
+                logger.info("Using SSH key from %s", release.method)
 
         self.ssh_client.connect(**connect_kwargs)
 

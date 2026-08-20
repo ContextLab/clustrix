@@ -220,6 +220,91 @@ def test_the_documented_setup_still_authenticates(
     assert attacker_server.authentications[-1] == ("victim", "password")
 
 
+def _victim_keypair(tmp_path):
+    """A private key the victim already has, and its public half."""
+    import paramiko
+
+    private = tmp_path / "id_victim"
+    key = paramiko.RSAKey.generate(2048)
+    key.write_private_key_file(str(private))
+    private.chmod(0o600)
+    public = private.with_suffix(".pub")
+    public.write_text(f"ssh-rsa {key.get_base64()} victim\n", encoding="utf-8")
+    return private, public
+
+
+def test_a_working_directory_config_naming_a_key_file_does_not_offer_the_key(
+    env_file, tmp_path, monkeypatch
+):
+    """Route 10. RED before the fix: the attacker logs in with the victim's key.
+
+    ``key_file`` is an ordinary declared field, so the ``./clustrix.yml``
+    that names ``cluster_host`` names it too -- and both connection paths
+    tested ``config.key_file`` **before** asking the gate, so the gate was
+    not reached at all. ``git clone && cd`` was enough to have the victim's
+    private key offered to a host the repository chose.
+
+    The measurement is real: the attacker's server holds the victim's
+    *public* key in its authorized list, which is what an attacker who
+    scraped it would have, and refuses password auth outright. An entry in
+    ``server.authentications`` therefore means the private key was
+    presented and possession of it proved.
+    """
+    private, public = _victim_keypair(tmp_path)
+    env_file()
+
+    root = tmp_path / "attacker-root"
+    root.mkdir()
+    with LocalSSHServer(
+        root=str(root), password=None, authorized_keys=[str(public)]
+    ) as server:
+        cloned_repository = tmp_path / "cloned-repository"
+        cloned_repository.mkdir()
+        (cloned_repository / "clustrix.yml").write_text(
+            _config_text(server, key_file=str(private)), encoding="utf-8"
+        )
+        monkeypatch.chdir(cloned_repository)
+
+        with pytest.warns(UserWarning, match="current working directory"):
+            config_module._load_default_config()
+
+        assert get_config().key_file == str(private)
+        authenticated = _attempt_connection()
+
+        assert server.authentications == [], (
+            "the victim's private key was offered to a host named by a file "
+            "in the working directory: " + repr(server.authentications)
+        )
+        assert not authenticated
+
+
+def test_a_key_file_from_a_config_the_user_chose_still_authenticates(
+    env_file, tmp_path
+):
+    """The fix must not stop ``key_file`` working where it always has.
+
+    Same key, same server, same field -- the only difference is that the
+    host came from the clustrix configuration directory, somewhere the user
+    had to go to put it.
+    """
+    private, public = _victim_keypair(tmp_path)
+    env_file()
+
+    root = tmp_path / "served"
+    root.mkdir()
+    with LocalSSHServer(
+        root=str(root), password=None, authorized_keys=[str(public)]
+    ) as server:
+        (get_config_dir() / "config.yml").write_text(
+            _config_text(server, key_file=str(private)), encoding="utf-8"
+        )
+        config_module._load_default_config()
+
+        assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
+        assert _attempt_connection() is True
+        assert server.authentications[-1] == ("victim", "publickey")
+
+
 def test_a_credential_that_names_this_host_is_used_from_anywhere(
     attacker_server, env_file, tmp_path, monkeypatch
 ):
@@ -2192,6 +2277,33 @@ def test_a_released_secret_has_to_say_where_it_came_from():
     """So that a log line can name the source of a secret it just used."""
     with pytest.raises(ValueError):
         CredentialRelease(target=_a_target(), password=SENTINEL_PASSWORD)
+
+
+@pytest.mark.parametrize(
+    "unknown",
+    ["", "config", "Stored-Credential", "stored-credentials", "config-fields", None],
+    ids=["empty", "prefix", "case", "plural", "near-miss", "none"],
+)
+def test_an_unrecognised_release_source_is_refused_rather_than_ignored(unknown):
+    """``sources`` may only ever narrow, so a name it does not know raises.
+
+    Killing M10. Ignoring an unknown member is the worst of the three
+    options: ``sources=("stored-credentials",)`` -- one letter out -- would
+    silently mean "every branch" under a loop that skips what it does not
+    recognise, and a caller that meant to *narrow* would have widened. The
+    auth chain's per-method messages depend on this narrowing being exact.
+    """
+    with pytest.raises(ValueError) as raised:
+        release_credential(_a_target(), provider="ssh", sources=(unknown,))
+
+    assert "release source" in str(raised.value)
+
+
+def test_the_declared_branches_are_all_accepted():
+    """The rule above is not simply "every tuple raises"."""
+    for source in credential_release_module.RELEASE_SOURCES:
+        release = release_credential(_a_target(), provider="ssh", sources=(source,))
+        assert release.refusal is not None
 
 
 def test_a_release_is_truthy_exactly_when_it_carries_a_secret():

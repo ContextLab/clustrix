@@ -18,6 +18,7 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional
 import paramiko
 
 from .config import ClusterConfig
+from .credential_release import CredentialTarget, release_credential
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -214,13 +215,36 @@ class ClusterFilesystem:
                 "banner_timeout": getattr(self.config, "ssh_connect_timeout", 30),
             }
 
-            if self.config.key_file:
-                connect_kwargs["key_filename"] = self.config.key_file
-            elif self.config.password:
-                connect_kwargs["password"] = self.config.password
+            # The same gate the execution path asks, and for the same
+            # reason: ``key_file`` and ``password`` are ordinary declared
+            # fields, so a working-directory ``clustrix.yml`` naming
+            # ``cluster_host`` names these too, and reading them here
+            # without a decision offered the victim's private key to a host
+            # the repository chose. A filesystem call is a connection.
+            connect_kwargs["look_for_keys"] = True
+            try:
+                target = CredentialTarget.for_config(self.config)
+            except ValueError as exc:
+                logger.warning("No credential can be released: %s", exc)
             else:
-                # Try default SSH key locations
-                connect_kwargs["look_for_keys"] = True
+                release = release_credential(
+                    target,
+                    provider="ssh",
+                    config=self.config,
+                    sources=("config-field", "stored-credential", "environment"),
+                )
+                if release.refusal is not None:
+                    logger.warning(
+                        "Not using a stored SSH credential for %s: %s.",
+                        self.config.cluster_host,
+                        release.refusal,
+                    )
+                elif release.key_path:
+                    connect_kwargs["key_filename"] = release.key_path
+                    connect_kwargs["look_for_keys"] = False
+                elif release.password:
+                    connect_kwargs["password"] = release.password
+                    connect_kwargs["look_for_keys"] = False
 
             self._ssh_client.connect(**connect_kwargs)
 
