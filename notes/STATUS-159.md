@@ -1236,3 +1236,44 @@ Close with evidence: #152 #153 #157 #158 #164 #165 #166 #167 #168 #171 #172,
 then roll up #159.
 **Leave open:** #111, #117, #122, #151, **#169** (unprovable locally),
 **#170** (a design decision, not a defect).
+
+## #171 closed (`3bfa452` on `work/fixes`)
+
+2007 passed / 0 failed (baseline 2002, +5); black 26.3.1, flake8, mypy clean;
+sphinx clean.
+
+**Policy: refuse.** Decided, not defaulted. `_on_config_name_change` is a
+`Text` observer firing on the **keystream**, which eliminates the other two
+options the issue offered: a modal has nowhere to appear and would arrive once
+per character, and auto-suffixing would silently name a configuration something
+the user never typed — the same "accepted the instruction, did something else,
+reported success" shape as the overwrite it replaces. It reports through
+`status_output`, the channel every other handler in this widget uses, naming
+both profiles.
+
+**A test was asserting the destruction.**
+`test_renaming_onto_a_name_that_came_off_a_disk_does_not_inherit_it` asserted
+the rename *went through*, and its own docstring recorded that as "left alone
+here" for #171 — the bug was encoded in the suite. Rewritten to assert the same
+security property on the refused path, with the rewrite stated in both the
+docstring and the commit message. That is the correct handling: say so
+explicitly and rewrite deliberately, never quietly relax.
+
+Tests assert on **contents, not counts** — against pristine `4e76040`,
+`configs["SSH Remote Server"]` came back as `cluster_type: huggingface` and
+"HuggingFace Jobs" was gone from the dropdown. All four mutants die, including
+M4 (collision checked against `DEFAULT_CONFIGS` instead of `self.configs`),
+which kills all six.
+
+Provenance on the refused path: nothing moves — `config_source_map`,
+`config_source_host_map` and `config_file_map` all stay keyed as they were,
+asserted in both directions.
+
+### Residual: a CHANGELOG "Known limitation", NOT a new issue
+
+Because the refusal deliberately does not reset the name box, it can show a
+name the profile does not hold until the user types on or selects elsewhere.
+That is a documented trade-off in the handler's docstring — resetting the field
+would fight the keystream — and there is no data loss. Filing an issue for a
+deliberate, documented trade-off would work against ending with a clean issue
+list. **Add it to the CHANGELOG's Known limitations section instead.**
