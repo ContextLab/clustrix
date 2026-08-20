@@ -514,3 +514,39 @@ Neither contains a secret-bearing key (checked by key name, values never read).
 The autouse `isolate_home` fixture isolates `HOME`, not the working directory —
 that is the gap. Finding the test that writes it is the lowest-priority item on
 the #123 fix round.
+
+## Sequencing settled by measurement, not guesswork (2026-08-20)
+
+Three orderings were tried in the isolated clone at
+`work/fixes` = `9973d82`, `work/credential-gate` = `238167a`:
+
+| Approach | Cost |
+|-|-|
+| base → silent → widget → named-env → **fixes** | fixes conflicts: 5 files, **16 regions** |
+| base → **fixes** → silent-failures → … | fixes CLEAN, then silent-failures: 6 files, **14 regions** |
+| **rebase** gate onto fixes | **fails at the gate's first commit** (`1bf4654`, "give the credential decision one home") — 14 commits each able to re-conflict |
+| **merge** fixes → gate | 6 files, **13 regions**, ONE reconciliation |
+
+Order barely matters between the first two: the #123 ↔ #167 `config.py`
+reconciliation has to happen once whichever way round, and only the sense of
+"ours" changes. **Do not rebase the gate.** It branched from `work/fixes` at
+`7f82333` and fixes has moved 4 commits since; rebasing replays 14 commits
+through the same conflict repeatedly, and it already fails on the first.
+
+**Final plan:**
+
+1. base `aa1345f` → silent-failures → widget-apply → named-env.
+   **Already done and verified: 2156 passed, 0 failed**, black/flake8/mypy
+   clean, `sphinx -W` clean, markup checker clean, examples checker 152/152.
+   (Re-do once the #123 fix round lands, since silent-failures will move.)
+2. **Merge `work/fixes` into `work/credential-gate`** — one reconciliation,
+   13 regions across `auth_methods.py`, `config.py`,
+   `notebook_magic_widget.py`, `profile_manager.py`, `test_auth_fallbacks.py`,
+   `test_a_cloned_repository_cannot_take_your_password.py`.
+3. Merge the combined gate branch into the line from step 1 — this is where
+   the big `config.py` reconciliation lands (8 regions when tried against
+   fixes alone, one of them ~545 lines).
+4. Then the whole-tree gates again, from scratch.
+
+Two conflicts are unavoidable and everything else is bookkeeping: fixes↔gate,
+and #123↔#167 in `config.py`.
