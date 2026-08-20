@@ -899,3 +899,56 @@ report this context"; only a real docs-only PR can. #169 must not be closed on
 a green test suite.
 
 Fix round dispatched. #168's two remaining sites dispatched to `work/fixes`.
+
+## #123 fix round three: `fcd922a` on `work/silent-failures`
+
+1869 passed / 17 skipped / 0 failed (baseline 1850, +19 tests); black 26.3.1,
+flake8, mypy clean. All eleven of the previous round's mutants now die,
+including the three that pin F1's lock **independently** — `configure`'s lock,
+the `target = _config` binding, and `load_config`'s lock, which previously had
+no test at all despite its docstring calling it load-bearing.
+
+**S1 armed at all five sites.** The reviewer's own attack was reproduced first
+(all five reports deleted → 1850 passed, byte-identical), then the new tests in
+that same mutant tree give 8 failures across all five. Each site pins the
+**level** (`levelno == WARNING`), not just the text, so a demotion to `debug`
+fails too. The triggers are real: a `DependencyAnalyzer` subclass that genuinely
+exhausts the stack, a real `exec`'d function with no source, real `int`
+subclasses, a real unparseable YAML file.
+
+**S2 made mechanical.** The family letter now lives on each entry
+(`BLIND_SPOTS: name -> (family, source)`), and each family's stated count is
+compared against a count of entries carrying that letter. The two defeats now
+fail: family A six→seven gives `assert 7 == 6`, and the *fabricated* "Nine
+spellings" in family E gives `assert 9 == 1`.
+
+**M25 deleted rather than tested** — correct: re-adding dead code cannot fail a
+test, and the caller's `continue` was proven to be the load-bearing guard
+(removing *that* fails 2 tests). The project's rule is use it or delete it.
+
+**Refiling**: the exception-accessor entry moved H → new family K (a
+name-matching false negative, not dead code). H 8→7, root causes ten→eleven,
+total still 25.
+
+## The stray `clustrix.yml` is a fossil, not live pollution — my finding corrected
+
+I reported a test writing `clustrix.yml` into a checkout root. **The suite does
+not do this.** A per-test teardown detector across all 1867 items found no
+writer, and nothing in the tree — including `real_world` and `integration`,
+grepped statically — writes such a path. `_resolve_config_path`, whose docstring
+names the repo root as where bare filenames *used* to land, has been an ancestor
+since `fade843` (2026-08-18).
+
+So the file in `clustrix-fixes` was written by an **agent's manual probe**, not
+by the suite. The quarantine was harmless and no code defect exists. The
+`.gitignore` observation still stands on its own: because `clustrix.yml` is
+ignored, anything that does land in a checkout root is invisible to
+`git status` — worth knowing, but not evidence of a bug.
+
+## Version strings: consistent
+
+All four required strings (`pyproject.toml`, `setup.py`,
+`clustrix/__init__.py`, `docs/source/conf.py`) read **0.2.0** on all seven
+branches. Checked with a parser rather than a shell one-liner, after a
+`bad substitution` produced silently empty fields for two of them — an empty
+field would have read as agreement.
