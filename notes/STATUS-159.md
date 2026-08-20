@@ -601,3 +601,46 @@ Mutants M6, M8, M10 now die. Enforcement gained rule 5 (bulk `os.environ` via
 credential file: `".env"` literal plus `env_file`/`env_file_path`), so the
 planted L1/L2 leakers are now caught. The documented limits were rewritten to
 list what actually remains rather than staying silent about L1 and L2.
+
+## #172 and #169 fixed on `work/leftovers` (`ea8aedf`, `732a5f0`, `e0c90bd`)
+
+1760 passed / 17 skipped / 0 failed (baseline 1746, +14 new); black 26.3.1,
+flake8, mypy clean.
+
+**#172 — contract chosen: a third state, not a raise.** `gpu_available=True`
+now means a GPU was *positively identified*; unparseable `nvidia-smi` output
+sets `gpu_detection_inconclusive` and records the offending lines in
+`detection_errors`, claiming nothing about availability or count. Parsing is
+all-or-nothing per response and requires exactly 5 fields (was `>= 5`).
+
+The reasoning for not raising, which is the right distinction: in
+`_select_remote_python` no interpreter means no job can run at all, so raising
+is the only honest answer; here a caller proceeds perfectly well without a
+device list — it just must not be told a GPU exists. `/proc/driver/nvidia` and
+`lspci` still run afterwards and can give a genuine yes on their own evidence.
+
+RED evidence against a pristine `aa1345f` (unpacked with `git archive`, tests
+copied in): 9 of 9 failed, and the unparseable and partial-parse cases failed
+on the *behaviour* (`assert True is False` on `gpu_available`), not merely on a
+missing key. No mocks: a real `LocalSSHServer`, a real `nvidia-smi` executable
+on its PATH emitting the bytes under test, a real paramiko client, with `nvcc`
+and `lspci` shadowed so the result comes from the response rather than the
+host. The issue's own surviving mutant now dies.
+
+A second commit was needed because `enhanced_setup_two_venv_environment` had
+two printed sentences for three outcomes and announced "No GPUs detected" for
+the unreadable case — the same defect one layer up.
+
+**#169 — `paths:` dropped from `fast_ci.yml`'s `pull_request` trigger.** No job
+depends on the filter: no job-level `paths`, no `if` keyed on changed files,
+and `status-check` already runs `if: always()` across all four jobs. The repo
+is public so Actions minutes are free; a companion workflow would duplicate the
+context name across two files. The `push:` filter stays, since `CI Status` is
+not required for develop pushes.
+
+**Explicitly unverifiable locally, and that is the important part:** nobody can
+confirm from here that GitHub triggers the workflow, publishes `CI Status`, and
+clears the merge block. **Someone must open a docs-only PR against `master`**
+(touching only e.g. `README.md`), confirm Fast CI runs and `CI Status` goes
+green, and confirm the PR becomes mergeable without an admin override. Until
+that happens #169 is fixed-but-unproven and must not be closed.
