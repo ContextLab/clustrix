@@ -166,7 +166,16 @@ def _install_proc_gpus_shim(
     else:
         gpus.mkdir()
         for address in pci_addresses:
+            # The driver's directory per GPU is not empty: it holds an
+            # `information` file (and `registry`, and on some releases a
+            # `power` file). They are here because the count must be of the
+            # GPU directories and not of what is inside them -- dropping
+            # `-maxdepth 1` from the shipped command doubles it otherwise,
+            # and against an empty fixture nothing would notice.
             (gpus / address).mkdir()
+            (gpus / address / "information").write_text(
+                f"Model: \t\t NVIDIA A100-SXM4-40GB\nDevice Minor: \t {address}\n"
+            )
 
     rewrite = (
         "n=$#\n"
