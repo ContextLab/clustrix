@@ -27,9 +27,11 @@ import pytest
 # The supported credential path. Guarded so that this module still imports
 # when clustrix itself cannot be; HAS_SECURE_CREDENTIALS gates every use.
 try:
-    from clustrix.config import get_config_dir
-    from clustrix.credential_manager import (
-        ensure_credential as _clustrix_ensure_credential,
+    from clustrix.config import CONFIG_SOURCE_RUNTIME, get_config_dir
+    from clustrix.credential_release import (
+        CredentialTarget,
+        describe_credential,
+        release_credential,
     )
     from clustrix.secure_credentials import ValidationCredentials
 
@@ -212,11 +214,21 @@ def credential_setup_hint() -> str:
     return CREDENTIAL_SETUP_HINT
 
 
-def _clustrix_credentials(provider: str) -> Dict[str, str]:
+def _clustrix_credentials(
+    provider: str, hostname: Optional[str] = None
+) -> Dict[str, str]:
     """Credentials for `provider` from ~/.clustrix/.env or the environment.
 
     This is the only supported source; an empty dict means "none configured",
     never "substitute something plausible".
+
+    A secret only comes out of clustrix through
+    `clustrix.credential_release.release_credential`, which requires the host
+    about to receive it -- so this names one. For SSH that is the host the
+    developer's own test configuration points at (`CLUSTRIX_TEST_*_HOST`) or,
+    failing that, the `SSH_HOST` in the credential file; both are the
+    developer naming a target on their own machine, which is `runtime`. For
+    HuggingFace it is `huggingface.co`, which nothing can configure.
 
     The environment is snapshotted and restored around the lookup: a
     credential belongs to the caller that asked for it, never to os.environ.
@@ -228,7 +240,43 @@ def _clustrix_credentials(provider: str) -> Dict[str, str]:
         return {}
     environment = dict(os.environ)
     try:
-        return _clustrix_ensure_credential(provider) or {}
+        described = describe_credential(provider)
+        if not described.available:
+            return {}
+        if provider == "huggingface":
+            target = CredentialTarget.fixed_service(
+                "huggingface.co", why="the HuggingFace Hub API"
+            )
+        else:
+            host = _nonempty(hostname) or _nonempty(described.host)
+            if not host:
+                return {}
+            target = CredentialTarget(
+                hostname=host,
+                username=described.username,
+                provenance=CONFIG_SOURCE_RUNTIME,
+                described_as=f"{host}, named by this machine's test configuration",
+            )
+        release = release_credential(target, provider=provider)
+        if release.refusal is not None:
+            logger.warning(
+                "clustrix %s credential was not released: %s",
+                provider,
+                release.refusal,
+            )
+            return {}
+        resolved: Dict[str, str] = {}
+        for key, value in (
+            ("host", described.host),
+            ("username", described.username),
+            ("port", described.port),
+            ("password", release.password),
+            ("private_key_path", release.key_path),
+            ("token", release.token),
+        ):
+            if value:
+                resolved[key] = value
+        return resolved
     except Exception as e:  # a broken .env must not abort collection
         logger.warning(f"clustrix {provider} credential lookup failed: {e}")
         return {}
@@ -285,7 +333,7 @@ def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
     failure several seconds later, which reads like a broken cluster rather
     than an unconfigured laptop.
     """
-    ssh = _clustrix_credentials("ssh")
+    ssh = _clustrix_credentials("ssh", hostname=get_test_host(role))
 
     host = get_test_host(role) or _nonempty(ssh.get("host"))
     username = (

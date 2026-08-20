@@ -2337,3 +2337,31 @@ def test_the_config_object_no_longer_hands_out_the_environment_password():
     in sight; leaving it in place would leave route 6 one caller away.
     """
     assert not hasattr(ClusterConfig, "get_env_password")
+
+
+def test_bypassing_the_gate_raises():
+    """Lock 3, proven from a module that is not the gate.
+
+    This is the test that makes the third lock live rather than decorative.
+    An eighth route written the old way -- reach into the store, get the
+    bytes, apply them to whatever ``cluster_host`` says -- raises on its
+    first run instead of being caught at review, or not.
+
+    The guard is always on. It makes no reference to tests and behaves the
+    same whether or not pytest is running: that is why it is a fact about
+    which module may obtain a secret rather than production code knowing it
+    is under test.
+    """
+    manager = credential_manager_module.get_credential_manager()
+
+    with pytest.raises(RuntimeError) as raised:
+        manager._ensure_credential_unchecked("ssh")
+
+    message = str(raised.value)
+    assert "release_credential" in message
+    assert __name__ in message
+
+
+def test_the_module_level_convenience_is_gone():
+    """The other way in, and the one a developer would have found by grep."""
+    assert not hasattr(credential_manager_module, "ensure_credential")

@@ -388,12 +388,17 @@ class CredentialRelease:
     method: Optional[str] = None
     password: Optional[str] = None
     key_path: Optional[str] = None
+    #: The secret for a token-shaped provider (HuggingFace). A third field
+    #: rather than reusing ``password`` because a caller that puts a token in
+    #: a ``password=`` keyword has already made the mistake this module is
+    #: about.
+    token: Optional[str] = None
     #: Why nothing was released, in the user's terms, naming a remedy that
     #: works.
     refusal: Optional[str] = None
 
     def __post_init__(self) -> None:
-        has_secret = bool(self.password) or bool(self.key_path)
+        has_secret = bool(self.password) or bool(self.key_path) or bool(self.token)
         if has_secret and self.refusal is not None:
             raise ValueError(
                 "A credential release carries a secret or a refusal, never "
@@ -424,7 +429,7 @@ def _stored_credential(provider: str) -> Optional[Dict[str, str]]:
     """
     from .credential_manager import get_credential_manager
 
-    return get_credential_manager().ensure_credential(provider)
+    return get_credential_manager()._ensure_credential_unchecked(provider)
 
 
 @dataclass(frozen=True)
@@ -444,7 +449,9 @@ class CredentialDescription:
     host: str = ""
     username: str = ""
     has_password: bool = False
+    has_token: bool = False
     key_path: str = ""
+    port: str = ""
 
     @property
     def has_key_path(self) -> bool:
@@ -469,7 +476,9 @@ def describe_credential(provider: str) -> CredentialDescription:
         host=credentials.get("host", "") or "",
         username=credentials.get("username", "") or "",
         has_password=bool(credentials.get("password")),
+        has_token=bool(credentials.get("token")),
         key_path=credentials.get("private_key_path", "") or "",
+        port=str(credentials.get("port", "") or ""),
     )
 
 
@@ -509,6 +518,9 @@ def _release_stored(
         return CredentialRelease(
             target=target, method="stored-credential", key_path=key_path
         )
+    token = credentials.get("token")
+    if token:
+        return CredentialRelease(target=target, method="stored-credential", token=token)
     return None
 
 
@@ -676,28 +688,24 @@ def release_credential(
     )
 
 
-def _caller_module() -> Optional[str]:
-    """The ``__name__`` of the frame that called our caller.
-
-    ``sys._getframe`` rather than ``inspect.stack()``: the latter reads
-    source files off disk for every frame, and this runs on the connection
-    path.
-    """
-    try:
-        return sys._getframe(2).f_globals.get("__name__")
-    except ValueError:  # pragma: no cover - no such frame
-        return None
-
-
 def assert_called_from_the_gate() -> None:
-    """Raise unless the caller's caller is this module.
+    """Raise unless the module calling the store is this one.
 
     Lock 3. **Always on**, in production, with no reference to tests and no
     different behaviour under pytest -- it is a fact about which module may
     obtain a secret, not test-awareness, so it does not violate the mocking
     policy's rule 4.
+
+    ``sys._getframe`` rather than ``inspect.stack()``: the latter reads
+    source files off disk for every frame, and this runs on the connection
+    path. Frame 0 is this function, frame 1 is the store method that called
+    it, and frame 2 is the module that called *that* -- the one being
+    judged.
     """
-    caller = _caller_module()
+    try:
+        caller = sys._getframe(2).f_globals.get("__name__")
+    except ValueError:  # pragma: no cover - not enough frames to judge
+        caller = None
     if caller != GATE_MODULE:
         raise RuntimeError(
             "Stored credentials are released only through "

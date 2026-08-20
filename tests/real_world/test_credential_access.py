@@ -21,9 +21,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clustrix.credential_manager import (  # noqa: E402
-    ensure_credential,
     get_credential_status,
     parse_env_file,
+)
+from clustrix.credential_release import (  # noqa: E402
+    CredentialTarget,
+    release_credential,
 )
 from clustrix.secure_credentials import ValidationCredentials  # noqa: E402
 from tests.real_world.credential_manager import (  # noqa: E402
@@ -67,7 +70,13 @@ def test_huggingface_credentials_match_the_environment():
     configured = {**parse_env_file(Path(status["env_file"])), **os.environ}
     env_token = configured.get("HF_TOKEN") or configured.get("HUGGINGFACE_TOKEN")
 
-    hf_creds = ensure_credential("huggingface")
+    # A token only comes out through the gate, which requires the host about
+    # to receive it. huggingface.co is compiled in, not configured.
+    hf_release = release_credential(
+        CredentialTarget.fixed_service("huggingface.co", why="the HuggingFace Hub API"),
+        provider="huggingface",
+    )
+    hf_creds = {"token": hf_release.token} if hf_release.token else None
     validation_creds = ValidationCredentials().get_huggingface_credentials()
 
     if hf_creds and hf_creds.get("token"):
@@ -117,7 +126,14 @@ def main():
     configured = [
         role for role in ("ssh", "slurm") if get_cluster_credentials(role) is not None
     ]
-    has_hf = ensure_credential("huggingface") is not None
+    has_hf = bool(
+        release_credential(
+            CredentialTarget.fixed_service(
+                "huggingface.co", why="the HuggingFace Hub API"
+            ),
+            provider="huggingface",
+        ).token
+    )
 
     print("\n📊 Summary:")
     print(f"   Cluster roles configured: {configured or 'none'}")

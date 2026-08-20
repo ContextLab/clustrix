@@ -14,6 +14,8 @@ from clustrix.credential_manager import (
     get_credential_manager,
 )
 from clustrix.config import get_config_dir
+import clustrix.credential_manager as credential_manager_module
+from clustrix.credential_release import describe_credential
 
 
 class TestDotEnvCredentialSource:
@@ -274,8 +276,15 @@ class TestFlexibleCredentialManager:
                     manager.env_file.stat().st_mode & 0o777 == 0o600
                 )  # Secure permissions
 
-    def test_ensure_credential_success(self):
-        """Test successful credential retrieval."""
+    def test_credential_retrieval_success(self):
+        """Successful retrieval, asked for the way callers must now ask.
+
+        ``ensure_credential`` was public and took no recipient; it is
+        ``_ensure_credential_unchecked`` and raises for anyone but the gate
+        (issue #167). The supported questions are "what is configured"
+        (:func:`describe_credential`, no secret) and "may this host have it"
+        (:func:`release_credential`, recipient first).
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)
 
@@ -286,24 +295,40 @@ class TestFlexibleCredentialManager:
                 "SSH_HOST=cluster.example.edu\nSSH_USERNAME=researcher\n"
             )
 
-            with patch.dict(os.environ, {}, clear=True):
-                manager = FlexibleCredentialManager(config_dir)
-                creds = manager.ensure_credential("ssh")
+            with patch.dict(
+                os.environ, {"CLUSTRIX_CONFIG_DIR": str(config_dir)}, clear=True
+            ):
+                credential_manager_module._credential_manager = None
+                described = describe_credential("ssh")
 
-                assert creds is not None
-                assert creds["host"] == "cluster.example.edu"
-                assert creds["username"] == "researcher"
+                assert described.available
+                assert described.host == "cluster.example.edu"
+                assert described.username == "researcher"
 
-    def test_ensure_credential_not_found(self):
+    def test_credential_retrieval_not_found(self):
         """Test credential retrieval when credentials don't exist."""
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)
 
             with patch.dict(os.environ, {}, clear=True):
                 manager = FlexibleCredentialManager(config_dir)
-                creds = manager.ensure_credential("nonexistent")
 
-                assert creds is None
+                assert manager._configured_fields("nonexistent") == (None, [])
+
+    def test_the_store_refuses_a_caller_that_is_not_the_gate(self):
+        """Lock 3, live rather than decorative.
+
+        This test module is not ``clustrix.credential_release``, so the
+        store raises. That is what makes an eighth route fail on its first
+        run instead of at review.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            with pytest.raises(RuntimeError) as raised:
+                manager._ensure_credential_unchecked("ssh")
+
+            assert "release_credential" in str(raised.value)
 
     def test_get_credential_status(self):
         """Test getting comprehensive credential status."""

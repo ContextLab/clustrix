@@ -39,10 +39,15 @@ script refuses to touch it or anything associated with it.
 
 CREDENTIALS
 -----------
-AWS credentials are loaded via ``clustrix.credential_manager.
-FlexibleCredentialManager`` (environment variables or ``~/.clustrix/.env``).
-If no credentials are found, this script exits immediately with an error --
-it never silently falls back to boto3's default credential chain.
+AWS credentials come from boto3's own credential chain: the ``AWS_*``
+environment variables, ``~/.aws/credentials``, or an instance profile. If it
+resolves nothing, this script exits immediately with an error rather than
+letting a call fail somewhere deeper.
+
+This used to ask ``clustrix.credential_manager`` for provider ``"aws"``,
+which has never existed in ``PROVIDER_ENV_NAMES`` -- the lookup always
+returned ``None``, so the script could never authenticate at all. AWS keys
+are also not something clustrix should be holding: it has no AWS backend.
 
 Usage:
     python scripts/aws/destroy_cluster.py CLUSTER_NAME [--region REGION] [--execute]
@@ -50,8 +55,6 @@ Usage:
 
 import argparse
 import sys
-
-from clustrix.credential_manager import FlexibleCredentialManager
 
 MANAGED_TAG_KEY = "clustrix:managed"
 MANAGED_TAG_VALUE = "true"
@@ -110,36 +113,31 @@ def get_clients(region: str):
             "        are the only thing in the project that needs it.)"
         )
 
-    manager = FlexibleCredentialManager()
-    creds = manager.ensure_credential("aws")
-    if (
-        not creds
-        or not creds.get("access_key_id")
-        or not creds.get("secret_access_key")
-    ):
+    # boto3's own credential chain, deliberately. This used to ask the
+    # clustrix credential manager for provider "aws", which has never been
+    # in PROVIDER_ENV_NAMES -- the lookup always returned None, so this
+    # script could never authenticate at all. Standard AWS environment
+    # variables, ~/.aws/credentials and instance profiles are what an
+    # operator running cleanup tooling already has, and going through the
+    # SDK's chain also keeps AWS keys out of clustrix's credential surface.
+    if boto3.Session().get_credentials() is None:
         print(
             "ERROR: No AWS credentials found. Set AWS_ACCESS_KEY_ID and "
-            "AWS_SECRET_ACCESS_KEY, or configure them in ~/.clustrix/.env, "
-            "before running this script.",
+            "AWS_SECRET_ACCESS_KEY, or configure a profile with `aws "
+            "configure`, before running this script.",
             file=sys.stderr,
         )
         raise SystemExit(1)
     eks = boto3.client(
         "eks",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     ec2 = boto3.client(
         "ec2",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     iam = boto3.client(
         "iam",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     return eks, ec2, iam

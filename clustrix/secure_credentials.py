@@ -98,19 +98,33 @@ class ValidationCredentials:
         and ``scripts/debug_huggingface_auth.py`` both stopped finding a
         token they were correctly configured to have.
 
-        Going through :func:`clustrix.credential_manager.ensure_credential`
-        fixes it properly rather than by re-exporting: that is the supported
-        lookup, it consults the environment *and* ``~/.clustrix/.env``, and
-        it honours the ``HUGGINGFACE_*``/``HF_*`` aliases from one table so
-        the two sources cannot disagree about which names count.
-        """
-        from .credential_manager import ensure_credential
+        Going through
+        :func:`clustrix.credential_release.release_credential` fixes it
+        properly rather than by re-exporting: that is the supported lookup,
+        it consults the environment *and* ``~/.clustrix/.env``, and it
+        honours the ``HUGGINGFACE_*``/``HF_*`` aliases from one table so the
+        two sources cannot disagree about which names count.
 
-        credentials = ensure_credential("huggingface")
-        if not credentials or not credentials.get("token"):
+        The recipient is ``huggingface.co``, and it is a
+        :meth:`~clustrix.credential_release.CredentialTarget.fixed_service`
+        because no configuration file can move it: unlike ``cluster_host``,
+        nothing untrusted can have chosen who receives this token.
+        """
+        from .credential_release import (
+            CredentialTarget,
+            describe_credential,
+            release_credential,
+        )
+
+        target = CredentialTarget.fixed_service(
+            "huggingface.co",
+            why="the HuggingFace Hub API, which is compiled in rather than configured",
+        )
+        release = release_credential(target, provider="huggingface")
+        if not release.token:
             return None
         return {
-            "token": credentials["token"],
+            "token": release.token,
             # Kept as "" rather than absent: every caller indexes it.
-            "username": credentials.get("username", ""),
+            "username": describe_credential("huggingface").username,
         }

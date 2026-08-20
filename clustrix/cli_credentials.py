@@ -17,10 +17,16 @@ try:
 except ImportError:
     HAS_CLICK = False
 
+from .config import CONFIG_SOURCE_RUNTIME
 from .credential_manager import (
     FlexibleCredentialManager,
     get_credential_manager,
     write_text_securely,
+)
+from .credential_release import (
+    CredentialTarget,
+    describe_credential,
+    release_credential,
 )
 from .ssh_security import configure_host_key_policy
 
@@ -330,8 +336,6 @@ def list_credentials_command():
 
 def test_credentials_command():
     """Test all configured credentials by attempting real API calls."""
-    manager = get_credential_manager()
-
     print("🧪 Testing Clustrix Credentials")
     print("=" * 50)
 
@@ -344,26 +348,67 @@ def test_credentials_command():
     for provider in providers_to_test:
         print(f"\n🔍 Testing {provider.upper()} credentials...")
 
-        credentials = manager.ensure_credential(provider)
-        if not credentials:
+        # What is configured is a question about names, not values, so it is
+        # answered without obtaining a secret at all. The secret itself comes
+        # from the gate below, with the recipient named.
+        described = describe_credential(provider)
+        if not described.available:
             print("  ❌ No credentials found")
             continue
 
         # Test with real validation
         if provider == "ssh":
-            required_keys = ["host", "username"]
-            if all(key in credentials for key in required_keys) and (
-                "password" in credentials or "private_key_path" in credentials
-            ):
-                success = _validate_ssh_credentials_real(credentials)
+            if not (described.host and described.username):
+                print(
+                    "  ❌ Missing required SSH credentials (need host, username, and password or private_key_path)"
+                )
+                continue
+            # The credential file naming SSH_HOST *is* the user authorising
+            # that host, which is rule 1 of the release rules. So the target
+            # is the credential's own host, and the release is the one the
+            # rule was written for.
+            target = CredentialTarget(
+                hostname=described.host,
+                username=described.username,
+                provenance=CONFIG_SOURCE_RUNTIME,
+                described_as="SSH_HOST from the credential file",
+            )
+            release = release_credential(target, provider="ssh")
+            if release.refusal is not None:
+                print(f"  ❌ {release.refusal}")
+                continue
+            # ``_validate_ssh_credentials_real`` reads the ``SSH_*`` spelling
+            # of the credential file, and this passed it the lower-case field
+            # names ``resolve_provider_credentials`` emits -- so every run
+            # raised KeyError inside the helper's own try block and reported
+            # "invalid or inaccessible" for credentials that were fine.
+            ssh_credentials = {
+                "SSH_HOST": described.host,
+                "SSH_USERNAME": described.username,
+                "SSH_PORT": described.port or "22",
+            }
+            if release.password:
+                ssh_credentials["SSH_PASSWORD"] = release.password
+            elif release.key_path:
+                ssh_credentials["SSH_PRIVATE_KEY_PATH"] = release.key_path
             else:
                 print(
                     "  ❌ Missing required SSH credentials (need host, username, and password or private_key_path)"
                 )
                 continue
+            success = _validate_ssh_credentials_real(ssh_credentials)
         elif provider == "huggingface":
-            if "token" in credentials:
-                success = _validate_huggingface_credentials_real(credentials)
+            release = release_credential(
+                CredentialTarget.fixed_service(
+                    "huggingface.co",
+                    why="the HuggingFace Hub API",
+                ),
+                provider="huggingface",
+            )
+            if release.token:
+                success = _validate_huggingface_credentials_real(
+                    {"HF_TOKEN": release.token}
+                )
             else:
                 print("  ❌ Missing required HuggingFace credentials (need token)")
                 continue

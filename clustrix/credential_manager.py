@@ -368,15 +368,30 @@ class FlexibleCredentialManager:
 
         return credentials
 
-    def ensure_credential(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials for a specific provider with detailed feedback.
+    def _ensure_credential_unchecked(self, provider: str) -> Optional[Dict[str, str]]:
+        """The stored credential for ``provider``, secrets and all.
 
-        Args:
-            provider: Provider name (ssh, huggingface, local)
+        **Unchecked** is the whole name: this returns the bytes with no idea
+        who is about to receive them. Deciding that is
+        :func:`clustrix.credential_release.release_credential`, whose first
+        positional parameter is the recipient, and this raises for anybody
+        else -- see :func:`clustrix.credential_release.assert_called_from_the_gate`.
 
-        Returns:
-            Credentials dictionary or None if not available
+        The guard is always on. It makes no reference to tests and behaves
+        identically whether or not pytest is running, so it is a fact about
+        which module may obtain a secret rather than production code knowing
+        it is under test. It costs one frame lookup on a path that already
+        reads a file off disk, and it means an eighth route written the old
+        way raises on its first run rather than at review.
+
+        This used to be ``ensure_credential``, public, with a module-level
+        convenience function beside it. Both were how a caller obtained the
+        cluster password without saying who for.
         """
+        from .credential_release import assert_called_from_the_gate
+
+        assert_called_from_the_gate()
+
         logger.debug(f"Looking up {provider} credentials...")
 
         for source in self.sources:
@@ -422,10 +437,29 @@ class FlexibleCredentialManager:
         missing = []
 
         for provider in required:
-            if not self.ensure_credential(provider):
+            if not self._configured_fields(provider)[1]:
                 missing.append(provider)
 
         return missing
+
+    def _configured_fields(self, provider: str) -> tuple:
+        """``(source name, field names)`` for ``provider``; no values.
+
+        "Is something configured, and where did it come from" never needed
+        the secret, so the status paths ask this instead of the gate. Field
+        *names* only -- ``["host", "username", "password"]`` says a password
+        is configured without being one.
+        """
+        for source in self.sources:
+            try:
+                if not source.is_available():
+                    continue
+                credentials = source.get_credentials(provider)
+                if credentials:
+                    return source.__class__.__name__, sorted(credentials)
+            except Exception:
+                continue
+        return None, []
 
     def list_available_providers(self) -> Dict[str, str]:
         """List all providers with available credentials and their sources.
@@ -477,38 +511,21 @@ class FlexibleCredentialManager:
                 }
                 status["sources"][source_name] = error_status
 
-        # Check each provider
+        # Check each provider. Field *names* and the source that answered --
+        # never a value, because this is printed by a status command.
         providers = [
             "ssh",
             "huggingface",
             "local",
         ]
         for provider in providers:
-            credentials = self.ensure_credential(provider)
-            if credentials:
-                # Find which source provided the credentials
-                source_name = "unknown"
-                for source in self.sources:
-                    try:
-                        if source.is_available() and source.get_credentials(provider):
-                            source_name = source.__class__.__name__
-                            break
-                    except Exception:
-                        continue
-
-                provider_status: Dict[str, Any] = {
-                    "available": True,
-                    "source": source_name,
-                    "fields": list(credentials.keys()),
-                }
-                status["providers"][provider] = provider_status
-            else:
-                empty_status: Dict[str, Any] = {
-                    "available": False,
-                    "source": None,
-                    "fields": [],
-                }
-                status["providers"][provider] = empty_status
+            source_name, field_names = self._configured_fields(provider)
+            provider_status: Dict[str, Any] = {
+                "available": bool(field_names),
+                "source": source_name if field_names else None,
+                "fields": field_names,
+            }
+            status["providers"][provider] = provider_status
 
         return status
 
@@ -532,12 +549,6 @@ def load_credentials_optional(
     """Load available credentials from all sources."""
     manager = get_credential_manager()
     return manager.load_credentials_optional(provider)
-
-
-def ensure_credential(provider: str) -> Optional[Dict[str, str]]:
-    """Get credentials for a specific provider with fallbacks."""
-    manager = get_credential_manager()
-    return manager.ensure_credential(provider)
 
 
 def get_missing_providers(required: List[str]) -> List[str]:
