@@ -1712,25 +1712,32 @@ class ModernClustrixWidget:
                 # config wholesale discarded settings that have no control here
                 # -- cluster_packages, excluded_packages, poll intervals and
                 # timeouts a user can only set from code.
-                defaults = asdict(ClusterConfig())
-                # ``.get``, not ``[]``: a name in WIDGET_MANAGED_FIELDS that is
-                # no longer a ClusterConfig field must reach the filter below
-                # and be named, rather than raising a bare KeyError here or --
-                # worse -- being dropped without a word (#165).
-                applied = {
-                    field: defaults.get(field) for field in WIDGET_MANAGED_FIELDS
-                }
-                applied.update(self._config_data_for_backend())
-                settings, unrecognised = split_config_kwargs(applied)
+                # ``reset_fields``, not a dict built here: a name in
+                # WIDGET_MANAGED_FIELDS that is no longer a ClusterConfig
+                # field must be named rather than raising a bare KeyError or
+                # -- worse -- being dropped without a word (#165). The legacy
+                # widget needs the same seeding for the same reason, so the
+                # rule lives in one place.
+                settings, unrecognised = split_config_kwargs(
+                    self._config_data_for_backend(),
+                    reset_fields=WIDGET_MANAGED_FIELDS,
+                )
                 configure(**settings)
 
+                # Read back what @cluster will actually see. Printing the
+                # on-screen ClusterConfig instead meant the summary
+                # contradicted the live configuration: _config_data_for_backend
+                # resets the fields the chosen backend ignores, so switching a
+                # profile to ``local`` applied no host and then printed the
+                # cluster's.
+                live = get_config()
                 print("✅ Applied configuration")
-                print(f"   Cluster: {config.cluster_type}")
-                if config.cluster_host:
-                    print(f"   Host: {config.cluster_host}")
+                print(f"   Cluster: {live.cluster_type}")
+                if live.cluster_host:
+                    print(f"   Host: {live.cluster_host}")
                 print(
-                    f"   Resources: {config.default_cores} cores, "
-                    f"{config.default_memory}, {config.default_time}"
+                    f"   Resources: {live.default_cores} cores, "
+                    f"{live.default_memory}, {live.default_time}"
                 )
                 print("   @cluster will use this configuration from now on.")
                 if unrecognised:

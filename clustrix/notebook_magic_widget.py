@@ -48,6 +48,41 @@ logger = logging.getLogger(__name__)
 #: Everything else that is not a ``ClusterConfig`` field gets said out loud.
 PROFILE_BOOKKEEPING_KEYS = ("name",)
 
+#: Every ``ClusterConfig`` field this widget's controls can set. Apply resets
+#: exactly these to their defaults and then lays what is on screen on top, so
+#: a box the user emptied unsets the field instead of leaving the previously
+#: applied profile's value standing, while settings with no control here
+#: survive untouched. The same bargain the modern widget strikes, through the
+#: same ``split_config_kwargs(reset_fields=...)``, so the two cannot drift.
+#: A test asserts this stays equal to what _save_config_from_widgets produces.
+WIDGET_MANAGED_FIELDS = frozenset(
+    {
+        "cluster_type",
+        "default_cores",
+        "default_memory",
+        "default_time",
+        "remote_work_dir",
+        "cluster_host",
+        "username",
+        "password",
+        "cluster_port",
+        "package_manager",
+        "default_partition",
+        "key_file",
+        "hf_hardware",
+        "hf_token",
+        "environment_variables",
+        "module_loads",
+        "pre_execution_commands",
+    }
+)
+
+#: Keys this widget wrote before #165, and the live field each one means.
+#: Profiles already on disk still carry them, so they are read when loading
+#: and re-emitted under the live name -- migrated, not blanked, and not
+#: reported as unrecognised, because the setting does reach @cluster.
+MIGRATED_PROFILE_KEYS = {"queue": "default_partition", "ssh_key_path": "key_file"}
+
 
 def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
     """Names present in ``before`` that ``strip_secret_fields`` removed.
@@ -662,13 +697,17 @@ class EnhancedClusterConfigWidget:
 
         # ``queue`` and ``ssh_key_path`` are what this widget wrote before
         # #165. Profiles saved by an older clustrix are still on disk, so they
-        # are read as fallbacks rather than being silently blanked.
-        self.partition_field.value = (
-            config.get("default_partition") or config.get("queue") or ""
-        )
-        self.ssh_key_field.value = (
-            config.get("key_file") or config.get("ssh_key_path") or ""
-        )
+        # are read as fallbacks rather than being silently blanked. The
+        # old-to-live mapping lives in one place because Apply needs it too --
+        # a key that is migrated must not also be reported as one the widget
+        # will not carry.
+        migrated_controls = {
+            "default_partition": self.partition_field,
+            "key_file": self.ssh_key_field,
+        }
+        for old_key, live_key in MIGRATED_PROFILE_KEYS.items():
+            control = migrated_controls[live_key]
+            control.value = config.get(live_key) or config.get(old_key) or ""
 
         # Trigger cluster type change to show/hide relevant fields
         self._on_cluster_type_change({"new": self.cluster_type.value})
@@ -796,6 +835,23 @@ class EnhancedClusterConfigWidget:
             try:
                 # Save current state
                 config_data = self._save_config_from_widgets()
+
+                # Whatever the stored profile holds that no control here owns:
+                # a field with no widget (``stage_warn_bytes``), a key an older
+                # clustrix wrote, a typo. Rebuilding the profile from the
+                # controls alone erased all of it without a word. Values for
+                # managed fields are deliberately *not* taken from the stored
+                # profile -- the controls are what the user is looking at, and
+                # a box they just emptied has to win.
+                stored = self.configs.get(self.current_config_name) or {}
+                unmanaged = {
+                    key: value
+                    for key, value in stored.items()
+                    if key not in WIDGET_MANAGED_FIELDS
+                    and key not in MIGRATED_PROFILE_KEYS
+                }
+                config_data = {**unmanaged, **config_data}
+
                 # Update the config in our dictionary
                 if self.current_config_name:
                     self.configs[self.current_config_name] = config_data
@@ -803,8 +859,18 @@ class EnhancedClusterConfigWidget:
                 # that is not a ClusterConfig field, and a profile carries at
                 # least one that is not -- its own ``name`` -- so splatting the
                 # profile straight in made Apply fail every single time (#165).
+                #
+                # ``reset_fields``: _save_config_from_widgets drops empty
+                # values so a blank box cannot overwrite a setting with "",
+                # which also meant a box the user *cleared* said nothing and
+                # the previous profile's value stayed live -- a run configured
+                # as ``local`` carrying the last cluster's host and username.
+                # Seeding this widget's own fields with their defaults first
+                # makes clearing a control mean clearing the setting.
                 settings, unrecognised = split_config_kwargs(
-                    config_data, PROFILE_BOOKKEEPING_KEYS
+                    config_data,
+                    PROFILE_BOOKKEEPING_KEYS,
+                    reset_fields=WIDGET_MANAGED_FIELDS,
                 )
                 configure(**settings)
                 print("✅ Configuration applied successfully!")

@@ -598,7 +598,9 @@ def config_field_names() -> FrozenSet[str]:
 
 
 def split_config_kwargs(
-    data: Mapping[str, Any], bookkeeping: Iterable[str] = ()
+    data: Mapping[str, Any],
+    bookkeeping: Iterable[str] = (),
+    reset_fields: Iterable[str] = (),
 ) -> Tuple[Dict[str, Any], List[str]]:
     """Split a saved configuration into what :func:`configure` accepts, and
     the names it does not.
@@ -615,12 +617,31 @@ def split_config_kwargs(
     either a stale profile written by an older clustrix or a control wired
     to a name that no longer exists, and both deserve to be said out loud
     rather than dropped on the floor.
+
+    ``reset_fields`` names the fields the caller *owns*: every one of them is
+    seeded with its :class:`ClusterConfig` default before ``data`` is laid on
+    top, so a control the user cleared clears the live setting instead of
+    leaving the previous configuration's value standing. Without it a caller
+    that drops empty values -- which both widgets do, so a blank box does not
+    overwrite a setting with an empty string -- can never say "unset this",
+    and a profile the user chose as ``local`` inherits the last profile's
+    ``cluster_host``. Fields outside this set are not touched at all, so
+    settings with no control anywhere survive an Apply. A name in
+    ``reset_fields`` that is not a field is reported rather than reset: it is
+    a control wired to a name that no longer exists.
     """
     accepted = config_field_names()
     known_extras = set(bookkeeping)
-    kwargs = {key: value for key, value in data.items() if key in accepted}
+    owned = list(reset_fields)
+    defaults = asdict(ClusterConfig())
+    kwargs = {name: defaults[name] for name in owned if name in accepted}
+    kwargs.update({key: value for key, value in data.items() if key in accepted})
     unrecognised = sorted(
-        key for key in data if key not in accepted and key not in known_extras
+        {
+            key
+            for key in list(data) + owned
+            if key not in accepted and key not in known_extras
+        }
     )
     return kwargs, unrecognised
 
