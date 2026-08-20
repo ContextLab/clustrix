@@ -7,6 +7,7 @@ for the notebook magic interface.
 
 import ipaddress
 import json
+import logging
 import os
 import yaml
 import re
@@ -26,6 +27,8 @@ from .config import (  # noqa: F401
     config_source_for_saved_entry,
     recorded_config_source,
 )
+
+logger = logging.getLogger(__name__)
 
 #: Default cluster configurations available in the widget.
 #:
@@ -131,38 +134,78 @@ def _as_mapping(value: Any) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def load_config_from_file(file_path: Union[Path, str]) -> Dict[str, Any]:
-    """Load configuration from a YAML or JSON file, tolerating a bad one.
+def _read_config_document(file_path: Union[Path, str]) -> Dict[str, Any]:
+    """Read and parse one configuration file, raising whatever goes wrong.
 
-    Returns an empty mapping for anything it cannot read or parse. That is a
-    deliberate contract -- four tests pin it -- because this is the widget's
-    "Load" path, where a raised exception would escape into a notebook cell
-    rather than the widget's own output area. The caller reports the empty
-    result to the user.
-
-    Use `clustrix.config.load_config` when a bad file should be an error: it
-    raises, and it names the offending settings.
-
-    Always returns a *mapping*. YAML happily parses a file of prose into a bare
-    string, so an unrecognised extension used to return a `str` from a function
-    annotated `-> Dict[str, Any]`; every caller then had to guess.
+    Always returns a *mapping*. YAML happily parses a file of prose into a
+    bare string, so an unrecognised extension used to return a `str` from a
+    function annotated `-> Dict[str, Any]`; every caller then had to guess.
     """
+    path = Path(file_path) if isinstance(file_path, str) else file_path
+    content = path.read_text()
+    suffix = path.suffix.lower()
+
+    if suffix in (".yml", ".yaml"):
+        return _as_mapping(yaml.safe_load(content))
+    if suffix == ".json":
+        return _as_mapping(json.loads(content))
+
+    # Unknown extension: try both.
     try:
-        path = Path(file_path) if isinstance(file_path, str) else file_path
-        content = path.read_text()
-        suffix = path.suffix.lower()
+        return _as_mapping(yaml.safe_load(content))
+    except yaml.YAMLError:
+        return _as_mapping(json.loads(content))
 
-        if suffix in (".yml", ".yaml"):
-            return _as_mapping(yaml.safe_load(content))
-        if suffix == ".json":
-            return _as_mapping(json.loads(content))
 
-        # Unknown extension: try both.
+def load_config_from_file(
+    file_path: Union[Path, str], *, discovered: bool = False
+) -> Dict[str, Any]:
+    """Load configuration from a YAML or JSON file.
+
+    Who chose the path decides what a failure means, which is the same
+    distinction `clustrix.config` draws and the reason there is not a third
+    policy here:
+
+    * **Named** (`discovered=False`, the default). The caller picked this
+      file, so failing to read it is an error and it raises --
+      `FileNotFoundError`, `PermissionError`, `yaml.YAMLError`,
+      `json.JSONDecodeError` -- exactly as `clustrix.config.load_config`
+      does for the same file. This used to answer `{}`, which is also the
+      answer for a file that genuinely holds no configurations, so a path
+      typo, a permissions problem and malformed YAML all presented to the
+      user as "this file has nothing in it" and the widget offered the
+      result as a valid, blank profile (issue #168).
+    * **Discovered** (`discovered=True`). Nobody named it; the widget globbed
+      the standard locations for it. Best effort, so an unreadable one is
+      skipped rather than taking the widget down -- but the reason is
+      *logged* rather than discarded, because "I could not read it" and "it
+      holds nothing" are different answers and only one of them deserves
+      silence.
+
+    Always returns a *mapping*; see `_read_config_document`.
+    """
+    if not discovered:
+        return _read_config_document(file_path)
+
+    try:
+        return _read_config_document(file_path)
+    except Exception as exc:
+        # Absolute, because the search covers ``.``, the configuration
+        # directory and ``/etc/clustrix``, and "clustrix.yml" alone does not
+        # tell the user which of them to go and look at.
         try:
-            return _as_mapping(yaml.safe_load(content))
-        except yaml.YAMLError:
-            return _as_mapping(json.loads(content))
-    except Exception:
+            named = os.path.abspath(str(file_path))
+        except OSError:  # pragma: no cover - cwd removed under us
+            named = str(file_path)
+        logger.warning(
+            "clustrix found the configuration file %s while searching the "
+            "standard locations but could not read it, so none of its "
+            "configurations are offered: %s: %s. This is not the same as the "
+            "file holding no configurations.",
+            named,
+            type(exc).__name__,
+            exc,
+        )
         return {}
 
 

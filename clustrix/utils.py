@@ -833,10 +833,34 @@ def deserialize_function(func_data: Union[bytes, Dict[str, Any]]) -> tuple:
         return pickle.loads(func_data)
     elif isinstance(func_data, dict):
         # Dictionary format from serialize_function
+        # dill first, cloudpickle as the fallback. The fallback is expected to
+        # fire routinely -- the two disagree about a handful of payloads and
+        # either may be the one that can read this -- so a success here is not
+        # worth saying anything about. A *double* failure is, and the reason
+        # dill gave must survive it: the two reasons are usually different,
+        # and dill's is often the informative one because it names the object
+        # that could not be reconstructed. Rebinding ``func`` inside a bare
+        # ``except Exception:`` threw that away and left the caller holding
+        # cloudpickle's reason alone.
+        #
+        # This is the remote execution path: the failure happened in another
+        # interpreter on another machine, and what propagates from here is the
+        # whole of what the caller gets. ``raise ... from cloudpickle_error``
+        # keeps cloudpickle's traceback as ``__cause__`` and dill's as that
+        # exception's ``__context__``, so all three print.
         try:
             func = dill.loads(func_data["function"])
-        except Exception:
-            func = cloudpickle.loads(func_data["function"])
+        except Exception as dill_error:
+            try:
+                func = cloudpickle.loads(func_data["function"])
+            except Exception as cloudpickle_error:
+                raise RuntimeError(
+                    "Could not deserialize the function payload. "
+                    f"dill.loads failed with "
+                    f"{type(dill_error).__name__}: {dill_error}; "
+                    f"cloudpickle.loads then failed with "
+                    f"{type(cloudpickle_error).__name__}: {cloudpickle_error}."
+                ) from cloudpickle_error
 
         # dill, to match _dumps_by_value -- args may carry classes defined in
         # the caller's __main__, which stdlib pickle can only store by name.

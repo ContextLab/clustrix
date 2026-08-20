@@ -179,6 +179,32 @@ Save and Load Configurations
 2. **Load**: reads profiles back from it
 3. **File Formats**: YAML and JSON, detected from the file extension
 
+.. autofunction:: clustrix.notebook_magic_config.load_config_from_file
+
+   Who chose the path decides what a failure means, and the two answers are
+   deliberately different:
+
+   * A file you **name** is a file you chose, so a path that does not exist,
+     one you cannot read, or one that does not parse **raises** --
+     :class:`FileNotFoundError`, :class:`PermissionError`,
+     ``yaml.YAMLError`` or :class:`json.JSONDecodeError`, the same errors
+     :func:`clustrix.config.load_config` raises for the same file.
+   * A file clustrix **discovered** by searching the standard locations
+     (``discovered=True``, which is what the widget's own scan passes) is
+     best effort: an unreadable one is skipped so that it cannot take the
+     widget's other profiles down with it, and the reason is written to the
+     ``clustrix.notebook_magic_config`` logger at ``WARNING``.
+
+   .. note::
+
+      **Behaviour change.** The named case used to return an empty mapping
+      for *every* failure.
+      That made a typo, a permissions problem and malformed YAML all report
+      identically to a file that genuinely holds no configurations, and the
+      widget offered the result as a valid, blank profile. If you were
+      relying on the old behaviour, pass ``discovered=True`` -- but read the
+      log, because an empty result now no longer means the file was empty.
+
 Notes
 -----
 

@@ -132,7 +132,10 @@ class EnhancedClusterConfigWidget:
         self.config_files = detect_config_files()
         for config_file in self.config_files:
             source = config_source_for_detected_file(config_file)
-            file_configs = load_config_from_file(config_file)
+            # ``discovered``: nobody named this file, the scan above found it.
+            # An unreadable one must not take the widget down, and must not
+            # pass for an empty one either -- see ``load_config_from_file``.
+            file_configs = load_config_from_file(config_file, discovered=True)
             if isinstance(file_configs, dict):
                 # Provenance the file carries about its own entries, removed
                 # before anything else looks at the mapping: it is clustrix's
