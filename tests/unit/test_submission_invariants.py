@@ -100,14 +100,33 @@ SBATCH = """\
 echo "Submitted batch job 4242"
 """
 
+#: Stands in for a GPU. ``detect_gpu_capabilities`` asks for exactly this --
+#: one CSV row per device, no header, no units -- and believes a zero exit
+#: with non-empty output, so an account carrying this takes the GPU arm of
+#: ``enhanced_setup_two_venv_environment``. That arm was single-valued
+#: before: every fixture in this file reported no GPU, so the branch that
+#: calls ``setup_gpu_enabled_venv2`` and folds its result into ``venv_info``
+#: never ran, and aliasing VENV2's environment to VENV1's *inside it* passed
+#: the whole suite.
+NVIDIA_SMI = """\
+#!/bin/sh
+echo "0, NVIDIA A100-SXM4-40GB, 40960, 40218, 8.0"
+"""
 
-def _account(tmp_path, with_conda=True):
+
+def _executable(path, text):
+    path.write_text(text)
+    path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return path
+
+
+def _account(tmp_path, with_conda=True, with_gpu=False):
     """A home directory shaped like a login account on a cluster."""
     root = tmp_path / "cluster"
     (root / "bin").mkdir(parents=True)
-    sbatch = root / "bin" / "sbatch"
-    sbatch.write_text(SBATCH)
-    sbatch.chmod(sbatch.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    _executable(root / "bin" / "sbatch", SBATCH)
+    if with_gpu:
+        _executable(root / "bin" / "nvidia-smi", NVIDIA_SMI)
     if with_conda:
         profile = root / "miniconda3" / "etc" / "profile.d"
         profile.mkdir(parents=True)
@@ -161,9 +180,15 @@ def server_exec(server, command):
 
 
 @pytest.fixture
-def cluster(tmp_path):
-    """A running SSH server whose account has the fixture conda and sbatch."""
-    root = _account(tmp_path)
+def cluster(request, tmp_path):
+    """A running SSH server whose account has the fixture conda and sbatch.
+
+    Parametrise indirectly with ``True`` to give the account an
+    ``nvidia-smi`` as well, which is the only thing standing between a
+    submission and the GPU arm of ``enhanced_setup_two_venv_environment``.
+    Tests that do not parametrise it get the no-GPU account, as before.
+    """
+    root = _account(tmp_path, with_gpu=getattr(request, "param", False))
     path = os.pathsep.join((str(root / "bin"),) + SAFE_PATH_DIRS)
     with LocalSSHServer(
         root=str(root), password=PASSWORD, env={"PATH": path}
@@ -239,32 +264,70 @@ def submit(server, cluster_type, **overrides):
 _STAGE_LAUNCH = re.compile(r'^(?!#).*-c "$')
 
 
+def _shell_level(script):
+    """``(indices of shell lines, indices of launch lines)``.
+
+    A ``-c "`` opens a Python program whose lines run inside the interpreter
+    just launched rather than in the shell, and the next line that is exactly
+    ``"`` closes it. Telling the two apart is what lets the search below be
+    bounded by the script's own structure instead of by a comment.
+    """
+    shell, launches = [], []
+    inside = False
+    for index, line in enumerate(script.splitlines()):
+        if inside:
+            inside = line != '"'
+            continue
+        shell.append(index)
+        if _STAGE_LAUNCH.match(line):
+            launches.append(index)
+            inside = True
+    assert not inside, 'a `-c "` program in this script is never closed'
+    return shell, launches
+
+
 def venv2_block(script):
     """VENV2's setup lines and the line that starts its interpreter.
 
-    Located structurally -- by the comment the generator writes above the
-    block -- rather than by pattern-matching for what a mutant produces, so
-    the assertions below are about the environment VENV2 gets, whatever that
-    turns out to be.
+    Located structurally rather than by pattern-matching for what a mutant
+    produces, so the assertions below are about the environment VENV2 gets,
+    whatever that turns out to be.
 
     Both halves matter, and which one carries the environment depends on the
     layout. With conda the launch line names it (``conda run -n <env>
     python``); with plain virtualenvs the launch line is a bare ``python``
     and the preceding ``source .../bin/activate`` is what decides which
     interpreter that is.
+
+    The ``# Step 2`` comment is used only to *name* which of the three launch
+    lines is VENV2's. It deliberately does not bound the scan: this used to
+    start at the line after the comment, and an activation emitted one line
+    *above* it was therefore invisible -- 20 invariant tests passed against a
+    script whose VENV2 block ran in clustrix's serialization venv. The
+    preamble now runs from the end of the previous stage's program, so every
+    shell line that executes between VENV1 finishing and VENV2 starting is
+    seen, wherever the comment happens to sit.
     """
     lines = script.splitlines()
-    for index, line in enumerate(lines):
-        if line.startswith("# Step 2: Use VENV2 to execute the function"):
-            block = lines[index + 1 :]
-            for offset, candidate in enumerate(block):
-                if _STAGE_LAUNCH.match(candidate):
-                    return block[:offset], candidate
-            raise AssertionError("the VENV2 block opens no interpreter")
-    # Single-venv layout: there is one launch line and it is VENV2's.
-    launches = [line for line in lines if _STAGE_LAUNCH.match(line)]
-    assert len(launches) == 1, f"expected exactly one launch line, got {launches}"
-    return [], launches[0]
+    shell, launches = _shell_level(script)
+    markers = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("# Step 2: Use VENV2 to execute the function")
+    ]
+    if not markers:
+        # Single-venv layout: there is one launch line and it is VENV2's.
+        assert len(launches) == 1, (
+            "expected exactly one launch line, got "
+            f"{[lines[index] for index in launches]}"
+        )
+        return [], lines[launches[0]]
+    after = [index for index in launches if index > markers[0]]
+    assert after, "the VENV2 block opens no interpreter"
+    launch = after[0]
+    before = [index for index in launches if index < launch]
+    start = before[-1] if before else -1
+    return [lines[index] for index in shell if start < index < launch], lines[launch]
 
 
 def venv2_launch_line(script):
@@ -314,17 +377,43 @@ BACKENDS = ["slurm", "ssh"]
 #: ``enhanced_setup_two_venv_environment``, or in its no-GPU branch, launches
 #: VENV2 as ``conda run -n clustrix_venv1_<key> python`` and survives
 #: everything -- but only on this path, because a named environment overrides
-#: the name before the script is generated.
+#: the name before the script is generated. Of that pair only
+#: ``conda_env2_name`` does the killing: ``venv_info["venv2_python"]`` is read
+#: nowhere in ``clustrix/`` and ``venv2_path`` only feeds a log message, so
+#: aliasing either of those alone is an equivalent mutant, not a survivor.
 NAMED_ENVIRONMENTS = [None, "prod"]
 
 
+@pytest.mark.parametrize("cluster", [False, True], indirect=True, ids=["no-gpu", "gpu"])
 @pytest.mark.parametrize(
     "named_env", NAMED_ENVIRONMENTS, ids=["clustrix-built", "user-named"]
 )
 @pytest.mark.parametrize("cluster_type", BACKENDS)
 def test_venv2_never_runs_in_venv1(cluster, cluster_type, named_env):
-    """M13, R15 and R21: two-venv setup, with and without a named env."""
-    script, _ = submit(cluster, cluster_type, conda_env_name=named_env)
+    """M13, R15 and R21: two-venv setup, with and without a named env.
+
+    Also the GPU arm, which was the last single-valued branch on this path.
+    ``enhanced_setup_two_venv_environment`` only calls
+    ``setup_gpu_enabled_venv2`` and folds its result into ``venv_info`` when
+    the cluster reports a GPU; with every fixture reporting none, aliasing
+    ``conda_env2_name`` to VENV1's immediately after that fold survived all
+    1958 tests. It is the worst place for the aliasing to live, too: a GPU
+    cluster is where a two-venv layout is most likely to be used in anger,
+    and the alias puts the user's function in clustrix's serialization
+    environment.
+    """
+    script, config = submit(cluster, cluster_type, conda_env_name=named_env)
+    has_gpu = (pathlib.Path(cluster.root) / "bin" / "nvidia-smi").exists()
+    assert config.venv_info["gpu_info"]["gpu_available"] is has_gpu, (
+        "GPU detection disagrees with what this account holds, so this "
+        "parametrisation is not reaching both arms: "
+        f"{config.venv_info['gpu_info']}"
+    )
+    if has_gpu:
+        assert "gpu_packages_installed" in config.venv_info, (
+            "the GPU arm's result never reached venv_info, so nothing here "
+            f"can see what that arm does to the layout: {config.venv_info}"
+        )
     launch = venv2_launch_line(script)
     if named_env:
         assert launch == f'conda run -n {named_env} python -c "', script
@@ -445,6 +534,39 @@ def test_the_plain_virtualenv_layout_never_runs_venv2_in_venv1(
     launch = venv2_launch_line(script)
     assert launch.endswith('/venv2_execution/bin/python -c "'), script
     assert_venv2_is_not_venv1(script)
+
+
+def test_the_invariant_does_not_depend_on_where_the_step_2_comment_sits(
+    cluster_without_conda,
+):
+    """The blind spot the widened assertion still had.
+
+    ``venv2_block`` scanned *from* the ``# Step 2`` comment, so emitting
+    VENV1's activation one line above it passed every invariant test in this
+    file while the generated script ran the user's function in clustrix's
+    serialization venv. Only the goldens saw it -- and the invariant is
+    precisely the thing that has to hold where no golden exists.
+
+    The activation is spliced into a script a real submission produced,
+    rather than mutating the generator, because the position of one emitted
+    line is the whole of what is under test and the shell either way is
+    identical.
+    """
+    script, _ = submit(cluster_without_conda, "slurm")
+    assert_venv2_is_not_venv1(script)
+
+    lines = script.splitlines()
+    marker = next(
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("# Step 2: Use VENV2 to execute the function")
+    )
+    activation = next(
+        line for line in lines if line.endswith("/venv1_serialization/bin/activate")
+    )
+    lines.insert(marker, activation)
+    with pytest.raises(AssertionError, match="activates VENV1"):
+        assert_venv2_is_not_venv1("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
