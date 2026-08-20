@@ -538,7 +538,13 @@ class LoopDetector(ast.NodeVisitor):
                 else:
                     # Fallback for older Python versions
                     iterable_str = _ast_to_string(node.iter)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Could not render the iterable of the loop at line %s (%s); "
+                    "it will be reported as 'unknown'.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 iterable_str = "unknown"
 
             # Analyze dependencies
@@ -585,7 +591,13 @@ class LoopDetector(ast.NodeVisitor):
                     condition_str = ast.unparse(node.test)
                 else:
                     condition_str = _ast_to_string(node.test)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Could not render the condition of the while loop at line "
+                    "%s (%s); it will be reported as 'unknown'.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 condition_str = "unknown"
 
             # Analyze dependencies

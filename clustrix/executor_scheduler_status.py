@@ -284,7 +284,13 @@ class SchedulerStatusManager:
                         slurm_files = (
                             stdout.strip().split("\n") if stdout.strip() else []
                         )
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not list slurm-*.out under %s (%s); this "
+                            "job's status is being decided without them.",
+                            remote_dir,
+                            exc,
+                        )
                         slurm_files = []
 
                 if slurm_files:

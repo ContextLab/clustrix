@@ -6,23 +6,49 @@ of done:
 > `grep -rn "except Exception:\s*$" clustrix/` reviewed line by line, with a
 > recorded decision per site
 
-Measured on the branch `work/silent-failures` after the fixes.
+Measured on the branch `work/silent-failures`. "Before" is `214fbce^`,
+"214fbce" is the first fix commit, "now" includes the follow-up commit that
+closed the guard's bypasses.
 
 ## Counts
 
-| Measure | Before | After |
-|-|-|-|
-| `grep -rEn 'except Exception:[[:space:]]*$' clustrix/` | 36 | 18 |
-| ... including handlers with a trailing `# pragma` / `# noqa` comment | 45 | 24 |
-| `except Exception` handlers of every form (AST count, incl. `as e`) | 123 | 123 |
-| Handlers whose body is **only** `pass` / `return None` / `continue` | 21 | 2 |
+| Measure | Before | 214fbce | Now |
+|-|-|-|-|
+| `grep -rEn 'except Exception:[[:space:]]*$' clustrix/` | 36 | 18 | 14 |
+| ... including handlers with a trailing `# pragma` / `# noqa` comment | 45 | 24 | 15 |
+| `except Exception` handlers of every form (AST count, incl. `as e`) | 134 | 123 | 123 |
+| Handlers whose body is **only** `pass` / `return None` / `continue` | 21 | 2 | 2 |
+| Sites the guard now calls silent (any spelling, any shrug) | 32 | 12 | 3 |
 
-The two remaining shrug-shaped handlers are `executor_core.__del__` and
-`auth_fallbacks.get_cluster_password`; both are on the allowlist in
-`tests/unit/test_no_silent_swallows.py::JUSTIFIED_SWALLOWS`, with the reason
-written out there. That allowlist is enforced in both directions — a new
-unjustified shrug fails `test_every_bare_swallow_has_a_recorded_decision`, and
-a stale entry fails `test_the_allowlist_has_no_stale_entries`.
+Two corrections to the first version of this table, both found by
+red-teaming it:
+
+* the all-forms count was recorded as "123 → 123". That was the *after* number
+  written into both columns. The real before figure is **134**: eleven
+  handlers were narrowed to specific exception types, so they stopped being
+  `except Exception` at all. A row that says a number did not move, when it
+  moved by eleven, is the same kind of defect as the ones being audited.
+* the last row is new, and is the one that matters most, because the row above
+  it counts only the *shape* `pass`/`return None`/`continue`. The guard now
+  asks whether a handler does anything about the failure, in any spelling, so
+  it sees `return False`, `...`, `break`, a dead assignment, `except
+  BaseException`, `contextlib.suppress(Exception)` and nine other bypasses
+  that the shape-based count could not. Measured with the guard's own
+  `scan_tree`, so the number and the test cannot disagree.
+
+The three remaining sites are `executor_core.ClusterExecutor.__del__` and
+`auth_fallbacks.get_cluster_password`, both on the allowlist in
+`tests/unit/test_no_silent_swallows.py::JUSTIFIED_SWALLOWS` with the reason
+written out there, and `notebook_magic_config.load_config_from_file`, which is
+a real defect recorded in `TRACKED_DEFECTS` against
+[#168](https://github.com/ContextLab/clustrix/issues/168) rather than
+pretended to be a decision. Both lists are enforced in both directions — a new
+unjustified swallow fails `test_every_silent_swallow_has_a_recorded_decision`,
+and a stale entry fails `test_the_allowlists_have_no_stale_entries`.
+
+What the guard still cannot see is written down in `KNOWN_BLIND_SPOTS` in the
+same file, with one executable example each, so a green run is not read as
+more than it is.
 
 The ~99 `except Exception as e` handlers were reviewed as a class rather than
 individually: they all bind the exception, and spot-checking confirmed they
@@ -42,20 +68,20 @@ Line numbers are pre-change, matching the issue text.
 | `executor_scheduler_status.py:117` `check_job_status` | **log (warning) + return `"unknown"`** | "the job is still running" — so `wait_for_result` burned the whole `job_wait_timeout` and then blamed a job that had already stopped | `test_an_unmeasurable_error_file_is_unknown_not_running` |
 | `executor_scheduler_status.py:344` traceback scan | **log and continue** (warning names the skipped file) | that the scan was exhaustive when it had skipped a file | `test_a_file_that_cannot_be_scanned_for_a_traceback_is_named` |
 | `executor_scheduler_status.py:594` `get_error_log` | **log + report honestly in the return value** | "No error log found" — a claim about the cluster, made after every read failed | `test_an_unreadable_error_log_says_so_instead_of_saying_there_is_none` |
-| `loop_analysis.py:332` `_evaluate_binop` | **narrow** to `(TypeError, ValueError, OverflowError)` + debug log | an unknown loop bound, which is correct — but a bug *in the evaluator* was laundered into the same answer | `test_every_bare_swallow_has_a_recorded_decision` (structural); `test_a_bound_that_cannot_be_folded_gives_no_range_rather_than_a_wrong_one` (behavioural) |
+| `loop_analysis.py:332` `_evaluate_binop` | **narrow** to `(TypeError, ValueError, OverflowError)` + debug log | an unknown loop bound, which is correct — but a bug *in the evaluator* was laundered into the same answer | `test_every_silent_swallow_has_a_recorded_decision` (structural); `test_a_bound_that_cannot_be_folded_gives_no_range_rather_than_a_wrong_one` (behavioural) |
 | `loop_analysis.py:638` argument binding | **narrow** to `(TypeError, ValueError)` + **warning** | "this function has no resolvable loop bounds" — the user asked for parallelism and silently ran serially | `test_arguments_that_cannot_be_bound_are_reported` |
-| `utils.py:744` `_dumps_by_value` dill(recurse) | **log (debug) and continue** | correct — the next strategy is a genuine alternative; only the reason was lost | `test_every_bare_swallow_has_a_recorded_decision` |
+| `utils.py:744` `_dumps_by_value` dill(recurse) | **log (debug) and continue** | correct — the next strategy is a genuine alternative; only the reason was lost | `test_every_silent_swallow_has_a_recorded_decision` |
 | `utils.py:748` `_dumps_by_value` dill | **log (debug) and continue** | same | same |
 | `utils.py:752` `_dumps_by_value` → `pickle.dumps` | **raise**, naming all three strategies | that the job had serialized. stdlib pickle stores functions by qualified name, so the payload *looked* fine here and died on the worker as "Can't get attribute". The function's own docstring already promised this. | `test_an_unserializable_payload_is_refused_rather_than_shipped_by_reference` |
-| `utils.py:776` `serialize_function` `getsource` | **narrow** to `(OSError, TypeError)` + debug | correct (source is optional); narrowed for consistency with the site two lines below | `test_every_bare_swallow_has_a_recorded_decision` |
-| `utils.py:806` `func_info["source"]` | **narrow** to `(OSError, TypeError)` + debug | correct — dill works from the code object | `test_serialize_function_source_exception` (rewritten), `test_every_bare_swallow_has_a_recorded_decision` |
-| `utils.py:880` `_source_checkout_path` | **narrow** + **warning** | "this is an ordinary installed package", so an editable checkout got pinned as `name==version` and the worker installed something else | `test_every_bare_swallow_has_a_recorded_decision` |
-| `utils.py:961` `_distribution_records` name/version | **narrow** + **warning** | that the distribution did not exist, so it never reached the worker's requirements | `test_every_bare_swallow_has_a_recorded_decision` |
-| `utils.py:968` `direct_url.json` read | **narrow** + **warning** | "an ordinary index install" — same consequence as `_source_checkout_path` | `test_every_bare_swallow_has_a_recorded_decision` |
+| `utils.py:776` `serialize_function` `getsource` | **narrow** to `(OSError, TypeError)` + debug | correct (source is optional); narrowed for consistency with the site two lines below | `test_every_silent_swallow_has_a_recorded_decision` |
+| `utils.py:806` `func_info["source"]` | **narrow** to `(OSError, TypeError)` + debug | correct — dill works from the code object | `test_serialize_function_source_exception` (rewritten), `test_every_silent_swallow_has_a_recorded_decision` |
+| `utils.py:880` `_source_checkout_path` | **narrow** + **warning** | "this is an ordinary installed package", so an editable checkout got pinned as `name==version` and the worker installed something else | `test_every_silent_swallow_has_a_recorded_decision` |
+| `utils.py:961` `_distribution_records` name/version | **narrow** + **warning** | that the distribution did not exist, so it never reached the worker's requirements | `test_every_silent_swallow_has_a_recorded_decision` |
+| `utils.py:968` `direct_url.json` read | **narrow** + **warning** | "an ordinary index install" — same consequence as `_source_checkout_path` | `test_every_silent_swallow_has_a_recorded_decision` |
 | `utils.py:1098` `get_environment_info` | **log (warning)**, keep the empty return | "this environment has no packages", which is never true. Also now warns on a non-zero `pip list` exit, which was silent too. | `test_a_failed_environment_capture_is_reported` |
-| `utils.py:1526` remote python probe | **narrow** to `(IndexError, ValueError)` + debug | correct — an unparseable banner is an unusable candidate, and `_select_remote_python` raises if none are | `test_every_bare_swallow_has_a_recorded_decision` |
+| `utils.py:1526` remote python probe | **narrow** to `(IndexError, ValueError)` + debug | correct — an unparseable banner is an unusable candidate, and `_select_remote_python` raises if none are | `test_every_silent_swallow_has_a_recorded_decision` |
 | `utils.py:1863` remote python probe (2) | **narrow** + debug | same | same |
-| `credential_manager.py:444` `list_available_providers` | **log (warning) and continue** | correct listing, but a broken keychain was reported identically to an empty one | `test_every_bare_swallow_has_a_recorded_decision` |
+| `credential_manager.py:444` `list_available_providers` | **log (warning) and continue** | correct listing, but a broken keychain was reported identically to an empty one | `test_every_silent_swallow_has_a_recorded_decision` |
 | `credential_manager.py:496` `get_credential_status` | **log (warning) and continue** | correct — the credentials are already in hand; only the attribution was lost | same |
 | `auth_manager.py:179` `_should_store_in_env_file` | **log (debug) and continue** | correct — the terminal prompt asks the same question and gets the same answer. Debug, not warning: a notebook with no display reaches here every time. | same |
 | `utils.py:259` `detect_loops` | **log (warning) + return None** | "no parallelizable loops". Running the loop whole is always correct, so this stays log-and-continue — but the user lost their parallelism with no explanation. | same |

@@ -27,9 +27,16 @@ def isolated_profile_store(tmp_path, monkeypatch):
     monkeypatch.setattr(
         ProfileManager, "__init__", _profile_manager_init(tmp_path / "profiles")
     )
-    from clustrix.config import _config
+    # get_config(), not `from clustrix.config import _config`. Binding the
+    # singleton by name is the one thing that would make deferring the
+    # standard-location search to first use unsafe: a by-name importer can
+    # hold the object as it stood *before* the search ran. Nothing in the
+    # package does it, and this fixture was the only place in the tests that
+    # did, which made the claim in clustrix/config.py true only when scoped to
+    # the package. Now it is true everywhere.
+    from clustrix.config import get_config
 
-    _config.__dict__.update(ClusterConfig().__dict__)
+    get_config().__dict__.update(ClusterConfig().__dict__)
 
 
 def _profile_manager_init(directory):

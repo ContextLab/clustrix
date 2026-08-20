@@ -1,5 +1,6 @@
 """Modern notebook widget with profile management and horizontal layout."""
 
+import logging
 import os
 import re
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
@@ -34,6 +35,8 @@ from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
+
+logger = logging.getLogger(__name__)
 
 #: Profile holding whatever clustrix was already configured to do when the
 #: widget opened, so the live state is visible instead of contradicted.
@@ -1589,7 +1592,8 @@ class ModernClustrixWidget:
                     data = json.load(handle)
                 else:
                     data = yaml.safe_load(handle)
-        except Exception:  # noqa: BLE001 - unreadable or malformed: not offerable
+        except Exception as exc:  # noqa: BLE001 - not offerable, but say why
+            logger.debug("Not offering %s as a profile file: %s", path, exc)
             return False
         return isinstance(data, dict) and isinstance(data.get("profiles"), dict)
 

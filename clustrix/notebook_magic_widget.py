@@ -1014,7 +1014,8 @@ class EnhancedClusterConfigWidget:
             result = sock.connect_ex((host, port))
             sock.close()
             return result == 0
-        except Exception:
+        except Exception as exc:
+            logger.debug("Connectivity probe to %s:%s failed: %s", host, port, exc)
             return False
 
     def _test_ssh_connectivity(self, config, timeout=10):

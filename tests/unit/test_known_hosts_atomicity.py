@@ -39,6 +39,7 @@ import random
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import paramiko
@@ -311,10 +312,22 @@ def test_a_killed_writer_never_leaves_a_broken_file(round_number):
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
     )
-    try:
-        process.wait(timeout=random.uniform(1.0, 2.0))
-    except subprocess.TimeoutExpired:
-        process.kill()
+    # Wait for the burst to actually start, *then* kill into the middle of
+    # it. The original raced a fixed 1-2s timer against interpreter startup
+    # (~0.5s idle, more under a loaded full-suite run), so on a slow draw the
+    # child was killed before writing a byte and the run ended on this test's
+    # own "test is vacuous" assertion -- a flake that says nothing about
+    # atomicity either way. Killing on the file's state instead of the clock
+    # makes the mid-write condition guaranteed rather than likely, which is
+    # strictly stronger: every round now really does SIGKILL a writer.
+    startup_deadline = time.monotonic() + 60
+    while known_hosts.read_text() == before:
+        if process.poll() is not None or time.monotonic() > startup_deadline:
+            break
+        time.sleep(0.01)
+    # It is now looping on appends; land the signal somewhere inside the burst.
+    time.sleep(random.uniform(0.05, 0.5))
+    process.kill()
     stderr = process.communicate()[1].decode()
 
     after = known_hosts.read_text()

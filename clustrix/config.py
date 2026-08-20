@@ -615,9 +615,31 @@ def load_config(config_path: str) -> None:
     """
     Load configuration from a file (JSON or YAML).
 
+    Runs under ``_DEFAULT_CONFIG_LOCK``, which is not decoration. The lazy
+    search of the standard locations (see :func:`_ensure_default_config_loaded`)
+    also rebinds ``_config``, and it now runs on whichever thread happens to
+    touch the configuration first rather than during the import. Without this
+    lock the two writers interleave: a thread that entered the search *before*
+    an explicit ``load_config`` can finish *after* it and rebind ``_config``
+    to the file it found in ``~/.clustrix`` -- so the explicitly loaded file is
+    accepted, reported as loaded, and then thrown away. That is exactly the
+    defect class this module is being fixed for, so it does not get to be
+    reintroduced by the fix. The lock is an ``RLock`` because the search
+    itself calls this function.
+
+    Holding it across the parse as well as the assignment means the winner is
+    the last caller to *enter*, not the last to *finish*; a slow large file
+    cannot land on top of a small one loaded after it.
+
     Args:
         config_path: Path to configuration file
     """
+    with _DEFAULT_CONFIG_LOCK:
+        _load_config_locked(config_path)
+
+
+def _load_config_locked(config_path: str) -> None:
+    """Body of :func:`load_config`; callers must hold ``_DEFAULT_CONFIG_LOCK``."""
     global _config, _default_config_loaded
 
     config_path_obj = Path(config_path)
@@ -712,8 +734,12 @@ def get_config() -> ClusterConfig:
 
     This is where the search of the standard locations for a user
     configuration file actually happens, the first time anything asks. Every
-    read of the singleton in the package goes through this function -- nothing
-    binds ``_config`` by name -- so deferring the search to here is complete.
+    read of the singleton goes through this function, and nothing anywhere in
+    the repository binds ``_config`` by name, so deferring the search to here
+    is complete. That second half is not an assertion of good intentions: it
+    is checked by
+    ``tests/unit/test_import_has_no_side_effects.py::test_nothing_binds_the_singleton_by_name``,
+    which found two by-name importers the first time it was run.
     """
     _ensure_default_config_loaded()
     return _config
@@ -815,6 +841,41 @@ _default_config_loading = False
 _DEFAULT_CONFIG_LOCK = threading.RLock()
 
 
+def _reset_default_config_lock_after_fork() -> None:
+    """Make the lock and the in-progress flag mean something in a forked child.
+
+    ``fork`` copies the memory of the calling thread only. If any *other*
+    thread held ``_DEFAULT_CONFIG_LOCK`` at that instant -- which is precisely
+    the window the lazy search opened, because the search now runs on whichever
+    thread touches the configuration first and holds the lock for its whole
+    duration -- then the child inherits a lock that is recorded as held by a
+    thread that does not exist in the child and can never release it. The
+    child's first ``get_config()`` blocks forever. It inherits
+    ``_default_config_loading = True`` for the same reason, set by that same
+    absent thread.
+
+    This is not hypothetical for this package: ``LocalExecutor`` runs work in a
+    ``ProcessPoolExecutor``, and ``fork`` is a real start method (the default
+    on Linux). A worker whose first act is to read the configuration would
+    hang rather than fail.
+
+    A forked child is single-threaded at this point, so nothing can be
+    contending: replacing the lock outright is safe, and it is the only
+    available repair -- an inherited held lock has no owner left to release it.
+    ``_default_config_loaded`` is deliberately *not* touched. If the parent had
+    finished, the child inherits both the flag and the loaded ``_config`` and
+    is consistent; if it had not, the flag is already False and the child
+    simply redoes the search itself.
+    """
+    global _DEFAULT_CONFIG_LOCK, _default_config_loading
+    _DEFAULT_CONFIG_LOCK = threading.RLock()
+    _default_config_loading = False
+
+
+if hasattr(os, "register_at_fork"):  # not available on Windows
+    os.register_at_fork(after_in_child=_reset_default_config_lock_after_fork)
+
+
 def _ensure_default_config_loaded() -> None:
     """Search the standard locations once, on first use rather than on import.
 
@@ -828,10 +889,15 @@ def _ensure_default_config_loaded() -> None:
 
     The singleton itself stays eager: ``_config = ClusterConfig()`` allocates
     an object and touches nothing. Only the file read moved. That split is
-    what makes this safe, because every read of the singleton inside the
-    package goes through :func:`get_config`; nothing does
+    what makes this safe, because every read of the singleton goes through
+    :func:`get_config`: nothing in the repository does
     ``from .config import _config``, so there is no route by which a caller
-    can observe the pre-search object.
+    can observe the pre-search object. A by-name importer would also be
+    holding the wrong object after any :func:`load_config`, which *rebinds*
+    the module attribute. The property is enforced by
+    ``test_nothing_binds_the_singleton_by_name`` rather than asserted here --
+    it was stated in this docstring before it was true, and a test fixture and
+    a script were both binding it by name at the time.
 
     The lock makes concurrent first calls do the search exactly once, and two
     separate flags are needed to keep that correct:

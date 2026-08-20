@@ -38,8 +38,8 @@ from typing import Any, Dict, Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from clustrix import cluster, configure  # noqa: E402
-from clustrix.config import ClusterConfig, _config  # noqa: E402
+from clustrix import cluster, configure, get_config  # noqa: E402
+from clustrix.config import ClusterConfig  # noqa: E402
 
 CRED_DIR = Path.home() / ".clustrix-dev-credentials"
 
@@ -224,7 +224,7 @@ def run_target(key: str) -> Dict[str, Any]:
 
     # Each target starts from a clean configuration so one cannot inherit
     # another's settings and appear to work by accident.
-    _config.__dict__.update(ClusterConfig().__dict__)
+    get_config().__dict__.update(ClusterConfig().__dict__)
 
     started = time.time()
     try:

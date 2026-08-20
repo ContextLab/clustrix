@@ -1130,14 +1130,16 @@ def _distribution_import_names(dist: Any) -> List[str]:
     names: Set[str] = set()
     try:
         text = dist.read_text("top_level.txt")
-    except Exception:  # pragma: no cover - unreadable metadata file
+    except Exception as exc:  # pragma: no cover - unreadable metadata file
+        logger.debug("Could not read top_level.txt for %s: %s", dist, exc)
         text = None
     if text:
         names.update(line.strip() for line in text.splitlines() if line.strip())
     if not names:
         try:
             files = dist.files or []
-        except Exception:  # pragma: no cover - metadata without a file list
+        except Exception as exc:  # pragma: no cover - metadata without a file list
+            logger.debug("Could not list the files of %s: %s", dist, exc)
             files = []
         for entry in files:
             head = str(entry).replace("\\", "/").split("/")[0]
@@ -2053,7 +2055,8 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(f"command -v {candidate}")
             return bool(stdout.read().decode().strip())
-        except Exception:  # pragma: no cover - defensive
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Could not probe the remote host for %s: %s", candidate, exc)
             return False
 
     if exists(wanted):
@@ -2069,7 +2072,10 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
                     f"{candidate} -c 'import sys; print(sys.version.split()[0])'"
                 )
                 version = stdout.read().decode().strip()
-            except Exception:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Could not read the version of remote %s: %s", candidate, exc
+                )
                 version = "?"
             available.append(f"{candidate} ({version})")
 
