@@ -807,3 +807,44 @@ it clustrix verifies against a file it is not writing to.
 raises `ValueError: Unknown configuration parameter: name` for any named
 profile — pre-existing, documented in the suite's route-5 comment, orthogonal
 to credentials.
+
+## RT-1/RT-2/RT-3 fixed (`ab99700` #172, `25640bd` #169)
+
+1772 passed / 0 failed (baseline 1760, +12); black 26.3.1, flake8, mypy clean.
+
+**Contract chosen, and it is the right one: each method is trusted only for
+what it observes.** `lspci` genuinely proves NVIDIA hardware is attached, so
+`gpu_available=True` stays — that is real evidence, not a guess. But it counts
+PCI *functions*, so `gpu_count` is now `None` rather than a fabricated number,
+`gpu_devices` stays `[]` on both fallbacks, and the summary gained a
+number-free sentence for that case.
+
+**RT-2 was worse than reported.** `ls -la … | wc -l` minus 2 counted the
+`total` line, so 1 GPU read as 2 — and an **empty** `/proc/driver/nvidia/gpus/`
+read as **1**, a GPU conjured from nothing. Fixed by dropping the flags: plain
+`ls` emits one line per GPU, so the count is real and there is nothing to
+subtract. Unlike the `lspci` count this one is determinable, so it is fixed
+rather than refused.
+
+**RT-3**: M13 applied to pristine `732a5f0` gave 4 passed — it really did
+survive. The guard now requires an `always()`-shaped `if:` on any job
+publishing a required context, and requires it to be carried when the job has
+`needs:`. M13 now fails 2/2, as do dropping `if: always()` and
+`always() && github.event_name != 'pull_request'`.
+
+**RT-4 declined, deliberately and correctly.** `REQUIRED_CONTEXTS` stays a
+hardcoded tuple: reading branch protection at test time would make which
+assertions run depend on network reachability and a mutable remote setting —
+flaky by definition — and CI holds no credentials for that endpoint. Verified
+accurate today against the live API.
+
+## Process defect: agents share the scratchpad and clobber each other
+
+The #172 agent's mutation copy was **destroyed mid-run by another agent** using
+the same scratch path; it re-ran all mutant evidence in a uniquely-named
+directory. Its worktree was never affected.
+
+This is the same class as the earlier `git checkout --` incident: parallel
+agents colliding over shared state. Both prompts and practice now require a
+**uniquely-named scratch directory per agent**, alongside the existing ban on
+destructive git in shared worktrees.
