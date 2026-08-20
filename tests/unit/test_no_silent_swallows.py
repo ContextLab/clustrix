@@ -48,6 +48,7 @@ import importlib.metadata
 import logging
 import os
 import pathlib
+import re
 import socket
 import sys
 import textwrap
@@ -441,6 +442,97 @@ def test_the_entry_point_still_analyzes_an_ordinary_function():
     namespace: dict = {}
     exec("def made_by_exec():\n    for i in range(3):\n        pass\n", namespace)
     assert detect_loops_in_function(namespace["made_by_exec"], (), {}) == []
+
+
+def test_a_bug_inside_the_while_loop_analyzer_reaches_the_caller(monkeypatch):
+    """``_analyze_while_loop`` is ``_analyze_for_loop``'s unpinned twin.
+
+    Both handlers were narrowed from ``except Exception`` to
+    ``except RecursionError`` in the same edit, and exactly one of them was
+    pinned: widening ``_analyze_while_loop`` back to ``except Exception``
+    left the whole suite green. That is the pattern this issue keeps paying
+    for -- fix one, miss its sibling -- so the sibling is pinned here on the
+    same terms as ``test_a_bug_inside_the_range_evaluator_reaches_the_caller``
+    above.
+
+    The trigger has to be built differently. The for-loop path carries the
+    caller's own values into ``SafeRangeEvaluator``, so a defect can be put
+    underneath it with nothing but an ``int`` subclass. Nothing on the
+    while-loop path touches a user value at all: it renders the condition,
+    walks the body with a ``DependencyAnalyzer`` and builds a ``LoopInfo``.
+    The only collaborator that can hold a defect is the analyzer the method
+    constructs, so a real subclass of it stands in -- a real
+    ``ast.NodeVisitor`` raising a real exception, not a mock; production code
+    cannot tell, and ``AnalyzerBug`` stands in for a defect exactly as
+    ``EvaluatorBug`` does above.
+
+    ``RecursionError`` stays caught, and must: the analyzer is a recursive
+    visitor and a deeply nested body really can exhaust the interpreter's
+    limit, for which "this loop is not analyzable" is a correct answer.
+    Anything else is a defect, and turning it into ``[]`` -- "this function
+    has no parallelizable loops" -- is the same lie one frame out that this
+    issue is about.
+    """
+    from clustrix import loop_analysis
+
+    class AnalyzerBug(Exception):
+        """A defect in the analyzer, not a loop that cannot be analyzed."""
+
+    class BrokenDependencyAnalyzer(loop_analysis.DependencyAnalyzer):
+        def visit_Name(self, node):
+            raise AnalyzerBug("the dependency analyzer is broken")
+
+    def target():
+        index = 0
+        while index < 10:
+            index += 1
+        return index
+
+    # The control first, so the raise below cannot be an artefact of the loop
+    # never having been reached: undamaged, this while loop really is analyzed.
+    loops = loop_analysis.detect_loops_in_function(target, (), {})
+    assert [loop.loop_type for loop in loops] == ["while"]
+    assert loops[0].iterable == "index < 10"
+
+    monkeypatch.setattr(loop_analysis, "DependencyAnalyzer", BrokenDependencyAnalyzer)
+
+    with pytest.raises(AnalyzerBug):
+        find_parallelizable_loops(target, (), {})
+
+
+def test_a_defect_in_source_acquisition_is_not_reported_as_no_loops():
+    """``detect_loops_in_function``'s outer tuple is a decision, not a shield.
+
+    ``(OSError, TypeError, SyntaxError)`` is the list of ways a function's
+    source is legitimately unavailable, and ``[]`` -- "no parallelizable
+    loops", so the function ships whole and runs sequentially -- is a correct
+    answer for every one of them. That is why the negative control above
+    drives an ``exec``'d function and expects ``[]``. What nothing drove was
+    anything *outside* the tuple, so widening it back to ``except Exception``
+    left the suite green.
+
+    A ``__wrapped__`` cycle is a real thing to drive it with, and it is not
+    exotic: ``functools.wraps`` sets ``__wrapped__`` on every wrapper, and a
+    decorator applied so that the chain closes on itself makes
+    ``inspect.getsource`` -- which unwraps before it looks for a file -- raise
+    ``ValueError("wrapper loop when unwrapping ...")``. That is a broken
+    decorator, not a function without source, and answering "no parallelizable
+    loops" for it hides the breakage behind a plausible result.
+    """
+
+    def first():
+        for index in range(3):
+            print(index)
+
+    def second():
+        for index in range(3):
+            print(index)
+
+    first.__wrapped__ = second
+    second.__wrapped__ = first
+
+    with pytest.raises(ValueError, match="wrapper loop"):
+        find_parallelizable_loops(first, (), {})
 
 
 @pytest.mark.parametrize("error", [TypeError, ValueError, OverflowError])
@@ -892,7 +984,7 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #
 #   * everything BELOW is a lint. It is fast, it runs over the whole package
 #     including handlers no test can reach, and it is worth having for
-#     exactly that. It is *not* evidence that a handler reports, and the 20
+#     exactly that. It is *not* evidence that a handler reports, and the 25
 #     entries in KNOWN_BLIND_SPOTS are the executable statement of how much
 #     it misses -- each asserted to be missed, so the list cannot quietly
 #     become optimistic.
@@ -984,7 +1076,7 @@ TRACKED_DEFECTS = {
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: They fall into nine root causes, and the first one is the big one:
+#: They fall into ten root causes, and the first one is the big one:
 #:
 #: A. **Any call at all counts as reporting.** Six spellings are recorded
 #:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
@@ -1026,17 +1118,31 @@ TRACKED_DEFECTS = {
 #:    package -- ``test_the_lint_finds_no_unrecorded_silent_swallow`` scans
 #:    for real handlers, and the behavioural tests in the first half of this
 #:    module are what actually guarantee those.
-#: I. **An alias bound by anything but a literal.** ``_catch_all_aliases``
-#:    resolves ``_E = Exception``, ``_E = (Exception,)``, ``_A, _B =
-#:    Exception, ValueError`` and ``from builtins import Exception as _E``,
-#:    which is every spelling found by red-teaming it on 2026-08-20 and
-#:    every one that is a literal. It does not resolve a binding produced by
-#:    a *call* -- ``_ERRORS = tuple([Exception])`` -- and it will not: that
-#:    is constant propagation through arbitrary expressions, which is the
-#:    same whole-program problem as family A. One spelling is recorded below.
-#:    Widening the alias resolver rather than recording this is how the four
-#:    previous guards were lost.
-KNOWN_BLIND_SPOTS = 21
+#: I. **An alias bound by a call.** ``_catch_all_aliases`` resolves
+#:    ``_E = Exception``, ``_E = (Exception,)``, ``_A, _B = Exception,
+#:    ValueError`` and ``from builtins import Exception as _E``. It does not
+#:    resolve a binding produced by a *call* -- ``_ERRORS =
+#:    tuple([Exception])`` -- and it will not: that is constant propagation
+#:    through arbitrary expressions, which is the same whole-program problem
+#:    as family A. One spelling is recorded below. This family used to be
+#:    written as "an alias bound by anything but a literal", which was false
+#:    in the direction that flatters the guard: an annotated binding is a
+#:    literal the resolver does not see either. That hole has a different
+#:    cause and is family J.
+#: J. **A binding the alias resolver never walks.** ``_catch_all_aliases``
+#:    iterates ``ast.Assign`` and ``ast.ImportFrom`` and nothing else, so
+#:    ``_E: type = Exception`` and ``_E: tuple = (Exception,)`` -- ordinary
+#:    annotated assignments, which parse to ``ast.AnnAssign`` -- bind a
+#:    catch-all it cannot see, including when the value is itself an alias
+#:    imported from ``builtins``. ``except (_E := Exception):`` is missed for
+#:    the mirror reason: ``_is_catch_all_expression`` reads ``ast.Name`` and
+#:    ``ast.Attribute``, and a walrus is an ``ast.NamedExpr``. Four spellings
+#:    are recorded below. Teaching the resolver these four statement forms
+#:    would close exactly these four and leave the fifth spelling open, which
+#:    is how the five previous guards were lost; they are recorded rather
+#:    than chased, and the behavioural tests in the first half of this module
+#:    are what guarantee the handlers.
+KNOWN_BLIND_SPOTS = 25
 
 
 class Swallow(NamedTuple):
@@ -2121,6 +2227,43 @@ BLIND_SPOTS = {
             except Exception:
                 value = SOME.format_exc
     """,
+    # J. a binding the alias resolver never walks
+    "a catch-all bound by an annotated assignment": """
+        _E: type = Exception
+
+        def f():
+            try:
+                g()
+            except _E:
+                pass
+    """,
+    "a catch-all tuple bound by an annotated assignment": """
+        _E: tuple = (Exception,)
+
+        def f():
+            try:
+                g()
+            except _E:
+                pass
+    """,
+    "an annotated binding chained through a builtins import": """
+        from builtins import Exception as _B
+
+        _E: type = _B
+
+        def f():
+            try:
+                g()
+            except _E:
+                pass
+    """,
+    "a catch-all bound by a walrus inside the except clause": """
+        def f():
+            try:
+                g()
+            except (_E := Exception):
+                pass
+    """,
 }
 
 
@@ -2144,6 +2287,65 @@ def test_the_lint_admits_what_it_cannot_see(spot):
     )
 
 
+#: Number words the prose above uses for counts. Digits are read directly.
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+
+def _prose_count(pattern):
+    """The number the module's own text states at ``pattern``."""
+    source = pathlib.Path(__file__).read_text(encoding="utf-8")
+    matches = set(re.findall(pattern, source))
+    assert matches, f"the prose no longer states a count matching {pattern!r}"
+    assert len(matches) == 1, f"the prose states {matches} for {pattern!r}"
+    token = matches.pop()
+    return int(token) if token.isdigit() else _NUMBER_WORDS[token]
+
+
 def test_the_blind_spot_list_matches_the_prose():
-    """The count in KNOWN_BLIND_SPOTS is the number of entries, not a guess."""
+    """Every count the prose states, read out of the text rather than assumed.
+
+    The previous version of this test asserted ``len(BLIND_SPOTS) ==
+    KNOWN_BLIND_SPOTS`` and nothing else. It never opened the prose it is
+    named for, and the same commit that wrote it left three false statements
+    in that prose: the narrative quoted an entry count of 20 while the
+    constant beneath it said 21, family I said "the four previous guards were
+    lost" while the header two hundred lines above said five, and family I
+    claimed the resolver handles "every one that is a literal" while an
+    annotated binding is a literal it does not handle. A test named for
+    checking prose that does not read prose is a false assurance, which is
+    worse than no test at all.
+
+    Three of the four are now mechanical. The fourth -- a family whose
+    *description* is wrong rather than its arithmetic -- is caught only
+    indirectly, by the family letters having to run contiguously from A and
+    to be as many as the narrative claims, so a hole that is discovered but
+    not written up cannot be filed under an existing letter without the count
+    moving.
+    """
     assert len(BLIND_SPOTS) == KNOWN_BLIND_SPOTS
+
+    assert _prose_count(r"the (\d+)\s+#\s+entries in KNOWN_BLIND_SPOTS") == len(
+        BLIND_SPOTS
+    )
+
+    source = pathlib.Path(__file__).read_text(encoding="utf-8")
+    families = re.findall(r"^#: ([A-Z])\. \*\*", source, flags=re.MULTILINE)
+    assert families == [
+        chr(ord("A") + offset) for offset in range(len(families))
+    ], families
+    assert _prose_count(r"They fall into (\w+) root causes") == len(families)
+
+    assert _prose_count(r"had (\w+) AST guards written") == _prose_count(
+        r"the (\w+) previous guards were lost"
+    )
