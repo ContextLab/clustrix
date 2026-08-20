@@ -142,8 +142,17 @@ class ConnectionManager:
                     if "password" in ssh_credentials:
                         connect_kwargs["password"] = ssh_credentials["password"]
                         logger.info("Using SSH password from credential manager")
-                    elif "key_file" in ssh_credentials:
-                        connect_kwargs["key_filename"] = ssh_credentials["key_file"]
+                    elif "private_key_path" in ssh_credentials:
+                        # ``private_key_path`` is the name
+                        # ``resolve_provider_credentials`` actually emits (it
+                        # is the field name for ``SSH_PRIVATE_KEY_PATH``).
+                        # This tested for ``key_file``, which nothing has
+                        # ever produced, so a user whose .env named a key
+                        # rather than a password silently fell through to
+                        # the agent and the default key files.
+                        connect_kwargs["key_filename"] = ssh_credentials[
+                            "private_key_path"
+                        ]
                         logger.info("Using SSH key from credential manager")
             except Exception:
                 # Log and continue: the caller still gets a correct answer.

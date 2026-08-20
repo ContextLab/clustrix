@@ -127,6 +127,63 @@ class EnvironmentPasswordMethod(AuthMethod):
             )
 
 
+def _normalize_hostname(hostname: object) -> str:
+    """The comparable form of a hostname, or ``""`` if there isn't one.
+
+    Case is not significant in DNS and a trailing dot only marks a name as
+    already absolute, so ``HPC.Example.Edu.`` and ``hpc.example.edu`` are
+    the same host and must compare equal. Anything that is not a non-empty
+    string -- ``None``, a stray ``0``, whitespace -- normalises to ``""``,
+    which :func:`_hostname_matches` then refuses outright.
+    """
+    if not isinstance(hostname, str):
+        return ""
+    return hostname.strip().rstrip(".").lower()
+
+
+def _hostname_matches(target: object, credential_host: object) -> bool:
+    """Whether a credential stored for ``credential_host`` is for ``target``.
+
+    **Exact, after normalisation.** Nothing else is safe, and the three
+    relaxations this replaces were each exploitable:
+
+    * ``credential_host in target`` -- substring containment. A ``.env``
+      holding only ``SSH_PASSWORD`` yields ``credential_host == ""``, and
+      the empty string is a substring of every hostname there is, so the
+      cluster password was offered to *any* host that was asked for. Even
+      with a real value it means a credential for ``hpc.example.edu`` is
+      handed to ``hpc.example.edu.attacker.test``, a name anybody can
+      register under a domain they control.
+    * ``target in credential_host`` -- the same thing backwards.
+    * ``target.split(".")[0] == credential_host.split(".")[0]`` -- first
+      label only, so ``hpc.evil.test`` collects the password stored for
+      ``hpc.example.edu``.
+
+    A hostname is the identity of the party about to receive the secret, so
+    a *partial* match is not a weaker check, it is a different check that
+    answers a question nobody asked. Nor is suffix-on-a-dot-boundary right
+    here: ``hpc.example.edu`` has no authority over ``node1.hpc.example.edu``
+    and a credential for the parent is not a credential for the child.
+
+    The cost of being strict is a credential that is simply not offered
+    when the user spelled the host differently in ``.env`` than in their
+    config -- at which point the fallback chain moves on and prompts, and
+    the guidance in :meth:`FlexibleCredentialAuthMethod.attempt_auth` names
+    the fix. That is a safe failure. Every relaxation above is an unsafe
+    success.
+    """
+    normalized_target = _normalize_hostname(target)
+    normalized_credential = _normalize_hostname(credential_host)
+    if not normalized_target or not normalized_credential:
+        # A credential that does not say which host it is for cannot be
+        # checked against one, and "unchecked" may not read as "matches".
+        # This is the same class of defect as the ``{"port": "22"}`` default
+        # that made every unconfigured machine look like it had SSH
+        # credentials: an absent value must never satisfy a test.
+        return False
+    return normalized_target == normalized_credential
+
+
 class FlexibleCredentialAuthMethod(AuthMethod):
     """Flexible credential authentication using the new credential manager."""
 
@@ -143,7 +200,16 @@ class FlexibleCredentialAuthMethod(AuthMethod):
         return True
 
     def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
-        """Attempt authentication using flexible credential manager."""
+        """Hand over a stored credential only if it is stored for *this* host.
+
+        A credential is released when the stored host and the requested
+        host are the same host (:func:`_hostname_matches`) *and* the stored
+        username and the requested username are the same non-empty
+        username. Both halves have to name something: a stored credential
+        with no username used to match a connection with no username,
+        because ``"" == ""``, which is the same "absent satisfies the test"
+        defect as the hostname case.
+        """
         hostname = connection_params.get("hostname", "")
         username = connection_params.get("username", "")
 
@@ -154,16 +220,9 @@ class FlexibleCredentialAuthMethod(AuthMethod):
             cred_host = ssh_creds.get("host", "")
             cred_username = ssh_creds.get("username", "")
 
-            # Match hostname (allow partial matches for flexibility)
-            host_match = (
-                hostname == cred_host
-                or hostname.split(".")[0] == cred_host.split(".")[0]
-                or cred_host in hostname
-                or hostname in cred_host
-            )
+            host_match = _hostname_matches(hostname, cred_host)
 
-            # Match username
-            username_match = username == cred_username
+            username_match = bool(username) and username == cred_username
 
             if host_match and username_match:
                 # Return password if available
@@ -185,7 +244,13 @@ class FlexibleCredentialAuthMethod(AuthMethod):
         return AuthResult(
             success=False,
             error="No matching SSH credentials found in credential manager",
-            guidance="Add SSH credentials using 'clustrix credentials setup' or edit ~/.clustrix/.env",
+            guidance=(
+                "Add SSH credentials using 'clustrix credentials setup' or edit "
+                "~/.clustrix/.env. A stored credential is only offered to the "
+                "host it names, so SSH_HOST and SSH_USERNAME must both be set "
+                "and must match "
+                f"{username or '<username>'}@{hostname or '<hostname>'} exactly."
+            ),
         )
 
 

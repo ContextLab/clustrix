@@ -45,16 +45,15 @@ logger = logging.getLogger(__name__)
 def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
     """Names present in ``before`` that ``strip_secret_fields`` removed.
 
-    Both the whole-field cases and the entries inside a secret-bearing
-    mapping, so that an ``AWS_SECRET_ACCESS_KEY`` dropped out of
-    ``environment_variables`` is named too and not silently lost.
+    Every dropped key is named, whatever the reason it was dropped -- a
+    declared credential field, a field whose values clustrix cannot
+    classify, or a key the configuration file format does not define. The
+    widget's ``self.configs`` holds whatever a previously saved file
+    contained, so the third case is not hypothetical, and a key silently
+    vanishing from a file the user just saved is the surprise this notice
+    exists to prevent.
     """
-    names = {key for key in before if key not in after}
-    for key, value in before.items():
-        surviving = after.get(key)
-        if isinstance(value, dict) and isinstance(surviving, dict):
-            names |= {inner for inner in value if inner not in surviving}
-    return names
+    return {key for key in before if key not in after}
 
 
 class EnhancedClusterConfigWidget:
@@ -837,7 +836,10 @@ class EnhancedClusterConfigWidget:
                 "will not survive a restart. They still work for the rest of "
                 "this session. To supply a password without writing it to "
                 "disk, set password_env_var to the name of an environment "
-                "variable holding it."
+                "variable holding it. environment_variables is withheld for "
+                "the same reason: its names and values are yours, so clustrix "
+                "cannot tell a setting from a token and does not guess -- set "
+                "them in the shell that starts the notebook instead."
             )
         return redacted
 

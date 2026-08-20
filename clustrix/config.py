@@ -178,11 +178,13 @@ class ClusterConfig:
             value = getattr(self, field_def.name)
             if field_def.name in SECRET_FIELDS and value is not None:
                 value = "***"
-            elif field_def.name in SECRET_BEARING_MAPPINGS and isinstance(value, dict):
-                value = {
-                    k: ("***" if k not in _redact_secret_entries(value) else v)
-                    for k, v in value.items()
-                }
+            elif field_def.name in UNCLASSIFIABLE_FIELDS and isinstance(value, dict):
+                # Every value, not the ones whose key name looks secret: the
+                # names are the user's, so ``GITHUB_PAT`` and
+                # ``SSH_PASSPHRASE`` are as likely as ``AWS_SECRET_ACCESS_KEY``
+                # and neither is recognisable. The names stay visible, so the
+                # repr still says what is configured.
+                value = {k: "***" for k in value}
             parts.append(f"{field_def.name}={value!r}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
@@ -226,9 +228,12 @@ class ClusterConfig:
 
         Secret-bearing fields (passwords, tokens, API keys, etc. -- see
         ``SECRET_FIELDS``) are omitted by default, since a saved config file
-        is easy to accidentally commit, back up, or share. Pass
-        ``include_secrets=True`` to write them anyway, e.g. for a config
-        file you deliberately keep out of version control.
+        is easy to accidentally commit, back up, or share. So is
+        ``environment_variables``: its names and values are the user's, so
+        nothing tells ``OMP_NUM_THREADS=4`` from ``GITHUB_PAT=<a token>``
+        (see ``UNCLASSIFIABLE_FIELDS``). Pass ``include_secrets=True`` to
+        write all of it anyway, e.g. for a config file you deliberately keep
+        out of version control.
         """
         config_path_obj = Path(config_path)
         config_data = asdict(self)
@@ -360,9 +365,23 @@ _SECRET_FIELD_PATTERN = re.compile(
 # protecting nothing.
 _NOT_ACTUALLY_SECRET = re.compile(r"^use_|_env_var$", re.IGNORECASE)
 
+#: The exemptions above, resolved once against the *fixed* set of
+#: ``ClusterConfig`` field names they were written for. ``^use_`` describes
+#: the boolean ``use_env_password`` and ``_env_var$`` describes
+#: ``password_env_var``; neither is a statement about names in general.
+#: Applying the regex to arbitrary keys turned it into a hole -- a
+#: user-chosen environment variable called ``USE_PASSWORD`` was exempted by
+#: a rule about a flag it has nothing to do with. An exemption from a
+#: classifier is only sound over the domain the classifier was designed for,
+#: so it is frozen to that domain here.
+NOT_SECRET_FIELDS = frozenset(
+    f.name for f in fields(ClusterConfig) if _NOT_ACTUALLY_SECRET.search(f.name)
+)
+
 
 def _is_secret_field(field_name: str, field_type: object) -> bool:
-    if _NOT_ACTUALLY_SECRET.search(field_name):
+    """Classify one *declared* ``ClusterConfig`` field. Not for other keys."""
+    if field_name in NOT_SECRET_FIELDS:
         return False
     return bool(_SECRET_FIELD_PATTERN.search(field_name))
 
@@ -371,43 +390,69 @@ SECRET_FIELDS = {
     f.name for f in fields(ClusterConfig) if _is_secret_field(f.name, f.type)
 }
 
-#: Fields holding a mapping whose *values* may be secrets even though the
-#: field name is innocuous. ``environment_variables`` commonly carries both
-#: ``OMP_NUM_THREADS`` and ``AWS_SECRET_ACCESS_KEY``; dropping the whole
-#: mapping would lose ordinary settings users expect to persist, so the
-#: individual entries are filtered by the same name test instead.
-SECRET_BEARING_MAPPINGS = frozenset({"environment_variables"})
+#: The one key a clustrix configuration file carries that is not a
+#: ``ClusterConfig`` field: the label the notebook widget shows in its
+#: dropdown, which it writes and reads back (see
+#: ``EnhancedClusterConfigWidget._initialize_configs``). Named here so that
+#: the allowlist below is the file format's own vocabulary rather than the
+#: dataclass's by accident.
+CONFIG_FILE_METADATA_KEYS = frozenset({"name"})
 
+#: Every key a configuration file may contain. Nothing else is written,
+#: because nothing else can be read back: ``ClusterConfig.load_from_file``
+#: does ``cls(**config_data)``, ``ProfileManager`` filters to the declared
+#: fields, and ``configure()`` ignores what it does not know. An unknown key
+#: is therefore dead weight on the way in and pure risk on the way out --
+#: the widget hands ``strip_secret_fields`` whatever a previously saved file
+#: happened to contain, and ``aws_secret_access_key``, ``client_secret``,
+#: ``private_key`` and ``token`` all reached disk verbatim because they were
+#: not ``ClusterConfig`` fields and so were not in ``SECRET_FIELDS``.
+#:
+#: This is an allowlist, not another list of forbidden spellings: it is
+#: derived from the dataclass, so it cannot fall behind it, and a key nobody
+#: has thought of is excluded by default rather than included by default.
+PERSISTABLE_KEYS = frozenset(
+    {f.name for f in fields(ClusterConfig)} | CONFIG_FILE_METADATA_KEYS
+)
 
-def _redact_secret_entries(mapping: dict) -> dict:
-    """Drop the entries of ``mapping`` whose *key* names a secret."""
-    return {
-        k: v
-        for k, v in mapping.items()
-        if not _SECRET_FIELD_PATTERN.search(str(k))
-        or _NOT_ACTUALLY_SECRET.search(str(k))
-    }
+#: Fields whose *values* are chosen by the user and therefore cannot be
+#: classified at all. ``environment_variables`` maps user-chosen names to
+#: user-chosen values: nothing distinguishes ``OMP_NUM_THREADS=4`` from
+#: ``GITHUB_PAT=<a token>`` by name or by shape, and the previous rule --
+#: judge each entry by its key name -- let ``SSH_PASSPHRASE``,
+#: ``GITHUB_PAT``, ``DATABASE_URL`` (with the password in the URL) and
+#: ``USE_PASSWORD`` through. Rather than guess again, the mapping is
+#: withheld whole and the caller is told; ``include_secrets=True`` writes it.
+UNCLASSIFIABLE_FIELDS = frozenset({"environment_variables"})
 
 
 def strip_secret_fields(config_data: dict) -> dict:
-    """Return ``config_data`` with every credential-bearing entry removed.
+    """Return only the keys of ``config_data`` that may be written to disk.
 
-    One implementation of "what may not reach disk", so that a second
+    One implementation of "what may reach disk", so that a second
     persistence path cannot quietly disagree with
     :meth:`ClusterConfig.save_to_file`. ``clustrix/profile_manager.py``
     used to serialise ``asdict(config)`` directly and therefore wrote
     passwords and API tokens in plaintext, in a file that
     :meth:`ClusterConfig.save_to_file` would have withheld them from.
 
-    Both the whole-field cases (``SECRET_FIELDS``) and the entries inside
-    a secret-bearing mapping (``SECRET_BEARING_MAPPINGS``) are handled.
+    A key survives when all three hold:
+
+    * it is a key the configuration file format defines
+      (``PERSISTABLE_KEYS``) -- callers such as the notebook widget pass
+      arbitrary dictionaries loaded from disk, and a key the format does
+      not define cannot be read back but can certainly carry a credential;
+    * it is not a declared credential field (``SECRET_FIELDS``);
+    * it is not a field whose values the user chooses and clustrix
+      therefore cannot classify (``UNCLASSIFIABLE_FIELDS``).
     """
-    stripped = {k: v for k, v in config_data.items() if k not in SECRET_FIELDS}
-    for key in SECRET_BEARING_MAPPINGS:
-        value = stripped.get(key)
-        if isinstance(value, dict):
-            stripped[key] = _redact_secret_entries(value)
-    return stripped
+    return {
+        k: v
+        for k, v in config_data.items()
+        if k in PERSISTABLE_KEYS
+        and k not in SECRET_FIELDS
+        and k not in UNCLASSIFIABLE_FIELDS
+    }
 
 
 def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:

@@ -151,8 +151,16 @@ class TestClusterConfigReal:
         assert saved_data["cluster_type"] == "slurm"
         assert saved_data["cluster_host"] == "hpc.university.edu"
         assert saved_data["default_cores"] == 32
-        assert saved_data["environment_variables"]["PROJECT_DIR"] == "/projects/ml"
         assert "python/3.10" in saved_data["module_loads"]
+        # Rewritten, not relaxed. This used to assert that PROJECT_DIR
+        # survived the save, which encoded the rule that each
+        # environment_variables entry is judged by its key name -- and that
+        # rule leaked SSH_PASSPHRASE, GITHUB_PAT, a DATABASE_URL with the
+        # password in it and USE_PASSWORD. The names and values in that
+        # mapping are the user's, so clustrix cannot tell a setting from a
+        # token; it now withholds the mapping and says so rather than
+        # guessing. save_to_file(include_secrets=True) writes it.
+        assert "environment_variables" not in saved_data
 
         # Load configuration back
         load_config(str(config_file))

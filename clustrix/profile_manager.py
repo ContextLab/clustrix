@@ -1,6 +1,8 @@
 """Profile management system for cluster configurations."""
 
 import json
+import stat
+import warnings
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -13,6 +15,61 @@ from .config import (
     write_config_file_securely,
 )
 
+#: The widest a clustrix-owned directory may be: the owner, nobody else.
+#: Traversal alone is enough to reach a file inside by name even when the
+#: directory cannot be listed, so the group and other bits all have to go.
+PRIVATE_DIR_MODE = 0o700
+
+
+def _narrow_if_too_wide(path: Path) -> None:
+    """Take the group and other bits off an *existing* ``path``, and say so.
+
+    A change of policy, and deliberate. The old rule -- leave what the user
+    set up -- read as restraint but meant that every install created before
+    this fix stayed wide forever: ``~/.clustrix`` is 0755 on a real machine
+    today, and the config files under it are reachable by name from any
+    other local account whatever their own modes are. Narrowing the
+    directory remediates the files inside it without touching a single one
+    of them, which is why this is the right lever to pull.
+
+    ``~/.clustrix`` is clustrix's own directory and nobody else has a stake
+    in its mode. The user is told rather than left to discover it, which is
+    what separates this from silently re-moding a directory somebody else
+    owns -- and :func:`_clustrix_owned` is what keeps it off ``$HOME``.
+
+    Only bits are removed, never added: whatever the owner can do, they go
+    on being able to do.
+    """
+    try:
+        mode = stat.S_IMODE(path.stat().st_mode)
+    except OSError:
+        return
+    if not mode & ~PRIVATE_DIR_MODE:
+        return
+    narrowed = mode & PRIVATE_DIR_MODE
+    try:
+        path.chmod(narrowed)
+    except OSError as e:
+        # Somebody else owns it. Refusing to save would be a worse
+        # outcome than saving into a directory that was already this wide,
+        # so this reports and continues -- but it reports, because the
+        # user is the only one who can fix it.
+        warnings.warn(
+            f"{path} is mode {oct(mode)}, which lets other local users "
+            f"reach the files inside it by name, and clustrix could not "
+            f"narrow it ({e}). Run: chmod {oct(PRIVATE_DIR_MODE)[2:]} "
+            f"{path}",
+            stacklevel=3,
+        )
+        return
+    warnings.warn(
+        f"{path} was mode {oct(mode)}, which lets other local users reach "
+        f"the files inside it by name; clustrix has narrowed it to "
+        f"{oct(narrowed)}. Configuration files, profiles and the .env "
+        f"credential file all live here and are nobody else's business.",
+        stacklevel=3,
+    )
+
 
 def _mkdir_private(directory: Path) -> None:
     """Create ``directory`` and any missing parent, each mode 0700.
@@ -22,11 +79,18 @@ def _mkdir_private(directory: Path) -> None:
     ``~/.clustrix`` ended up 0755 while ``~/.clustrix/profiles`` under it
     was 0700. Profiles are the user's cluster coordinates and usernames;
     nothing under the clustrix config directory is other people's
-    business. Each level is therefore created explicitly.
+    business. Each level is therefore created explicitly, and then
+    ``chmod``-ed to exactly 0700 -- ``mkdir``'s mode argument is masked by
+    the umask, so it guarantees nothing on its own. Under ``umask 0022`` a
+    0700 request lands as 0755, and under ``umask 0200`` it lands as 0500,
+    a directory clustrix cannot then write into: creating the parent that
+    way made the very next ``mkdir`` fail with ``PermissionError``. The
+    ``chmod`` has to happen level by level, before the child is attempted.
 
-    An existing directory is left exactly as the user set it up: widening
-    is the bug, and silently re-moding a directory somebody else created
-    is the same overreach that ``write_text_securely`` refuses.
+    Directories that already exist are narrowed too, as far up as the
+    clustrix configuration directory but never past it -- ``$HOME`` and
+    everything above it belong to the user, not to clustrix. See
+    :func:`_narrow_if_too_wide`.
     """
     missing = []
     current = directory
@@ -35,8 +99,46 @@ def _mkdir_private(directory: Path) -> None:
         if current.parent == current:
             break
         current = current.parent
+
+    created = set()
     for path in reversed(missing):
+        # The literal is deliberate and must stay one: the static guard in
+        # tests/unit/test_credential_file_permissions.py cannot verify a
+        # mode it has to resolve a name to reach, so it rejects one. It is
+        # the same value as PRIVATE_DIR_MODE below.
         path.mkdir(mode=0o700, exist_ok=True)
+        # Ours, brand new, and empty: set the mode outright rather than
+        # narrowing, and without a warning about a mode the umask chose.
+        path.chmod(PRIVATE_DIR_MODE)
+        created.add(path)
+
+    for path in _clustrix_owned(directory):
+        if path not in created:
+            _narrow_if_too_wide(path)
+
+
+def _clustrix_owned(directory: Path):
+    """``directory`` and the ancestors of it that clustrix, not the user, owns.
+
+    Ownership stops at the configuration directory: creating
+    ``~/.clustrix/profiles`` is a reason to narrow ``~/.clustrix``, and
+    never a reason to touch ``$HOME``. A ``directory`` outside the
+    configuration directory entirely -- ``ProfileManager(config_dir=...)``
+    with somewhere of the caller's choosing -- yields only itself, since
+    clustrix asked for that one leaf and nothing above it.
+    """
+    yield directory
+    try:
+        config_dir = get_config_dir().resolve()
+        resolved = directory.resolve()
+    except OSError:
+        return
+    if resolved == config_dir or config_dir not in resolved.parents:
+        return
+    for parent in resolved.parents:
+        yield parent
+        if parent == config_dir:
+            return
 
 
 class ProfileManager:
@@ -62,8 +164,6 @@ class ProfileManager:
             # An unwritable config directory must not stop the widget from
             # opening. Profiles then live for the session only, and _persist
             # reports the same problem when it tries to save.
-            import warnings
-
             warnings.warn(f"Cannot create profile directory {self.config_dir}: {e}")
 
         self.profiles: Dict[str, ClusterConfig] = {}
@@ -290,6 +390,12 @@ class ProfileManager:
         ``_persist()`` fires from seven mutators, so a per-save warning
         would be noise and would be filtered out, which is the same as not
         warning at all.
+
+        A field is reported only when it holds something. An empty
+        ``environment_variables`` mapping is dropped by
+        ``strip_secret_fields`` like a populated one, and warning about the
+        loss of nothing would fire for every profile ever saved -- a notice
+        that always fires is one nobody reads.
         """
         if self._announced_dropped_secrets:
             return
@@ -297,13 +403,11 @@ class ProfileManager:
             field
             for name, config in self.profiles.items()
             for field, value in asdict(config).items()
-            if value not in (None, "") and field not in persisted.get(name, {})
+            if value and field not in persisted.get(name, {})
         }
         if not dropped:
             return
         self._announced_dropped_secrets = True
-
-        import warnings
 
         warnings.warn(
             "Profiles are not a credential store: "
@@ -311,7 +415,9 @@ class ProfileManager:
             "not survive a restart. They still work for the rest of this "
             "session. To supply a password without writing it to disk, set "
             "password_env_var to the name of an environment variable holding "
-            "it.",
+            "it. environment_variables is withheld for the same reason: its "
+            "names and values are yours, so clustrix cannot tell a setting "
+            "from a token and does not guess.",
             stacklevel=3,
         )
 

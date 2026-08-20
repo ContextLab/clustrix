@@ -30,11 +30,22 @@ The umask is deliberately 0o000 for the whole run: under a developer's
 0o077 even a completely broken writer produces 0600, and the test would
 pass against code it is supposed to reject.
 
-No secret-shaped literals appear below -- the ``<redacted>`` spelling is
-the one ``tests/unit/test_check_for_secrets.py`` already treats as a
-placeholder.
+The content half of the guard works the same way, and did not used to.
+It checked each line's key against ``{password, api_key, hf_token,
+AWS_SECRET_ACCESS_KEY}`` -- a name list, i.e. exactly the shape that
+failed above -- and so reported nothing while ``aws_secret_access_key``,
+``client_secret`` and ``token`` sat in the file the widget had just
+written. It now plants a distinct **sentinel value** in every credential
+slot the exercises touch and then looks for those *values* in the bytes on
+disk. A leak is caught whatever its key is called, including keys nobody
+has thought of yet, because no key is ever examined.
+
+No secret-shaped literals appear below: the sentinels are assembled from
+parts at import time, and the ``<redacted>`` spelling is the one
+``tests/unit/test_check_for_secrets.py`` already treats as a placeholder.
 """
 
+import json
 import os
 import shutil
 import stat
@@ -46,7 +57,7 @@ import clustrix.config as config_module
 from clustrix.cli_credentials import _write_credentials_to_env_file
 from clustrix.config import ClusterConfig, get_config_dir, save_config
 from clustrix.credential_manager import FlexibleCredentialManager
-from clustrix.profile_manager import ProfileManager
+from clustrix.profile_manager import ProfileManager, _mkdir_private
 from clustrix.ssh_utils import generate_ssh_key, update_ssh_config
 
 #: The widest a file clustrix creates may be: owner read/write, nothing else.
@@ -65,6 +76,76 @@ PUBLIC_BY_DESIGN = (".pub",)
 #: A umask that hides nothing, so a mode of 0600 can only have come from an
 #: explicit ``os.open`` mode or ``fchmod`` and never from the environment.
 WIDE_OPEN_UMASK = 0o000
+
+
+def _sentinel(slot):
+    """A value that exists nowhere else, so finding it means it was written."""
+    return "-".join(["clustrix", "sentinel", slot, "value"])
+
+
+#: One sentinel per place a credential can hide, planted by the exercises
+#: below and hunted for by ``test_no_persisted_file_contains_a_credential``.
+#:
+#: The point of the list is that the *code under test* is never told any of
+#: these names. Half of them are not ``ClusterConfig`` fields at all, three
+#: of the environment-variable names match no pattern clustrix has ever
+#: had, and ``USE_PASSWORD`` was actively exempted by a rule about the
+#: boolean field ``use_env_password``. If the guard is ever narrowed back to
+#: recognising keys by name, every one of these goes undetected again.
+SENTINELS = {
+    # Declared credential fields.
+    "password": _sentinel("password"),
+    "api_key": _sentinel("apikey"),
+    "hf_token": _sentinel("hftoken"),
+    # Keys that are not ClusterConfig fields, which is how they reached
+    # disk verbatim: the widget hands strip_secret_fields whatever a
+    # previously saved file contained.
+    "aws_secret_access_key": _sentinel("aws"),
+    "client_secret": _sentinel("clientsecret"),
+    "private_key": _sentinel("privatekey"),
+    "token": _sentinel("token"),
+    "secret_key": _sentinel("secretkey"),
+    "PASSWORD": _sentinel("shoutypassword"),
+    "legacy_auth_blob": _sentinel("blob"),
+    # Environment variable names chosen by the user.
+    "AWS_SECRET_ACCESS_KEY": _sentinel("envaws"),
+    "SSH_PASSPHRASE": _sentinel("passphrase"),
+    "GITHUB_PAT": _sentinel("pat"),
+    "USE_PASSWORD": _sentinel("usepassword"),
+    "DATABASE_URL": _sentinel("dburl"),
+}
+
+#: The environment-variable half, ready to drop into a config. The database
+#: URL hides its sentinel inside a value whose *key* says nothing at all.
+SENTINEL_ENVIRONMENT = {
+    "OMP_NUM_THREADS": "4",
+    "AWS_SECRET_ACCESS_KEY": SENTINELS["AWS_SECRET_ACCESS_KEY"],
+    "SSH_PASSPHRASE": SENTINELS["SSH_PASSPHRASE"],
+    "GITHUB_PAT": SENTINELS["GITHUB_PAT"],
+    "USE_PASSWORD": SENTINELS["USE_PASSWORD"],
+    "DATABASE_URL": f"postgres://u:{SENTINELS['DATABASE_URL']}@db.example.edu/app",
+}
+
+#: The top-level half: keys the configuration file format does not define,
+#: which is what a config file written by an older clustrix can contain and
+#: what the widget therefore carries around in ``self.configs``.
+SENTINEL_UNKNOWN_KEYS = {
+    key: SENTINELS[key]
+    for key in (
+        "aws_secret_access_key",
+        "client_secret",
+        "private_key",
+        "token",
+        "secret_key",
+        "PASSWORD",
+        "legacy_auth_blob",
+    )
+}
+
+
+def _sentinels_in(text):
+    """Which planted values appear in ``text``, by the slot they were put in."""
+    return sorted(slot for slot, value in SENTINELS.items() if value in text)
 
 
 def _too_wide(root):
@@ -127,10 +208,10 @@ def _a_config():
         cluster_type="ssh",
         cluster_host="cluster.example.edu",
         username="researcher",
-        password="<redacted>",
-        api_key="<redacted>",
-        hf_token="<redacted>",
-        environment_variables={"OMP_NUM_THREADS": "4", "AWS_SECRET_ACCESS_KEY": "<r>"},
+        password=SENTINELS["password"],
+        api_key=SENTINELS["api_key"],
+        hf_token=SENTINELS["hf_token"],
+        environment_variables=dict(SENTINEL_ENVIRONMENT),
     )
 
 
@@ -215,7 +296,8 @@ def _exercise_notebook_widgets(home):
     legacy.cluster_type.value = "ssh"
     legacy.host_field.value = "cluster.example.edu"
     legacy.username_field.value = "researcher"
-    legacy.password_field.value = "<redacted>"
+    legacy.password_field.value = SENTINELS["password"]
+    legacy.env_vars_field.value = json.dumps(SENTINEL_ENVIRONMENT)
     legacy.current_config_name = "widget-saved"
     legacy.configs = {"widget-saved": legacy._save_config_from_widgets()}
     legacy.save_filename_input.value = "widget-single.yml"
@@ -224,8 +306,21 @@ def _exercise_notebook_widgets(home):
     # The other branch: more than one configuration goes into one file, and
     # a HuggingFace token is a credential the SSH branch never produces.
     legacy.cluster_type.value = "huggingface"
-    legacy.hf_token_field.value = "<redacted>"
+    legacy.hf_token_field.value = SENTINELS["hf_token"]
     legacy.configs["widget-hf"] = legacy._save_config_from_widgets()
+    # A configuration as it comes *off disk*: the widget stores the parsed
+    # mapping unchanged, so a file written by an older clustrix -- or by
+    # anything else -- puts keys the format does not define straight back
+    # into the next save. This is the path on which aws_secret_access_key,
+    # client_secret and token reached disk verbatim.
+    legacy.configs["widget-restored"] = {
+        "name": "widget-restored",
+        "cluster_type": "ssh",
+        "cluster_host": "cluster.example.edu",
+        "username": "researcher",
+        "environment_variables": dict(SENTINEL_ENVIRONMENT),
+        **SENTINEL_UNKNOWN_KEYS,
+    }
     legacy.save_filename_input.value = "widget-many.yml"
     legacy._on_save_config(None)
 
@@ -368,6 +463,16 @@ def test_no_persisted_file_contains_a_credential(private_tree, monkeypatch):
     around the filtering ``ClusterConfig.save_to_file`` applies, so
     passwords and API tokens reached ``profiles.yml`` in plaintext even
     though the supported path would have withheld them.
+
+    **Values, not key names.** This test used to compare each line's key
+    against ``{password, api_key, hf_token, AWS_SECRET_ACCESS_KEY}``, which
+    is the same shape as the bug it exists to catch: run against the file
+    the widget writes it reported nothing while ``aws_secret_access_key``,
+    ``client_secret`` and ``token`` were sitting in it. Sentinel values are
+    planted by the exercises instead and hunted for in the raw bytes, so a
+    credential is found under whatever key it was filed -- one nobody has
+    thought of, one spelled in a different case, or one buried inside a
+    connection URL where there is no key to read at all.
     """
     monkeypatch.setattr(config_module, "_config", _a_config())
     for exercise in EXERCISES.values():
@@ -380,14 +485,57 @@ def test_no_persisted_file_contains_a_credential(private_tree, monkeypatch):
         if path.name == ".env":
             continue  # the credential file itself, by definition
         text = path.read_text(encoding="utf-8", errors="replace")
-        for line in text.splitlines():
-            key = line.split(":")[0].strip().lstrip("- ")
-            if key in {"password", "api_key", "hf_token", "AWS_SECRET_ACCESS_KEY"}:
-                leaked.append(f"{path.relative_to(private_tree)}: {line.strip()}")
+        for slot in _sentinels_in(text):
+            leaked.append(f"{path.relative_to(private_tree)}: value planted as {slot}")
 
     assert not leaked, "credentials were written where nobody asked for them:\n  " + (
         "\n  ".join(leaked)
     )
+
+
+def test_the_sentinels_really_were_planted(private_tree, monkeypatch):
+    """A hunt for values nobody planted would pass forever.
+
+    The assertion above is only worth anything if the sentinels actually
+    passed through a persisting surface. If ``_a_config`` stopped carrying
+    them the guard would go green while observing nothing, which is
+    precisely how the name-list version survived so long. The file written
+    by ``save_to_file(include_secrets=True)`` is the whole config as the
+    exercises supplied it, so it is the place to look.
+
+    (The widget half is pinned the same way, against what the widget was
+    handed, in
+    ``tests/unit/test_widget_save_withholds_unnamed_secrets.py``.)
+    """
+    monkeypatch.setattr(config_module, "_config", _a_config())
+    _exercise_config_saves(private_tree)
+
+    opted_in = (get_config_dir() / "with-secrets.yml").read_text(encoding="utf-8")
+    planted = set(_sentinels_in(opted_in))
+
+    # The opt-in file is the whole config, so every ClusterConfig-borne
+    # sentinel has to be in it.
+    expected = {"password", "api_key", "hf_token"} | set(SENTINEL_ENVIRONMENT) - {
+        "OMP_NUM_THREADS"
+    }
+    assert expected <= planted, sorted(expected - planted)
+
+
+def test_the_hunt_reports_a_sentinel_that_was_written(private_tree):
+    """Plant a leak by hand and prove the check fails on it.
+
+    Without this the guard could be looking for the wrong strings, or in
+    the wrong files, and nobody would know.
+    """
+    leaked_file = private_tree / ".clustrix" / "leaked.yml"
+    leaked_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    leaked_file.write_text(
+        f"some_key_nobody_listed: {SENTINELS['legacy_auth_blob']}\n", encoding="utf-8"
+    )
+
+    found = _sentinels_in(leaked_file.read_text(encoding="utf-8"))
+
+    assert found == ["legacy_auth_blob"]
 
 
 def test_dropping_a_profile_credential_is_announced_once(private_tree):
@@ -436,3 +584,73 @@ def test_the_opt_in_really_does_write_the_secret(private_tree, monkeypatch):
     # flags as an assigned credential.
     for field in ("password", "hf_token"):
         assert f"{field}:" in text, f"{field} is missing despite include_secrets"
+
+
+# --------------------------------------------------------------------------
+# The tree the walk above starts from is always empty, which is exactly the
+# case a real machine is not in.
+# --------------------------------------------------------------------------
+
+
+def test_a_config_directory_that_is_already_too_wide_is_narrowed(private_tree):
+    """An install made before this fix must not stay wide forever.
+
+    The walk above only ever sees directories clustrix created during the
+    test, so it cannot notice the case that matters most: ``~/.clustrix``
+    on a machine where clustrix has been used already. Measured on a real
+    one, it is ``drwxr-xr-x`` with ``clustrix.yml`` at 0644 inside it, and
+    a fix that only tightens *new* directories changes nothing there.
+
+    Narrowing the directory is enough to remediate the files under it --
+    another local user cannot reach ``clustrix.yml`` by name through a
+    directory they cannot traverse, whatever the file's own mode is -- so
+    nothing here rewrites a single file the user owns.
+    """
+    config_dir = get_config_dir()
+    config_dir.mkdir(mode=0o755, parents=True, exist_ok=True)
+    config_dir.chmod(0o755)
+    stale = config_dir / "clustrix.yml"
+    stale.write_text("cluster_type: local\n", encoding="utf-8")
+    stale.chmod(0o644)
+
+    with pytest.warns(UserWarning, match="narrowed"):
+        ProfileManager()
+
+    assert stat.S_IMODE(config_dir.stat().st_mode) == 0o700
+    # Traversal is now impossible for anybody else, which is what makes the
+    # file underneath unreachable regardless of its own mode.
+    assert not _too_wide(private_tree / ".clustrix" / "profiles")
+
+
+def test_narrowing_stops_at_the_config_directory(private_tree):
+    """$HOME is the user's, not clustrix's.
+
+    Remediating a directory clustrix owns is one thing; re-moding a home
+    directory somebody else set up is the overreach this must not become.
+    """
+    home_mode_before = stat.S_IMODE(private_tree.stat().st_mode)
+
+    ProfileManager()
+
+    assert stat.S_IMODE(private_tree.stat().st_mode) == home_mode_before
+
+
+def test_a_directory_is_created_at_0700_whatever_the_umask_is(private_tree):
+    """``mkdir(mode=...)`` is masked, so on its own it guarantees nothing.
+
+    Under ``umask 0022`` a 0700 request lands as 0755. Under ``umask
+    0200`` it lands as 0500 -- a directory clustrix cannot write into,
+    which made creating the parent fail the very next ``mkdir`` with
+    ``PermissionError``.
+    """
+    for umask in (0o022, 0o200, 0o077, 0o000):
+        target = private_tree / ".clustrix" / f"under-{umask:04o}" / "profiles"
+        previous = os.umask(umask)
+        try:
+            _mkdir_private(target)
+        finally:
+            os.umask(previous)
+
+        assert target.is_dir(), f"umask {umask:04o} blocked the create"
+        assert stat.S_IMODE(target.stat().st_mode) == 0o700, f"umask {umask:04o}"
+        assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700

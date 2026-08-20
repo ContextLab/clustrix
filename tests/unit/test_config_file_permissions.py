@@ -238,13 +238,24 @@ def test_secret_fields_derived_from_dataclass_covers_known_credential_names():
         assert not_expected not in SECRET_FIELDS
 
 
-def test_environment_variables_are_filtered_not_dropped(tmp_path):
-    """`environment_variables` usually holds a mix.
+def test_environment_variables_are_not_persisted_by_default(tmp_path):
+    """`environment_variables` holds a mix that cannot be told apart.
 
-    Dropping the whole mapping protected the credentials in it but also
-    threw away ordinary settings the user expects to persist -- so saving
-    and reloading a config silently lost OMP_NUM_THREADS. Each entry is
-    judged on its own key name instead.
+    **This assertion is rewritten, not relaxed.** It used to require that
+    ``OMP_NUM_THREADS`` and ``MY_PIPELINE_STAGE`` survived while
+    ``AWS_SECRET_ACCESS_KEY`` and ``HF_TOKEN`` were dropped -- i.e. that
+    each entry is judged on its own key name. That rule was measured and
+    fails: ``SSH_PASSPHRASE`` and ``GITHUB_PAT`` match nothing in the
+    pattern, a ``DATABASE_URL`` carries its password in the URL where no
+    key name can see it, and ``USE_PASSWORD`` was *exempted* by the
+    ``^use_`` rule written to describe the boolean field
+    ``use_env_password``. Both the names and the values in this mapping are
+    chosen by the user, so nothing distinguishes a setting from a token,
+    and a fifth guess at the spelling is not the fix. The mapping is
+    withheld whole, and the caller is told (see
+    ``ProfileManager._announce_dropped_secrets`` and the widget's save
+    notice). ``include_secrets=True`` -- exercised by the test below --
+    writes it.
     """
     config = ClusterConfig(
         cluster_host="cluster.example.edu",
@@ -252,6 +263,10 @@ def test_environment_variables_are_filtered_not_dropped(tmp_path):
         environment_variables={
             "OMP_NUM_THREADS": "8",
             "MY_PIPELINE_STAGE": "preprocess",
+            "SSH_PASSPHRASE": "fake-passphrase-value",
+            "GITHUB_PAT": "fake-pat-value",
+            "DATABASE_URL": "postgres://u:fake-dburl-value@db.example.edu/app",
+            "USE_PASSWORD": "fake-usepassword-value",
             "AWS_SECRET_ACCESS_KEY": "fake-aws-secret-value",
             "HF_TOKEN": "fake-hf-token-value",
         },
@@ -261,14 +276,21 @@ def test_environment_variables_are_filtered_not_dropped(tmp_path):
     config.save_to_file(str(config_path))
     raw_text = config_path.read_text()
 
-    assert "fake-aws-secret-value" not in raw_text
-    assert "fake-hf-token-value" not in raw_text
+    for secret in (
+        "fake-passphrase-value",
+        "fake-pat-value",
+        "fake-dburl-value",
+        "fake-usepassword-value",
+        "fake-aws-secret-value",
+        "fake-hf-token-value",
+    ):
+        assert secret not in raw_text, f"{secret!r} was written to disk"
 
+    # The ordinary settings go with them, which is the cost of not
+    # guessing, and the reason the loss is announced rather than silent.
+    assert "OMP_NUM_THREADS" not in raw_text
     reloaded = ClusterConfig.load_from_file(str(config_path))
-    assert reloaded.environment_variables == {
-        "OMP_NUM_THREADS": "8",
-        "MY_PIPELINE_STAGE": "preprocess",
-    }
+    assert reloaded.environment_variables == {}
 
 
 def test_environment_variable_secrets_survive_include_secrets(tmp_path):

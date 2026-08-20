@@ -9,7 +9,6 @@ For credential management, please use:
 - clustrix.cli_credentials for command-line credential management
 """
 
-import os
 import logging
 from typing import Dict, Optional
 
@@ -75,7 +74,7 @@ class SecureCredentialManager:
 
 
 class ValidationCredentials:
-    """HuggingFace credentials for external service validation, from the environment.
+    """HuggingFace credentials for external service validation.
 
     HuggingFace only. There used to be a ``get_ssh_credentials`` here that
     returned ``None`` unconditionally, which is worse than not having one:
@@ -85,11 +84,33 @@ class ValidationCredentials:
     """
 
     def __init__(self):
-        logger.info("Using environment variable fallback for validation credentials")
+        logger.info("Using the clustrix credential manager for validation credentials")
 
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
-        """Get HuggingFace credentials from environment variables."""
-        token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
-        if token:
-            return {"token": token, "username": os.getenv("HUGGINGFACE_USERNAME", "")}
-        return None
+        """Get HuggingFace credentials from every supported source.
+
+        This read ``os.environ`` directly, which worked only by accident:
+        some earlier lookup in the same process called ``load_dotenv`` and
+        exported ``~/.clustrix/.env`` into the environment, so a token that
+        lived *only* in that file appeared to be an environment variable.
+        Removing that process-wide export (issue #153) made the accident
+        visible as a regression -- ``tests/real_world/test_credential_access.py``
+        and ``scripts/debug_huggingface_auth.py`` both stopped finding a
+        token they were correctly configured to have.
+
+        Going through :func:`clustrix.credential_manager.ensure_credential`
+        fixes it properly rather than by re-exporting: that is the supported
+        lookup, it consults the environment *and* ``~/.clustrix/.env``, and
+        it honours the ``HUGGINGFACE_*``/``HF_*`` aliases from one table so
+        the two sources cannot disagree about which names count.
+        """
+        from .credential_manager import ensure_credential
+
+        credentials = ensure_credential("huggingface")
+        if not credentials or not credentials.get("token"):
+            return None
+        return {
+            "token": credentials["token"],
+            # Kept as "" rather than absent: every caller indexes it.
+            "username": credentials.get("username", ""),
+        }
