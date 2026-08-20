@@ -52,9 +52,12 @@ do not.
 
 Two things to notice:
 
-- The ``cores``, ``memory`` and ``time`` arguments are accepted and ignored by
-  the local backend. They are there so the *same* decorated function works
-  unchanged against a scheduler.
+- The local backend does not reserve memory or enforce a wall time. An explicit
+  ``cores>1`` also has no effect on an ordinary call, and Clustrix warns that
+  it was discarded. These resource arguments let the same decorated function
+  work unchanged against a scheduler; locally, ``cores`` sizes a worker pool
+  only on the narrow path where the loop analysis finds a supported loop and
+  the function accepts the matching chunk argument.
 - The ``import random`` is **inside** the function body. Do that
   consistently. The remote worker starts a fresh interpreter that has not run
   your module's top-level imports, so anything the body names must either be

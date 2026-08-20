@@ -75,11 +75,13 @@ What it does
 - **Errors that reach you.** A remote traceback is re-raised in your own
   process rather than left in a log file on the cluster.
 
-Two things that sound like features and are not. ``@cluster(cores=N)`` with no
-cluster configured does not use N cores: the function runs in your own process,
-sequentially (`issue #152
-<https://github.com/ContextLab/clustrix/issues/152>`_). And Clustrix does not
-move your data -- see :doc:`introduction`.
+Two things that sound like features and are not. ``@cluster(cores=N)`` does not
+split an ordinary local function across N workers: it runs once in your own
+process, and Clustrix warns that the number was discarded whenever you asked
+for more than one core. Loop parallelization is on by default, so nothing has
+to be switched on: ``cores`` sizes a local pool only when the loop analysis
+finds a supported loop *and* the function accepts the matching chunk argument.
+Clustrix also does not move your data -- see :doc:`introduction`.
 
 Jupyter Notebook Integration
 ----------------------------

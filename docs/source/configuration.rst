@@ -65,17 +65,15 @@ file. Both reject unknown names rather than accepting them silently:
    ValueError: bad.yml contains unknown setting(s): cleanup_remote_files
    (did you mean cleanup_on_success?)
 
-**Per call.** Six settings can be overridden on the decorator: ``cores``,
-``memory``, ``time``, ``partition``, ``queue`` and ``environment``. Five of
-the six reach a backend. ``queue`` does not: the decorator resolves it against
-``default_queue`` and writes it into the job configuration, and nothing reads
-it back out, because none of ``local``, ``ssh``, ``slurm`` or ``huggingface``
-has a queue to submit to. Everything else is configuration-only, with the
-exception of the pass-through extras listed under :ref:`decorator-extras`.
+**Per call.** Five settings can be overridden on the decorator: ``cores``,
+``memory``, ``time``, ``partition`` and ``environment``. Everything else is
+configuration-only, with the exception of the pass-through extras listed under
+:ref:`decorator-extras`. The removed ``queue`` spelling now arrives as an
+unrecognized extra and produces a warning; use ``partition`` for SLURM.
 
 **Effective precedence**
 
-1. ``@cluster(...)`` arguments (the six above, plus the extras).
+1. ``@cluster(...)`` arguments (the five above, plus the extras).
 2. ``clustrix.configure()`` / direct attribute assignment.
 3. The configuration file found at import.
 4. Dataclass defaults.
@@ -529,15 +527,16 @@ Field                         Status
                               GPUs inside your own function. The field is
                               accepted so that existing config files keep
                               loading, and passing it to ``@cluster`` warns.
-``local_parallel_threshold``  Not read. Local chunking uses
-                              ``os.cpu_count() * 2`` instead.
+``local_parallel_threshold``  Not read. Local chunking aims for two chunks
+                              per worker in the pool ``cores`` sized, falling
+                              back to ``os.cpu_count()`` when that is unknown.
 ``cache_credentials``         Not read.
 ``credential_cache_ttl``      Not read.
-``default_queue``             Resolved and placed in the job configuration
-                              by the decorator, then never read: none of the
-                              four supported backends submits to a queue.
-                              ``@cluster(queue=...)`` is inert for the same
-                              reason. Use ``default_partition`` on SLURM.
+``default_queue``             Retained so older configuration files and widget
+                              profiles keep loading, but read by no backend.
+                              A non-empty value produces a warning when a
+                              decorated function runs. Use
+                              ``default_partition`` on SLURM.
 ``hf_hardware``               Read only as a fallback for ``hf_flavor``.
                               Set ``hf_flavor``.
 ``venv_info``                 Runtime scratch space, written by clustrix

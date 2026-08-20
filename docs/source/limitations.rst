@@ -128,13 +128,13 @@ installs.
 
 .. _limitation-local-cores:
 
-``cores`` does nothing on the local backend
---------------------------------------------
+Local cores require splittable work
+-----------------------------------
 
-With no cluster configured, ``@cluster(cores=8)`` runs your function in the
-process that called it, on one core. The number you passed is not a hint that
-was ignored under load; it is not consulted at all. Nothing forks, nothing
-spawns, and the call returns when the function returns.
+With no cluster configured, ``@cluster(cores=8)`` runs an ordinary function in
+the process that called it, on one core, and logs that the request has no
+effect. One call is one unit of work, so there is nothing to give seven other
+workers. Nothing forks, and the call returns when the function returns.
 
 .. code-block:: python
 
@@ -158,14 +158,17 @@ spawns, and the call returns when the function returns.
    the job ran in:   44824
    same process?     True
 
-This is `issue #152 <https://github.com/ContextLab/clustrix/issues/152>`_ and it
-is a defect rather than a design position. It matters most to the person
-sizing up the library, since the local backend is what the quickstart reaches
-for first and "eight cores" is a reasonable thing to believe you asked for.
+There is exactly one local path where ``cores`` does size a pool: the
+parallelizing path (on by default through ``auto_parallel``, and forced with
+``parallel=True``) must find a supported loop, split it into chunks, and pass
+each chunk through a ``_parallel_<variable>`` keyword the function accepts.
+Most Python loops do not meet those rules. Even when they do, the pool size is
+an upper bound, not a promise that many workers will be busy.
 
-The parallel machinery underneath is real. :class:`clustrix.local_executor.LocalExecutor`
-builds a ``ProcessPoolExecutor`` or a ``ThreadPoolExecutor`` and gives the
-speedups you would expect; what is missing is the wire from ``@cluster`` to it.
+The parallel machinery underneath is real.
+:class:`clustrix.local_executor.LocalExecutor` builds a
+``ProcessPoolExecutor`` or a ``ThreadPoolExecutor`` and gives the speedups you
+would expect.
 :func:`clustrix.local_executor.choose_executor_type` decides which pool you
 get, in two steps. First it calls ``pickle.dumps`` on your function and on
 every argument, and any failure selects threads, because a process pool has no
@@ -178,9 +181,9 @@ source text, so it is fooled by a variable called ``sqlite_path`` and blind to
 I/O reached through a helper. Pass ``use_threads=True`` or ``use_threads=False``
 to say what you meant.
 
-**Workarounds:** drive :class:`~clustrix.local_executor.LocalExecutor` yourself,
-or use ``joblib`` or ``concurrent.futures``, which is what the local backend
-would be wrapping anyway. The
+For general local parallelism, drive
+:class:`~clustrix.local_executor.LocalExecutor` yourself, or use ``joblib`` or
+``concurrent.futures``. The
 :doc:`local-parallelism notebook <notebooks/local_parallel_comparison>`
 measures both the gap and what the pools are worth.
 
@@ -620,8 +623,9 @@ Smaller sharp edges
 * **``pre_execution_commands`` is not validated or quoted.** It is a raw shell
   injection point by design. ``module_loads`` and ``environment_variables``
   keys *are* validated and will refuse metacharacters.
-* **``cores=0`` falls back to the default.** The merge is written as
-  ``cores or config.default_cores``, so any falsy value takes the default.
+* **``cores`` must be a positive integer.** ``@cluster(cores=0)`` and
+  ``@cluster(cores=-2)`` raise ``ValueError`` at decoration time rather than
+  falling through the ``cores or config.default_cores`` merge.
 * **Unknown ``@cluster`` keywords are warned about, not rejected.** The
   warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
   a keyword name is easy to miss if nothing is watching that logger. This is

@@ -83,9 +83,9 @@ function's source code.** In other words, a function you typed into a REPL, a
 notebook cell, or built with ``exec`` serializes and runs correctly, because
 dill and cloudpickle work from the compiled code object rather than from text.
 Only the *source-based* features need ``inspect.getsource()``. Automatic loop
-parallelization (``@cluster(parallel=True)``) is the one that matters here: it
-parses the function body with ``ast``, and quietly does nothing when there is
-no source to parse.
+parallelization, which ``config.auto_parallel`` leaves on, is the one that
+matters here: it parses the function body with ``ast``, and quietly does
+nothing when there is no source to parse.
 
 .. _what-clustrix-is-not:
 
@@ -154,8 +154,8 @@ wrong version of your code.
 Hand-written sbatch wins when the job is not shaped like "call this Python
 function": array jobs over an existing file list, MPI programs, non-Python
 executables, anything that needs specific scheduler features Clustrix does not
-expose. Clustrix passes ``cores``, ``memory``, ``time``, ``partition`` and
-``queue`` through to the generated script; anything more exotic than that is
+expose. Clustrix passes ``cores``, ``memory``, ``time`` and ``partition``
+through to the generated script; anything more exotic than that is
 easier to write yourself.
 
 Dask
@@ -195,12 +195,12 @@ joblib
 
 ``joblib.Parallel`` is the closest thing in spirit -- parallelize a loop with
 minimal ceremony -- and for multi-core work on one machine it is the better
-tool by a wide margin. Reach for joblib there. Clustrix's own local path does
-not compete with it: ``@cluster(cores=N)`` with no cluster configured runs your
-function in the calling process, one core, and ``cores`` is ignored
-(`issue #152 <https://github.com/ContextLab/clustrix/issues/152>`_). The
-in-process pools that :class:`clustrix.local_executor.LocalExecutor` builds are
-real and do give a speedup, but you have to drive them yourself; see
+tool by a wide margin. Reach for joblib there. Clustrix's ordinary local path
+does not compete with it: ``@cluster(cores=N)`` with no cluster configured runs
+your function in the calling process, one core, and -- for any ``N`` above one
+-- warns that ``cores`` had no effect. The narrow local-parallelization path
+and the pools built by :class:`clustrix.local_executor.LocalExecutor` do use
+multiple workers; see
 :doc:`the local-parallelism notebook <notebooks/local_parallel_comparison>`.
 
 The difference that does favour Clustrix is reach. joblib's backends are

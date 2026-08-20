@@ -39,11 +39,13 @@ it there, and hands you back the return value.
 - **Remote tracebacks come home.** A job that raises raises in your process,
   rather than leaving a log file on the cluster for you to find.
 
-Two things that sound like they are on that list and are not. `@cluster(cores=N)`
-with no cluster configured does **not** give you N cores: the function runs in
-your own process, sequentially
-([#152](https://github.com/ContextLab/clustrix/issues/152)). And Clustrix does
-not move your data — see [Data](#data).
+Two things that sound like they are on that list and are not. An ordinary
+`@cluster(cores=N)` call with no cluster configured does **not** give you N
+cores: the function runs in your own process, sequentially. Clustrix logs a
+warning about the discarded number when you asked for more than one core —
+`cores=1`, and the shipped `default_cores` you never changed, pass in silence.
+Loop parallelization is on by default and can split a supported loop across
+that many workers. Clustrix also does not move your data — see [Data](#data).
 
 Read [Supported Cluster Types](#supported-cluster-types) before relying on a
 backend. Not everything in this package works, and the sections below say which

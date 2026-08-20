@@ -82,6 +82,7 @@ pytest --cov=clustrix --cov-report=html
 - Add examples for new features
 - Update README.md if adding user-facing features
 - Consider adding notebook tutorials for complex features
+- Follow the [Documentation Style](#documentation-style) rules below
 
 ## Types of Contributions
 
@@ -209,6 +210,69 @@ Specific documentation needs:
 - More examples of advanced configurations
 - Guides for specific cluster environments
 - Performance tuning recommendations
+
+## Documentation Style
+
+Clustrix documentation should help a reader make a correct decision and run a
+working example. It should not imitate the voice of a research paper. The
+ContextLab writing-style guide explicitly defers project documentation, so the
+rules below select only the parts that transfer safely to technical writing.
+
+### Lead with the result
+
+Open a page or section with what the reader can do, what the feature does, or
+the limitation that changes their decision. Do not open with a history of the
+project, a novelty claim, or phrases such as "This page will demonstrate."
+
+### Make abstractions concrete
+
+Follow a technical claim with its practical meaning or a small example. For
+example, after saying that remote filesystem helpers return paths relative to
+the searched directory, show the `os.path.join` needed before `stat`.
+
+### Prefer runnable examples
+
+Examples should be short enough to copy, deterministic where practical, and
+explicit about their execution requirements. A Python block that needs a live
+cluster begins with `# cluster-required: <reason>`. Local blocks must run in
+`scripts/check_docs_examples.py`. Notebook cells that contact a cluster must
+be clearly marked and must not run accidentally during a local audit.
+
+### State boundaries plainly
+
+Say when an option is ignored, when a backend is unsupported, and when an
+operation can incur cost. Do not turn a limitation into a workaround unless
+the workaround has been verified. If the documentation exposes a toolbox
+defect, record it under the documentation master issue rather than changing
+library code during a documentation pass.
+
+### Use a direct, quiet voice
+
+Use sentence-case headings and active constructions when they identify the
+actor. Address the reader as `you` when describing an action. Avoid
+evaluative filler ("easy," "powerful," "obviously," "simply"), promotional
+claims, emoji, and repeated exclamation points. Use `For example` when a
+concrete case earns the space, not as a quota.
+
+### Keep one source of truth
+
+Explain a behavior fully once and link to it elsewhere. API pages define
+parameters and return values; guides explain concepts; tutorials carry a
+reader through a task. Generated files under `docs/build` are build output,
+not editing targets.
+
+### Check every change
+
+Run both checks before publishing:
+
+```bash
+python scripts/check_docs_examples.py
+sphinx-build -W -b html docs/source docs/build/html
+```
+
+Run locally self-contained notebooks from a clean kernel. For notebooks that
+require SLURM, SSH, or paid services, syntax-check every cell and inspect the
+execution path without submitting a job.
 
 ## Coding Standards
 

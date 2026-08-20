@@ -6,9 +6,13 @@ and Clustrix either submits the call to the backend you configured or runs it
 in the calling process.
 
 One thing to fix in your expectations before reading further: ``cores`` is a
-*request to a scheduler*. On the local path there is no scheduler, so
-``@cluster(cores=8)`` runs your function once, in this process, on one core.
-See :ref:`limitation-local-cores`.
+resource request, not an instruction to split an ordinary function. On the
+local path, ``@cluster(cores=8)`` runs that function once in this process, and
+Clustrix warns that the eight was discarded. The value sizes a pool only on the
+narrow local-parallelization path described below, which needs no
+``parallel=True`` -- ``config.auto_parallel`` is already ``True`` -- but does
+need the loop analysis to flag a loop and the function to accept the matching
+``_parallel_<var>`` keyword. See :ref:`limitation-local-cores`.
 
 .. automodule:: clustrix.decorator
    :members:

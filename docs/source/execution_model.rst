@@ -43,8 +43,8 @@ everything you left out:
 .. code-block:: text
 
    {'cores': 8, 'memory': '16GB', 'time': None, 'partition': None,
-    'queue': None, 'parallel': None, 'auto_gpu_parallel': None,
-    'environment': None, 'async_submit': None}
+    'parallel': None, 'auto_gpu_parallel': None, 'environment': None,
+    'async_submit': None}
 
 The consequence is that **configuration order does not matter**. Decorating
 before ``clustrix.configure()`` is fine; the wrapper calls ``get_config()`` on
@@ -88,8 +88,8 @@ Steps 7--10 differ per backend; see :ref:`per-backend-divergence`.
 Step 2: resource resolution
 ---------------------------
 
-Each of ``cores``, ``memory``, ``time``, ``partition``, ``queue`` and
-``environment`` falls back to a configuration default when the decorator left
+Each of ``cores``, ``memory``, ``time``, ``partition`` and ``environment``
+falls back to a configuration default when the decorator left
 it as ``None``:
 
 ===============  =============================
@@ -99,20 +99,21 @@ Decorator arg    Config fallback
 ``memory``       ``default_memory`` (``"8GB"``)
 ``time``         ``default_time`` (``"01:00:00"``)
 ``partition``    ``default_partition`` (None)
-``queue``        ``default_queue`` (None)
 ``environment``  ``conda_env_name`` (None)
 ===============  =============================
 
-The fallback is written as ``cores or config.default_cores``, so ``cores=0``
-also falls back. Any resource key still missing when a job script is generated
-is filled in again by ``resolve_job_resources``.
+The fallback is written as ``cores or config.default_cores``. ``cores`` is
+validated before that merge: anything other than a positive integer raises
+``ValueError`` at decoration time, so ``cores=0`` and ``cores=-2`` are rejected
+rather than absorbed. Any resource key still missing when a job script is
+generated is filled in again by ``resolve_job_resources``.
 
-``queue`` is resolved along with the rest and then read by nothing. No
-supported backend submits to a queue, so the value lands in the job
-configuration and stops there; ``default_queue`` and ``@cluster(queue=...)``
-are both inert (`issue #158
-<https://github.com/ContextLab/clustrix/issues/158>`_). Use
-``default_partition`` on SLURM.
+``queue`` is not a decorator parameter. ``@cluster(queue=...)`` lands in
+``**kwargs`` and is reported as an unrecognized option. ``ClusterConfig``
+still carries ``default_queue`` so that older configuration files and saved
+widget profiles keep loading, but no backend reads it; a non-empty value
+warns on every call. Use ``default_partition`` or ``@cluster(partition=...)``
+on SLURM.
 
 Memory strings are rewritten per scheduler by ``normalize_memory``:
 

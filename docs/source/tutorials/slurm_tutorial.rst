@@ -107,9 +107,9 @@ fractional value like ``"1.5GB"`` is rounded up to ``--mem=2G``):
    "
 
 There is no pass-through for arbitrary ``sbatch`` directives beyond
-``cores``, ``memory``, ``time``, ``partition`` and ``queue`` -- an
-unrecognized keyword argument to ``@cluster`` is accepted but never written
-into the script. If you need ``--nodes``, ``--ntasks-per-node``,
+``cores``, ``memory``, ``time`` and ``partition`` -- an
+unrecognized keyword argument to ``@cluster`` produces a warning and is not
+written into the script. If you need ``--nodes``, ``--ntasks-per-node``,
 ``--account`` or similar, put the equivalent in
 ``pre_execution_commands`` or your cluster's own scheduler defaults.
 
@@ -230,7 +230,7 @@ SLURM-specific resource options:
        eigenvalues = np.linalg.eigvals(matrix)
        return len(eigenvalues)
 
-``cores``, ``memory``, ``time``, ``partition`` and ``queue`` are the resource
+``cores``, ``memory``, ``time`` and ``partition`` are the resource
 arguments the decorator understands. There is no pass-through for arbitrary
 ``sbatch`` directives such as ``--nodes``, ``--ntasks-per-node`` or
 ``--account``: unrecognised keyword arguments are collected but never written
