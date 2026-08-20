@@ -4,6 +4,7 @@ from typing import Optional, List, Dict, Any
 
 from .config import ClusterConfig
 from .credential_manager import get_credential_manager
+from .credential_release import CredentialTarget, release_credential
 from .auth_methods import (
     AuthMethod,
     AuthResult,
@@ -230,19 +231,34 @@ class AuthenticationManager:
 
         print("🔍 Validating authentication configuration...")
 
-        # Check environment variable if enabled
+        # Check environment variable if enabled.
+        #
+        # "Is it set" is not the question the user needs answered -- an
+        # environment password that is set but would never be released to
+        # this ``cluster_host`` is not a working configuration, and reporting
+        # it as one is how route 6 stayed invisible. So this asks the gate
+        # the same question the connection path asks.
         if self.config.use_env_password:
-            env_password = self.config.get_env_password()
-            results["env_var_set"] = env_password is not None
-
-            if env_password:
-                print(
-                    f"   ✅ Environment variable ${self.config.password_env_var} is set"
-                )
+            try:
+                target = CredentialTarget.for_config(self.config)
+            except ValueError as exc:
+                print(f"   ❌ {exc}")
+                results["env_var_set"] = False
             else:
-                print(
-                    f"   ❌ Environment variable ${self.config.password_env_var} not set"
+                release = release_credential(
+                    target,
+                    provider="ssh",
+                    config=self.config,
+                    sources=("environment",),
                 )
+                results["env_var_set"] = bool(release)
+                if release:
+                    print(
+                        f"   ✅ Environment variable "
+                        f"${self.config.password_env_var} is set"
+                    )
+                else:
+                    print(f"   ❌ {release.refusal}")
 
         # Check SSH keys
         ssh_method = SSHKeyAuthMethod(self.config)

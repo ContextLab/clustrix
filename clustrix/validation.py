@@ -7,6 +7,7 @@ from typing import Dict, Optional
 import paramiko
 
 from .config import ClusterConfig
+from .credential_release import CredentialTarget, release_credential
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -140,17 +141,37 @@ def run_comprehensive_validation(config: ClusterConfig) -> Dict[str, bool]:
 
     results = {}
 
-    # Test environment variable if enabled
+    # Test environment variable if enabled.
+    #
+    # This used to be ``config.get_env_password()``, which had no host check
+    # and no provenance check, and its result went straight into
+    # ``validate_cluster_auth`` -> ``paramiko.connect(hostname=
+    # config.cluster_host)``. With a working-directory ``clustrix.yml`` the
+    # whole method was the repository's: the file names ``password_env_var``
+    # as well as ``cluster_host``, so it chose which of the victim's
+    # environment variables to read *and* where to send it. That was route 6
+    # of issue #167 and it is why ``get_env_password`` no longer exists.
     if config.use_env_password:
-        env_password = config.get_env_password()
-        if env_password:
-            print(
-                f"✅ Environment variable {config.password_env_var} contains password"
-            )
-            results["env_password"] = validate_cluster_auth(config, env_password)
-        else:
-            print(f"❌ Environment variable {config.password_env_var} not set")
+        try:
+            target = CredentialTarget.for_config(config)
+        except ValueError as exc:
+            print(f"❌ {exc}")
             results["env_password"] = False
+        else:
+            release = release_credential(
+                target, provider="ssh", config=config, sources=("environment",)
+            )
+            if release.refusal is not None:
+                print(f"❌ ${config.password_env_var} was not used: {release.refusal}")
+                results["env_password"] = False
+            else:
+                print(
+                    f"✅ Environment variable {config.password_env_var} "
+                    f"contains password"
+                )
+                results["env_password"] = validate_cluster_auth(
+                    config, release.password
+                )
     else:
         print("ℹ️  Environment variable password disabled")
         results["env_password"] = False

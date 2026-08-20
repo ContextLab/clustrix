@@ -119,7 +119,8 @@ above:
   ``~/.cache/huggingface/token``.
 - the variable *named by* ``password_env_var`` -- read for the SSH password
   when ``use_env_password`` is ``True``. The name is configurable, so there is
-  no fixed variable to document here; see ``ClusterConfig.get_env_password``.
+  no fixed variable to document here; the value is read (and gated) by
+  ``clustrix.credential_release.release_credential``.
 
 ``CLUSTRIX_CONFIG_DIR``
    Overrides the directory clustrix reads and writes user configuration in,

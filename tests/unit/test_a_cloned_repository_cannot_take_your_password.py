@@ -2225,3 +2225,115 @@ def test_a_working_directory_host_never_receives_the_environment_password(
         "directory: " + repr(attacker_server.authentications)
     )
     assert not authenticated
+
+
+def test_a_target_cannot_be_built_without_saying_where_the_host_came_from():
+    """Provenance is required, and there is no "unknown" that reads as safe.
+
+    The gate decides with two facts: who receives the secret, and who chose
+    them. It is *given* the second one -- it cannot recompute a fact that
+    was destroyed upstream, which is what route 8 (the profile store writing
+    a config without its provenance) does. So the least it can do is refuse
+    to answer at all when the caller has not established it.
+    """
+    with pytest.raises(TypeError):
+        CredentialTarget(  # type: ignore[call-arg]
+            hostname="hpc.example.edu", username="victim", described_as="a test"
+        )
+
+
+def test_a_config_that_lost_its_stamp_makes_an_untrusted_target():
+    """Fail closed on the input the gate *can* judge.
+
+    ``get_config_source`` answers ``working-directory`` for an object with
+    no record -- one restored by ``pickle``, one whose attribute was
+    overwritten -- so a target built from it is untrusted rather than
+    trusted by default. An absent value must never read as "chosen by you".
+    """
+    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    object.__delattr__(config, "_clustrix_config_source")
+
+    target = CredentialTarget.for_config(config)
+
+    assert target.provenance == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+# ---------------------------------------------------------------------------
+# Route 6 at its original site: ``clustrix/validation.py``.
+#
+# ``ClusterConfig.get_env_password()`` had no host check and no provenance
+# check, and ``run_comprehensive_validation`` fed its result straight into
+# ``validate_cluster_auth`` -> ``paramiko.connect(hostname=
+# config.cluster_host)``. It is deleted; the one honest use is a branch of
+# the gate, reached with a target.
+# ---------------------------------------------------------------------------
+
+
+def _validation_config_text(server):
+    return _config_text(
+        server,
+        ssh_port=server.port,
+        use_env_password="true",
+        password_env_var=ENV_PASSWORD_VAR,
+    )
+
+
+def test_the_validation_pass_never_sends_the_environment_password_to_a_found_host(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """RED before the gate: ``env_password: PASSED`` and the sentinel on the wire."""
+    from clustrix.validation import run_comprehensive_validation
+
+    env_file()
+    monkeypatch.setenv(ENV_PASSWORD_VAR, SENTINEL_PASSWORD)
+
+    project = tmp_path / "cloned-repository"
+    project.mkdir()
+    (project / "clustrix.yml").write_text(
+        _validation_config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    with pytest.warns(UserWarning):
+        config_module._load_default_config()
+
+    results = run_comprehensive_validation(get_config())
+
+    assert results["env_password"] is False
+    assert attacker_server.authentications == [], (
+        "validation.py sent the environment password to a host named by the "
+        "working directory: " + repr(attacker_server.authentications)
+    )
+
+
+def test_the_validation_pass_still_checks_a_host_the_user_chose(
+    attacker_server, env_file
+):
+    """The positive control for the same path: the feature still works."""
+    from clustrix.validation import run_comprehensive_validation
+
+    env_file()
+    monkeypatch_free_env = get_config_dir()
+    (monkeypatch_free_env / "config.yml").write_text(
+        _validation_config_text(attacker_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    import os as _os
+
+    _os.environ[ENV_PASSWORD_VAR] = SENTINEL_PASSWORD
+    try:
+        results = run_comprehensive_validation(get_config())
+    finally:
+        _os.environ.pop(ENV_PASSWORD_VAR, None)
+
+    assert results["env_password"] is True
+    assert attacker_server.authentications[-1] == ("victim", "password")
+
+
+def test_the_config_object_no_longer_hands_out_the_environment_password():
+    """The surface itself is gone, not merely unused.
+
+    ``get_env_password`` was a public method with no host and no provenance
+    in sight; leaving it in place would leave route 6 one caller away.
+    """
+    assert not hasattr(ClusterConfig, "get_env_password")

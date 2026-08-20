@@ -255,12 +255,6 @@ class ClusterConfig:
         # it does, explicitly. See ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES``.
         set_config_source(self, _source_being_read(), record_host=False)
 
-    def get_env_password(self) -> Optional[str]:
-        """Get password from specified environment variable."""
-        if self.use_env_password and self.password_env_var:
-            return os.environ.get(self.password_env_var)
-        return None
-
     def save_to_file(self, config_path: str, include_secrets: bool = False) -> None:
         """Save this configuration instance to a file.
 

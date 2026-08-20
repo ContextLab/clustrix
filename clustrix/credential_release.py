@@ -52,6 +52,37 @@ Three locks, in decreasing strength:
    that a caller which rebinds ``__name__`` defeats it -- a caller that
    hostile already has the interpreter.
 
+**What this gate relies on being true of its input, and what it cannot
+check.** ``release_credential`` decides with two facts: the hostname about
+to receive the secret, and *who chose that hostname*. The first it is
+handed. The second it computes from
+:func:`clustrix.config.get_config_source`, and that answer is only as good
+as the provenance that reached this process. A choke point cannot recover a
+fact that was destroyed upstream of it.
+
+There is a known way to destroy it, and it is **route 8**: the profile
+store persists ``strip_secret_fields(asdict(config))``, and provenance is
+deliberately not a dataclass field (an attacker's file could otherwise
+declare itself trusted), so it does not survive the write. A profile
+refused in one process because a bundle was discovered in the working
+directory is copied into ``<config dir>/profiles/profiles.yml`` by any of
+the auto-persisting mutators, and the next process reads it back from a
+directory the user *did* choose, computes ``user-config-dir`` entirely
+legitimately, and releases. By the time this module runs, every input it
+has says the release is correct. **That is fixed where the fact is lost --
+in ``ProfileManager._persist`` / ``ClusterConfig.save_to_file`` -- and not
+here.**
+
+What this module does do about it is fail closed on the inputs it *can*
+judge. :meth:`CredentialTarget.__post_init__` requires a provenance that is
+a member of :data:`clustrix.config.CONFIG_SOURCES`; there is no default and
+no "unknown" value, so a caller that has not established where a hostname
+came from cannot construct a target at all. And
+:func:`clustrix.config.get_config_source` answers ``working-directory`` --
+the untrusted end -- for an object carrying no record, so a config that
+lost its stamp (unpickled, ``setattr``-ed, restored) is distrusted rather
+than trusted by default.
+
 **Two things this deliberately does not do.**
 
 *It does not wrap the secret in a ``Secret`` type* whose plaintext is only
@@ -267,6 +298,10 @@ class CredentialTarget:
     #: one, and the ``.env`` that holds only ``SSH_PASSWORD`` names none.
     username: str
     #: A ``clustrix.config.CONFIG_SOURCE_*`` value: who chose ``hostname``.
+    #: Required, with no default and no "unknown" member, because a caller
+    #: that has not established where a hostname came from must not be able
+    #: to ask for a release to it. This is a fact the gate is *given*, not
+    #: one it can verify -- see the module docstring on route 8.
     provenance: str
     #: How to name this target in a refusal, e.g.
     #: ``"cluster_host from ./clustrix.yml"``.
