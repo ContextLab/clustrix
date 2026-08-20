@@ -848,3 +848,54 @@ This is the same class as the earlier `git checkout --` incident: parallel
 agents colliding over shared state. Both prompts and practice now require a
 **uniquely-named scratch directory per agent**, alongside the existing ban on
 destructive git in shared worktrees.
+
+## Second red-team on `work/leftovers` (`25640bd`) — both fixes broken again
+
+Gates reproduce: 1772 passed / 0 failed. Worktree clean before and after.
+
+### #172 — RT5-6 is the consequential one
+`lspci | grep -i nvidia` matches the **vendor string**, not the device class.
+Probed against the real server: an NVIDIA HD-Audio function with *no* display
+controller, and an **nForce SMBus/Ethernet chipset**, each give
+`gpu_available=True` and "NVIDIA hardware detected". Downstream,
+`setup_gpu_enabled_venv2` gates on `gpu_available` **alone** — never
+`cuda_available` — and installs `torch --index-url .../cu118`. So an
+NVIDIA-vendor *audio* chip is promised as a compute GPU and pulls a CUDA build.
+
+The contract adopted last round ("each method is trusted only for what it
+observes") is right; it simply was not applied to *what `lspci` actually
+matched*.
+
+- **RT5-5**: mutant M8 survives — `inconclusive = smi_unreadable`, dropping the
+  `and not gpu_available` this very commit added. Nothing asserts `inconclusive`
+  when smi is unreadable *and* a fallback answered, so the mutant reports
+  `gpu_available=True` and `inconclusive=True` at once, invisibly.
+- **RT5-7**: plain `ls` fixed the decoration bug but not the count — an `ls`
+  wrapper forcing `-C` reports **4 real GPUs as 2**. `ls -1` closes it.
+- Clean: `gpu_count=None` has exactly one production reader
+  (`gpu_detection_summary`), which branches on `None` first; no arithmetic or
+  comparison on it anywhere. Methods 2-4 have no third re-set path.
+
+### #169 — the YAML guard is defeated five ways, all with 8/8 passing
+- **RT5-1 (worst)**: `if: github.event_name == 'push'` on `status-check`'s only
+  **step**. The job runs, every step skips, the job concludes **success**, and
+  the required context reports **pass on every PR without checking anything**.
+  The tests inspect `job.if` and `job.needs`, never `steps`.
+- **RT5-2**: `on.pull_request.types: [labeled]` — stops firing on
+  opened/synchronize, so the context is never reported and the PR sticks on
+  "Expected — Waiting", which is exactly the #169 failure. The guard checks
+  `paths`/`paths-ignore`/`branches`, not `types`.
+- **RT5-3**: `_publisher()` returns the *first* sorted match, so an
+  `aaa_decoy.yml` with a compliant job of the same name passes 8/8 while the
+  real gate is silenced.
+- **RT5-4 / G5**: `continue-on-error: true`, and a matrix on the publisher —
+  both uncaught.
+
+**This is the #123 lint story again**, and it gets the same answer: close what
+is closeable, then state the residual blind spots in an *executable* form that
+fails if one ever becomes detectable — the pattern this repo already uses for
+the silent-failure families. A YAML guard cannot decide "will GitHub actually
+report this context"; only a real docs-only PR can. #169 must not be closed on
+a green test suite.
+
+Fix round dispatched. #168's two remaining sites dispatched to `work/fixes`.
