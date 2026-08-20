@@ -14,6 +14,57 @@ The first release in which `@cluster` demonstrably runs a function on remote
 compute and returns the right answer. Before this, it never had — on any
 backend.
 
+### Security — one gate for every credential release
+
+- **A stored credential could reach a host you never named, by seven separate
+  routes.** Issue #167 was reported as one leak and closed as seven, one at a
+  time. Seven call sites for one decision is not a bug with instances; it is a
+  decision with no home. All of them now go through
+  `clustrix.credential_release.release_credential(target)`, whose first
+  positional parameter is the recipient: a frozen `CredentialTarget` naming the
+  hostname, the username, and who chose the hostname. A target that names
+  nobody cannot be constructed, a release carries a secret or a refusal but
+  never both and never neither, and
+  `FlexibleCredentialManager._ensure_credential_unchecked` raises for any
+  caller that is not the gate.
+
+- **`ClusterConfig.get_env_password()` is removed.** It read
+  `os.environ[password_env_var]` with no host check and no provenance check,
+  and `validation.py` fed the result straight into
+  `paramiko.connect(hostname=config.cluster_host)`. With a working-directory
+  `clustrix.yml` the whole method was the repository's: the file names
+  `password_env_var` as well as `cluster_host`. **This is a user-visible
+  behaviour change**: `clustrix credentials`/validation now reports a refusal,
+  rather than "✅ Environment variable X contains password", for a
+  `cluster_host` that came from a source you did not choose. The refusal names
+  the remedy.
+
+- **The interactive password prompt no longer offers to persist an untrusted
+  host.** It offered to write `SSH_HOST=<whatever cluster_host says>` plus the
+  password you had just typed into `~/.clustrix/.env` — manufacturing a
+  permanent authorisation, in every future process, for a host a file had
+  chosen.
+
+- **`ConnectionManager.setup_ssh_connection` now honours `password_env_var`**,
+  which it never did, under exactly the same two rules as every other source.
+
+- **`ClusterConfig.from_file_content(mapping, source)`** is the only supported
+  way to build a config out of parsed file bytes. Provenance is a required
+  argument rather than something each loader must remember to declare, and
+  because it is an argument it survives being handed to another thread.
+
+- **`clustrix credentials test` never worked for SSH.** It passed the
+  lower-case field names the credential resolver emits to a helper that indexes
+  `SSH_HOST`/`SSH_USERNAME`/…, so every run raised `KeyError` inside that
+  helper's own `try` block and reported "invalid or inaccessible" for
+  credentials that were fine.
+
+- **`scripts/aws/` could never authenticate.** They asked the clustrix
+  credential manager for provider `"aws"`, which has never existed in
+  `PROVIDER_ENV_NAMES`, so the lookup always returned `None`. They use boto3's
+  own credential chain now, which also keeps AWS keys out of clustrix's
+  credential surface entirely.
+
 ### Fixed — correctness
 
 Some entries below describe defects in backends that this same release then
