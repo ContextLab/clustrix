@@ -332,7 +332,7 @@ Checked each against its own criterion rather than against commit count:
 | Item | State |
 |-|-|
 | 2. secret scanning + push protection | enabled, verified in a prior session |
-| 3. stop generating scanner bait | done — no `AKIAIOSFODNN7EXAMPLE` / `hf_abcdefghij` in `credential_manager.py` |
+| 3. stop generating scanner bait | done — neither the AWS documentation example access-key id nor an `hf_`-prefixed sample token appears in `credential_manager.py` (both described here rather than reproduced, per the standing rule) |
 | 4. `.gitignore` a bare `.env` | done — `.gitignore:66` |
 | 5. credentials written world-readable | done — created 0600, not narrowed after |
 | 6. GCP service-account JSON leaked to `/tmp` | gone — zero `GOOGLE_APPLICATION_CREDENTIALS` in `cli_credentials.py`; removed with the cloud backends |

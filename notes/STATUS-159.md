@@ -644,3 +644,34 @@ clears the merge block. **Someone must open a docs-only PR against `master`**
 (touching only e.g. `README.md`), confirm Fast CI runs and `CI Status` goes
 green, and confirm the PR becomes mergeable without an admin override. Until
 that happens #169 is fixed-but-unproven and must not be closed.
+
+## Pre-push secret check — the repo's scanner does NOT cover history
+
+`scripts/check_for_secrets.py` scans `git ls-files`, i.e. tracked files in the
+**working tree**, and explicitly excludes `.git`. A credential committed in an
+earlier commit and removed later passes it. We are about to push ~70 commits
+from a campaign that handled credentials, so the working-tree gate is not
+sufficient on its own.
+
+**Working tree: clean.** 23 passed in every worktree — `clustrix`,
+`clustrix-fixes`, `clustrix-env`, `clustrix-widget`, `clustrix-leftovers`, and
+the merged simulation tree.
+
+**History: scanned separately**, by driving the scanner's own `TOKEN_PATTERNS`
+and `PEM_BODY_LINE` over `git log -p master..<branch>` for all seven branches.
+Result: **1 hit, benign**, and no history surgery is warranted.
+
+The hit is the AWS *documentation* example access-key id, in a notes table row
+that recorded removing scanner bait — and reproduced the literal while doing
+so. It is a public documentation constant with no secret value, the scanner
+allowlists it as a placeholder, and it legitimately appears in
+`scripts/check_for_secrets.py` and `tests/unit/test_check_for_secrets.py`,
+which must be able to detect it.
+
+The notes copy was mine and broke the standing rule I set after tripping the
+scanner twice: **describe the literal, name the file, never reproduce it**.
+Now rewritten to describe both literals; 0 occurrences remain in `notes/`.
+
+**Add to the pre-push checklist:** run the history scan as well as the
+working-tree one. The working-tree scanner passing is not evidence that the
+commits being pushed are clean.
