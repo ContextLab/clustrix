@@ -719,3 +719,43 @@ does fail on skipped/cancelled. 13 of 14 mutants were caught.
 Fix round dispatched. **Asking the red-team specifically whether a later
 detection method re-sets the flag is what surfaced this** — the fix itself was
 correct in isolation and would have shipped looking complete.
+
+## Systematic hunt for the RT-1 shape — one known, one candidate
+
+RT-1's shape is "an honest refusal overridden by a later, weaker method". I
+scanned every function in `clustrix/` with an AST pass for functions that
+assert a positive result (`*avail*`, `*detect*`, `*found*`, `*success*`,
+`*present*`, `*support*`, …) as `True` in more than one place. Exactly two:
+
+| Function | Assignments | Status |
+|-|-|-|
+| `utils.py:2778 detect_gpu_capabilities` | `gpu_available` ×3 | **RT-1, known, fix dispatched** |
+| `utils.py:1408 setup_two_venv_environment` | `conda_available` ×2 | **candidate — see below** |
+
+**The conda candidate — stated precisely, because I have NOT verified it is a
+defect.** What I did verify:
+
+- The first probe looks for `etc/profile.d/conda.sh` across eight locations and
+  on success sets both `conda_available = True` and
+  `conda_setup_prefix = "source <path>"` (`:1473-1474`).
+- The `else` branch runs `bash -lc 'conda --version'` and sets
+  `conda_available = True` on the substring `"conda"` — leaving
+  `conda_setup_prefix` **empty** (`:1478-1481`).
+- Downstream handles an empty prefix by simply omitting the source:
+  `_conda_envs_exist` (`:1322`) and `venv_info` consumption (`:2130`) both do
+  `f"{prefix} && " if prefix else ""`.
+- **Neither branch is asserted by any test.** No test references either of the
+  two distinct print strings; the two unit modules that drive
+  `setup_two_venv_environment` do not check the conda outcome.
+
+What I have NOT verified, and will not claim: that this actually breaks a job.
+The concern is that the fallback detects conda inside a **login** shell
+(`bash -lc`) while asserting availability with no way to activate it, so if the
+job script's shell does not put conda on `PATH`, `conda run` / `conda activate`
+would fail at run time with nothing to fall back on. Proving or disproving it
+needs a `LocalSSHServer` with a real `conda` executable on PATH and no
+`conda.sh` — exactly the technique the #172 round used for `nvidia-smi`.
+
+Queued, not dispatched (three agents already running). If it proves out it is a
+new issue; if not, the branch still needs a test, because an untested fallback
+in the environment-setup path is how #172's defect survived.
