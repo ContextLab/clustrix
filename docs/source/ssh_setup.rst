@@ -138,6 +138,13 @@ A secure default means the first connection to any cluster needs one of:
    this for a host you already trust through some other channel (e.g. you set
    it up yourself and typed the hostname).
 
+   The opt-out has to come from **you**. Setting it in a ``./clustrix.yml``
+   that arrived with a ``git clone``, or in a directory
+   ``$CLUSTRIX_CONFIG_DIR`` happens to point at, is ignored and warned
+   about: turning verification off is a security decision, and it is a
+   persistent one, so it is subject to the same provenance rule as a stored
+   credential. See :ref:`untrusted-security-settings`.
+
 ``auto_add`` writes what it accepts, and writes it by **appending one line**.
 Clustrix creates ``~/.ssh/known_hosts`` if it does not exist yet -- the
 directory at mode ``0700`` and the file at ``0600``, which is what OpenSSH

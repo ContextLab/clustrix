@@ -137,6 +137,54 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
 }
 
 
+#: Reads of ``os.environ`` under a **literal** key, as ``(module, enclosing
+#: definitions)``.
+#:
+#: Rule 4 watches keys chosen at run time and *exempted* literal ones, on
+#: the argument that a name written in the source is a name no configuration
+#: file can choose. That argument is about who picks the variable, and it
+#: says nothing about what is in it. Leaker L3 was one line --
+#: ``os.environ.get("SSH_PASSWORD")`` -- handed straight to
+#: ``paramiko.connect(hostname=...)`` with no call to the gate anywhere in
+#: the module, and it passed the entire suite: rule 4 skipped it for being
+#: literal, and :data:`~clustrix.credential_release.SECRET_SURFACES` only
+#: checks that the surfaces already declared still exist, so it can never
+#: find a new one. It was proven on the wire, ``('victim', 'password')`` to
+#: a working-directory host.
+#:
+#: ``SSH_PASSWORD`` is the credential store's own variable name. Writing it
+#: out by hand is not a *different* act from reading it through
+#: ``password_env_var``; it is the same read with the indirection removed.
+#: So literal keys are inventoried exactly as computed ones are, and the
+#: reason each is not a credential release is written next to it.
+LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST = {
+    # ``$EDITOR``: which program opens the credential file, not what is in
+    # it.
+    ("cli_credentials.py", "edit_credentials_command"),
+    # The CI provider's own variables. ``GITHUB_ACTIONS`` is a flag; the
+    # other two are this source's whole reason to exist, and the recipient
+    # is the compiled-in HuggingFace host rather than anything configurable.
+    ("credential_manager.py", "GitHubActionsCredentialSource.is_available"),
+    ("credential_manager.py", "GitHubActionsCredentialSource.get_credentials"),
+    # ``$HF_TOKEN`` and the CLI's cache location. Same recipient argument:
+    # every client built from these is pinned to ``huggingface.co`` by
+    # ``huggingface_client_kwargs()`` (rule 7), so no configuration chooses
+    # where the token goes.
+    ("hf_jobs.py", "HFJobsManager.api"),
+    ("hf_jobs.py", "_token_from_hf_cli_cache"),
+    ("staging.py", "_hf_token"),
+    # ``$USER``: a default for a username field. Not a secret, and the
+    # username is not a credential -- it is half of who the credential is
+    # *for*, which the gate compares rather than consumes.
+    ("executor_connections.py", "ConnectionManager.setup_ssh_connection"),
+    ("modern_notebook_widget.py", "ModernClustrixWidget._create_remote_section"),
+    ("validation.py", "validate_on_test_clusters"),
+    # Which hosts the operator's own validation run should talk to. Host
+    # names, no secret, and they are read from the operator's environment
+    # rather than from any file clustrix discovered.
+    ("validation.py", "_validation_clusters"),
+}
+
 #: Places that hand over the **whole** environment rather than reading one
 #: variable out of it, as ``(module, enclosing definitions)``.
 #:
@@ -525,6 +573,94 @@ def test_every_run_time_environment_lookup_is_written_down():
     )
 
 
+def _is_literal_environ_lookup(node: ast.AST) -> bool:
+    """A read of ``os.environ`` under a key that *is* a literal.
+
+    The exact complement of :func:`_is_environ_lookup`, in the same three
+    spellings, so that between them every single-variable read of the
+    environment in this package lands in one inventory or the other and
+    none falls between.
+    """
+    if isinstance(node, ast.Subscript):
+        value = node.value
+        if not (isinstance(value, ast.Attribute) and value.attr == "environ"):
+            return False
+        key = node.slice
+        key = getattr(key, "value", key) if isinstance(key, ast.Index) else key
+        return isinstance(key, ast.Constant)
+    if not isinstance(node, ast.Call):
+        return False
+    func = node.func
+    if not isinstance(func, ast.Attribute) or not node.args:
+        return False
+    if not isinstance(node.args[0], ast.Constant):
+        return False
+    if func.attr == "get":
+        return isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+    if func.attr == "getenv":
+        return isinstance(func.value, ast.Name) and func.value.id == "os"
+    return False
+
+
+def test_every_literal_environment_lookup_is_written_down_too():
+    """Rule 8: the exemption leaker L3 walked out through.
+
+    A literal key means no *configuration file* chose the variable. It does
+    not mean nobody chose the secret: ``SSH_PASSWORD`` is the store's own
+    name, and typing it into a new module is the same read the store does,
+    with the gate left out. Planted exactly that way -- one
+    ``os.environ.get`` and one ``paramiko.connect``, no gate call anywhere
+    -- it passed all 2045 tests and authenticated on the wire.
+
+    So both halves of "a read of one environment variable" are inventoried,
+    and the only difference between rule 4 and this one is the reason each
+    entry gives for not being a credential release.
+    """
+    found: Set[Tuple[str, str]] = set()
+    for path, tree in _modules():
+        for node, scope in _definitions_of(tree):
+            if _is_literal_environ_lookup(node):
+                found.add((path.name, scope))
+
+    assert found == LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST, (
+        "an environment variable is read by name somewhere new. If it can "
+        "hold a credential, route it through "
+        "clustrix.credential_release.release_credential; if it cannot, add "
+        "it to LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST with the reason.\n"
+        f"  unexpected: {sorted(found - LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST)}\n"
+        f"  gone:       {sorted(LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST - found)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "os.environ.get('SSH_PASSWORD')",
+        "os.getenv('SSH_PASSWORD')",
+        "os.environ['SSH_PASSWORD']",
+    ],
+    ids=["get", "getenv", "subscript"],
+)
+def test_rule_eight_sees_the_shape_leaker_three_used(source):
+    """Not vacuous: this is the line the planted leaker was built from."""
+    tree = ast.parse(source)
+
+    assert any(_is_literal_environ_lookup(node) for node in ast.walk(tree))
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["os.environ.get(name)", "os.getenv(name)", "os.environ[name]"],
+    ids=["get", "getenv", "subscript"],
+)
+def test_rule_eight_leaves_the_computed_keys_to_rule_four(source):
+    """The two inventories partition the reads; they must not overlap."""
+    tree = ast.parse(source)
+
+    assert not any(_is_literal_environ_lookup(node) for node in ast.walk(tree))
+    assert any(_is_environ_lookup(node) for node in ast.walk(tree))
+
+
 def test_every_bulk_read_of_the_environment_is_written_down():
     """Rule 5: handing over the whole mapping, which rule 4 could not see.
 
@@ -832,6 +968,148 @@ def test_rule_seven_accepts_a_pinned_client(source):
     call = ast.parse(source).body[0].value
 
     assert _pins_its_endpoint(call)
+
+
+def _generated_client_calls(tree: ast.AST):
+    """String constants that write a HuggingFace client call into *generated* code.
+
+    Returns ``(scope, names, pins)``: which client names the strings in a
+    scope mention, and whether ``endpoint=`` is written anywhere in the same
+    scope.
+
+    Rule 7 reads ``ast.Call`` nodes, so it sees every client this package
+    *builds* and none that it *emits*. ``hf_jobs._bootstrap_source`` emits
+    one: the program the container runs is assembled as a string, and inside
+    it ``hf_hub_download`` was called with the account token and no
+    ``endpoint=``. That environment is the container's, and a container
+    image carries its own ``ENV`` -- so ``hf_image``, an ordinary field any
+    configuration file can set, chose both the container *and*, through
+    ``$HF_ENDPOINT``, where the token that container was handed got sent.
+
+    Measured with two loopback listeners: the unpinned call delivered
+    ``Bearer <token>`` to the ``$HF_ENDPOINT`` listener, and the pinned one
+    delivered it only to the endpoint named in the call.
+    """
+    per_scope = {}
+    for node, scope in _definitions_of(tree):
+        if not (isinstance(node, ast.Constant) and isinstance(node.value, str)):
+            continue
+        names, pins = per_scope.setdefault(scope, (set(), [False]))
+        for client in HUGGINGFACE_CLIENTS:
+            if f"{client}(" in node.value:
+                names.add(client)
+        if "endpoint=" in node.value:
+            pins[0] = True
+    return [
+        (scope, names, pins[0]) for scope, (names, pins) in per_scope.items() if names
+    ]
+
+
+def test_every_huggingface_client_written_into_generated_code_is_pinned_too():
+    """Rule 7b: the half of rule 7 that lives inside a string.
+
+    A client clustrix *writes out* for another interpreter to run is exactly
+    as able to take ``$HF_ENDPOINT`` as one it builds -- more so, because
+    the environment it will read is a container's rather than this
+    process's.
+    """
+    offenders = set()
+    for path, tree in _modules():
+        for scope, names, pins in _generated_client_calls(tree):
+            if not pins:
+                offenders.add(f"{path.name}:{scope} -> {sorted(names)}")
+
+    assert offenders == set(), (
+        "generated code calls a HuggingFace client without naming its "
+        "endpoint, so $HF_ENDPOINT -- in whatever environment that code "
+        "ends up running in -- chooses where the token goes: " + repr(sorted(offenders))
+    )
+
+
+def test_rule_seven_b_sees_an_unpinned_client_in_generated_code():
+    """Not vacuous: the exact shape ``_bootstrap_source`` had."""
+    tree = ast.parse(
+        "def emit():\n"
+        "    return (\n"
+        '        "    from huggingface_hub import hf_hub_download\\n"\n'
+        '        "    _f=hf_hub_download(repo_id=r,token=t)\\n"\n'
+        "    )\n"
+    )
+
+    assert _generated_client_calls(tree) == [("emit", {"hf_hub_download"}, False)]
+
+
+def test_rule_seven_b_accepts_generated_code_that_names_its_endpoint():
+    tree = ast.parse(
+        "def emit():\n"
+        "    return (\n"
+        '        "    _f=hf_hub_download(repo_id=r,\\n"\n'
+        "        \"        endpoint='https://huggingface.co',token=t)\\n\"\n"
+        "    )\n"
+    )
+
+    assert _generated_client_calls(tree) == [("emit", {"hf_hub_download"}, True)]
+
+
+#: Settings that aim a secret, and are therefore subject to the provenance
+#: rule rather than merely to validation. Each has exactly one reader, and
+#: this is what stops a second one being written.
+#:
+#: * ``ssh_host_key_policy``: ``auto_add`` removes the host key barrier, and
+#:   the removal is persisted in ``~/.ssh/known_hosts`` for every later
+#:   process on the machine.
+#: * ``hf_image``: a staged HuggingFace job hands ``CLUSTRIX_HF_TOKEN`` to
+#:   the container as a job secret, so naming the image names the
+#:   recipient.
+PROVENANCE_GOVERNED_SETTINGS = ("ssh_host_key_policy", "hf_image")
+
+#: The one place each of those may be read, as ``(module, enclosing
+#: definitions)``. ``config.py`` is where the field is declared and
+#: validated; the others are the single reader that also asks who set it.
+PROVENANCE_GOVERNED_READER_ALLOWLIST = {
+    ("ssh_host_key_policy", "config.py", "ClusterConfig.__post_init__"),
+    ("ssh_host_key_policy", "ssh_security.py", "host_key_policy_name"),
+    ("hf_image", "hf_jobs.py", "HFJobsManager._image"),
+}
+
+
+def test_a_setting_that_aims_a_secret_has_exactly_one_reader():
+    """Rule 9: the fix for F2 and F4 is one expression, and stays one.
+
+    Both settings were obeyed by whoever happened to read the field, and
+    neither reader asked who had set it. A second reader is how that comes
+    back -- it would be validated, it would look ordinary, and it would not
+    consult :func:`clustrix.config.config_source_is_trusted`.
+
+    Field *declaration* is exempt by being in ``config.py``; a docstring
+    mentioning the name is not a read, because this matches an attribute or
+    a mapping key equal to the name rather than text containing it.
+    """
+    found: Set[Tuple[str, str, str]] = set()
+    for path, tree in _modules():
+        for node, scope in _definitions_of(tree):
+            name = None
+            if isinstance(node, ast.Attribute) and node.attr in (
+                PROVENANCE_GOVERNED_SETTINGS
+            ):
+                name = node.attr
+            elif (
+                isinstance(node, ast.Constant)
+                and node.value in PROVENANCE_GOVERNED_SETTINGS
+            ):
+                name = node.value
+            if name is not None:
+                found.add((name, path.name, scope))
+
+    assert found == PROVENANCE_GOVERNED_READER_ALLOWLIST, (
+        "a setting that decides where a secret goes is read somewhere new. "
+        "Route it through the reader that already asks who set it "
+        "(clustrix.ssh_security.host_key_policy_name, "
+        "clustrix.hf_jobs.HFJobsManager._image), or add it here and say why "
+        "this read cannot aim anything.\n"
+        f"  unexpected: {sorted(found - PROVENANCE_GOVERNED_READER_ALLOWLIST)}\n"
+        f"  gone:       {sorted(PROVENANCE_GOVERNED_READER_ALLOWLIST - found)}"
+    )
 
 
 @pytest.mark.parametrize("module, symbol", SECRET_SURFACES)

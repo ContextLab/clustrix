@@ -377,6 +377,105 @@ def deploy_ssh_key(
     )
 
 
+#: What ``-F`` is pointed at when the user's own ``ssh_config`` may not
+#: take part. ``/dev/null`` is an empty file that always exists, and naming
+#: *any* file on the command line also makes OpenSSH skip the system-wide
+#: ``/etc/ssh/ssh_config`` -- which is the other half of the same channel.
+NO_SSH_CONFIG = "/dev/null"
+
+
+def ssh_copy_id_command(
+    public_key_path: str,
+    username: str,
+    hostname: str,
+    port: int = 22,
+    *,
+    local_identities: bool,
+    config: Optional[ClusterConfig] = None,
+) -> List[str]:
+    """The exact ``ssh-copy-id`` invocation :func:`deploy_public_key` runs.
+
+    A function rather than a block inside the caller because this argv *is*
+    the security decision at the OpenSSH boundary: every rule the paramiko
+    call sites obey has to be re-expressed here, in OpenSSH's vocabulary,
+    and a decision written inline is one nothing can point at.
+
+    ``local_identities`` is :func:`~clustrix.credential_release
+    .hostless_secret_refusal`'s answer, decided once by the caller for both
+    halves of the deployment. When it is ``False`` three separate channels
+    have to be shut, and closing two of them is worth nothing:
+
+    * **The agent.** ``IdentityAgent=none``.
+    * **The default identity files** (``~/.ssh/id_rsa`` and friends).
+      ``IdentitiesOnly=yes`` alone does *not* do this -- ``ssh -G`` reports
+      the defaults either way -- so the identity list is replaced with the
+      key being deployed, which is the only one this operation is entitled
+      to offer.
+    * **The user's own** ``~/.ssh/config``. This one was missed, and it
+      defeated the other two. OpenSSH resolves ``~`` from the passwd
+      database rather than from ``$HOME``, so nothing in clustrix (or in a
+      test) moves that file; an ``IdentityFile`` it supplies is loaded as
+      *explicit*, which is precisely the category ``IdentitiesOnly=yes``
+      exists to keep. Measured against a real server with otherwise
+      identical flags: ``-F /dev/null`` gave ``rc=255, auths=[]``, and a
+      ``Host * / IdentityFile`` stanza gave ``rc=0,
+      [('victim', 'publickey')]``.
+
+    So ``-F`` is not passed unconditionally, because a user's ``ssh_config``
+    legitimately carries ``ProxyJump``, ``HostName``, ``Port`` and ``User``
+    for the hosts they chose, and discarding those would break real
+    deployments. It is passed on exactly the ``local_identities`` answer
+    everything else here turns on: when the gate has refused to let ambient
+    secrets reach this host, the ambient *configuration* may not supply one
+    either. Nothing clustrix decided is lost with it -- the port, the
+    account, the host key policy, the known_hosts file and the identity are
+    all named explicitly on this command line, above ``ssh_config`` in
+    OpenSSH's precedence.
+    """
+    cmd = ["ssh-copy-id", "-i", public_key_path]
+    # The same host key policy every paramiko connection here obeys.
+    # This used to be a hardcoded ``accept-new``: the one place clustrix
+    # reaches for OpenSSH applied the deliberate opt-out to everybody.
+    cmd.extend(
+        [
+            "-o",
+            f"StrictHostKeyChecking={openssh_strict_host_key_checking(config)}",
+        ]
+    )
+    # Point OpenSSH at the same known_hosts this module reads. It does
+    # NOT resolve "~" from $HOME -- it reads the passwd database -- so
+    # without this the Python half of clustrix loads one file while
+    # ssh-copy-id appends to another. Anywhere the two differ (a
+    # container, `sudo -u`, a login node with a relocated home) clustrix
+    # verifies against a file it is not writing to. Verified with
+    # `ssh -G`: with HOME set to a temporary directory it still reported
+    # `userknownhostsfile /Users/<me>/.ssh/known_hosts`.
+    cmd.extend(["-o", f"UserKnownHostsFile={_user_known_hosts_path()}"])
+    if not local_identities:
+        # ssh-copy-id pins identities only while it is *testing* which
+        # keys are already installed; the invocation that actually logs
+        # in and appends to authorized_keys runs plain ``ssh``, so
+        # OpenSSH offers the default identity files and every key in the
+        # agent -- to whatever host was named. Measured before this:
+        # ``AUTH [('victim', 'publickey')]`` from an agent identity,
+        # with the requested key installed, while the gate was refusing
+        # the same host in the same call.
+        #
+        # ``-F`` first, and see this function's docstring: without it the
+        # two options below are read out of a file the user's ssh_config
+        # can add to, and an identity from there is "explicit" so
+        # IdentitiesOnly keeps it.
+        private_key_path = re.sub(r"\.pub$", "", public_key_path)
+        cmd.extend(["-F", NO_SSH_CONFIG])
+        cmd.extend(["-o", "IdentitiesOnly=yes"])
+        cmd.extend(["-o", f"IdentityFile={private_key_path}"])
+        cmd.extend(["-o", "IdentityAgent=none"])
+    if port != 22:
+        cmd.extend(["-p", str(port)])
+    cmd.append(f"{username}@{hostname}")
+    return cmd
+
+
 def deploy_public_key(
     hostname: str,
     username: str,
@@ -434,45 +533,14 @@ def deploy_public_key(
 
     # Try ssh-copy-id first (most reliable method)
     try:
-        cmd = ["ssh-copy-id", "-i", public_key_path]
-        # The same host key policy every paramiko connection here obeys.
-        # This used to be a hardcoded ``accept-new``: the one place clustrix
-        # reaches for OpenSSH applied the deliberate opt-out to everybody.
-        cmd.extend(
-            [
-                "-o",
-                f"StrictHostKeyChecking={openssh_strict_host_key_checking(config)}",
-            ]
+        cmd = ssh_copy_id_command(
+            public_key_path,
+            username,
+            hostname,
+            port,
+            local_identities=local_identities,
+            config=config,
         )
-        # Point OpenSSH at the same known_hosts this module reads. It does
-        # NOT resolve "~" from $HOME -- it reads the passwd database -- so
-        # without this the Python half of clustrix loads one file while
-        # ssh-copy-id appends to another. Anywhere the two differ (a
-        # container, `sudo -u`, a login node with a relocated home) clustrix
-        # verifies against a file it is not writing to. Verified with
-        # `ssh -G`: with HOME set to a temporary directory it still reported
-        # `userknownhostsfile /Users/<me>/.ssh/known_hosts`.
-        cmd.extend(["-o", f"UserKnownHostsFile={_user_known_hosts_path()}"])
-        if not local_identities:
-            # ssh-copy-id pins identities only while it is *testing* which
-            # keys are already installed; the invocation that actually logs
-            # in and appends to authorized_keys runs plain ``ssh``, so
-            # OpenSSH offers the default identity files and every key in the
-            # agent -- to whatever host was named. Measured before this:
-            # ``AUTH [('victim', 'publickey')]`` from an agent identity,
-            # with the requested key installed, while the gate was refusing
-            # the same host in the same call. IdentitiesOnly alone is not
-            # enough: it constrains the agent but leaves the *default*
-            # identity files in play (``ssh -G`` reports them either way),
-            # so the identity list is replaced with the key being deployed,
-            # which is the only one this operation is entitled to offer.
-            private_key_path = re.sub(r"\.pub$", "", public_key_path)
-            cmd.extend(["-o", "IdentitiesOnly=yes"])
-            cmd.extend(["-o", f"IdentityFile={private_key_path}"])
-            cmd.extend(["-o", "IdentityAgent=none"])
-        if port != 22:
-            cmd.extend(["-p", str(port)])
-        cmd.append(f"{username}@{hostname}")
 
         result = subprocess.run(
             cmd,

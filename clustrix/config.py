@@ -1190,8 +1190,15 @@ def source_that_named_hostname(hostname: object) -> Optional[str]:
     return _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.get(normalize_hostname(hostname))
 
 
-def get_config_source(config: ClusterConfig) -> str:
+def get_config_source(config: object) -> str:
     """Where ``config``'s ``cluster_host`` came from.
+
+    Typed ``object`` rather than ``ClusterConfig`` because the whole point
+    of the fallback below is objects that are not well-formed ones: a
+    config restored by ``pickle``, one whose attribute was overwritten, a
+    mapping the notebook widget carries. Promising a ``ClusterConfig`` here
+    would make the annotation disagree with the docstring, and callers
+    would have to cast to ask the question this exists to answer.
 
     Falls back to the *untrusted* answer for an object that somehow has no
     record -- one restored by ``pickle``, say, which does not run
@@ -1217,8 +1224,12 @@ def get_config_source(config: ClusterConfig) -> str:
     return recorded
 
 
-def config_source_is_trusted(config: ClusterConfig) -> bool:
+def config_source_is_trusted(config: object) -> bool:
     """Whether ``config`` came from somewhere the user chose.
+
+    ``object``, for the reason :func:`get_config_source` is: an object that
+    never ran ``__post_init__`` is exactly the input this has to be able to
+    judge.
 
     A ``cluster_host`` that is truthy but does not normalise is refused
     whatever its recorded source says. ``__post_init__`` rejects such a

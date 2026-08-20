@@ -510,6 +510,16 @@ def test_the_openssh_spelling_of_every_policy_is_defined():
     )
     assert openssh_strict_host_key_checking(None) == "yes"
     # The widget's dict shape, and the same validation as the paramiko side.
-    assert host_key_policy_name({"ssh_host_key_policy": "auto_add"}) == "auto_add"
+    #
+    # This line asserted ``== "auto_add"`` and that assertion was wrong, so
+    # it is rewritten deliberately rather than relaxed. A weakening of host
+    # key verification may only come from a source the user chose, and a
+    # mapping carries no provenance record at all -- it is a bag of values
+    # that no loader stamped, so ``config_source_is_trusted`` has nothing to
+    # read and the fail-closed answer is the only available one. ``reject``
+    # from a mapping still means ``reject``; validation is unchanged, which
+    # is what the ``pytest.raises`` below is about.
+    assert host_key_policy_name({"ssh_host_key_policy": "auto_add"}) == "reject"
+    assert host_key_policy_name({"ssh_host_key_policy": "reject"}) == "reject"
     with pytest.raises(ValueError, match="Invalid ssh_host_key_policy"):
         openssh_strict_host_key_checking({"ssh_host_key_policy": "accept-new"})

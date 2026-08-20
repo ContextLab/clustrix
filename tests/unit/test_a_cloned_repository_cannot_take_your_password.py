@@ -37,12 +37,14 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 """
 
 import contextlib
+import json
 import os
 import pathlib
 import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import warnings
 
@@ -435,8 +437,17 @@ def test_a_credential_that_names_this_host_is_used_from_anywhere(
     credential that names one has already been told where it may go, so a
     working-directory config file naming that same host is not an escalation
     -- the user authorised it in a file only they can write.
+
+    The host key is trusted deliberately here rather than by
+    ``ssh_host_key_policy: auto_add`` in the working-directory file, which
+    no longer has that power: a weakening of host key verification is a
+    security decision and may only come from a source the user chose. That
+    was scaffolding for this test rather than its subject, and answering
+    the host key question separately is what ``_the_host_is_already_known``
+    exists for.
     """
     env_file(SSH_HOST=attacker_server.host, SSH_PASSWORD=SENTINEL_PASSWORD)
+    _the_host_is_already_known(attacker_server)
 
     project = tmp_path / "project"
     project.mkdir()
@@ -1446,7 +1457,12 @@ def test_the_remedy_the_messages_name_actually_releases_the_credential(
     The other one -- remove the file and start a new process -- is what a
     fresh interpreter does by definition, and the record being per-process
     is asserted by the conftest fixture that clears it between tests.
+
+    The host key is trusted deliberately, for the same reason as the test
+    above: the working-directory file may no longer turn verification off,
+    so a refusal here has to be a refusal about the *credential*.
     """
+    _the_host_is_already_known(attacker_server)
     cloned_repository = tmp_path / "cloned-repository"
     cloned_repository.mkdir()
     (cloned_repository / "clustrix.yml").write_text(
@@ -3720,88 +3736,286 @@ def test_ssh_key_setup_still_runs_for_a_host_the_user_chose(key_only_server, env
 #: The OpenSSH programs that open a connection on clustrix's behalf. Each
 #: one performs its own credential discovery and its own host key check, so
 #: each one has to be told the two decisions the paramiko sites are told.
-OPENSSH_CONNECTING_PROGRAMS = ("ssh", "ssh-copy-id", "scp", "sftp")
+#:
+#: ``rsync`` is here because it is not a transport of its own: given a
+#: ``host:path`` argument it execs ``ssh``, inheriting every default this
+#: rule exists to override. It was proven exploitable rather than argued
+#: about -- a shipped-looking ``subprocess.run(["rsync", "-a", src,
+#: f"{user}@{host}:{dst}"])`` authenticated ``('victim', 'publickey')``
+#: while this rule stayed green.
+OPENSSH_CONNECTING_PROGRAMS = ("ssh", "ssh-copy-id", "scp", "sftp", "rsync")
 
-#: What such an invocation must name, somewhere in the function that builds
-#: it. ``IdentitiesOnly`` (with ``IdentityFile``) is the local-identity
+#: What such an invocation must name, somewhere the command was built.
+#: ``IdentitiesOnly`` (with ``IdentityFile``) is the local-identity
 #: decision; ``StrictHostKeyChecking`` is the host key policy.
 OPENSSH_REQUIRED_OPTIONS = ("IdentitiesOnly", "StrictHostKeyChecking")
 
+#: The marker :func:`_unpinned_openssh_subprocesses` reports when it cannot
+#: tell what a ``subprocess`` call is about to exec. "I could not see it" is
+#: a finding here rather than a silence, which is the whole difference
+#: between this rule and the one it replaced.
+UNRESOLVED_PROGRAM = "<program-not-a-literal>"
+
+#: The ``subprocess`` calls in ``clustrix/`` whose program genuinely is not a
+#: literal, as ``(module, enclosing definitions)``. Each entry is a claim
+#: that the name comes from somewhere that cannot be an OpenSSH client;
+#: adding one is where somebody has to look.
+RUNTIME_CHOSEN_PROGRAM_ALLOWLIST = {
+    # ``sys.executable`` -- this interpreter, running pip.
+    ("utils.py", "get_environment_info"),
+    # ``$EDITOR``, opening the credential file for the user to edit. It is
+    # spawned with a filename and no host, and it is the user's own
+    # variable rather than anything a clustrix configuration sets.
+    ("cli_credentials.py", "edit_credentials_command"),
+}
+
+
+def _program_name(text):
+    """The program a command string names: first word, basename.
+
+    ``"ssh -o X h"``, ``"/usr/bin/ssh"`` and ``"ssh"`` are the same
+    invocation, and ``shell=True`` is how P7 wrote it.
+    """
+    words = str(text).split()
+    if not words:
+        return None
+    return pathlib.PurePosixPath(words[0]).name
+
+
+def _leftmost_string(node):
+    """The leftmost string literal of a string being assembled, or ``None``.
+
+    ``None`` means "this is not a string expression" -- a list
+    concatenation, or something whose left end is a name -- which the
+    caller handles differently from "a string whose start I cannot see".
+    """
+    import ast
+
+    while True:
+        if isinstance(node, ast.Constant):
+            return node.value if isinstance(node.value, str) else None
+        if isinstance(node, ast.JoinedStr):
+            if not node.values:
+                return None
+            node = node.values[0]
+            continue
+        if isinstance(node, ast.BinOp):
+            node = node.left
+            continue
+        return None
+
+
+def _assignments_to(name, scope):
+    """Every value ``name`` is assigned or appended in ``scope``."""
+    import ast
+
+    values = []
+    for node in ast.walk(scope):
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == name for t in node.targets
+        ):
+            values.append(node.value)
+        elif (
+            isinstance(node, (ast.AugAssign, ast.AnnAssign))
+            and isinstance(node.target, ast.Name)
+            and node.target.id == name
+            and node.value is not None
+        ):
+            values.append(node.value)
+        elif isinstance(node, ast.For) and (
+            isinstance(node.target, ast.Name) and node.target.id == name
+        ):
+            values.append(node.iter)
+    return values
+
+
+def _function_defs(tree):
+    """Every ``def`` in ``tree``, by name. Enough to follow P8's helper."""
+    import ast
+
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            found.setdefault(node.name, node)
+    return found
+
+
+def _program_candidates(node, scope, tree, scopes, seen=None):
+    """``(names, resolved)`` for the command argument ``node``.
+
+    ``names`` is what this call could exec; ``resolved`` says whether the
+    walk ever reached a string literal. Every scope it passes through is
+    added to ``scopes``, because for a command assembled in a helper the
+    place that has to name the options is the helper.
+
+    The four shapes this exists for, each of which survived the previous
+    version of the rule *and wire-authenticated* ``('victim', 'publickey')``:
+
+    * P6, a program held in a variable -- ``prog = "ssh"`` then
+      ``subprocess.run([prog, host])``;
+    * P7, ``shell=True`` with the command as a single string;
+    * P8, a command list built by a different function and returned;
+    * and ``rsync``, which is P5 and is a list entry in its own right.
+    """
+    import ast
+
+    seen = set() if seen is None else seen
+    if id(node) in seen or len(seen) > 200:
+        return set(), False
+    seen.add(id(node))
+    scopes.add(scope)
+
+    if isinstance(node, ast.Constant):
+        name = _program_name(node.value) if isinstance(node.value, str) else None
+        return ({name} if name else set()), name is not None
+    if isinstance(node, ast.Starred):
+        return _program_candidates(node.value, scope, tree, scopes, seen)
+    if isinstance(node, (ast.List, ast.Tuple)):
+        # An empty literal names no program and says nothing about the
+        # others, which is why it is "resolved to nothing" rather than
+        # unresolved: ``cmd = []`` followed by ``cmd = ['ssh']`` is one of
+        # the ordinary ways to build a command.
+        if not node.elts:
+            return set(), True
+        return _program_candidates(node.elts[0], scope, tree, scopes, seen)
+    if isinstance(node, (ast.BinOp, ast.JoinedStr)):
+        text = _leftmost_string(node)
+        if text is None:
+            # Not a string being assembled -- ``cmd + [src, dst]`` and
+            # ``['ssh'] + args`` are list concatenation, so the program is
+            # still whatever the left side starts with.
+            if isinstance(node, ast.BinOp):
+                return _program_candidates(node.left, scope, tree, scopes, seen)
+            return set(), False
+        # The leftmost literal only *ends* the program name if something in
+        # it separates the name from the next word. ``"ssh " + host`` names
+        # ssh; ``"ss" + "h"`` and ``f"ss{h}"`` are the program name itself
+        # being assembled, and this rule cannot follow that -- so it says so
+        # rather than reporting the prefix as the program.
+        if not any(character.isspace() for character in text):
+            return set(), False
+        name = _program_name(text)
+        return ({name} if name else set()), name is not None
+    if isinstance(node, ast.Name):
+        values = _assignments_to(node.id, scope)
+        if not values:
+            return set(), False
+        names, resolved = set(), True
+        for value in values:
+            found, ok = _program_candidates(value, scope, tree, scopes, seen)
+            names |= found
+            # ``all``, not ``any``: one branch of an assignment resolving is
+            # not evidence about the others, and a name that is sometimes a
+            # literal and sometimes ``os.getenv(...)`` is exactly the shape
+            # this must not wave through.
+            resolved = resolved and ok
+        return names, resolved
+    if isinstance(node, ast.Call):
+        func = node.func
+        if isinstance(func, ast.Attribute) and func.attr in ("split", "format"):
+            return _program_candidates(func.value, scope, tree, scopes, seen)
+        if isinstance(func, ast.Name):
+            definition = _function_defs(tree).get(func.id)
+            if definition is not None:
+                names, resolved, returns = set(), True, 0
+                for returned in ast.walk(definition):
+                    if isinstance(returned, ast.Return) and returned.value is not None:
+                        returns += 1
+                        found, ok = _program_candidates(
+                            returned.value, definition, tree, scopes, seen
+                        )
+                        names |= found
+                        resolved = resolved and ok
+                return names, resolved and returns > 0
+    return set(), False
+
+
+def _spawns_a_process(call):
+    """A call that hands a command to the operating system.
+
+    ``subprocess.anything`` and the ``os`` spawners, because ``os.system``
+    takes the P7 shape by construction and nothing in this package should
+    grow one unnoticed.
+    """
+    import ast
+
+    func = call.func
+    if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Name):
+        return False
+    if func.value.id == "subprocess":
+        return True
+    return func.value.id == "os" and func.attr in (
+        "system",
+        "popen",
+        "execl",
+        "execle",
+        "execlp",
+        "execv",
+        "execve",
+        "execvp",
+        "execvpe",
+        "posix_spawn",
+        "posix_spawnp",
+        "spawnl",
+        "spawnv",
+        "spawnvp",
+    )
+
 
 def _unpinned_openssh_subprocesses(text):
-    """``subprocess`` calls in ``text`` that exec an OpenSSH client unpinned.
+    """``subprocess``/``os`` spawns in ``text`` that exec an OpenSSH client unpinned.
 
-    Matches a call on the ``subprocess`` module whose command argument is a
-    list whose first element is the literal name of one of
-    :data:`OPENSSH_CONNECTING_PROGRAMS` -- either written inline or built as
-    a local name in the same function, which is the shape ``ssh_utils``
-    uses. Both option names must appear as string constants somewhere in the
-    innermost enclosing function, the same allowance
-    :func:`_unpinned_paramiko_connects` makes for the ``**kwargs`` shape and
-    with the same limit: a function that merely mentions the names passes.
-    It detects "somebody added another shell-out to ssh", which is the
-    realistic regression, not an adversary.
+    The command argument is *resolved* rather than pattern-matched -- see
+    :func:`_program_candidates` -- so the four shapes an earlier version of
+    this rule listed as admitted limitations are covered: a program held in
+    a variable, a ``shell=True`` command string, a list assembled by another
+    function, and ``rsync`` (which execs ``ssh``). Each of those was written
+    as a shipped-looking call site and each one authenticated against a real
+    server while the rule reported nothing, so they are defects rather than
+    caveats.
 
-    **Stated limits.** It does not follow a command list assembled across
-    functions, a program named through a variable, or a command string
-    handed to ``shell=True``. Requiring the call to be on ``subprocess`` is
-    what keeps ``["ssh", "huggingface"]`` -- a list of credential providers
-    -- from being read as an invocation. And it says nothing about
-    ``ssh-keyscan``, which connects but authenticates nothing: what matters
-    there is that its output is appended to ``known_hosts``, and the guard
-    on that is its caller being conditional on the host key policy, covered
-    by ``tests/unit/test_host_key_policy.py``.
+    When the program name is genuinely not a literal the call is reported
+    with :data:`UNRESOLVED_PROGRAM` instead of being passed over in silence.
+    ``clustrix/`` has four such calls and they are written down in
+    :data:`RUNTIME_CHOSEN_PROGRAM_ALLOWLIST`.
+
+    **What is still open, stated because a rule that cannot fire reads as
+    coverage.** A program name assembled at run time (``"ss" + "h"``), one
+    read out of a configuration field or the environment, a wrapper earlier
+    on ``$PATH`` that happens to be named something else, and anything
+    outside ``clustrix/``. Those are the same computed-name limits every
+    other static rule in this suite has; what answers them is the runtime
+    gate, not this file. The residual is executable rather than prose:
+    :func:`test_the_openssh_subprocess_rule_states_its_own_blind_spots`
+    fails if one of them silently starts working, so the list cannot drift
+    out of date in the flattering direction.
     """
     import ast
 
     tree = ast.parse(text)
     offenders = []
 
-    def options_named_in(scope):
+    def options_named_in(scopes):
         found = set()
-        for node in ast.walk(scope):
-            if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                for option in OPENSSH_REQUIRED_OPTIONS:
-                    if option in node.value:
-                        found.add(option)
+        for scope in scopes:
+            for node in ast.walk(scope):
+                if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    for option in OPENSSH_REQUIRED_OPTIONS:
+                        if option in node.value:
+                            found.add(option)
         return found
-
-    def program_of(node, scope):
-        """The OpenSSH program a command argument names, if any."""
-        if isinstance(node, ast.List) and node.elts:
-            first = node.elts[0]
-            if isinstance(first, ast.Constant):
-                return first.value
-            return None
-        if isinstance(node, ast.Name):
-            for assigned in ast.walk(scope):
-                if (
-                    isinstance(assigned, ast.Assign)
-                    and any(
-                        isinstance(t, ast.Name) and t.id == node.id
-                        for t in assigned.targets
-                    )
-                    and isinstance(assigned.value, ast.List)
-                    and assigned.value.elts
-                    and isinstance(assigned.value.elts[0], ast.Constant)
-                ):
-                    return assigned.value.elts[0].value
-        return None
-
-    def is_subprocess_call(call):
-        func = call.func
-        return (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Name)
-            and func.value.id == "subprocess"
-        )
 
     def visit(node, scope):
         for child in ast.iter_child_nodes(node):
-            if isinstance(child, ast.Call) and is_subprocess_call(child) and child.args:
-                program = program_of(child.args[0], scope)
-                if program in OPENSSH_CONNECTING_PROGRAMS:
-                    named = options_named_in(scope)
+            if isinstance(child, ast.Call) and _spawns_a_process(child) and child.args:
+                scopes = {scope}
+                programs, resolved = _program_candidates(
+                    child.args[0], scope, tree, scopes
+                )
+                if not resolved:
+                    offenders.append((child.lineno, (UNRESOLVED_PROGRAM,)))
+                elif programs & set(OPENSSH_CONNECTING_PROGRAMS):
+                    named = options_named_in(scopes)
                     missing = tuple(
                         o for o in OPENSSH_REQUIRED_OPTIONS if o not in named
                     )
@@ -3818,25 +4032,75 @@ def _unpinned_openssh_subprocesses(text):
     return sorted(set(offenders))
 
 
+def _scope_of_line(text):
+    """``lineno -> dotted enclosing definitions``, for reporting offenders."""
+    import ast
+
+    scopes = {}
+
+    class Walker(ast.NodeVisitor):
+        def __init__(self):
+            self.stack = []
+
+        def _scoped(self, node):
+            self.stack.append(node.name)
+            self.generic_visit(node)
+            self.stack.pop()
+
+        visit_FunctionDef = _scoped
+        visit_AsyncFunctionDef = _scoped
+        visit_ClassDef = _scoped
+
+        def generic_visit(self, node):
+            if hasattr(node, "lineno"):
+                scopes.setdefault(node.lineno, ".".join(self.stack))
+            super().generic_visit(node)
+
+    Walker().visit(ast.parse(text))
+    return scopes
+
+
 def test_no_openssh_subprocess_leaves_the_identity_search_or_host_policy_open():
     """The rule that stops an eighth route-13 site appearing as a subprocess.
 
     ``deploy_public_key`` was the seventh, and the sixth site's rule could
     not see it: it reads ``connect()`` calls, and this one is an ``execve``.
+
+    A call whose program is not a literal is reported too, and has to be
+    written into :data:`RUNTIME_CHOSEN_PROGRAM_ALLOWLIST`. The previous
+    version of this rule said nothing about those, which is how a command
+    assembled in a variable, a ``shell=True`` string and a list built in a
+    helper each walked past it while authenticating for real.
     """
     package = pathlib.Path(config_module.__file__).parent
 
-    offenders = {}
+    unpinned = {}
+    unresolved = set()
     for path in sorted(package.glob("*.py")):
-        found = _unpinned_openssh_subprocesses(path.read_text(encoding="utf-8"))
-        if found:
-            offenders[path.name] = found
+        text = path.read_text(encoding="utf-8")
+        found = _unpinned_openssh_subprocesses(text)
+        if not found:
+            continue
+        scopes = _scope_of_line(text)
+        for lineno, missing in found:
+            if missing == (UNRESOLVED_PROGRAM,):
+                unresolved.add((path.name, scopes.get(lineno, "")))
+            else:
+                unpinned.setdefault(path.name, []).append((lineno, missing))
 
-    assert not offenders, (
+    assert not unpinned, (
         "an OpenSSH client was exec'd without naming IdentitiesOnly and "
         "StrictHostKeyChecking, so it performs its own credential discovery "
         "and its own host key check outside the gate and outside "
-        "ssh_security (route 13, via subprocess): " + repr(offenders)
+        "ssh_security (route 13, via subprocess): " + repr(unpinned)
+    )
+    assert unresolved == RUNTIME_CHOSEN_PROGRAM_ALLOWLIST, (
+        "a subprocess call runs a program this rule cannot identify. If it "
+        "can never be an OpenSSH client, add it to "
+        "RUNTIME_CHOSEN_PROGRAM_ALLOWLIST and say why; if it can, name the "
+        "program as a literal so the rule can see it.\n"
+        f"  unexpected: {sorted(unresolved - RUNTIME_CHOSEN_PROGRAM_ALLOWLIST)}\n"
+        f"  gone:       {sorted(RUNTIME_CHOSEN_PROGRAM_ALLOWLIST - unresolved)}"
     )
 
 
@@ -3884,6 +4148,169 @@ def test_the_openssh_subprocess_rule_fires_on_what_it_is_for_and_nothing_else():
         "def unpinned(h):\n"
         "    subprocess.run(['ssh', h])\n"
     ) == [(6, ("IdentitiesOnly", "StrictHostKeyChecking"))]
+
+
+BOTH_OPTIONS = ("IdentitiesOnly", "StrictHostKeyChecking")
+
+
+@pytest.mark.parametrize(
+    "label, source, expected",
+    [
+        (
+            "P5: rsync execs ssh",
+            "def f(src, user, host, dst):\n"
+            "    subprocess.run(['rsync', '-a', src, f'{user}@{host}:{dst}'])\n",
+            [(2, BOTH_OPTIONS)],
+        ),
+        (
+            "P6: the program is held in a variable",
+            "def f(h):\n" "    prog = 'ssh'\n" "    subprocess.run([prog, h])\n",
+            [(3, BOTH_OPTIONS)],
+        ),
+        (
+            "P6b: the whole command is built by appending",
+            "def f(h):\n"
+            "    cmd = []\n"
+            "    cmd = ['ssh']\n"
+            "    cmd.append(h)\n"
+            "    subprocess.run(cmd)\n",
+            [(5, BOTH_OPTIONS)],
+        ),
+        (
+            "P7: shell=True with the command as one string",
+            "def f(h):\n" "    subprocess.run(f'ssh {h} true', shell=True)\n",
+            [(2, BOTH_OPTIONS)],
+        ),
+        (
+            "P7b: shell=True with an absolute path",
+            "def f(h):\n" "    subprocess.run('/usr/bin/ssh ' + h, shell=True)\n",
+            [(2, BOTH_OPTIONS)],
+        ),
+        (
+            "P7c: os.system, which is shell=True by construction",
+            "def f(h):\n    os.system('ssh ' + h)\n",
+            [(2, BOTH_OPTIONS)],
+        ),
+        (
+            "P8: the command list is built by another function",
+            "def build(h):\n"
+            "    return ['ssh', h]\n"
+            "\n"
+            "def f(h):\n"
+            "    subprocess.run(build(h))\n",
+            [(5, BOTH_OPTIONS)],
+        ),
+        (
+            "the program cannot be identified at all",
+            "def f(prog, h):\n    subprocess.run([prog, h])\n",
+            [(2, (UNRESOLVED_PROGRAM,))],
+        ),
+    ],
+    ids=[
+        "rsync",
+        "variable-program",
+        "appended-command",
+        "shell-true-fstring",
+        "shell-true-concat",
+        "os-system",
+        "helper-built-list",
+        "unidentifiable",
+    ],
+)
+def test_the_openssh_subprocess_rule_sees_the_shapes_that_used_to_survive_it(
+    label, source, expected
+):
+    """P5-P8: four admitted limitations, each proven exploitable.
+
+    Every one of these was written as a shipped-looking call site and
+    **wire-authenticated** ``('victim', 'publickey')`` against a real
+    server while the previous version of this rule reported nothing. An
+    admitted limitation that is demonstrably exploitable is a defect, so
+    each shape is now resolved rather than listed.
+    """
+    assert _unpinned_openssh_subprocesses(source) == expected, label
+
+
+@pytest.mark.parametrize(
+    "label, source",
+    [
+        (
+            "P5 pinned",
+            "def f(src, host, dst):\n"
+            "    cmd = ['rsync', '-e',\n"
+            "           'ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes']\n"
+            "    subprocess.run(cmd + [src, f'{host}:{dst}'])\n",
+        ),
+        (
+            "P6 pinned",
+            "def f(h):\n"
+            "    prog = 'ssh'\n"
+            "    subprocess.run([prog, '-o', 'IdentitiesOnly=yes',\n"
+            "                    '-o', 'StrictHostKeyChecking=yes', h])\n",
+        ),
+        (
+            "P7 pinned",
+            "def f(h):\n"
+            "    subprocess.run(\n"
+            "        f'ssh -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes {h}',\n"
+            "        shell=True)\n",
+        ),
+        (
+            "P8 pinned in the helper that builds it",
+            "def build(h):\n"
+            "    return ['ssh', '-o', 'IdentitiesOnly=yes',\n"
+            "            '-o', 'StrictHostKeyChecking=yes', h]\n"
+            "\n"
+            "def f(h):\n"
+            "    subprocess.run(build(h))\n",
+        ),
+        (
+            "a program that is not an OpenSSH client",
+            "def f():\n    subprocess.run(['pip', 'list'])\n",
+        ),
+        ("a shell command that is not one either", "def f():\n    os.system('true')\n"),
+    ],
+    ids=["rsync", "variable", "shell-true", "helper", "pip", "shell-other"],
+)
+def test_the_broadened_rule_still_accepts_a_pinned_invocation(label, source):
+    """The control arm: broadening must not make every spawn an offender.
+
+    In particular the P8 shape has to be satisfiable *where the command is
+    built*, or the only way to pass would be to stop using helpers.
+    """
+    assert _unpinned_openssh_subprocesses(source) == [], label
+
+
+def test_the_openssh_subprocess_rule_states_its_own_blind_spots():
+    """The residual, executable rather than prose.
+
+    A static rule cannot follow a program name that does not exist until
+    run time, and saying so in a docstring lets the claim rot. These are
+    the shapes that still walk past, asserted so that the list is a
+    measurement: if one of them silently starts being caught, this fails
+    and the docstring above gets shorter. Each is reported as
+    :data:`UNRESOLVED_PROGRAM` rather than passed over in silence, which is
+    the difference between a blind spot and a hole -- the same treatment
+    ``tests/unit/test_credential_file_permissions.py`` gives its own.
+    """
+    assembled = "def f(h):\n    subprocess.run(['ss' + 'h', h])\n"
+    from_config = "def f(cfg, h):\n    subprocess.run([cfg.ssh_program, h])\n"
+    from_environment = "def f(h):\n    subprocess.run([os.environ['SSH'], h])\n"
+
+    for source in (assembled, from_config, from_environment):
+        assert _unpinned_openssh_subprocesses(source) == [
+            (2, (UNRESOLVED_PROGRAM,))
+        ], source
+
+    # And what no static rule in this file can reach at all: a wrapper
+    # earlier on $PATH, and anything outside ``clustrix/``. Those are
+    # answered by the runtime gate, not here.
+    assert (
+        _unpinned_openssh_subprocesses(
+            "def f(h):\n    subprocess.run(['my-deploy-helper', h])\n"
+        )
+        == []
+    )
 
 
 @pytest.fixture
@@ -4056,3 +4483,488 @@ def test_key_deployment_over_ssh_copy_id_still_works_for_a_chosen_host(
     assert agent_only_server.authentications, "nothing authenticated at all"
     installed = pathlib.Path(agent_only_server.root) / ".ssh" / "authorized_keys"
     assert key.get_base64() in installed.read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Route 13, eighth site: OpenSSH reads the user's own ``~/.ssh/config``.
+#
+# ``IdentitiesOnly=yes`` keeps the identities "explicitly configured in the
+# ssh_config files", and an ``IdentityFile`` the user's config supplies is
+# one of those -- so the option added for the seventh site did not filter
+# it. ``$HOME`` does not move that file either: OpenSSH resolves ``~`` from
+# the passwd database, which is why no test may write to it and why the
+# arms below hand ``ssh-copy-id`` a ``-F`` file standing in for it.
+# ---------------------------------------------------------------------------
+
+
+def _planted_ssh_config(tmp_path, identity):
+    """A stand-in for the user's own ``~/.ssh/config``.
+
+    The real one cannot be used: OpenSSH reads it from the passwd home
+    rather than from ``$HOME`` (verified with ``ssh -G``, which reported
+    ``/Users/<me>/.ssh/known_hosts`` with ``$HOME`` pointed at a tmpdir), so
+    planting into it would edit the developer's own machine. ``-F`` is the
+    same channel by a name a test can reach, and OpenSSH takes the *last*
+    ``-F`` on the command line -- so passing this one first is exactly the
+    situation clustrix is in: a user ssh_config offering an identity, and
+    whatever clustrix says about ``-F`` deciding whether it is read.
+    """
+    path = tmp_path / "planted_ssh_config"
+    path.write_text(f"Host *\n    IdentityFile {identity}\n", encoding="utf-8")
+    return path
+
+
+def _run_ssh_copy_id_under(planted, argv):
+    """Run ``argv`` with ``planted`` standing in for the user's ssh_config."""
+    return subprocess.run(
+        [argv[0], "-F", str(planted)] + argv[1:],
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=dict(os.environ, SSH_AUTH_SOCK=""),
+    )
+
+
+def test_a_refused_ssh_copy_id_does_not_read_the_users_own_ssh_config(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """The eighth site, on the wire.
+
+    Measured with otherwise identical flags before the fix: a ``Host * /
+    IdentityFile`` stanza gave ``rc=0`` and ``[('victim', 'publickey')]``
+    -- the victim's key authenticating to a host named by a
+    working-directory file, straight through ``IdentitiesOnly=yes``,
+    ``IdentityFile=<the key being deployed>`` and ``IdentityAgent=none``.
+    """
+    from clustrix.ssh_utils import NO_SSH_CONFIG, ssh_copy_id_command
+
+    if shutil.which("ssh-copy-id") is None:
+        pytest.skip("ssh-copy-id is not installed")
+
+    env_file()
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    _trust_this_host_deliberately(key_only_server)
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+    victim_identity = pathlib.Path.home() / ".ssh" / "id_rsa"
+    planted = _planted_ssh_config(tmp_path, victim_identity)
+
+    argv = ssh_copy_id_command(
+        str(public),
+        "victim",
+        key_only_server.host,
+        key_only_server.port,
+        local_identities=False,
+        config=get_config(),
+    )
+    result = _run_ssh_copy_id_under(planted, argv)
+
+    # The wire first: what the server saw is the measurement, and a
+    # structural assertion placed ahead of it would turn a leak into a
+    # lookup error on the argv.
+    assert key_only_server.authentications == [], (
+        "an identity out of the user's ssh_config authenticated to a host "
+        "named by a working-directory file: " + repr(key_only_server.authentications)
+    )
+    assert result.returncode != 0
+    assert [argv[i : i + 2] for i, item in enumerate(argv) if item == "-F"] == [
+        ["-F", NO_SSH_CONFIG]
+    ], f"the refused invocation left the user's ssh_config in play: {argv}"
+
+
+def test_the_users_own_ssh_config_still_applies_to_a_host_they_chose(
+    key_only_server, env_file, tmp_path
+):
+    """The control arm: this must not become a blanket ``-F /dev/null``.
+
+    A user's ``ssh_config`` carries ``ProxyJump``, ``HostName``, ``Port``
+    and ``User`` for the hosts they actually use, and throwing it away
+    would break real deployments. So it is discarded on exactly the
+    ``local_identities`` answer everything else here turns on, and this arm
+    -- same server, same key, same code path, host from
+    ``~/.clustrix/config.yml`` -- shows it is still read.
+    """
+    from clustrix.ssh_utils import ssh_copy_id_command
+
+    if shutil.which("ssh-copy-id") is None:
+        pytest.skip("ssh-copy-id is not installed")
+
+    env_file()
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    _trust_this_host_deliberately(key_only_server)
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+    victim_identity = pathlib.Path.home() / ".ssh" / "id_rsa"
+    planted = _planted_ssh_config(tmp_path, victim_identity)
+
+    argv = ssh_copy_id_command(
+        str(public),
+        "victim",
+        key_only_server.host,
+        key_only_server.port,
+        local_identities=True,
+        config=get_config(),
+    )
+    _run_ssh_copy_id_under(planted, argv)
+
+    assert "-F" not in argv, f"a licensed invocation discarded ssh_config: {argv}"
+    assert key_only_server.authentications, (
+        "the user's own ssh_config was ignored for a host they chose, so "
+        "the fix is an outage rather than a gate"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ``ssh_host_key_policy`` is a security decision, so an untrusted source may
+# not make it. Weaponised, a ``./clustrix.yml`` carrying no credential at
+# all removed the host key barrier -- and did it *persistently*, for every
+# later process on the machine.
+# ---------------------------------------------------------------------------
+
+
+def test_a_working_directory_file_cannot_turn_host_key_checking_off(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """``auto_add`` from a file nobody chose is downgraded to ``reject``.
+
+    ``_config_text`` writes ``ssh_host_key_policy: auto_add``, which is the
+    whole payload: the file names a host and no credential of any kind.
+    Before this, the gate refused (``GATE REFUSES: True``) while
+    ``host_key_policy_name`` answered ``auto_add`` and the OpenSSH
+    translation answered ``accept-new``.
+    """
+    from clustrix.ssh_security import (
+        host_key_policy_name,
+        may_weaken_host_key_checking,
+        openssh_strict_host_key_checking,
+    )
+
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+    config = get_config()
+
+    assert config.ssh_host_key_policy == "auto_add"
+    assert may_weaken_host_key_checking(config) is False
+    assert host_key_policy_name(config) == "reject"
+    assert openssh_strict_host_key_checking(config) == "yes"
+
+
+def test_the_host_key_policy_you_chose_yourself_still_applies(
+    key_only_server, env_file
+):
+    """The control arm: ``auto_add`` is a supported opt-out and stays one."""
+    from clustrix.ssh_security import (
+        host_key_policy_name,
+        may_weaken_host_key_checking,
+        openssh_strict_host_key_checking,
+    )
+
+    env_file()
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+    config = get_config()
+
+    assert may_weaken_host_key_checking(config) is True
+    assert host_key_policy_name(config) == "auto_add"
+    assert openssh_strict_host_key_checking(config) == "accept-new"
+    assert host_key_policy_name(ClusterConfig(ssh_host_key_policy="auto_add")) == (
+        "auto_add"
+    )
+
+
+def test_a_mapping_cannot_license_a_weakening_because_it_has_no_provenance():
+    """The widget hands its form over as a dict, and a dict was never stamped.
+
+    ``_save_config_from_widgets`` does not emit ``ssh_host_key_policy``
+    today, so this costs nothing now; it is what stops the dict becoming a
+    laundering route the day it does.
+    """
+    from clustrix.ssh_security import (
+        host_key_policy_name,
+        may_weaken_host_key_checking,
+    )
+
+    form = {"cluster_host": "someone.example", "ssh_host_key_policy": "auto_add"}
+
+    assert may_weaken_host_key_checking(form) is False
+    assert host_key_policy_name(form) == "reject"
+    assert host_key_policy_name({"ssh_host_key_policy": "reject"}) == "reject"
+
+
+def test_a_weaponised_run_leaves_nothing_trusted_for_the_next_process(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """The durable half, across two real interpreters.
+
+    ``auto_add`` is not a per-process setting: it *appends to*
+    ``~/.ssh/known_hosts``. Measured before the fix, in exactly this shape:
+    process one wrote **8** entries, and process two -- a fresh
+    interpreter, no attacker file anywhere, the default ``reject`` policy
+    in force -- found the attacker's host already trusted for all three of
+    its host key algorithms. Nothing clears that, so the write is the part
+    that has to not happen.
+
+    A second interpreter rather than a second function call because a
+    process-global taint record cannot follow one, and following it is
+    precisely what a persistent file does not need to do.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    env_file()
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+
+    with contextlib.suppress(Exception):
+        deploy_public_key(
+            key_only_server.host,
+            "victim",
+            str(public),
+            key_only_server.port,
+            None,
+            config=get_config(),
+        )
+
+    known_hosts = pathlib.Path.home() / ".ssh" / "known_hosts"
+    assert not known_hosts.exists() or known_hosts.read_text() == "", (
+        "a working-directory file got the attacker's host key written into "
+        "the global known_hosts: " + known_hosts.read_text()
+    )
+
+    program = (
+        "import json,paramiko\n"
+        "from clustrix.ssh_security import configure_host_key_policy\n"
+        "client = paramiko.SSHClient()\n"
+        "configure_host_key_policy(client, None)\n"
+        "entry = client.get_host_keys().lookup('[%s]:%d')\n"
+        "print(json.dumps(sorted(entry) if entry else []))\n"
+        % (key_only_server.host, key_only_server.port)
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        cwd=str(pathlib.Path(__file__).resolve().parents[2]),
+        env=dict(os.environ, HOME=str(pathlib.Path.home())),
+        timeout=120,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout.strip().splitlines()[-1]) == [], (
+        "a second, entirely fresh process found the attacker's host already "
+        "trusted: " + completed.stdout
+    )
+
+
+# ---------------------------------------------------------------------------
+# ``hf_image`` chooses the container that is handed CLUSTRIX_HF_TOKEN.
+# ---------------------------------------------------------------------------
+
+
+def test_a_working_directory_file_does_not_choose_the_container_for_your_token(
+    tmp_path, monkeypatch
+):
+    """Same class as the host key policy: an untrusted source aiming a secret.
+
+    A staged job hands ``CLUSTRIX_HF_TOKEN`` to the image as a job secret,
+    so naming the image is naming the recipient -- and ``hf_image`` is an
+    ordinary declared field.
+    """
+    from clustrix.hf_jobs import HFJobsManager
+
+    cloned_repository = tmp_path / "cloned-repository"
+    cloned_repository.mkdir()
+    (cloned_repository / "clustrix.yml").write_text(
+        "cluster_type: huggingface\n"
+        "cluster_host: hf-victim.example\n"
+        "hf_image: attacker/collects-tokens:latest\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(cloned_repository)
+    with pytest.warns(UserWarning, match="current working directory"):
+        config_module._load_default_config()
+
+    config = get_config()
+
+    assert config.hf_image == "attacker/collects-tokens:latest"
+    assert get_config_source(config) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert HFJobsManager(config)._image() == (
+        f"python:{sys.version_info.major}.{sys.version_info.minor}-slim"
+    )
+
+
+def test_the_container_image_you_chose_yourself_is_still_used():
+    """The control arm: ``hf_image`` is a documented setting and stays one."""
+    from clustrix.hf_jobs import HFJobsManager
+
+    (get_config_dir() / "config.yml").write_text(
+        "cluster_type: huggingface\n"
+        "cluster_host: hf-mine.example\n"
+        "hf_image: myorg/cuda-python:3.11\n",
+        encoding="utf-8",
+    )
+    config_module._load_default_config()
+
+    assert HFJobsManager(get_config())._image() == "myorg/cuda-python:3.11"
+    assert (
+        HFJobsManager(
+            ClusterConfig(cluster_host="hf-mine2.example", hf_image="myorg/x:1")
+        )._image()
+        == "myorg/x:1"
+    )
+
+
+def _recording_listener():
+    """A loopback HTTP server that records what was asked of it."""
+    import http.server
+    import socketserver
+    import threading
+
+    class Recorder(http.server.BaseHTTPRequestHandler):
+        def _record(self):
+            self.server.seen.append(
+                (self.command, self.path, self.headers.get("Authorization"))
+            )
+            self.send_response(404)
+            self.end_headers()
+
+        do_GET = _record
+        do_HEAD = _record
+
+        def log_message(self, *args):
+            pass
+
+    server = socketserver.TCPServer(("127.0.0.1", 0), Recorder)
+    server.seen = []
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
+
+
+def test_the_generated_job_bootstrap_pins_where_its_token_is_sent():
+    """Route 13b, in the half of the tree that is a string.
+
+    The container's ``hf_hub_download`` carries ``CLUSTRIX_HF_TOKEN``, and
+    ``huggingface_hub`` fills ``endpoint`` in from ``$HF_ENDPOINT`` -- read
+    from the *container's* environment, which a container image sets in its
+    own ``ENV``. So the configuration field that chose the image also chose
+    where the account token went.
+
+    Both arms are measured with real loopback listeners, in a subprocess
+    because ``huggingface_hub`` reads ``$HF_ENDPOINT`` at import: the
+    unpinned call really does deliver ``Bearer <token>`` to whatever
+    ``$HF_ENDPOINT`` names, and the pinned one does not.
+    """
+    pytest.importorskip("huggingface_hub")
+
+    from clustrix.credential_release import HUGGINGFACE_ENDPOINT
+    from clustrix.hf_jobs import _bootstrap_source
+
+    assert f"endpoint={HUGGINGFACE_ENDPOINT!r}" in _bootstrap_source()
+
+    pinned = _recording_listener()
+    ambient = _recording_listener()
+    try:
+        pinned_url = f"http://127.0.0.1:{pinned.server_address[1]}"
+        ambient_url = f"http://127.0.0.1:{ambient.server_address[1]}"
+        # Assembled from parts, like SENTINEL_PASSWORD, so that no
+        # credential-shaped literal appears anywhere in this source file.
+        probe_token = "-".join(["clustrix", "probe", "token"])
+        program = (
+            "from huggingface_hub import hf_hub_download\n"
+            "for extra in ({}, {'endpoint': %r}):\n"
+            "    try:\n"
+            "        hf_hub_download(repo_id='someone/payload',\n"
+            "                        filename='p.b64', repo_type='dataset',\n"
+            "                        token=%r, **extra)\n"
+            "    except Exception:\n"
+            "        pass\n" % (pinned_url, probe_token)
+        )
+        completed = subprocess.run(
+            [sys.executable, "-c", program],
+            capture_output=True,
+            text=True,
+            env=dict(
+                os.environ,
+                HF_ENDPOINT=ambient_url,
+                HF_HOME=str(pathlib.Path.home() / ".hf-probe"),
+            ),
+            timeout=180,
+        )
+        assert completed.returncode == 0, completed.stderr
+
+        def downloads(listener):
+            return [entry[2] for entry in listener.seen if "/resolve/" in entry[1]]
+
+        assert downloads(ambient) == [f"Bearer {probe_token}"], (
+            "the unpinned arm did not reach $HF_ENDPOINT, so this test would "
+            "pass without the pinning: " + repr(ambient.seen)
+        )
+        assert downloads(pinned) == [f"Bearer {probe_token}"]
+    finally:
+        pinned.shutdown()
+        ambient.shutdown()
+
+
+def test_the_options_the_subprocess_rule_demands_really_stop_rsync(
+    agent_only_server, agent_identity, tmp_path
+):
+    """P5 on the wire, both arms: the rule must ask for something that works.
+
+    ``rsync`` is in :data:`OPENSSH_CONNECTING_PROGRAMS` because it is not a
+    transport of its own -- given a ``host:path`` it execs ``ssh`` and
+    inherits every default. Unpinned it authenticated ``('victim',
+    'publickey')`` out of the ssh-agent while the previous rule reported
+    nothing about it.
+
+    The pinned arm matters as much: an option list that did not actually
+    close the agent would be a rule demanding a ritual. ``rsync`` has no
+    ``-o``; the options go in ``-e``, which is why this is worth measuring
+    rather than assuming.
+    """
+    if shutil.which("rsync") is None:
+        pytest.skip("rsync is not installed")
+
+    payload = tmp_path / "payload.txt"
+    payload.write_text("x\n", encoding="utf-8")
+    ssh_config = tmp_path / "rsync_ssh_config"
+    ssh_config.write_text(
+        "Host *\n"
+        "  StrictHostKeyChecking no\n"
+        f"  UserKnownHostsFile {pathlib.Path.home() / '.ssh' / 'known_hosts'}\n",
+        encoding="utf-8",
+    )
+
+    def rsync(transport, name):
+        subprocess.run(
+            [
+                "rsync",
+                "-a",
+                "-e",
+                transport,
+                str(payload),
+                f"victim@{agent_only_server.host}:{name}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+    base = f"ssh -F {ssh_config} -p {agent_only_server.port}"
+    rsync(base, "unpinned.txt")
+    unpinned = list(agent_only_server.authentications)
+    rsync(
+        f"{base} -o IdentitiesOnly=yes -o IdentityAgent=none",
+        "pinned.txt",
+    )
+    pinned = agent_only_server.authentications[len(unpinned) :]
+
+    assert (
+        unpinned
+    ), "rsync did not reach the server at all, so neither arm means anything"
+    assert set(unpinned) == {("victim", "publickey")}
+    assert pinned == [], (
+        "the options this rule demands did not actually close the agent for "
+        "rsync: " + repr(pinned)
+    )

@@ -44,7 +44,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
-from .credential_release import huggingface_client_kwargs
+from .config import config_source_is_trusted, get_config_source
+from .credential_release import HUGGINGFACE_ENDPOINT, huggingface_client_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,13 @@ def _bootstrap_source() -> str:
         "    from huggingface_hub import hf_hub_download\n"
         "    _f=hf_hub_download(repo_id=os.environ['CLUSTRIX_PAYLOAD_REPO'],\n"
         "        filename=os.environ['CLUSTRIX_PAYLOAD_FILE'],repo_type='dataset',\n"
+        # ``endpoint`` explicitly, for the reason every client built in this
+        # process names it (route 13b): huggingface_hub falls back to
+        # $HF_ENDPOINT, and here the environment is the *container's* --
+        # which a container image sets in its own ENV. Without this, the
+        # image chosen by the configuration also chose where the token this
+        # line carries was sent.
+        f"        endpoint={HUGGINGFACE_ENDPOINT!r},\n"
         # Popped for the same reason: an account token must not still be in
         # the environment when third-party code starts running.
         "        token=os.environ.pop('CLUSTRIX_HF_TOKEN'))\n"
@@ -275,11 +283,43 @@ class HFJobsManager:
 
         dill payloads carry CPython bytecode, so the container has to run the
         same minor version as the caller or unpickling raises "unknown opcode".
+
+        **Only a configuration the user chose may name it.** ``hf_image`` is
+        an ordinary declared field, so a ``./clustrix.yml`` in a cloned
+        repository sets it -- and a staged job hands ``CLUSTRIX_HF_TOKEN``
+        to whatever this returns, as a job secret. Choosing the image is
+        therefore choosing who receives the account token, which is the same
+        decision as ``ssh_host_key_policy`` (see
+        :func:`clustrix.ssh_security.host_key_policy_name`) and gets the same
+        answer: honoured from a source
+        :func:`clustrix.config.config_source_is_trusted` vouches for, and
+        otherwise downgraded to the compiled-in default with a warning.
+
+        The image is not merely a place the token sits, either: a container
+        image carries its own ``ENV``, and ``huggingface_hub`` reads
+        ``$HF_ENDPOINT`` -- so an attacker-chosen image redirects the
+        bootstrap's own download. That half is closed separately, by
+        :func:`_bootstrap_source` pinning ``endpoint=``.
         """
         configured = getattr(self.config, "hf_image", None)
-        if configured:
-            return configured
-        return f"python:{sys.version_info.major}.{sys.version_info.minor}-slim"
+        default = f"python:{sys.version_info.major}.{sys.version_info.minor}-slim"
+        if not configured:
+            return default
+        if not config_source_is_trusted(self.config):
+            logger.warning(
+                "Ignoring hf_image=%r and using %r instead: the container "
+                "image receives CLUSTRIX_HF_TOKEN as a job secret, so "
+                "choosing it is choosing who receives your account token, "
+                "and this configuration did not come from anywhere you "
+                "chose (its provenance is %r). Move the setting into your "
+                "clustrix configuration directory, pass it to configure(), "
+                "or name the file with load_config(path).",
+                configured,
+                default,
+                get_config_source(self.config),
+            )
+            return default
+        return configured
 
     def _extra_packages(
         self, job_config: Dict[str, Any], requirements: Optional[Dict[str, str]] = None

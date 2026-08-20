@@ -223,6 +223,13 @@ class TestDeployPublicKey:
             # chose ``test.host.com``, so the gate does not license the local
             # identities and OpenSSH is given the key being deployed and
             # nothing else.
+            #
+            # ``-F /dev/null`` belongs to the same decision and was added
+            # after ``IdentitiesOnly=yes`` was measured *not* to be enough:
+            # an ``IdentityFile`` out of the user's own ``~/.ssh/config``
+            # counts as explicitly configured, so it survives the option
+            # meant to exclude everything ambient. See
+            # ``clustrix.ssh_utils.ssh_copy_id_command``.
             expected_cmd = [
                 "ssh-copy-id",
                 "-i",
@@ -231,6 +238,8 @@ class TestDeployPublicKey:
                 "StrictHostKeyChecking=yes",
                 "-o",
                 f"UserKnownHostsFile={_user_known_hosts_path()}",
+                "-F",
+                "/dev/null",
                 "-o",
                 "IdentitiesOnly=yes",
                 "-o",

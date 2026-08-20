@@ -302,6 +302,8 @@ Connection and authentication
      - ``"reject"`` refuses an unknown host key and prints the ``ssh-keyscan``
        command to add it. ``"auto_add"`` trusts unknown keys -- insecure, and
        never the default. Any other value raises at construction time.
+       ``"auto_add"`` is honoured **only from a configuration you chose**;
+       see :ref:`untrusted-security-settings` below.
    * - ``ssh_connect_timeout``
      - ``30``
      - Seconds paramiko waits to connect. The OS default is minutes, which
@@ -328,6 +330,37 @@ Connection and authentication
 
    Invalid ssh_host_key_policy='yolo'. Valid values are 'reject' (default,
    secure) or 'auto_add' (insecure, trusts unknown host keys automatically).
+
+
+.. _untrusted-security-settings:
+
+Settings an untrusted configuration may not make
+------------------------------------------------
+
+Clustrix already refuses to hand a stored credential to a ``cluster_host``
+that came from somewhere nobody chose -- a ``./clustrix.yml`` that arrived
+with a ``git clone``, or a directory ``$CLUSTRIX_CONFIG_DIR`` was pointed
+at. Two other settings aim a secret just as directly, so they follow the
+same rule:
+
+``ssh_host_key_policy``
+   ``"auto_add"`` turns host key verification off. That is what stops a
+   machine-in-the-middle, and it is *persistent*: the key is appended to
+   your ``~/.ssh/known_hosts``, so the host stays trusted for every later
+   process on the machine, clustrix's and your own ``ssh`` alike. From an
+   untrusted configuration the value is ignored, host keys are verified,
+   and a warning names the file. ``"reject"`` is always honoured -- a
+   configuration asking for *more* checking costs nothing to believe.
+
+``hf_image``
+   A staged HuggingFace job hands ``CLUSTRIX_HF_TOKEN`` to its container as
+   a job secret, so naming the image is naming who receives your account
+   token. From an untrusted configuration the compiled-in default image is
+   used instead, with a warning.
+
+In both cases the fix is the same as for a refused credential: move the
+setting into ``~/.clustrix/config.yml``, pass it to ``configure()``, or name
+the file yourself with ``load_config(path)``.
 
 
 Resources
@@ -524,7 +557,8 @@ HuggingFace Jobs (``cluster_type="huggingface"``)
    * - ``hf_image``
      - ``None`` -> ``python:<your minor>-slim``
      - Must match your local Python minor version, because dill payloads carry
-       CPython bytecode.
+       CPython bytecode. Honoured **only from a configuration you chose**; see
+       :ref:`untrusted-security-settings` below.
    * - ``hf_job_timeout``
      - ``None`` -> ``"30m"``
      - Job timeout. Per-call override: ``@cluster(hf_timeout="2h")``.
