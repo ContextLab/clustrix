@@ -13,10 +13,13 @@ from .config import (
     CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
     CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     CONFIG_SOURCES,
+    CONFIG_SOURCES_KEY,
     UNTRUSTED_CONFIG_SOURCES,
     ClusterConfig,
     config_built_from_file,
+    config_document,
     config_source_for_discovered_path,
+    config_source_for_saved_entry,
     get_config_dir,
     get_config_source,
     set_config_source,
@@ -819,11 +822,17 @@ class ProfileManager:
         an exported profile is a file made to be sent to a colleague or
         committed to a repository, which is the last place a password
         should be.
+
+        Both rules come from :func:`clustrix.config.config_document`, which
+        is also where the provenance record comes from -- an export lands
+        wherever the caller says, ``~/.clustrix/config.yml`` included, and a
+        profile a repository supplied must not become the user's own by
+        being copied there. :meth:`import_profile` reads the record back.
         """
         if profile_name not in self.profiles:
             raise ValueError(f"Profile '{profile_name}' does not exist")
 
-        config_data = strip_secret_fields(asdict(self.profiles[profile_name]))
+        config_data = config_document(self.profiles[profile_name])
         self._announce_dropped_secrets({profile_name: config_data})
         write_config_file_securely(Path(filepath), config_data)
 
@@ -845,8 +854,14 @@ class ProfileManager:
 
         # Create config object. The caller named this path, so it is
         # ``explicit-file`` -- but it is still a file, so it is declared as
-        # one rather than left to ``__post_init__``'s ``runtime`` default.
-        with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
+        # one rather than left to ``__post_init__``'s ``runtime`` default,
+        # and a record the file carries may lower it. Removed before
+        # construction either way: it is clustrix's own note about the file,
+        # not a declared field, and ``ClusterConfig(**config_dict)`` would
+        # raise on it.
+        recorded = config_dict.pop(CONFIG_SOURCES_KEY, None)
+        source = config_source_for_saved_entry(CONFIG_SOURCE_EXPLICIT_FILE, recorded)
+        with config_built_from_file(source):
             config = ClusterConfig(**config_dict)
 
         # Generate profile name if not provided

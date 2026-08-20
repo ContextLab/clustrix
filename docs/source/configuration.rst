@@ -135,6 +135,31 @@ automatically. Changing directory does not reload it.
    ignored -- so a project's configuration you deliberately keep is kept,
    along with the reason it is not handed your credential.
 
+   Typing your own hostname over the host field before saving is recorded
+   the same way it is applied: nothing is written for that entry, because
+   the file no longer names the host it came with, and the next session
+   treats it as yours. Any other entry the save carries along is unaffected
+   and still records where it came from.
+
+   **Every writer of a configuration file does this, not only the widget.**
+   ``ClusterConfig.save_to_file(path)``, ``clustrix.save_config(path)``,
+   ``clustrix config --config-file <path>`` and
+   ``ProfileManager.export_profile(name, path)`` all write the same key, for
+   the same reason: any of them can be pointed at ``~/.clustrix/config.yml``
+   from inside a cloned repository, and what a save writes is a credential
+   decision one restart later. In the flat single-configuration file those
+   write, the key holds the source directly::
+
+       cluster_type: ssh
+       cluster_host: cluster.example.edu
+       username: researcher
+       config_sources: working-directory
+
+   Reading such a file -- by the automatic search, ``load_config(path)``,
+   ``ClusterConfig.load_from_file(path)`` or ``import_profile(path)`` -- says
+   so and refuses the credential, and the automatic search names the file and
+   the line to delete if the settings are in fact yours.
+
    **To adopt a project's configuration on purpose**, do what
    ``clustrix`` already tells you to do for a working-directory file: put
    the settings into ``~/.clustrix/config.yml`` *yourself* and start a new

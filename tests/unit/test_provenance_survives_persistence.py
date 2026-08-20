@@ -46,7 +46,10 @@ from typing import Optional
 import pytest
 
 import clustrix
+import yaml
+
 from clustrix.config import (
+    CONFIG_SOURCES_KEY,
     CONFIG_SOURCE_EXPLICIT_FILE,
     CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
@@ -105,6 +108,7 @@ def _run(
     home: Path,
     tree: str = _REPO_ROOT,
     extra_env: Optional[dict] = None,
+    cwd: Optional[Path] = None,
 ) -> dict:
     """Run ``script`` in a *real* fresh interpreter rooted at ``home``.
 
@@ -127,7 +131,7 @@ def _run(
     completed = subprocess.run(
         [sys.executable, "-c", textwrap.dedent(script)],
         env=env,
-        cwd=str(home),
+        cwd=str(cwd or home),
         capture_output=True,
         text=True,
         timeout=120,
@@ -981,3 +985,305 @@ def test_a_record_that_is_not_a_mapping_condemns_every_entry_in_the_file():
     )
     assert recorded_config_source(None, "anything") is None
     assert recorded_config_source({"a": CONFIG_SOURCE_WORKING_DIRECTORY}, "b") is None
+
+
+# ---------------------------------------------------------------------------
+# Route 12b: ``ClusterConfig.save_to_file`` is the *other* writer of the same
+# file, and it recorded nothing.
+#
+# Route 12 was the notebook widget's Save button laundering a repository's
+# configuration into ``~/.clustrix/config.yml``. This is the identical
+# laundering through a path the widget is not involved in at all, using only
+# the shipped CLI:
+#
+#     cd cloned-repo                 # ships ./clustrix.yml naming a host
+#     clustrix config --cores 8 --config-file ~/.clustrix/config.yml
+#     # any later process, anywhere:
+#     import clustrix                # -> user-config-dir, trusted
+#
+# ``get_config().save_to_file(path)`` and ``save_config(path)`` are the same
+# defect; the precondition is weaker than route 12's, because the user names
+# the destination rather than pressing a button labelled Save. But the
+# argument the route-12 fix rests on -- that what a save writes IS a
+# credential decision one restart later -- does not care which writer wrote
+# it, so the record is now a property of the write path: it is
+# ``save_to_file`` that records, and every caller of it inherits that.
+# ---------------------------------------------------------------------------
+
+#: The configuration a cloned repository ships. Not a credential, and not a
+#: real host: every assertion is about where this name came from.
+_ROUTE_12B_REPOSITORY_CONFIG = f"""\
+cluster_type: ssh
+cluster_host: {SENTINEL_HOST}
+username: victim
+"""
+
+#: Process 1: inside the clone, confirm the file is refused *here*, then run
+#: the shipped CLI's own save.
+_ROUTE_12B_PROCESS_ONE = """
+    import json, os, runpy, sys
+    from clustrix.config import (
+        config_source_is_trusted,
+        get_config,
+        get_config_source,
+    )
+
+    before = {
+        "host": get_config().cluster_host,
+        "source": get_config_source(get_config()),
+        "trusted": config_source_is_trusted(get_config()),
+    }
+    destination = os.path.join(os.environ["HOME"], ".clustrix", "config.yml")
+    sys.argv = ["clustrix", "config", "--cores", "8", "--config-file", destination]
+    try:
+        runpy.run_module("clustrix.cli", run_name="__main__")
+    except SystemExit:
+        pass
+    print(json.dumps({"before": before, "destination": destination}))
+"""
+
+#: Process 2: somewhere else entirely, having never seen the repository.
+_ROUTE_12B_PROCESS_TWO = """
+    import json
+    from clustrix.config import (
+        config_source_is_trusted,
+        get_config,
+        get_config_source,
+    )
+
+    print(json.dumps({
+        "host": get_config().cluster_host,
+        "username": get_config().username,
+        "source": get_config_source(get_config()),
+        "trusted": config_source_is_trusted(get_config()),
+    }))
+"""
+
+
+@pytest.fixture(scope="module")
+def round_16_tree(tmp_path_factory):
+    """A working tree of the commit that closed route 12 but not route 12b.
+
+    ``git archive`` rather than a checkout, so nothing in any other working
+    tree is touched. Skipped when the object is unreachable -- a shallow CI
+    clone has no history -- with
+    ``test_save_to_file_records_an_untrusted_source`` as the hermetic guard
+    that still runs there.
+    """
+    destination = tmp_path_factory.mktemp("route-12-only")
+    archive = subprocess.run(
+        ["git", "archive", ROUTE_12_ONLY_COMMIT],
+        cwd=_REPO_ROOT,
+        capture_output=True,
+        timeout=120,
+    )
+    if archive.returncode != 0:
+        pytest.skip(
+            f"commit {ROUTE_12_ONLY_COMMIT} is not in this checkout: "
+            f"{archive.stderr.decode(errors='replace').strip()}"
+        )
+    subprocess.run(
+        ["tar", "-x", "-C", str(destination)],
+        input=archive.stdout,
+        check=True,
+        timeout=120,
+    )
+    module = destination / "clustrix" / "config.py"
+    assert module.exists(), "git archive produced no clustrix package"
+    assert "CONFIG_SOURCES_KEY" not in module.read_text(encoding="utf-8"), (
+        f"{ROUTE_12_ONLY_COMMIT} already records provenance from "
+        f"save_to_file, so it is not the release route 12b is measured in"
+    )
+    return str(destination)
+
+
+#: The commit that closed route 12 in the widget and left ``save_to_file``
+#: writing the same file with no record at all.
+ROUTE_12_ONLY_COMMIT = "720e363"
+
+
+def _route_12b_scenario(tmp_path, tree):
+    """Run the two processes and return what the second one saw."""
+    home = tmp_path / "home"
+    (home / ".clustrix").mkdir(mode=0o700, parents=True)
+    repository = tmp_path / "cloned-repository"
+    repository.mkdir()
+    (repository / "clustrix.yml").write_text(
+        _ROUTE_12B_REPOSITORY_CONFIG, encoding="utf-8"
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    first = _run(_ROUTE_12B_PROCESS_ONE, home, tree=tree, cwd=repository)
+    assert first["before"] == {
+        "host": SENTINEL_HOST,
+        "source": CONFIG_SOURCE_WORKING_DIRECTORY,
+        "trusted": False,
+    }, "the repository's file was not even refused in the process that read it"
+    assert Path(first["destination"]).exists(), "the CLI wrote nothing"
+
+    second = _run(_ROUTE_12B_PROCESS_TWO, home, tree=tree, cwd=elsewhere)
+    assert second["host"] == SENTINEL_HOST, "the copy did not carry the hostname"
+    return second, Path(first["destination"])
+
+
+def test_the_cli_cannot_promote_a_configuration_a_repository_shipped(tmp_path):
+    """Route 12b, closed. Two real interpreters, only a file between them."""
+    second, destination = _route_12b_scenario(tmp_path, _REPO_ROOT)
+
+    assert second["username"] == "victim"
+    assert second["source"] == CONFIG_SOURCE_WORKING_DIRECTORY, (
+        "saving into ~/.clustrix promoted a configuration a cloned "
+        "repository chose: " + repr(second)
+    )
+    assert second["trusted"] is False
+
+    recorded = yaml.safe_load(destination.read_text(encoding="utf-8"))[
+        CONFIG_SOURCES_KEY
+    ]
+    assert recorded == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_the_release_before_this_really_did_promote_it(round_16_tree, tmp_path):
+    """The RED arm, kept: route 12b was real, and measured in the shipped code.
+
+    Without this the test above could pass because the scenario never
+    reproduced the defect. Both processes run out of a ``git archive`` of the
+    commit that closed route 12 for the widget and left this path alone.
+    """
+    second, destination = _route_12b_scenario(tmp_path, round_16_tree)
+
+    assert second["source"] == CONFIG_SOURCE_USER_CONFIG_DIR
+    assert second["trusted"] is True, (
+        "the scenario did not reproduce route 12b against the release that "
+        "had it, so the test above proves nothing: " + repr(second)
+    )
+    assert CONFIG_SOURCES_KEY not in yaml.safe_load(
+        destination.read_text(encoding="utf-8")
+    )
+
+
+@pytest.mark.parametrize(
+    "source, recorded",
+    [
+        (CONFIG_SOURCE_WORKING_DIRECTORY, CONFIG_SOURCE_WORKING_DIRECTORY),
+        (CONFIG_SOURCE_REDIRECTED_CONFIG_DIR, CONFIG_SOURCE_REDIRECTED_CONFIG_DIR),
+        (CONFIG_SOURCE_RUNTIME, None),
+        (CONFIG_SOURCE_EXPLICIT_FILE, None),
+        (CONFIG_SOURCE_USER_CONFIG_DIR, None),
+    ],
+)
+def test_save_to_file_records_an_untrusted_source_and_only_that(
+    tmp_path, source, recorded
+):
+    """The write rule, hermetically: untrusted is written, trusted is not.
+
+    A trusted source would be re-derived identically from the file's own
+    location, and a record that could *raise* trust is the laundering route
+    the key exists to close -- so it must never be written, exactly as the
+    widget's Save must never write one.
+    """
+    config = ClusterConfig(cluster_type="ssh", cluster_host=SENTINEL_HOST)
+    set_config_source(config, source)
+    destination = tmp_path / "config.yml"
+    config.save_to_file(str(destination))
+
+    written = yaml.safe_load(destination.read_text(encoding="utf-8"))
+    assert written.get(CONFIG_SOURCES_KEY) == recorded
+    assert written["cluster_host"] == SENTINEL_HOST
+
+
+def test_a_flat_file_may_only_lower_its_own_trust(tmp_path):
+    """A file cannot promote itself by writing a trusted source beside itself.
+
+    The mirror of the widget's rule, on the flat shape ``save_to_file``
+    writes: a repository shipping ``config_sources: explicit-file`` in its
+    own ``clustrix.yml`` must not be believed.
+    """
+    from clustrix.config import config_source_for_saved_entry
+
+    for claimed in (CONFIG_SOURCE_EXPLICIT_FILE, CONFIG_SOURCE_USER_CONFIG_DIR):
+        assert (
+            config_source_for_saved_entry(CONFIG_SOURCE_WORKING_DIRECTORY, claimed)
+            == CONFIG_SOURCE_WORKING_DIRECTORY
+        )
+    assert (
+        config_source_for_saved_entry(
+            CONFIG_SOURCE_USER_CONFIG_DIR, CONFIG_SOURCE_WORKING_DIRECTORY
+        )
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+
+def test_a_record_is_not_a_setting_the_reader_rejects(tmp_path):
+    """Neither reader may treat the record as a configuration field.
+
+    ``load_config`` raises on an unknown setting -- deliberately, so a typo
+    is named rather than swallowed -- and ``ClusterConfig(**config_data)``
+    raises on an unexpected keyword. A key clustrix writes itself must be
+    removed before either sees it, or every file either writer produced
+    would fail to load.
+    """
+    destination = tmp_path / "config.yml"
+    config = ClusterConfig(cluster_type="ssh", cluster_host=SENTINEL_HOST)
+    set_config_source(config, CONFIG_SOURCE_WORKING_DIRECTORY)
+    config.save_to_file(str(destination))
+    assert CONFIG_SOURCES_KEY in destination.read_text(encoding="utf-8")
+
+    clustrix.config.load_config(str(destination))
+    assert clustrix.config.get_config().cluster_host == SENTINEL_HOST
+    # explicit-file, lowered by the record the file carries.
+    assert (
+        get_config_source(clustrix.config.get_config())
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+    restored = ClusterConfig.load_from_file(str(destination))
+    assert restored.cluster_host == SENTINEL_HOST
+    assert get_config_source(restored) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_exporting_a_profile_is_not_adopting_it(tmp_path):
+    """The third writer of a flat configuration file, closed the same way.
+
+    ``export_profile`` writes wherever the caller says -- including into
+    ``~/.clustrix`` -- and ``import_profile`` used to stamp the result
+    ``explicit-file`` unconditionally, so exporting a profile a repository
+    supplied and importing it back was a promotion in two calls. It shares
+    ``config_document`` with :meth:`ClusterConfig.save_to_file`, so it
+    inherits the record rather than needing to remember it.
+    """
+    manager = ProfileManager(config_dir=str(tmp_path / "store"))
+    shipped = ClusterConfig(cluster_type="ssh", cluster_host=SENTINEL_HOST)
+    set_config_source(shipped, CONFIG_SOURCE_WORKING_DIRECTORY)
+    manager.profiles["shipped"] = shipped
+
+    exported = tmp_path / "exported.yml"
+    manager.export_profile("shipped", str(exported))
+    assert (
+        yaml.safe_load(exported.read_text(encoding="utf-8"))[CONFIG_SOURCES_KEY]
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+    imported = manager.import_profile(str(exported))
+    assert manager.profiles[imported].cluster_host == SENTINEL_HOST
+    assert get_config_source(manager.profiles[imported]) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    ), "a round trip through export/import promoted the profile"
+
+
+def test_exporting_a_profile_you_chose_yourself_stays_yours(tmp_path):
+    """The control: nothing is recorded, and the import is believed."""
+    manager = ProfileManager(config_dir=str(tmp_path / "store"))
+    mine = ClusterConfig(cluster_type="ssh", cluster_host="my-own-cluster.invalid")
+    set_config_source(mine, CONFIG_SOURCE_RUNTIME)
+    manager.profiles["mine"] = mine
+
+    exported = tmp_path / "mine.yml"
+    manager.export_profile("mine", str(exported))
+    assert CONFIG_SOURCES_KEY not in yaml.safe_load(
+        exported.read_text(encoding="utf-8")
+    )
+
+    imported = manager.import_profile(str(exported))
+    assert get_config_source(manager.profiles[imported]) == CONFIG_SOURCE_EXPLICIT_FILE

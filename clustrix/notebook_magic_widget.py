@@ -14,6 +14,7 @@ from typing import Dict, List, Optional, Any
 from .notebook_magic_config import (
     CONFIG_SOURCES_KEY,
     DEFAULT_CONFIGS,
+    config_name_from_document,
     config_source_for_detected_file,
     config_source_for_saved_entry,
     detect_config_files,
@@ -152,7 +153,11 @@ class EnhancedClusterConfigWidget:
                     )
                 else:
                     # Multiple configs
-                    for name, config in file_configs.items():
+                    for raw_name, config in file_configs.items():
+                        # A YAML key is not always a string, and a name that
+                        # is not one cannot be sorted against the others. See
+                        # ``config_name_from_document``.
+                        name = config_name_from_document(raw_name)
                         if isinstance(config, dict):
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
@@ -960,7 +965,22 @@ class EnhancedClusterConfigWidget:
         leaves the hostname untouched and so leaves the refusal in place,
         which is right: it is the host that receives the credential.
         """
-        name = self.current_config_name or ""
+        return self._source_still_naming_host(
+            self.current_config_name or "", config_data
+        )
+
+    def _source_still_naming_host(
+        self, name: str, config_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """``name``'s discovered source, while it still names *this* host.
+
+        The rule :meth:`_discovered_source_for` documents, stated once so
+        that it can be asked about a configuration other than the selected
+        one. ``_record_discovered_sources`` needs exactly that: a save writes
+        every entry in the dropdown, and each of them has to be judged
+        against the host it is *being written with*, not against the host it
+        arrived with.
+        """
         source = self.config_source_map.get(name)
         if not source:
             return None
@@ -1072,6 +1092,17 @@ class EnhancedClusterConfigWidget:
         :func:`~clustrix.notebook_magic_config.config_source_for_saved_entry`
         would ignore it if it did.
 
+        And only while the source still names the host being written, which
+        is :meth:`_source_still_naming_host` -- the same rule Apply applies
+        in :meth:`_discovered_source_for`. Keying off ``config_source_map``
+        alone made the two disagree across the restart: typing your own
+        hostname over a found configuration applied as ``runtime`` in the
+        session and came back ``working-directory`` in the next one, because
+        the write side condemned a host the file had never named. That errs
+        safe, so it was a wrong answer rather than a leak; a hostname is only
+        condemned by a source that actually named it, on both sides of the
+        process boundary or on neither.
+
         The single-configuration shape has no room for a sibling key without
         the record becoming a configuration field, so a save that has
         something to record uses the nested shape instead. That is the
@@ -1080,14 +1111,14 @@ class EnhancedClusterConfigWidget:
         hand.
         """
         if single_config and self.current_config_name:
-            names = {self.current_config_name}
+            entries = {self.current_config_name: save_data}
         else:
-            names = set(save_data)
-        recorded = {
-            name: self.config_source_map[name]
-            for name in sorted(names)
-            if self.config_source_map.get(name) in UNTRUSTED_CONFIG_SOURCES
-        }
+            entries = dict(save_data)
+        recorded = {}
+        for name in sorted(entries):
+            source = self._source_still_naming_host(name, entries[name])
+            if source in UNTRUSTED_CONFIG_SOURCES:
+                recorded[name] = source
         if not recorded:
             return save_data
         if single_config and self.current_config_name:
@@ -1229,7 +1260,9 @@ class EnhancedClusterConfigWidget:
                 # Check if this is a single config or multiple configs
                 if "cluster_type" in data:
                     # Single configuration
-                    config_name = data.get("name", "Loaded Configuration")
+                    config_name = config_name_from_document(
+                        data.get("name", "Loaded Configuration")
+                    )
                     self.configs[config_name] = data
                     self.current_config_name = config_name
                     self._load_config_to_widgets(config_name)
@@ -1250,7 +1283,8 @@ class EnhancedClusterConfigWidget:
                     # disagreeing.
                     loaded_count = 0
                     first_config = None
-                    for name, config in data.items():
+                    for raw_name, config in data.items():
+                        name = config_name_from_document(raw_name)
                         if isinstance(config, dict) and "cluster_type" in config:
                             config["name"] = name
                             self.configs[name] = config
