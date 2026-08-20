@@ -141,18 +141,35 @@ class TestEnvironmentCredentialSource:
         assert creds["port"] == "22"
 
     def test_get_credentials_no_env_vars(self):
-        """Test that minimal credentials return only defaults."""
+        """Nothing configured must be reported as nothing configured.
+
+        The assertion here used to be ``ssh_creds == {"port": "22"}``, and
+        that was the bug rather than the specification: ``SSH_PORT`` was
+        looked up with a ``"22"`` default, so the filtered dictionary was
+        never empty and ``ensure_credential("ssh")`` could never be
+        ``None``. Every caller that tests for ``None`` to mean "not
+        configured" -- ``auth_methods.FlexibleCredentialAuth``,
+        ``executor_connections`` -- therefore never saw it, and matched a
+        blank host against the host it was asked to connect to. The default
+        port now applies only to a credential set that already holds
+        something real.
+        """
         with patch.dict(os.environ, {}, clear=True):
             source = EnvironmentCredentialSource()
 
-            # SSH has a default port
-            ssh_creds = source.get_credentials("ssh")
-            assert ssh_creds == {"port": "22"}
+            assert source.get_credentials("ssh") is None
 
             # HuggingFace has no defaults, so with nothing in the environment
             # every field filters out and the whole provider returns None.
             hf_creds = source.get_credentials("huggingface")
             assert hf_creds is None
+
+    def test_the_default_port_still_applies_to_a_real_credential(self):
+        """The default must not have been removed, only narrowed."""
+        with patch.dict(os.environ, {"SSH_HOST": "cluster.example.edu"}, clear=True):
+            creds = EnvironmentCredentialSource().get_credentials("ssh")
+
+        assert creds == {"host": "cluster.example.edu", "port": "22"}
 
     @patch.dict(
         os.environ,

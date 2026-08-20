@@ -27,9 +27,34 @@ except ImportError:
     IPYTHON_AVAILABLE = False
     from .notebook_magic_fallback import display, HTML, widgets
 
-from .config import configure, get_config_dir
+from .config import (
+    configure,
+    get_config_dir,
+    strip_secret_fields,
+    write_text_securely,
+)
+
+# The one implementation of "create each level 0700"; see its docstring for
+# why ``mkdir(parents=True, mode=0o700)`` is not the same thing. Imported
+# rather than copied so the widget and the profile store cannot drift.
+from .profile_manager import _mkdir_private
 
 logger = logging.getLogger(__name__)
+
+
+def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
+    """Names present in ``before`` that ``strip_secret_fields`` removed.
+
+    Both the whole-field cases and the entries inside a secret-bearing
+    mapping, so that an ``AWS_SECRET_ACCESS_KEY`` dropped out of
+    ``environment_variables`` is named too and not silently lost.
+    """
+    names = {key for key in before if key not in after}
+    for key, value in before.items():
+        surviving = after.get(key)
+        if isinstance(value, dict) and isinstance(surviving, dict):
+            names |= {inner for inner in value if inner not in surviving}
+    return names
 
 
 class EnhancedClusterConfigWidget:
@@ -48,6 +73,10 @@ class EnhancedClusterConfigWidget:
         )  # Maps config names to their source files
         self.auto_display = auto_display
         self.has_unsaved_changes = False
+        # Said once per widget, not once per click: the save button is the
+        # kind of thing a user presses repeatedly, and a repeated notice is
+        # one that stops being read.
+        self._announced_dropped_secrets = False
         # Initialize configurations
         self._initialize_configs()
         # Create widget components
@@ -772,6 +801,46 @@ class EnhancedClusterConfigWidget:
             except Exception as e:
                 print(f"❌ Error applying configuration: {str(e)}")
 
+    def _redact_for_save(
+        self, save_data: Dict[str, Any], single_config: bool
+    ) -> Dict[str, Any]:
+        """Return ``save_data`` with every credential removed, saying so once.
+
+        The same decision ``ProfileManager`` makes, for the same three
+        reasons, so that clustrix has one answer rather than two: the save
+        fires from a button press in the middle of ordinary editing rather
+        than from a user asking to persist a secret; one file holds every
+        configuration in the dropdown, so a single leak is N credentials;
+        and ``password_env_var`` is the supported way to supply a password
+        without writing it down. There is deliberately no ``include_secrets``
+        opt-in here, because the widget offers no place to ask for one.
+
+        The user is told what was withheld -- once per widget -- because
+        silently discarding a password they just typed, and then failing to
+        connect after a restart, is its own surprise.
+        """
+        if single_config:
+            redacted = strip_secret_fields(save_data)
+            dropped = _dropped_keys(save_data, redacted)
+        else:
+            redacted = {}
+            dropped = set()
+            for config_name, entry in save_data.items():
+                redacted[config_name] = strip_secret_fields(entry)
+                dropped |= _dropped_keys(entry, redacted[config_name])
+
+        if dropped and not self._announced_dropped_secrets:
+            self._announced_dropped_secrets = True
+            print(
+                "⚠️  Configuration files are not a credential store: "
+                f"{', '.join(sorted(dropped))} were not written to disk and "
+                "will not survive a restart. They still work for the rest of "
+                "this session. To supply a password without writing it to "
+                "disk, set password_env_var to the name of an environment "
+                "variable holding it."
+            )
+        return redacted
+
     def _on_save_config(self, button):
         """Save configuration to file."""
         with self.status_output:
@@ -796,13 +865,16 @@ class EnhancedClusterConfigWidget:
                 if not filename.endswith((".yml", ".yaml")):
                     filename += ".yml"
 
-                # Determine save directory
+                # Determine save directory. Every level is created 0700:
+                # ``mkdir(exist_ok=True)`` left ~/.clustrix at 0755, and
+                # traversing it is enough to reach a file inside by name.
                 save_dir = get_config_dir()
-                save_dir.mkdir(exist_ok=True)
+                _mkdir_private(save_dir)
                 file_path = save_dir / filename
 
                 # Prepare data to save
-                if len(self.configs) == 1 and self.current_config_name:
+                single_config = len(self.configs) == 1 and self.current_config_name
+                if single_config:
                     # Single config - save just the config data
                     save_data = config_data
                 else:
@@ -825,11 +897,15 @@ class EnhancedClusterConfigWidget:
                             # Always include non-default configurations
                             save_data[config_name] = config_data
 
-                # Save to file
+                # Save to file, without the credentials and 0600 from the
+                # instant the file exists.
                 import yaml
 
-                with open(file_path, "w") as f:
-                    yaml.dump(save_data, f, default_flow_style=False, sort_keys=False)
+                save_data = self._redact_for_save(save_data, bool(single_config))
+                write_text_securely(
+                    file_path,
+                    yaml.dump(save_data, default_flow_style=False, sort_keys=False),
+                )
 
                 print(f"✅ Configuration saved to: {file_path}")
 

@@ -31,7 +31,7 @@ from .config import (
     get_config_dir,
 )
 from .utils import MEMORY_PATTERN
-from .profile_manager import ProfileManager
+from .profile_manager import ProfileManager, _mkdir_private
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
 
@@ -1613,7 +1613,10 @@ class ModernClustrixWidget:
         if os.path.isabs(filename) or os.sep in filename:
             return os.path.expanduser(filename)
         config_dir = get_config_dir()
-        config_dir.mkdir(parents=True, exist_ok=True)
+        # 0700 at every level: mkdir(parents=True) leaves ~/.clustrix at the
+        # umask default, and traversing it is enough to reach the profile
+        # store inside it by name.
+        _mkdir_private(config_dir)
         return str(config_dir / filename)
 
     def _on_save_config(self, button):

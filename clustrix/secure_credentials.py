@@ -75,7 +75,14 @@ class SecureCredentialManager:
 
 
 class ValidationCredentials:
-    """Provides credentials for external service validation using environment variables only."""
+    """HuggingFace credentials for external service validation, from the environment.
+
+    HuggingFace only. There used to be a ``get_ssh_credentials`` here that
+    returned ``None`` unconditionally, which is worse than not having one:
+    a caller reads the ``None`` as "no SSH credentials are configured"
+    rather than "this class never had any to give". SSH credentials come
+    from :mod:`clustrix.credential_manager`.
+    """
 
     def __init__(self):
         logger.info("Using environment variable fallback for validation credentials")
@@ -85,8 +92,4 @@ class ValidationCredentials:
         token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
         if token:
             return {"token": token, "username": os.getenv("HUGGINGFACE_USERNAME", "")}
-        return None
-
-    def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
-        """SSH credentials no longer available - use ~/.clustrix/.env instead."""
         return None

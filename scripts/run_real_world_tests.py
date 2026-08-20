@@ -66,7 +66,6 @@ class RealWorldTestRunner:
             print(
                 f"  Environment: {'GitHub Actions' if manager.is_github_actions else 'Local Development'}"
             )
-            print(f"  1Password: {'✅' if manager.is_1password_available() else '❌'}")
 
             service_names = {
                 "ssh": "SSH",
@@ -75,8 +74,6 @@ class RealWorldTestRunner:
             }
 
             for service, available in credentials.items():
-                if service == "1password":
-                    continue
                 display_name = service_names.get(service, service.upper())
                 status = "✅" if available else "❌"
                 print(f"  {status} {display_name}")

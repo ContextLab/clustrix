@@ -8,19 +8,110 @@ multiple fallback sources.
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Any
+from typing import Dict, Mapping, Optional, List, Any
 from abc import ABC, abstractmethod
 from .config import get_config_dir, write_text_securely  # noqa: F401
 
-# Try to import python-dotenv
+# Try to import python-dotenv. ``dotenv_values`` is used rather than
+# ``load_dotenv``: the latter copies the whole file into ``os.environ``,
+# which is the process-wide export this module deliberately does not do.
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
 
     HAS_DOTENV = True
 except ImportError:
     HAS_DOTENV = False
 
 logger = logging.getLogger(__name__)
+
+#: The port assumed when a credential set names a host but no port. Applied
+#: only to a set that already holds something real: it used to be the
+#: default of the ``SSH_PORT`` lookup itself, so an unconfigured machine
+#: produced ``{"port": "22"}`` and ``ensure_credential("ssh")`` could never
+#: be ``None``. Every caller testing for "not configured" therefore never
+#: saw it.
+DEFAULT_SSH_PORT = "22"
+
+#: Which environment variable names carry which credential field, per
+#: provider. One table rather than one per source, because the two used to
+#: disagree -- only the environment source honoured the ``HUGGINGFACE_*``
+#: aliases -- and a credential that resolves from the shell but not from
+#: ~/.clustrix/.env is indistinguishable from a missing credential.
+PROVIDER_ENV_NAMES: Dict[str, Dict[str, tuple]] = {
+    "ssh": {
+        "host": ("SSH_HOST",),
+        "username": ("SSH_USERNAME",),
+        "password": ("SSH_PASSWORD",),
+        "private_key_path": ("SSH_PRIVATE_KEY_PATH",),
+        "port": ("SSH_PORT",),
+    },
+    "huggingface": {
+        "token": ("HF_TOKEN", "HUGGINGFACE_TOKEN"),
+        "username": ("HF_USERNAME", "HUGGINGFACE_USERNAME"),
+    },
+}
+
+
+def resolve_provider_credentials(
+    values: Mapping[str, Optional[str]], provider: str
+) -> Optional[Dict[str, str]]:
+    """Credentials for ``provider`` read out of the mapping ``values``.
+
+    ``values`` is any name-to-value mapping -- ``os.environ``, or the parsed
+    contents of a ``.env`` file. Nothing is written back to it: reading a
+    credential is a read, and a lookup that also exports the file into
+    ``os.environ`` changes what every later import in the process sees.
+
+    Returns ``None`` when nothing for the provider is configured, so that
+    "not configured" is distinguishable from "configured with defaults".
+    """
+    if provider == "local":
+        return {"type": "local"}  # local execution needs no real credentials
+
+    names = PROVIDER_ENV_NAMES.get(provider)
+    if names is None:
+        return None
+
+    credentials = {}
+    for field, candidates in names.items():
+        for candidate in candidates:
+            value = values.get(candidate)
+            if value:
+                credentials[field] = value
+                break
+
+    if not credentials:
+        return None
+    if provider == "ssh":
+        credentials.setdefault("port", DEFAULT_SSH_PORT)
+    return credentials
+
+
+def parse_env_file(path: Path) -> Dict[str, str]:
+    """Parse a ``.env`` file into a dictionary, touching nothing else.
+
+    ``load_dotenv`` was used here, and it copies every key in the file into
+    ``os.environ`` for the remaining life of the process. That leaked real
+    AWS and HuggingFace credentials into the environment of every test that
+    happened to run afterwards, and made one test pass in CI (no ``.env``
+    present) while failing on any developer machine that had one -- an
+    asymmetry CI cannot see.
+    """
+    if HAS_DOTENV:
+        return {k: v for k, v in dotenv_values(path).items() if v is not None}
+
+    logger.debug("python-dotenv not available, parsing %s manually", path)
+    values: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception as e:
+        logger.debug(f"Failed to read .env file: {e}")
+    return values
 
 
 class CredentialSource(ABC):
@@ -53,45 +144,18 @@ class DotEnvCredentialSource(CredentialSource):
         return self.env_file_path.exists() and self.env_file_path.is_file()
 
     def get_credentials(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials for a provider from .env file."""
+        """Get credentials for a provider from .env file.
+
+        The file is layered *under* the ambient environment, matching what
+        ``load_dotenv`` did (it does not override an already-set variable),
+        but resolved in a local dictionary so that nothing in the file
+        becomes visible to the rest of the process.
+        """
         if not self.is_available():
             return None
 
-        # Load environment variables from .env file
-        if HAS_DOTENV:
-            load_dotenv(self.env_file_path)
-        else:
-            logger.warning(
-                "python-dotenv not available, falling back to manual parsing"
-            )
-            self._load_env_manual()
-
-        # Map providers to their environment variable patterns
-        provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "ssh": {
-                "host": os.getenv("SSH_HOST"),
-                "username": os.getenv("SSH_USERNAME"),
-                "password": os.getenv("SSH_PASSWORD"),
-                "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
-                "port": os.getenv("SSH_PORT", "22"),
-            },
-            "huggingface": {
-                "token": os.getenv("HF_TOKEN"),
-                "username": os.getenv("HF_USERNAME"),
-            },
-            "local": {
-                "type": "local",  # Local provider needs no real credentials
-            },
-        }
-
-        if provider not in provider_mappings:
-            return None
-
-        credentials = provider_mappings[provider]
-
-        # Filter out None values and return only if we have some credentials
-        filtered_credentials = {k: v for k, v in credentials.items() if v is not None}
-        return filtered_credentials if filtered_credentials else None
+        values = {**parse_env_file(self.env_file_path), **os.environ}
+        return resolve_provider_credentials(values, provider)
 
     def list_available_providers(self) -> List[str]:
         """List providers that have credentials available in .env file."""
@@ -108,20 +172,6 @@ class DotEnvCredentialSource(CredentialSource):
 
         return available
 
-    def _load_env_manual(self):
-        """Manually load .env file if python-dotenv is not available."""
-        try:
-            with open(self.env_file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, value = line.split("=", 1)
-                        key = key.strip()
-                        value = value.strip().strip('"').strip("'")
-                        os.environ[key] = value
-        except Exception as e:
-            logger.debug(f"Failed to manually load .env file: {e}")
-
 
 class EnvironmentCredentialSource(CredentialSource):
     """Credential source that reads from environment variables."""
@@ -132,33 +182,7 @@ class EnvironmentCredentialSource(CredentialSource):
 
     def get_credentials(self, provider: str) -> Optional[Dict[str, str]]:
         """Get credentials from environment variables."""
-        # Use same mapping as DotEnv but read directly from current environment
-        provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "ssh": {
-                "host": os.getenv("SSH_HOST"),
-                "username": os.getenv("SSH_USERNAME"),
-                "password": os.getenv("SSH_PASSWORD"),
-                "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
-                "port": os.getenv("SSH_PORT", "22"),
-            },
-            "huggingface": {
-                "token": os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN"),
-                "username": os.getenv("HF_USERNAME")
-                or os.getenv("HUGGINGFACE_USERNAME"),
-            },
-            "local": {
-                "type": "local",  # Local provider needs no real credentials
-            },
-        }
-
-        if provider not in provider_mappings:
-            return None
-
-        credentials = provider_mappings[provider]
-
-        # Filter out None values and return only if we have some credentials
-        filtered_credentials = {k: v for k, v in credentials.items() if v is not None}
-        return filtered_credentials if filtered_credentials else None
+        return resolve_provider_credentials(os.environ, provider)
 
     def list_available_providers(self) -> List[str]:
         """List providers that have credentials available in environment."""

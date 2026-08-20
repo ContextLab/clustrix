@@ -73,5 +73,13 @@ class TestValidationCredentials:
 
         assert ValidationCredentials().get_huggingface_credentials() is None
 
-    def test_ssh_credentials_unavailable(self):
-        assert ValidationCredentials().get_ssh_credentials() is None
+    def test_ssh_credentials_are_not_offered_here(self):
+        """The method is gone, not returning ``None``.
+
+        Rewritten rather than deleted: the old assertion locked in a method
+        that could only ever return ``None``, which reads to the next caller
+        as "SSH is supported here and you have none configured". SSH
+        credentials come from ``clustrix.credential_manager``; this class
+        only ever answered for HuggingFace.
+        """
+        assert not hasattr(ValidationCredentials(), "get_ssh_credentials")

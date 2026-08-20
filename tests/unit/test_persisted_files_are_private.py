@@ -196,6 +196,44 @@ def _exercise_credential_writers(home):
     )
 
 
+def _exercise_notebook_widgets(home):
+    """The "Save configuration" button of both notebook widgets.
+
+    Included because a widget save is a mutator, not an export: it fires
+    from ordinary editing rather than from anyone asking to persist a
+    secret, and one file holds every configuration in the dropdown, so a
+    single wide file is N credentials at once. It used to be a plain
+    ``open(path, "w")`` under ``mkdir(exist_ok=True)``, which left
+    ``~/.clustrix`` at 0755 and the file at 0644 with the password in it.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.modern_notebook_widget import ModernClustrixWidget
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    legacy = EnhancedClusterConfigWidget()
+    legacy.config_name.value = "widget-saved"
+    legacy.cluster_type.value = "ssh"
+    legacy.host_field.value = "cluster.example.edu"
+    legacy.username_field.value = "researcher"
+    legacy.password_field.value = "<redacted>"
+    legacy.current_config_name = "widget-saved"
+    legacy.configs = {"widget-saved": legacy._save_config_from_widgets()}
+    legacy.save_filename_input.value = "widget-single.yml"
+    legacy._on_save_config(None)
+
+    # The other branch: more than one configuration goes into one file, and
+    # a HuggingFace token is a credential the SSH branch never produces.
+    legacy.cluster_type.value = "huggingface"
+    legacy.hf_token_field.value = "<redacted>"
+    legacy.configs["widget-hf"] = legacy._save_config_from_widgets()
+    legacy.save_filename_input.value = "widget-many.yml"
+    legacy._on_save_config(None)
+
+    modern = ModernClustrixWidget()
+    modern.widgets["config_filename"].value = "widget-profiles.yml"
+    modern._on_save_config(None)
+
+
 def _exercise_ssh_writers(home):
     """The local files the SSH setup flow creates."""
     update_ssh_config("cluster.example.edu", "researcher", "/keys/id_ed25519", "demo")
@@ -207,6 +245,7 @@ EXERCISES = {
     "config saves": _exercise_config_saves,
     "profile manager": _exercise_profile_manager,
     "credential writers": _exercise_credential_writers,
+    "notebook widgets": _exercise_notebook_widgets,
     "ssh writers": _exercise_ssh_writers,
 }
 
@@ -266,7 +305,18 @@ def test_the_walk_actually_inspects_a_realistic_number_of_files(
     assert len(written) >= 10, f"only {len(written)} files written: {written}"
 
     names = {p.name for p in written}
-    assert {"profiles.yml", "clustrix.yml", ".env", "config"} <= names, sorted(names)
+    expected = {
+        "profiles.yml",
+        "clustrix.yml",
+        ".env",
+        "config",
+        # The widget handlers catch and print their own exceptions, so an
+        # exercise that stopped writing would otherwise go unnoticed.
+        "widget-single.yml",
+        "widget-many.yml",
+        "widget-profiles.yml",
+    }
+    assert expected <= names, sorted(names)
 
 
 @pytest.mark.parametrize("mode", [0o644, 0o604, 0o640, 0o666, 0o777])
