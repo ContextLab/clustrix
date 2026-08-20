@@ -725,15 +725,36 @@ class TestResultCombination:
         assert combined is None
 
     def test_combine_local_results_single(self):
-        """Test combining single local result."""
+        """A lone chunk's answer is handed back unwrapped, whatever its type.
+
+        The list payload alone cannot see the branch it is meant to cover:
+        ``[[1, 2, 3]]`` comes back as ``[1, 2, 3]`` from the concatenating
+        branch too, so deleting ``if len(results) == 1: return results[0]``
+        leaves this half of the test green. The non-list payloads are what
+        make the branch visible -- without it a caller whose function returns a
+        dict gets ``[{...}]``.
+
+        Nothing on the decorator's own path reaches here with one result: work
+        chunks are only built for loops of three iterations or more, and
+        ``chunk_size = max(1, len(loop_range) // (workers * 2))`` cuts any such
+        loop into at least two pieces. The branch is the contract this helper
+        offers its caller, and the shape it returns is user-visible the moment
+        the chunker's arithmetic changes, so it is pinned here rather than
+        left to be rediscovered. What that shape *should* be is issue #170.
+        """
         from clustrix.decorator import _combine_local_results
 
-        results = [[1, 2, 3]]
         loop_info = {"variable": "i"}
 
-        combined = _combine_local_results(results, loop_info)
+        assert _combine_local_results([[1, 2, 3]], loop_info) == [1, 2, 3]
 
-        assert combined == [1, 2, 3]
+        for payload in ({"total": 6}, 42, (1, 2), "done"):
+            combined = _combine_local_results([payload], loop_info)
+            assert combined == payload and type(combined) is type(payload), (
+                f"a single chunk answering {payload!r} came back as "
+                f"{combined!r}: the lone result is returned as it is, not "
+                "wrapped in a list"
+            )
 
     def test_combine_local_results_multiple_lists(self):
         """Test combining multiple list results."""

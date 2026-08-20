@@ -333,8 +333,64 @@ This is the trap most likely to produce a wrong answer rather than an error.
 * otherwise -> **the list of per-chunk results**
 
 So a function that returns a scalar returns a *list of scalars* when it is
-parallelized, and the length of that list depends on ``os.cpu_count()`` on the
-machine that ran it.
+parallelized, and the length of that list is the number of chunks the work was
+cut into: two per worker, and the worker count is the ``cores`` you asked for.
+
+The "exactly one chunk" line is the helper's contract rather than something
+you can provoke today: work is only split when the loop runs at least three
+times, and ``chunk_size = max(1, len(loop_range) // (workers * 2))`` cuts any
+such loop into at least two pieces. Nothing on the decorator's path currently
+reaches that branch.
+
+Two consequences catch people out, and neither is a difference between a
+parallel run and a sequential one -- they are differences *between parallel
+runs*.
+
+**Changing ``cores`` alone changes the answer.** The chunk count follows the
+pool size, so the same call cut a different number of ways returns a different
+list:
+
+.. code-block:: python
+
+   import clustrix
+
+   clustrix.configure(cluster_type="local", cluster_host=None)
+
+   def partial_sum(n, _parallel_i=None):
+       indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
+       marker = 0
+       for i in range(n):
+           marker = i * i
+       del marker
+       return sum(indices)
+
+.. code-block:: text
+
+   partial_sum(8)                                     -> 28
+   @cluster(parallel=True, cores=1) partial_sum(8)    -> [6, 22]
+   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
+   @cluster(parallel=True, cores=4) partial_sum(8)    -> [0, 1, 2, 3, 4, 5, 6, 7]
+
+Three pool sizes, three answers, none of them 28. For a callee that returns a
+**list** the concatenation makes the parallel answer match the sequential one,
+so this only bites scalar-returning callees -- but there it bites hard, because
+nothing raises.
+
+**A short loop changes the return type.** A loop of fewer than three
+iterations is not considered worth splitting, so the same decorated function
+returns the scalar its body returns:
+
+.. code-block:: text
+
+   @cluster(parallel=True, cores=2) partial_sum(2)    -> 1     (an int)
+   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
+
+A caller who tested with a short input and shipped with a long one gets a list
+where they tested an int. Whether any of this is the right behaviour is an open
+design question -- see `issue #170
+<https://github.com/ContextLab/clustrix/issues/170>`_ -- but it is the current
+behaviour, and it is pinned by
+``tests/unit/test_local_cores.py::test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is``.
 
 .. code-block:: python
 
@@ -368,11 +424,12 @@ Called from another module, so that ``inspect.getsource`` can see it:
    print("sequential ->", type(sequential).__name__, repr(sequential))
    assert isinstance(sequential, int)
 
-On a 12-core machine that prints:
+With ``cores=4`` that prints a list of eight -- two chunks per worker -- and
+the scalar:
 
 .. code-block:: text
 
-   parallel   -> list [999, 999, 999, 999, 999, 999, 999, 999, 999, 999, 999, 999,
+   parallel   -> list [999, 999, 999, 999, 999, 999, 999, 999]
    sequential -> int 999
 
 Note also that the function above *accepts* ``_parallel_i`` and then ignores

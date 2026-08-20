@@ -112,6 +112,23 @@ def indices_of_slice(n, _parallel_i=None):
     return list(indices)
 
 
+def countdown_of_slice(n, _parallel_i=None):
+    """Like ``indices_of_slice``, but its natural answer is not already sorted.
+
+    ``indices_of_slice`` answers ``[0, 1, 2, ...]``, which is its own sorted
+    order, so a combiner that returned ``sorted(combined)`` would agree with it
+    on every input and go unnoticed. Counting down means sorted order and
+    produced order are different sequences, and only one of them is the answer
+    the undecorated call gives.
+    """
+    indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
+    marker = 0
+    for i in range(n):
+        marker = i * i
+    del marker
+    return [n - 1 - j for j in indices]
+
+
 def pid_of_whole_call(n):
     """Take no chunk keyword, so this can only ever run as one unit of work."""
     marker = 0
@@ -287,10 +304,10 @@ def test_the_call_site_hands_the_pool_size_to_the_chunker(cores, machine_with_tw
     result = cluster(parallel=True, cores=cores)(pids_of_slice)(N)
     assert isinstance(result, list), f"expected per-chunk results, got {result!r}"
 
-    assert len(result) >= 2 * cores, (
+    assert len(result) == 2 * cores, (
         f"cores={cores} sized a {cores}-worker pool and the work was cut into "
         f"{len(result)} chunk(s) on a machine reporting "
-        f"{os.cpu_count()} CPUs -- the pool size did not reach the chunker"
+        f"{os.cpu_count()} CPUs -- expected exactly {2 * cores}"
     )
 
     # Splitting further must not lose, duplicate or corrupt the work.
@@ -326,10 +343,10 @@ def test_a_configured_default_cores_sizes_the_chunks_too(machine_with_two_cpus):
     result = cluster(pids_of_slice)(N)
     assert isinstance(result, list), f"expected per-chunk results, got {result!r}"
 
-    assert len(result) >= 2 * 16, (
+    assert len(result) == 2 * 16, (
         f"configure(default_cores=16) cut {N} iterations into {len(result)} "
-        f"chunk(s) on a machine reporting {os.cpu_count()} CPUs -- the "
-        "configured default did not reach the pool"
+        f"chunk(s) on a machine reporting {os.cpu_count()} CPUs -- expected "
+        f"exactly {2 * 16}, two per configured worker"
     )
 
     indices = sorted(j for chunk in result for j, _ in chunk["pids"])
@@ -379,16 +396,116 @@ def test_a_parallel_run_returns_its_results_in_order():
     correctness defect, so the decorated and undecorated results are compared
     as sequences, at two pool sizes so the comparison is not accidentally
     reading a single chunk.
-    """
-    sequential = indices_of_slice(N)
-    assert sequential == list(range(N))
 
-    for cores in (2, 4):
-        parallel = cluster(parallel=True, cores=cores)(indices_of_slice)(N)
-        assert parallel == sequential, (
-            f"cores={cores} returned the work in a different order from the "
-            "undecorated call"
+    Reversal is not the only way to lose the order, and the obvious other way
+    hid here for a while: a combiner ending in ``sorted(combined)`` reads like
+    a determinism fix -- results do arrive from a pool in completion order --
+    and ``indices_of_slice`` cannot see it, because ``[0, 1, 2, ...]`` is its
+    own sorted order. ``countdown_of_slice`` is the same shape of function with
+    a descending answer, so sorted order and produced order are different
+    sequences and only the produced one matches the undecorated call. Sorting
+    is not a fix in any case: order comes from the chunk list, which is built
+    in range order, and ``execute_parallel`` already returns per chunk.
+    """
+    for func, expected in (
+        (indices_of_slice, list(range(N))),
+        (countdown_of_slice, list(range(N - 1, -1, -1))),
+    ):
+        sequential = func(N)
+        assert sequential == expected, f"{func.__name__} answers {sequential!r}"
+
+        for cores in (2, 4):
+            parallel = cluster(parallel=True, cores=cores)(func)(N)
+            assert parallel == sequential, (
+                f"{func.__name__} at cores={cores} returned the work in a "
+                "different order from the undecorated call"
+            )
+
+
+def sum_of_slice(n, _parallel_i=None):
+    """A scalar-returning callee: whole, it answers ``sum(range(n))``.
+
+    Handed a slice it answers the sum *of that slice*, which is a partial
+    answer and not a smaller version of the whole one. That is the difference
+    between this and ``indices_of_slice``, and it is the difference that makes
+    the combined shape visible -- see
+    ``test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is``.
+    """
+    indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
+    marker = 0
+    for i in range(n):
+        marker = i * i
+    del marker
+    return sum(indices)
+
+
+def test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is(
+    machine_with_two_cpus,
+):
+    """Pinning a live hazard exactly as it behaves, not as it ought to.
+
+    ``_combine_local_results`` concatenates when every chunk answered with a
+    list and otherwise hands back the list of per-chunk answers. For a callee
+    whose answer is a list, that makes a parallel run match a sequential one.
+    For a callee whose answer is a scalar it cannot: each chunk answers about
+    its own slice, and there is no way to add them up without knowing what the
+    caller meant by the loop.
+
+    So two things vary that a caller would not expect to vary, and both are
+    asserted here as facts about today's behaviour:
+
+    * **``cores`` changes the answer.** The same call at three pool sizes comes
+      back as three different lists, because the pool size sets the chunk count
+      and the chunk count sets how the partial sums are cut. None of the three
+      is the undecorated answer.
+    * **The loop's length changes the *type*.** A range shorter than three
+      iterations is not parallelized at all -- ``LoopInfo`` requires three
+      before it considers the work worth splitting -- so the caller gets the
+      scalar the undecorated function returns. One more iteration and the same
+      decorated function returns a list.
+
+    This test is deliberately not a fix. Changing what comes back is a
+    breaking change to user-visible behaviour and belongs in its own release
+    note; issue #170 carries the design question of what ``parallel=True``
+    should promise a scalar-returning callee. What must not happen in the
+    meantime is the shape changing again by accident, so the numbers below are
+    exact. They are machine-independent: ``LocalExecutor`` takes the worker
+    count it is given, and the machine is pinned to two CPUs to prove the
+    counts are not coming from it.
+    """
+    assert sum_of_slice(8) == 28, "the undecorated answer, for reference"
+
+    # Below the three-iteration threshold: no loop is split, so the caller
+    # gets the scalar back whatever they asked for.
+    for cores in (1, 2, 4):
+        short = cluster(parallel=True, cores=cores)(sum_of_slice)(2)
+        assert short == 1 and isinstance(short, int), (
+            f"a 2-iteration loop at cores={cores} came back as {short!r}: "
+            "too short to split, so this is the sequential answer"
         )
+
+    # Long enough to split: a list of partial sums, cut differently at every
+    # pool size, and equal to the sequential answer at none of them.
+    expected = {
+        1: [6, 22],  # two chunks of four
+        2: [1, 5, 9, 13],  # four chunks of two
+        4: [0, 1, 2, 3, 4, 5, 6, 7],  # eight chunks of one
+    }
+    for cores, answer in expected.items():
+        got = cluster(parallel=True, cores=cores)(sum_of_slice)(8)
+        assert got == answer, (
+            f"cores={cores} on an 8-iteration loop answered {got!r}, not "
+            f"{answer!r}: the partial sums are cut two per worker"
+        )
+        assert got != sum_of_slice(8), (
+            "a parallel run of a scalar-returning callee does not reproduce "
+            "the sequential answer, and pretending otherwise here would hide "
+            "that from the next reader"
+        )
+
+    assert len({tuple(v) for v in expected.values()}) == 3, (
+        "the whole point: three pool sizes, three different answers to the " "same call"
+    )
 
 
 def test_the_chunk_count_moves_with_cores_on_a_fixed_machine(machine_with_two_cpus):
@@ -423,6 +540,17 @@ def test_a_worker_is_offered_more_than_one_chunk():
     several pool sizes and with a range long enough for the division to have
     room.
 
+    The count is asserted **exactly**, and that was a deliberate change from
+    "at least two each". Two per worker is not a floor the chunker is free to
+    exceed: over-chunking is not free either, because every extra chunk is a
+    pickle of the arguments, a queue round trip and a result to reassemble, and
+    a chunker that answered ``workers * 4`` -- half the slice size, twice the
+    dispatch -- passed the lower-bound form of this assertion while quietly
+    doubling the overhead the factor of two was chosen to trade against. ``N``
+    is a multiple of ``2 * workers`` at every size listed, so the arithmetic is
+    exact and the equality is a statement about the rule rather than about the
+    rounding.
+
     ``workers=1`` is in the list deliberately, and it was a judgement call.
     "One worker, one chunk, no rebalancing possible" is a defensible reading,
     and a special case returning a single chunk there survived the rest of this
@@ -440,10 +568,11 @@ def test_a_worker_is_offered_more_than_one_chunk():
 
     for workers in (1, 2, 4, 8, 16):
         chunks = _create_local_work_chunks(pids_of_slice, (N,), {}, loops[0], workers)
-        assert len(chunks) >= 2 * workers, (
+        assert len(chunks) == 2 * workers, (
             f"a {workers}-worker pool was offered {len(chunks)} chunk(s) of "
-            f"{N} iterations: with fewer than two each, a worker that draws a "
-            "slow chunk cannot be relieved by its idle siblings"
+            f"{N} iterations, not {2 * workers}: with fewer than two each, a "
+            "worker that draws a slow chunk cannot be relieved by its idle "
+            "siblings; with more, the extra dispatches are pure overhead"
         )
 
 
@@ -669,7 +798,8 @@ def test_a_different_decline_reason_is_reported_again(caplog):
     assert sum("no parallelizable loop was found" in m for m in said) == 1, said
 
 
-def test_a_warning_nobody_could_hear_does_not_spend_the_budget(caplog):
+@pytest.mark.parametrize("silenced_at", [logging.ERROR, logging.CRITICAL])
+def test_a_warning_nobody_could_hear_does_not_spend_the_budget(silenced_at, caplog):
     """The one message is spent on delivery, not on the attempt.
 
     The throttle is right -- a warning repeated on every iteration is a warning
@@ -679,13 +809,22 @@ def test_a_warning_nobody_could_hear_does_not_spend_the_budget(caplog):
     ``logging.basicConfig()``, therefore spent the single message on a record
     that went nowhere, and every later call was silent: zero warnings
     delivered. That is #152's own silence, rebuilt inside the fix for it.
+
+    Both levels above ``WARNING`` are exercised, and that is the point of the
+    parametrisation rather than tidiness. Asking the gate about ``ERROR``
+    instead of ``WARNING`` -- an easy slip, since the two read alike -- is
+    invisible at ``CRITICAL``, where both answers are "off". At ``ERROR`` they
+    part company: the real question answers "nobody can hear this", the wrong
+    one answers "somebody can", and the budget is spent on a record that went
+    nowhere. The level the gate asks about must be the level the message is
+    logged at, and only the notch immediately above it can show that.
     """
     decorator_logger = logging.getLogger("clustrix.decorator")
     saved = decorator_logger.level
     said_once = cluster(cores=8)(pid_of_whole_call)
 
     try:
-        decorator_logger.setLevel(logging.CRITICAL)
+        decorator_logger.setLevel(silenced_at)
         for _ in range(50):
             assert said_once(N)["pid"] == os.getpid()
         heard = [m for m in warnings_from(caplog) if "cores=8" in m]
@@ -701,6 +840,53 @@ def test_a_warning_nobody_could_hear_does_not_spend_the_budget(caplog):
     assert len(said) == 1, (
         "the caller turned warnings on and was told exactly once; got "
         f"{len(said)}: {said}"
+    )
+
+
+def test_a_null_handler_does_not_spend_the_budget_either(caplog):
+    """The level was never the whole question: a handler has to want it too.
+
+    ``logging.getLogger("clustrix").addHandler(logging.NullHandler())`` is the
+    documented way to keep a library quiet, and under it ``isEnabledFor`` still
+    answers True -- the level is untouched. What changes is delivery:
+    ``Logger.callHandlers`` finds the null handler, does nothing with the
+    record, and *because it found a handler* declines to fall back to
+    ``logging.lastResort``. Zero warnings are emitted, and a gate that asked
+    only about the level would have marked the reason as reported. The caller
+    who later wires up a real handler -- which is the whole reason to start
+    with a null one -- then hears nothing, ever.
+
+    The root handlers are lifted for the silent phase because pytest installs
+    its own there, and leaving them would mean the record *was* delivered,
+    which is a different situation from the one under test.
+    """
+    decorator_logger = logging.getLogger("clustrix.decorator")
+    null_handler = logging.NullHandler()
+    saved_root = logging.root.handlers[:]
+    said_once = cluster(cores=8)(pid_of_whole_call)
+
+    decorator_logger.addHandler(null_handler)
+    try:
+        logging.root.handlers = []
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+    finally:
+        logging.root.handlers = saved_root
+        decorator_logger.removeHandler(null_handler)
+
+    assert not [m for m in warnings_from(caplog) if "cores=8" in m], (
+        "a NullHandler was the only handler in the chain, so nothing was "
+        "emitted; caplog should not have seen anything either"
+    )
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "the caller replaced the NullHandler with one that emits and was told "
+        f"exactly once; got {len(said)}: {said}"
     )
 
 

@@ -75,6 +75,10 @@ setup(
             # psutil in the function it submits, and is not marked real_world;
             # nothing else here pulls psutil in. See pyproject.toml.
             "psutil>=5.8",
+            # test_notebook_magic_extended.py imports traitlets.config
+            # directly; it only arrives transitively via ipython. See
+            # pyproject.toml.
+            "traitlets>=5.0",
         ],
         "test": [
             "pytest>=6.0",

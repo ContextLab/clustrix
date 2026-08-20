@@ -97,6 +97,11 @@ dev = [
     # could not pass the suite; it only ever passed where a developer happened
     # to have psutil already. Several tests/real_world modules import it too.
     "psutil>=5.8",
+    # tests/test_notebook_magic_extended.py imports traitlets.config directly.
+    # It arrives transitively with ipython today, which makes it a dependency
+    # this suite has without declaring; a direct import gets a direct
+    # declaration, exactly as psutil above.
+    "traitlets>=5.0",
 ]
 test = [
     "pytest>=6.0",

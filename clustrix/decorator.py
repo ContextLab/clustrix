@@ -523,6 +523,48 @@ def _requested_cores(
     return None
 
 
+def _warning_reaches_someone() -> bool:
+    """Whether a ``logger.warning`` issued right now would actually be emitted.
+
+    ``isEnabledFor`` is only half the question. The other half is whether any
+    handler will do anything with the record, and the standard library's own
+    idiom for a quiet library makes the two answers disagree: with
+    ``logging.getLogger("clustrix").addHandler(logging.NullHandler())`` and no
+    handler configured above it, the level test passes, ``callHandlers`` finds
+    the null handler, and *because it found one* it does not fall back to
+    ``logging.lastResort``. Nothing is emitted. Spending the one-per-reason
+    budget there rebuilds exactly the silence the budget was added to prevent
+    (#152): zero warnings delivered, and then permanent silence once the caller
+    wires up a handler that would have shown them.
+
+    This walks the chain ``Logger.callHandlers`` walks and asks the same
+    questions of it, so the two cannot disagree.
+    """
+    if not logger.isEnabledFor(logging.WARNING):
+        return False
+
+    current: Optional[logging.Logger] = logger
+    found_a_handler = False
+    while current is not None:
+        for handler in current.handlers:
+            found_a_handler = True
+            if handler.level <= logging.WARNING and not isinstance(
+                handler, logging.NullHandler
+            ):
+                return True
+        if not current.propagate:
+            break
+        current = current.parent
+
+    if found_a_handler:
+        # Handlers exist, none of them will emit this, and their existence is
+        # what stops ``lastResort`` from stepping in.
+        return False
+
+    last_resort = logging.lastResort
+    return last_resort is not None and last_resort.level <= logging.WARNING
+
+
 def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     """Say out loud that a requested worker count is being discarded.
 
@@ -549,15 +591,24 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     warnings on burned the single message on a record nothing was listening
     for, and the fifty calls after ``logging.basicConfig()`` were then silent:
     zero warnings delivered, which is #152's silence rebuilt by the fix for it.
-    ``isEnabledFor`` is the same question the ``logger.warning`` below asks, so
-    the two cannot disagree.
+    ``_warning_reaches_someone`` asks the whole of that question -- see there
+    for why the level test alone is only half of it.
+
+    The set of keys is not bounded, and deliberately. A key is a pair of short
+    strings, and a new one only appears when the caller changes what they asked
+    for between calls; the pathological case is a loop that calls
+    ``configure(default_cores=k)`` with a fresh ``k`` every iteration, which
+    retains one small tuple per distinct ``k``. Capping it would mean either
+    dropping keys -- and a dropped key speaks again, which is the repetition
+    the throttle exists to stop -- or refusing to report a genuinely new
+    request. Neither trade is worth a few hundred bytes.
     """
     if request is None or request.value <= 1:
         return
     key = (request.where, because)
     if key in request.reported:
         return
-    if logger.isEnabledFor(logging.WARNING):
+    if _warning_reaches_someone():
         request.reported.add(key)
     logger.warning(
         "%s has no effect here: %s. Locally, cores bounds the worker pool only "
