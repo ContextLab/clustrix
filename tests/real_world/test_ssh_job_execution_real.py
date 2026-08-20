@@ -15,6 +15,7 @@ from typing import List, Dict, Any
 from clustrix import cluster, configure
 from clustrix.config import ClusterConfig
 from tests.real_world import TempResourceManager, credentials, test_manager
+from tests.real_world.credential_manager import credential_setup_hint
 
 
 class TestRealSSHJobExecution:
@@ -25,7 +26,7 @@ class TestRealSSHJobExecution:
         """Get SSH configuration for testing."""
         ssh_creds = credentials.get_ssh_credentials()
         if not ssh_creds:
-            pytest.skip("No SSH credentials available for testing")
+            pytest.skip(f"No SSH credentials configured. {credential_setup_hint()}")
 
         # Configure clustrix for SSH-based execution
         configure(

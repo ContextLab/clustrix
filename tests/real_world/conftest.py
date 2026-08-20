@@ -15,6 +15,7 @@ from tests.real_world import RealWorldTestManager, TestCredentials, TempResource
 from tests.real_world.credential_manager import (
     HOST_ENV_VARS,
     configured_test_hosts,
+    credential_setup_hint,
 )
 
 # Create global test manager instance
@@ -122,7 +123,10 @@ def ssh_credentials(test_credentials):
     """SSH credentials for testing."""
     creds = test_credentials.get_ssh_credentials()
     if not creds:
-        pytest.skip("SSH credentials not available")
+        # This gate could not fire until the localhost/$USER default was
+        # removed from get_ssh_credentials(): the tests below used to run
+        # against the developer's own machine instead of skipping.
+        pytest.skip(f"No SSH credentials configured. {credential_setup_hint()}")
     return creds
 
 
@@ -149,7 +153,7 @@ def gpu_cluster_credentials(test_credentials, require_cluster_network):
     """SSH-GPU cluster credentials (requires the cluster network)."""
     creds = test_credentials.get_gpu_cluster_credentials()
     if not creds:
-        pytest.skip("SSH-GPU cluster credentials not available")
+        pytest.skip(f"No SSH-GPU cluster credentials. {credential_setup_hint()}")
     return creds
 
 
@@ -158,7 +162,7 @@ def slurm_cluster_credentials(test_credentials, require_cluster_network):
     """SSH-SLURM cluster credentials (requires the cluster network)."""
     creds = test_credentials.get_slurm_cluster_credentials()
     if not creds:
-        pytest.skip("SSH-SLURM cluster credentials not available")
+        pytest.skip(f"No SSH-SLURM cluster credentials. {credential_setup_hint()}")
     return creds
 
 

@@ -16,7 +16,7 @@ grow a third credential path: add sources to
 
 import os
 import logging
-from typing import Dict, Optional, Any
+from typing import Dict, Optional
 from pathlib import Path
 
 # Only used by the require_* helpers below, which skip rather than fail when a
@@ -27,6 +27,7 @@ import pytest
 # The supported credential path. Guarded so that this module still imports
 # when clustrix itself cannot be; HAS_SECURE_CREDENTIALS gates every use.
 try:
+    from clustrix.config import get_config_dir
     from clustrix.credential_manager import (
         ensure_credential as _clustrix_ensure_credential,
     )
@@ -59,10 +60,7 @@ logger = logging.getLogger(__name__)
 #: variables points the whole repository at one developer's clusters.
 #:
 #: Deliberately NOT falling back to the older bare TEST_SSH_HOST /
-#: TEST_SSH_USERNAME names: `setup_environment_variables()` writes those on
-#: import, defaulting the host to "localhost". Reading them here would make
-#: `configured_test_hosts()` always report a resolvable host, and every
-#: network gate below would open on a machine with no cluster access at all.
+#: TEST_SSH_USERNAME names, which name a single SSH target rather than a role.
 #: Those names still work where they always did, in get_ssh_credentials().
 HOST_ENV_VARS = {
     "ssh": ("CLUSTRIX_TEST_SSH_HOST",),
@@ -164,27 +162,75 @@ CREDENTIAL_SETUP_HINT = (
 )
 
 
-def _clustrix_ssh_credentials() -> Dict[str, str]:
-    """SSH credentials from ~/.clustrix/.env or the environment.
+def env_file_path() -> Optional[Path]:
+    """Path of the credential file clustrix reads, or None if it cannot say.
+
+    The location follows CLUSTRIX_CONFIG_DIR, so this asks clustrix rather
+    than rebuilding `~/.clustrix/.env` here.
+    """
+    if not HAS_SECURE_CREDENTIALS:
+        return None
+    try:
+        return get_config_dir() / ".env"
+    except Exception as e:  # pragma: no cover - Path.home() with no home dir
+        logger.debug(f"could not locate the clustrix config directory: {e}")
+        return None
+
+
+def unreadable_env_file() -> Optional[Path]:
+    """The credential file that exists but cannot be read, if that is the case.
+
+    `chmod 000 ~/.clustrix/.env` used to be indistinguishable from having no
+    .env at all: the read fails inside clustrix, is logged at debug level, and
+    every skip reason then says "no credentials configured" -- sending the
+    developer off to re-enter credentials that are already on disk.
+    """
+    path = env_file_path()
+    if path is None:
+        return None
+    try:
+        if path.is_file() and not os.access(path, os.R_OK):
+            return path
+    except OSError as e:  # pragma: no cover - unreadable parent directory
+        logger.debug(f"could not stat {path}: {e}")
+    return None
+
+
+def credential_setup_hint() -> str:
+    """What to tell the developer about credentials, given this machine.
+
+    Same text as :data:`CREDENTIAL_SETUP_HINT` unless the .env file is present
+    and unreadable, which is a different problem with a different fix.
+    """
+    unreadable = unreadable_env_file()
+    if unreadable is not None:
+        return (
+            f"{unreadable} exists but cannot be read (permission denied), so "
+            f"the credentials in it were not loaded: run `chmod 600 "
+            f"{unreadable}` to fix it"
+        )
+    return CREDENTIAL_SETUP_HINT
+
+
+def _clustrix_credentials(provider: str) -> Dict[str, str]:
+    """Credentials for `provider` from ~/.clustrix/.env or the environment.
 
     This is the only supported source; an empty dict means "none configured",
     never "substitute something plausible".
 
-    The environment is snapshotted and restored around the lookup. Reading the
-    .env file goes through `load_dotenv`, which *exports* every variable in it
-    -- so without this, importing this module (conftest does, for the whole
-    `pytest tests/` run) published the developer's real AWS, GCP and HF
-    credentials into every unrelated test's environment. Two credential-source
-    tests failed because of it, which is how it was caught; the values we
-    actually need come back in the return value, not in os.environ.
+    The environment is snapshotted and restored around the lookup: a
+    credential belongs to the caller that asked for it, never to os.environ.
+    The lookup itself no longer exports anything, but this module is the
+    place a re-introduced export would do the most damage, so the guard
+    stays -- and it is cheap.
     """
     if not HAS_SECURE_CREDENTIALS:
         return {}
     environment = dict(os.environ)
     try:
-        return _clustrix_ensure_credential("ssh") or {}
+        return _clustrix_ensure_credential(provider) or {}
     except Exception as e:  # a broken .env must not abort collection
-        logger.debug(f"clustrix ssh credential lookup failed: {e}")
+        logger.warning(f"clustrix {provider} credential lookup failed: {e}")
         return {}
     finally:
         os.environ.clear()
@@ -197,6 +243,28 @@ def _nonempty(value: Optional[str]) -> Optional[str]:
         return None
     value = value.strip()
     return value or None
+
+
+def _usable_key_path(value: Optional[str]) -> Optional[str]:
+    """`value` if it names a key file that exists, else None.
+
+    A SSH_PRIVATE_KEY_PATH pointing at a file that is not there is not a
+    credential: paramiko raises on open, several seconds into a connection,
+    and the failure reads like a cluster problem. Treat it as missing so the
+    caller skips with the setup hint instead.
+    """
+    path = _nonempty(value)
+    if path is None:
+        return None
+    expanded = Path(path).expanduser()
+    if not expanded.is_file():
+        logger.warning(
+            "ignoring SSH private key %s: no such file (set SSH_PRIVATE_KEY_PATH "
+            "to a key that exists, or use a password)",
+            path,
+        )
+        return None
+    return str(expanded)
 
 
 def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
@@ -217,7 +285,7 @@ def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
     failure several seconds later, which reads like a broken cluster rather
     than an unconfigured laptop.
     """
-    ssh = _clustrix_ssh_credentials()
+    ssh = _clustrix_credentials("ssh")
 
     host = get_test_host(role) or _nonempty(ssh.get("host"))
     username = (
@@ -228,7 +296,7 @@ def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
     password = _nonempty(ssh.get("password")) or _nonempty(
         os.environ.get("CLUSTRIX_PASSWORD")
     )
-    private_key_path = _nonempty(ssh.get("private_key_path"))
+    private_key_path = _usable_key_path(ssh.get("private_key_path"))
 
     if not host or not username or not (password or private_key_path):
         return None
@@ -253,7 +321,7 @@ def require_cluster_credentials(role: str) -> Dict[str, str]:
     credentials = get_cluster_credentials(role)
     if not credentials:
         pytest.skip(
-            f"No credentials for the {role} test cluster. {CREDENTIAL_SETUP_HINT}"
+            f"No credentials for the {role} test cluster. {credential_setup_hint()}"
         )
     return credentials
 
@@ -273,16 +341,16 @@ class RealWorldCredentialManager:
             except Exception as e:
                 logger.debug(f"Failed to initialize validation credentials: {e}")
 
-    def is_1password_available(self) -> bool:
-        """Always False: 1Password was removed from clustrix in issue #97.
-
-        Retained only because `scripts/run_real_world_tests.py` still prints
-        it, and that file is outside this package; delete both together.
-        """
-        return False
-
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH credentials from available sources."""
+        """Get SSH credentials, or None when no SSH target is configured.
+
+        None means "nothing configured". It used to mean nothing at all: the
+        fallback below defaulted the host to "localhost" and the account to
+        $USER, so this returned a truthy dictionary on a machine with no test
+        cluster whatsoever. Every `if not ssh_creds: pytest.skip(...)` gate
+        was therefore dead, and the tests behind them pointed clustrix at the
+        developer's own laptop over SSH instead of skipping.
+        """
         # ~/.clustrix/.env and the environment, via clustrix itself.
         configured = get_cluster_credentials("ssh")
         if configured:
@@ -292,19 +360,23 @@ class RealWorldCredentialManager:
         # reads CLUSTRIX_USERNAME / CLUSTRIX_PASSWORD alongside the .env file,
         # so a branch here could never be reached.
 
-        # Fall back to environment variables
-        host = os.getenv("TEST_SSH_HOST", "localhost")
-        username = os.getenv("TEST_SSH_USERNAME", os.getenv("USER"))
-        password = os.getenv("TEST_SSH_PASSWORD")
-        private_key_path = os.getenv("TEST_SSH_PRIVATE_KEY_PATH")
-        port = os.getenv("TEST_SSH_PORT", "22")
+        # Explicitly exported TEST_SSH_* variables, for a target that is not
+        # in the .env file. All three parts must be present: a host with no
+        # secret only produces an authentication failure later on.
+        host = _nonempty(os.getenv("TEST_SSH_HOST"))
+        username = _nonempty(os.getenv("TEST_SSH_USERNAME"))
+        password = _nonempty(os.getenv("TEST_SSH_PASSWORD"))
+        private_key_path = _usable_key_path(os.getenv("TEST_SSH_PRIVATE_KEY_PATH"))
+
+        if not host or not username or not (password or private_key_path):
+            return None
 
         return {
             "host": host,
             "username": username,
             "password": password,
             "private_key_path": private_key_path,
-            "port": port,
+            "port": os.getenv("TEST_SSH_PORT", "22"),
         }
 
     def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
@@ -323,12 +395,15 @@ class RealWorldCredentialManager:
 
         # No separate GitHub Actions branch; see get_ssh_credentials.
 
-        # Fall back to environment variables
-        host = os.getenv("TEST_SLURM_HOST", "localhost")
-        username = os.getenv("TEST_SLURM_USERNAME", os.getenv("USER"))
-        password = os.getenv("TEST_SLURM_PASSWORD")
+        # Explicitly exported TEST_SLURM_* variables. The host used to default
+        # to "localhost" and the account to $USER, which pointed the SLURM
+        # tests at the developer's own machine as soon as a password was
+        # readable from anywhere.
+        host = _nonempty(os.getenv("TEST_SLURM_HOST"))
+        username = _nonempty(os.getenv("TEST_SLURM_USERNAME"))
+        password = _nonempty(os.getenv("TEST_SLURM_PASSWORD"))
 
-        if username and password:
+        if host and username and password:
             return {
                 "host": host,
                 "username": username,
@@ -340,12 +415,19 @@ class RealWorldCredentialManager:
 
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
         """Get HuggingFace credentials from available sources."""
-        # Exported variables only, deliberately. Reading the token out of
-        # ~/.clustrix/.env here would be resolved at import time by
-        # setup_environment_variables() below, which exports what it finds --
-        # publishing a real HF token into every unrelated test's environment
-        # for the whole `pytest tests/` run. Tests that need the .env token
-        # ask clustrix for it directly instead.
+        # ~/.clustrix/.env and the environment, via clustrix itself. This used
+        # to read exported variables only, because the import-time export
+        # below would have republished a .env token into every unrelated
+        # test's environment; with that export gone, the token can be read
+        # where the setup instructions tell people to put it.
+        token = _nonempty(_clustrix_credentials("huggingface").get("token"))
+        if token:
+            return {
+                "token": token,
+                "username": _nonempty(os.environ.get("HUGGINGFACE_USERNAME"))
+                or _nonempty(os.environ.get("HF_USERNAME")),
+            }
+
         if self._validation_creds:
             try:
                 validation_creds = self._validation_creds.get_huggingface_credentials()
@@ -385,38 +467,7 @@ class RealWorldCredentialManager:
             print(f"  {service.upper()}: {icon}")
 
         if not all(status.values()):
-            print(f"  ℹ️  {CREDENTIAL_SETUP_HINT}")
-
-    def setup_environment_variables(self) -> None:
-        """Set up environment variables from available credentials."""
-        # Set SSH credentials
-        ssh_creds = self.get_ssh_credentials()
-        if ssh_creds:
-            if ssh_creds.get("host"):
-                os.environ["TEST_SSH_HOST"] = ssh_creds["host"]
-            if ssh_creds.get("username"):
-                os.environ["TEST_SSH_USERNAME"] = ssh_creds["username"]
-            if ssh_creds.get("password"):
-                os.environ["TEST_SSH_PASSWORD"] = ssh_creds["password"]
-            if ssh_creds.get("private_key_path"):
-                os.environ["TEST_SSH_PRIVATE_KEY_PATH"] = ssh_creds["private_key_path"]
-
-        # Set SLURM credentials
-        slurm_creds = self.get_slurm_credentials()
-        if slurm_creds:
-            os.environ["TEST_SLURM_HOST"] = slurm_creds["host"]
-            os.environ["TEST_SLURM_USERNAME"] = slurm_creds["username"]
-            if slurm_creds.get("password"):
-                os.environ["TEST_SLURM_PASSWORD"] = slurm_creds["password"]
-
-        # Set HuggingFace credentials
-        hf_creds = self.get_huggingface_credentials()
-        if hf_creds:
-            os.environ["HUGGINGFACE_TOKEN"] = hf_creds["token"]
-            os.environ["HF_TOKEN"] = hf_creds["token"]
-            if hf_creds.get("username"):
-                os.environ["HUGGINGFACE_USERNAME"] = hf_creds["username"]
-                os.environ["HF_USERNAME"] = hf_creds["username"]
+            print(f"  ℹ️  {credential_setup_hint()}")
 
 
 # Global credential manager instance
@@ -431,12 +482,6 @@ def get_credential_manager() -> RealWorldCredentialManager:
     return _credential_manager
 
 
-def setup_test_credentials() -> None:
-    """Set up test credentials from all available sources."""
-    manager = get_credential_manager()
-    manager.setup_environment_variables()
-
-
 def get_credential_status() -> Dict[str, bool]:
     """Get status of all credential types."""
     manager = get_credential_manager()
@@ -449,5 +494,17 @@ def print_credential_status() -> None:
     manager.print_credential_status()
 
 
-# Set up credentials when module is imported
-setup_test_credentials()
+# Importing this module deliberately has no effect on os.environ.
+#
+# There used to be a `setup_test_credentials()` call here, which resolved
+# every credential and exported the results as TEST_SSH_PASSWORD,
+# TEST_SLURM_PASSWORD, HUGGINGFACE_TOKEN and friends. Since #153 wired
+# ~/.clustrix/.env into that lookup, the exported values were the developer's
+# real cluster password -- published into the environment of the whole pytest
+# process and every subprocess it spawns, on an ordinary `pytest tests/` run
+# (tests/unit/test_cluster_network_detection.py imports this module).
+#
+# Nothing consumed those exports: the only readers of TEST_SSH_HOST treat it
+# as a variable the *developer* exported, and no reader of TEST_SSH_PASSWORD
+# exists at all. A credential is returned to the caller that asked for it;
+# tests/unit/test_real_world_credentials_are_not_exported.py holds that line.

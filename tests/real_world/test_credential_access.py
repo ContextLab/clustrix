@@ -23,6 +23,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from clustrix.credential_manager import (  # noqa: E402
     ensure_credential,
     get_credential_status,
+    parse_env_file,
 )
 from clustrix.secure_credentials import ValidationCredentials  # noqa: E402
 from tests.real_world.credential_manager import (  # noqa: E402
@@ -58,11 +59,15 @@ def test_huggingface_credentials_match_the_environment():
     print("\n🧪 Testing HuggingFace credential lookup")
     print("=" * 40)
 
-    # Read the environment *after* the lookup: resolving credentials loads
-    # ~/.clustrix/.env into os.environ, so a token that lives only in the file
-    # is invisible beforehand.
+    # Resolving a credential deliberately does NOT export it, so os.environ
+    # alone cannot say what is configured: a token that lives only in
+    # ~/.clustrix/.env is invisible there. Read the same two places clustrix
+    # reads, in the same precedence order (environment over file).
+    status = get_credential_status()
+    configured = {**parse_env_file(Path(status["env_file"])), **os.environ}
+    env_token = configured.get("HF_TOKEN") or configured.get("HUGGINGFACE_TOKEN")
+
     hf_creds = ensure_credential("huggingface")
-    env_token = os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN")
     validation_creds = ValidationCredentials().get_huggingface_credentials()
 
     if hf_creds and hf_creds.get("token"):
@@ -74,7 +79,7 @@ def test_huggingface_credentials_match_the_environment():
         print(f"   ✅ token resolved (length {len(hf_creds['token'])})")
     else:
         # No token configured: both paths must say so rather than substitute.
-        assert not env_token, "HF token is set but was not resolved"
+        assert not env_token, "HF token is configured but was not resolved"
         assert validation_creds is None
         print("   ❌ no HF token configured (HF_TOKEN / HUGGINGFACE_TOKEN unset)")
 
