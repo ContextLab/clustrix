@@ -44,18 +44,25 @@ import pytest
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
 from clustrix.auth_methods import stored_credential_is_for_config
-from clustrix.credential_release import CredentialRelease, CredentialTarget
+from clustrix.credential_release import (
+    CredentialRelease,
+    CredentialTarget,
+    derived_provenance,
+    release_credential,
+)
 from clustrix.config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
     CONFIG_SOURCE_RUNTIME,
     CONFIG_SOURCE_USER_CONFIG_DIR,
     CONFIG_SOURCE_WORKING_DIRECTORY,
+    TRUSTED_CONFIG_SOURCES,
     ClusterConfig,
     configure,
     get_config,
     get_config_dir,
     get_config_source,
     load_config,
+    record_discovered_hostname,
 )
 from clustrix.executor_connections import ConnectionManager
 from tests.ssh_server import LocalSSHServer
@@ -2068,20 +2075,73 @@ def test_a_target_cannot_name_nobody(nobody):
         CredentialTarget(
             hostname=nobody,
             username="victim",
-            provenance=CONFIG_SOURCE_RUNTIME,
             described_as="a test",
         )
 
 
-def test_a_target_must_name_a_provenance_that_exists():
-    """A typo may not invent a source that is neither trusted nor untrusted."""
-    with pytest.raises(ValueError):
-        CredentialTarget(
+def test_a_target_cannot_declare_its_own_provenance():
+    """The keyword is gone, so the forgery cannot even be written.
+
+    It could be, and it released: ``CredentialTarget(hostname=<anything>,
+    provenance="runtime", ...)`` was handed the secret because the rule that
+    needs provenance read it off the target and returned before consulting
+    the config. A gate that asks a question whose answer the caller supplies
+    is decoration, so provenance is derived and there is no parameter to
+    fill in.
+    """
+    with pytest.raises(TypeError):
+        CredentialTarget(  # type: ignore[call-arg]
             hostname="hpc.example.edu",
             username="victim",
-            provenance="totally-fine-honest",
+            provenance="runtime",
             described_as="a test",
         )
+
+
+def test_a_forged_provenance_cannot_outrank_the_config_that_was_also_passed(
+    env_file, attacker_server
+):
+    """The G1 finding, at the level the decision is actually made.
+
+    The hostname the auth chain connects to need not be
+    ``config.cluster_host`` -- ``CredentialTarget.for_config(config,
+    hostname=...)`` exists precisely for that -- and the provenance the
+    target used to carry was the *config's*, because
+    ``get_config_source`` only ever looks at ``config.cluster_host``. So a
+    trusted config plus an override naming a host a working-directory file
+    had already named released the password to that host. Provenance is now
+    derived about the host being connected to, from the process record that
+    no caller writes.
+    """
+    env_file(SSH_USERNAME="victim", SSH_PASSWORD=SENTINEL_PASSWORD)
+    record_discovered_hostname(attacker_server.host, CONFIG_SOURCE_WORKING_DIRECTORY)
+    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    assert get_config_source(config) in TRUSTED_CONFIG_SOURCES
+
+    target = CredentialTarget.for_config(config, hostname=attacker_server.host)
+    release = release_credential(target, provider="ssh", config=config)
+
+    assert release.refusal is not None
+    assert release.password is None
+    assert not attacker_server.authentications
+
+
+def test_fixed_service_may_only_name_a_service_compiled_into_clustrix():
+    """ "Compiled in" is a claim about *which* host, so it is checked.
+
+    A constructor that accepted any hostname while asserting that nothing
+    untrusted could have chosen it would be the declared-provenance defect
+    wearing a different hat.
+    """
+    with pytest.raises(ValueError):
+        CredentialTarget.fixed_service("attacker.example", why="a test")
+
+    assert (
+        CredentialTarget.fixed_service(
+            "huggingface.co", why="the HuggingFace Hub API"
+        ).hostname
+        == "huggingface.co"
+    )
 
 
 def test_a_target_may_name_no_username():
@@ -2089,7 +2149,6 @@ def test_a_target_may_name_no_username():
     target = CredentialTarget(
         hostname="hpc.example.edu",
         username="",
-        provenance=CONFIG_SOURCE_RUNTIME,
         described_as="a test",
     )
     assert target.username == ""
@@ -2099,7 +2158,6 @@ def _a_target():
     return CredentialTarget(
         hostname="hpc.example.edu",
         username="victim",
-        provenance=CONFIG_SOURCE_RUNTIME,
         described_as="a test",
     )
 
@@ -2142,14 +2200,14 @@ def test_a_release_is_truthy_exactly_when_it_carries_a_secret():
     assert not CredentialRelease(target=_a_target(), refusal="not for you")
 
 
-def test_a_target_built_from_a_config_carries_that_config_s_provenance(tmp_path):
-    """Provenance is a fact about the hostname, and the target records it."""
+def test_a_target_built_from_a_config_takes_that_config_s_provenance(tmp_path):
+    """Provenance is a fact about the hostname, and the gate derives it."""
     config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
     target = CredentialTarget.for_config(config)
 
     assert target.hostname == "hpc.example.edu"
     assert target.username == "victim"
-    assert target.provenance == CONFIG_SOURCE_RUNTIME
+    assert derived_provenance(config, target.hostname) == CONFIG_SOURCE_RUNTIME
     assert "hpc.example.edu" in target.described_as
 
 
@@ -2227,19 +2285,21 @@ def test_a_working_directory_host_never_receives_the_environment_password(
     assert not authenticated
 
 
-def test_a_target_cannot_be_built_without_saying_where_the_host_came_from():
-    """Provenance is required, and there is no "unknown" that reads as safe.
+def test_a_target_alone_establishes_nothing_about_who_chose_the_host():
+    """The gate decides with two facts, and only one of them is on the target.
 
-    The gate decides with two facts: who receives the secret, and who chose
-    them. It is *given* the second one -- it cannot recompute a fact that
-    was destroyed upstream, which is what route 8 (the profile store writing
-    a config without its provenance) does. So the least it can do is refuse
-    to answer at all when the caller has not established it.
+    A bare target is a recipient and nothing else. Who chose that recipient
+    is :func:`derived_provenance`'s answer, and with no config accompanying
+    the request there is no record of a chooser at all -- which answers
+    ``None``, which is not trusted, so the release fails closed rather than
+    defaulting to the caller's word.
     """
-    with pytest.raises(TypeError):
-        CredentialTarget(  # type: ignore[call-arg]
-            hostname="hpc.example.edu", username="victim", described_as="a test"
-        )
+    target = CredentialTarget(
+        hostname="hpc.example.edu", username="victim", described_as="a test"
+    )
+
+    assert derived_provenance(None, target.hostname) is None
+    assert derived_provenance(None, target.hostname) not in TRUSTED_CONFIG_SOURCES
 
 
 def test_a_config_that_lost_its_stamp_makes_an_untrusted_target():
@@ -2255,7 +2315,9 @@ def test_a_config_that_lost_its_stamp_makes_an_untrusted_target():
 
     target = CredentialTarget.for_config(config)
 
-    assert target.provenance == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert derived_provenance(config, target.hostname) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
 
 
 # ---------------------------------------------------------------------------

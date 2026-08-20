@@ -27,7 +27,7 @@ import pytest
 # The supported credential path. Guarded so that this module still imports
 # when clustrix itself cannot be; HAS_SECURE_CREDENTIALS gates every use.
 try:
-    from clustrix.config import CONFIG_SOURCE_RUNTIME, get_config_dir
+    from clustrix.config import get_config_dir
     from clustrix.credential_release import (
         CredentialTarget,
         describe_credential,
@@ -254,7 +254,6 @@ def _clustrix_credentials(
             target = CredentialTarget(
                 hostname=host,
                 username=described.username,
-                provenance=CONFIG_SOURCE_RUNTIME,
                 described_as=f"{host}, named by this machine's test configuration",
             )
         release = release_credential(target, provider=provider)

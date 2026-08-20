@@ -55,10 +55,19 @@ Three locks, in decreasing strength:
 **What this gate relies on being true of its input, and what it cannot
 check.** ``release_credential`` decides with two facts: the hostname about
 to receive the secret, and *who chose that hostname*. The first it is
-handed. The second it computes from
-:func:`clustrix.config.get_config_source`, and that answer is only as good
-as the provenance that reached this process. A choke point cannot recover a
-fact that was destroyed upstream of it.
+handed. The second it **derives** -- :func:`derived_provenance`, from
+:func:`clustrix.config.source_that_named_hostname` and
+:func:`clustrix.config.get_config_source` -- and that answer is only as
+good as the provenance that reached this process. A choke point cannot
+recover a fact that was destroyed upstream of it.
+
+Deriving it is not a detail. :class:`CredentialTarget` used to carry a
+``provenance`` field the caller filled in, and
+``CredentialTarget(hostname=<anything>, provenance="runtime", ...)``
+released -- even when the honest, untrusted ``config`` was passed in the
+same call, because the rule returned on the target's word before consulting
+it. A gate whose caller supplies the answer is decoration. There is no
+``provenance`` parameter now, anywhere: naming one is a ``TypeError``.
 
 There is a known way to destroy it, and it is **route 8**: the profile
 store persists ``strip_secret_fields(asdict(config))``, and provenance is
@@ -74,10 +83,10 @@ in ``ProfileManager._persist`` / ``ClusterConfig.save_to_file`` -- and not
 here.**
 
 What this module does do about it is fail closed on the inputs it *can*
-judge. :meth:`CredentialTarget.__post_init__` requires a provenance that is
-a member of :data:`clustrix.config.CONFIG_SOURCES`; there is no default and
-no "unknown" value, so a caller that has not established where a hostname
-came from cannot construct a target at all. And
+judge. :func:`derived_provenance` answers ``None`` when nothing accompanied
+the request that records a chooser, and ``None`` is not a member of
+:data:`clustrix.config.TRUSTED_CONFIG_SOURCES`, so a release nobody can
+account for is refused rather than allowed. And
 :func:`clustrix.config.get_config_source` answers ``working-directory`` --
 the untrusted end -- for an object carrying no record, so a config that
 lost its stamp (unpickled, ``setattr``-ed, restored) is distrusted rather
@@ -114,13 +123,11 @@ from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .config import (
-    CONFIG_SOURCES,
-    CONFIG_SOURCE_RUNTIME,
     TRUSTED_CONFIG_SOURCES,
     ClusterConfig,
-    config_source_is_trusted,
     get_config_source,
     normalize_hostname,
+    source_that_named_hostname,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,9 +136,14 @@ logger = logging.getLogger(__name__)
 #: Written once so the guard and its error message cannot drift apart.
 GATE_MODULE = __name__
 
-#: The branches :func:`release_credential` can answer from, in the order it
-#: tries them.
+#: The branches :func:`release_credential` can answer from.
 RELEASE_SOURCES = ("stored-credential", "environment")
+
+#: Hosts :meth:`CredentialTarget.fixed_service` may name: services compiled
+#: into clustrix, which no configuration file can move. Not a registry and
+#: not a plugin point -- a name that belongs here is one written in this
+#: source file.
+FIXED_SERVICE_HOSTS = ("huggingface.co",)
 
 #: Every secret-bearing surface in the tree, as ``(module, symbol)`` pairs.
 #:
@@ -203,10 +215,55 @@ def _hostname_matches(target: object, credential_host: object) -> bool:
     return normalized_target == normalized_credential
 
 
+def derived_provenance(
+    config: Optional[ClusterConfig], hostname: object
+) -> Optional[str]:
+    """Who chose ``hostname``, as far as this process can establish.
+
+    **Derived, never declared.** This is the answer the gate decides on, and
+    every input to it is a record the caller does not write:
+    :func:`clustrix.config.source_that_named_hostname` is written by the
+    loaders and keyed by the name, and :func:`clustrix.config.get_config_source`
+    reads an attribute that is deliberately not a dataclass field. A caller
+    that says otherwise is not consulted, because a gate that asks a question
+    whose answer the caller supplies is decoration.
+
+    The hostname record outranks the config: a name a file named earlier in
+    this process stays that file's, whatever object is holding it now, and
+    that is the one check that follows a connection to a host which is *not*
+    ``config.cluster_host`` -- the case the auth chain drives routinely and
+    the case ``get_config_source`` alone cannot see.
+
+    ``None`` when nothing accompanied the request that records a chooser. It
+    is not a member of :data:`clustrix.config.TRUSTED_CONFIG_SOURCES`, so
+    every test against this value fails closed.
+    """
+    if hostname and not normalize_hostname(hostname):
+        # Unrecordable is exactly the state the taint map cannot describe,
+        # and "the map has nothing on it" may not read as "it is fine". The
+        # same rule ``config_source_is_trusted`` applies, applied to the
+        # host actually being connected to.
+        return None
+    named_by = source_that_named_hostname(hostname)
+    if named_by:
+        return named_by
+    if config is None:
+        return None
+    return get_config_source(config)
+
+
 def stored_credential_is_for_config(
-    config: ClusterConfig, credentials: Dict[str, Any]
+    config: Optional[ClusterConfig],
+    credentials: Dict[str, Any],
+    *,
+    hostname: Optional[str] = None,
 ) -> Optional[str]:
     """Why a stored SSH credential may not be used for ``config``, or ``None``.
+
+    ``hostname`` overrides ``config.cluster_host`` for a connection to
+    somewhere else, which is what the auth chain drives; the provenance is
+    then :func:`derived_provenance`'s answer *about that host*, so a target
+    renamed to a host some file named does not escape the record.
 
     ``FlexibleCredentialAuthMethod`` answers this question for a connection
     the auth chain is driving. ``ConnectionManager.setup_ssh_connection``
@@ -259,28 +316,42 @@ def stored_credential_is_for_config(
     Returns the reason it may not be used, so the caller can say so; ``None``
     means it may.
     """
+    if hostname is None:
+        if config is None:
+            raise ValueError(
+                "stored_credential_is_for_config needs a config or an "
+                "explicit hostname: there is no recipient to decide about."
+            )
+        hostname = config.cluster_host
+    host = hostname
     credential_host = credentials.get("host", "")
     if normalize_hostname(credential_host):
-        if _hostname_matches(config.cluster_host, credential_host):
+        if _hostname_matches(host, credential_host):
             return None
         return (
             f"the stored credential is for {credential_host!r} and this "
-            f"connection is to {config.cluster_host!r}"
+            f"connection is to {host!r}"
         )
 
-    if config_source_is_trusted(config):
+    provenance = derived_provenance(config, host)
+    if provenance in TRUSTED_CONFIG_SOURCES:
         return None
 
+    origin = (
+        f"came from {provenance}"
+        if provenance
+        else "arrived with no configuration recording who chose it"
+    )
     return (
         f"the stored credential names no host, and cluster_host="
-        f"{config.cluster_host!r} came from {get_config_source(config)} -- "
+        f"{host!r} {origin} -- "
         f"a file chosen by where the process runs or by an inherited "
         f"environment variable, not by you. That is settled for the life of "
         f"this process: passing "
         f"the same hostname to configure(cluster_host=...) or "
         f"load_config(path) does not clear it, because a value handed back "
         f"through a function call is not evidence that anyone chose it. "
-        f"Either set SSH_HOST={config.cluster_host!r} in the credential file, "
+        f"Either set SSH_HOST={host!r} in the credential file, "
         f"which is you naming the host that may receive the secret, or move "
         f"the host into the clustrix configuration directory (config.yml), "
         f"remove the file it came from, and start a new process"
@@ -305,15 +376,19 @@ class CredentialTarget:
     #: Who it would authenticate as. May be ``""`` -- not every provider has
     #: one, and the ``.env`` that holds only ``SSH_PASSWORD`` names none.
     username: str
-    #: A ``clustrix.config.CONFIG_SOURCE_*`` value: who chose ``hostname``.
-    #: Required, with no default and no "unknown" member, because a caller
-    #: that has not established where a hostname came from must not be able
-    #: to ask for a release to it. This is a fact the gate is *given*, not
-    #: one it can verify -- see the module docstring on route 8.
-    provenance: str
     #: How to name this target in a refusal, e.g.
     #: ``"cluster_host from ./clustrix.yml"``.
     described_as: str
+
+    #: **There is deliberately no ``provenance`` field.** There was one, and
+    #: it was the gate's worst defect: ``CredentialTarget(hostname=<any>,
+    #: provenance="runtime", ...)`` released, because the rule that needs
+    #: provenance read it off the target *before* consulting the config the
+    #: honest caller had also passed. A caller that can assert its own
+    #: provenance turns the gate into a question whose answer the caller
+    #: supplies. Provenance is now :func:`derived_provenance`'s answer,
+    #: computed inside the gate from records the caller does not write, and
+    #: naming the keyword here is a ``TypeError`` rather than a release.
 
     def __post_init__(self) -> None:
         if not normalize_hostname(self.hostname):
@@ -329,11 +404,6 @@ class CredentialTarget:
                 f"username must be a string (possibly empty), not "
                 f"{type(self.username).__name__}."
             )
-        if self.provenance not in CONFIG_SOURCES:
-            raise ValueError(
-                f"Unknown provenance: {self.provenance!r}. "
-                f"Known sources are {sorted(CONFIG_SOURCES)}."
-            )
 
     @classmethod
     def for_config(
@@ -347,20 +417,18 @@ class CredentialTarget:
 
         ``hostname`` and ``username`` override the config's own for a
         connection to somewhere else -- the auth chain passes connection
-        parameters that need not be ``config.cluster_host``. The provenance
-        is the config's either way, because provenance is a fact about the
-        *hostname* rather than about the object
-        (:func:`clustrix.config.get_config_source`), and an override that
-        renamed the host without renaming where it came from would be the
-        laundering route with extra steps.
+        parameters that need not be ``config.cluster_host``. Nothing about
+        provenance is carried on the object; the gate derives it from this
+        config and from the process record for the host actually being
+        connected to, when it decides. The source only appears here in
+        ``described_as``, which is prose for a refusal message.
         """
         host = hostname if hostname is not None else config.cluster_host
         user = username if username is not None else config.username
-        source = get_config_source(config)
+        source = derived_provenance(config, host) or get_config_source(config)
         return cls(
             hostname=host if isinstance(host, str) else str(host),
             username=user or "",
-            provenance=source,
             described_as=f"cluster_host={host!r} (from {source})",
         )
 
@@ -369,14 +437,23 @@ class CredentialTarget:
         """A recipient compiled into clustrix rather than read from anywhere.
 
         ``huggingface.co`` is the only kind: no configuration file can move
-        it, so nothing untrusted can have chosen it, and its provenance is
-        ``runtime`` for the same reason a ``ClusterConfig(...)`` typed in a
-        script is.
+        it, so nothing untrusted can have chosen it. The name is checked
+        against :data:`FIXED_SERVICE_HOSTS` rather than taken on trust,
+        because "compiled in" is a claim about *which* host, and a
+        constructor that accepted any hostname while asserting that one
+        would be the declared-provenance defect wearing a different hat.
         """
+        if normalize_hostname(hostname) not in FIXED_SERVICE_HOSTS:
+            raise ValueError(
+                f"{hostname!r} is not a service compiled into clustrix. "
+                f"fixed_service is for {sorted(FIXED_SERVICE_HOSTS)} and "
+                f"nothing else; a recipient read from configuration is "
+                f"CredentialTarget.for_config(config), which derives who "
+                f"chose it."
+            )
         return cls(
             hostname=hostname,
             username="",
-            provenance=CONFIG_SOURCE_RUNTIME,
             described_as=why,
         )
 
@@ -539,31 +616,18 @@ def _stored_ssh_is_for_target(
 ) -> Optional[str]:
     """Why a stored SSH credential may not go to ``target``, or ``None``.
 
-    The two rules of :func:`stored_credential_is_for_config`, expressed
-    against the target rather than against a config, so that a caller
-    connecting somewhere other than ``config.cluster_host`` gets the check
-    for the host it is actually connecting to. When a config is available
-    the wording of rule 2's refusal comes from that function unchanged --
-    there is one refusal text, not a second one that drifts.
+    The two rules of :func:`stored_credential_is_for_config`, asked about
+    the host actually being connected to. It is one call rather than a
+    second copy of the rules, and that is the point: the version this
+    replaces read ``target.provenance`` first and *returned* on it, so a
+    caller that constructed its own target with ``provenance="runtime"``
+    was released to -- even when the honest, untrusted ``config`` was passed
+    in the same call. Provenance is derived here, from
+    :func:`derived_provenance`, and there is nothing on the target to
+    consult instead.
     """
-    credential_host = credentials.get("host", "")
-    if normalize_hostname(credential_host):
-        if _hostname_matches(target.hostname, credential_host):
-            return None
-        return (
-            f"the stored credential is for {credential_host!r} and this "
-            f"connection is to {target.hostname!r}"
-        )
-
-    if target.provenance in TRUSTED_CONFIG_SOURCES:
-        return None
-    if config is not None:
-        return stored_credential_is_for_config(config, dict(credentials))
-    return (
-        f"the stored credential names no host, and {target.described_as} "
-        f"was not chosen by you. Set SSH_HOST={target.hostname!r} in the "
-        f"credential file, which is you naming the host that may receive "
-        f"the secret."
+    return stored_credential_is_for_config(
+        config, dict(credentials), hostname=target.hostname
     )
 
 
@@ -588,7 +652,7 @@ def _release_environment(
     # somewhere the user chose. Reused rather than restated -- a second
     # implementation of "may this credential go to this host" is a second
     # thing to get wrong.
-    refusal = stored_credential_is_for_config(config, {})
+    refusal = stored_credential_is_for_config(config, {}, hostname=target.hostname)
     if refusal:
         return CredentialRelease(
             target=target,

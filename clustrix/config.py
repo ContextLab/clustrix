@@ -1154,6 +1154,24 @@ def record_discovered_hostname(hostname: object, source: str) -> None:
         _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.setdefault(host, source)
 
 
+def source_that_named_hostname(hostname: object) -> Optional[str]:
+    """The untrusted source that named ``hostname`` in this process, if any.
+
+    The read side of :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`, and the only
+    fact about a hostname's provenance that no caller can supply: it is
+    written by the loaders, keyed by the name rather than by any object, and
+    there is no way to clear it. :func:`get_config_source` consults it for
+    ``config.cluster_host``; a connection to some *other* host -- which the
+    auth chain drives routinely -- needs to ask about that host instead, and
+    this is how.
+
+    ``None`` means "nothing in this process recorded that a file named it",
+    which is not the same as "somebody chose it" and must never be read as
+    trust on its own.
+    """
+    return _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.get(normalize_hostname(hostname))
+
+
 def get_config_source(config: ClusterConfig) -> str:
     """Where ``config``'s ``cluster_host`` came from.
 

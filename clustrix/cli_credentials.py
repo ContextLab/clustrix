@@ -17,7 +17,6 @@ try:
 except ImportError:
     HAS_CLICK = False
 
-from .config import CONFIG_SOURCE_RUNTIME
 from .credential_manager import (
     FlexibleCredentialManager,
     get_credential_manager,
@@ -370,7 +369,6 @@ def test_credentials_command():
             target = CredentialTarget(
                 hostname=described.host,
                 username=described.username,
-                provenance=CONFIG_SOURCE_RUNTIME,
                 described_as="SSH_HOST from the credential file",
             )
             release = release_credential(target, provider="ssh")

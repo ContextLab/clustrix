@@ -4,7 +4,11 @@ from typing import Optional, List, Dict, Any
 
 from .config import TRUSTED_CONFIG_SOURCES, ClusterConfig
 from .credential_manager import get_credential_manager
-from .credential_release import CredentialTarget, release_credential
+from .credential_release import (
+    CredentialTarget,
+    derived_provenance,
+    release_credential,
+)
 from .auth_methods import (
     AuthMethod,
     AuthResult,
@@ -174,10 +178,11 @@ class AuthenticationManager:
             print(f"   ⚠️  Not storing the credential: {exc}")
             return
 
-        if target.provenance not in TRUSTED_CONFIG_SOURCES:
+        provenance = derived_provenance(self.config, target.hostname)
+        if provenance not in TRUSTED_CONFIG_SOURCES:
             print(
                 f"   ⚠️  Not storing these credentials in ~/.clustrix/.env: "
-                f"cluster_host={hostname!r} came from {target.provenance} -- "
+                f"cluster_host={hostname!r} came from {provenance} -- "
                 f"a file chosen by where this process runs or by an "
                 f"inherited environment variable, not by you. Writing "
                 f"SSH_HOST={hostname!r} there would authorise that host "
