@@ -80,7 +80,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Optional
+from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .config import (
     CONFIG_SOURCES,
@@ -97,6 +97,10 @@ logger = logging.getLogger(__name__)
 #: The module name ``_ensure_credential_unchecked`` will accept as a caller.
 #: Written once so the guard and its error message cannot drift apart.
 GATE_MODULE = __name__
+
+#: The branches :func:`release_credential` can answer from, in the order it
+#: tries them.
+RELEASE_SOURCES = ("stored-credential", "environment")
 
 #: Every secret-bearing surface in the tree, as ``(module, symbol)`` pairs.
 #:
@@ -388,6 +392,63 @@ def _stored_credential(provider: str) -> Optional[Dict[str, str]]:
     return get_credential_manager().ensure_credential(provider)
 
 
+@dataclass(frozen=True)
+class CredentialDescription:
+    """What is stored for a provider, with none of what is stored.
+
+    Every field is a boolean or a value that is not a secret: the host and
+    username a credential names are the *recipient*, which the user wrote
+    down themselves, and a key path is a path. The password and the private
+    key never appear here, and ``tests`` assert that the sentinel appears in
+    neither the fields nor the ``repr`` -- a description that leaks is worse
+    than no description, because it is printed by a status command.
+    """
+
+    provider: str
+    available: bool = False
+    host: str = ""
+    username: str = ""
+    has_password: bool = False
+    key_path: str = ""
+
+    @property
+    def has_key_path(self) -> bool:
+        return bool(self.key_path)
+
+
+def describe_credential(provider: str) -> CredentialDescription:
+    """Non-secret facts about the stored credential for ``provider``.
+
+    This is what a status command wants, and it is the reason privatising
+    the store does not make ``clustrix credentials status`` impossible: the
+    question "is something configured, and for whom" never needed the
+    secret, and answering it without one means the status path is not a
+    release at all and needs no target.
+    """
+    credentials = _stored_credential(provider)
+    if not credentials:
+        return CredentialDescription(provider=provider)
+    return CredentialDescription(
+        provider=provider,
+        available=True,
+        host=credentials.get("host", "") or "",
+        username=credentials.get("username", "") or "",
+        has_password=bool(credentials.get("password")),
+        key_path=credentials.get("private_key_path", "") or "",
+    )
+
+
+def describe_stored_credential(provider: str) -> Dict[str, str]:
+    """The non-secret identifying fields of the stored credential.
+
+    A two-key mapping rather than the whole credential, so that a caller
+    asking "which host is this credential for" cannot accidentally end up
+    holding the password as well.
+    """
+    described = describe_credential(provider)
+    return {"host": described.host, "username": described.username}
+
+
 def _release_stored(
     target: CredentialTarget,
     provider: str,
@@ -515,6 +576,7 @@ def release_credential(
     *,
     provider: str = "ssh",
     config: Optional[ClusterConfig] = None,
+    sources: Sequence[str] = RELEASE_SOURCES,
 ) -> CredentialRelease:
     """The only place in clustrix where a stored secret is handed out.
 
@@ -524,42 +586,45 @@ def release_credential(
     ``key_file`` / ``password`` / ``password_env_var`` branches and must be
     the config ``target`` was built from.
 
-    Branch order, highest first, and it is the order
-    ``ConnectionManager.setup_ssh_connection`` already used:
+    Two branches, in order:
 
-    1. ``config.key_file`` -- an explicit key path in the configuration.
-    2. ``config.password`` -- an explicit password in the configuration.
-    3. the stored credential from ``~/.clustrix/.env``, the environment, or
+    1. ``"stored-credential"`` -- ``~/.clustrix/.env``, the environment, or
        GitHub Actions, gated by :func:`_stored_ssh_is_for_target`.
-    4. ``config.password_env_var``, gated the same way.
+    2. ``"environment"`` -- ``config.password_env_var``, gated the same way.
 
-    The first three are the user's own configuration object, so they carry
-    their own authorisation: a ``ClusterConfig`` with a ``password`` field
-    set was either typed in Python or read from a file the user named --
-    and a file the user did *not* name cannot set it either, because
-    ``save_to_file`` omits secret-bearing fields and the loaders refuse
-    unknown keys rather than inventing them. They are still routed through
-    here so that one function can answer "where would the secret for this
-    host come from", which is what ``describe_credential`` reports.
+    ``config.password`` and ``config.key_file`` are deliberately *not*
+    branches. They are not stored credentials: they are fields of the
+    caller's own configuration object, which the caller already holds and
+    which no file it did not name can set -- ``save_to_file`` omits
+    secret-bearing fields and every loader rejects unknown keys rather than
+    inventing them. Routing them through here would mean the auth chain
+    started returning ``config.password`` from a method whose job is the
+    credential store, which is a behaviour change with no security argument
+    behind it. They are listed in :data:`SECRET_SURFACES` all the same,
+    because a reader looking for "where can a secret come from" must find
+    them.
+
+    ``sources`` narrows which branches may answer, and narrowing is all it
+    can do: every branch applies the same host and provenance checks, so a
+    caller passing a shorter tuple can only be offered *less*. The auth
+    chain uses it to keep one method per source, which is what makes its
+    per-method messages ("$SSH_PASSWORD was not offered: ...") true.
 
     Returns a :class:`CredentialRelease`, which is a secret or a reason and
     never both or neither.
     """
-    if config is not None:
-        if config.key_file:
-            return CredentialRelease(
-                target=target, method="config-key", key_path=config.key_file
-            )
-        if config.password:
-            return CredentialRelease(
-                target=target, method="config-password", password=config.password
+    for source in sources:
+        if source not in RELEASE_SOURCES:
+            raise ValueError(
+                f"Unknown release source: {source!r}. "
+                f"Known sources are {list(RELEASE_SOURCES)}."
             )
 
-    released = _release_stored(target, provider, config)
-    if released is not None:
-        return released
-
-    released = _release_environment(target, config)
+    released = None
+    if "stored-credential" in sources:
+        released = _release_stored(target, provider, config)
+    if released is None and "environment" in sources:
+        released = _release_environment(target, config)
     if released is not None:
         return released
 

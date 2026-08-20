@@ -12,6 +12,7 @@ from typing import Optional
 
 import paramiko
 
+from clustrix.credential_release import CredentialTarget, release_credential
 from clustrix.ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -130,66 +131,40 @@ class ConnectionManager:
             # Fallback to password authentication (not recommended)
             connect_kwargs["password"] = self.config.password
         else:
-            # Try to get SSH credentials from credential manager
-            # This ensures we check .env, environment variables, and GitHub Actions
+            # Ask the one gate. A stored credential belongs to one host, and
+            # applying it to whatever ``config.cluster_host`` says was an
+            # exfiltration path rather than a convenience: the search of the
+            # standard configuration locations includes ``./clustrix.yml``,
+            # so a cloned repository can name the host that receives the
+            # user's cluster password. That decision is not made here any
+            # more -- it is made once, in
+            # ``clustrix.credential_release.release_credential``, whose
+            # first argument is the host about to receive the secret.
             try:
-                from .auth_methods import stored_credential_is_for_config
-                from .credential_manager import FlexibleCredentialManager
-
-                credential_manager = FlexibleCredentialManager()
-                ssh_credentials = credential_manager.ensure_credential("ssh")
-
-                if ssh_credentials:
-                    # A stored credential belongs to one host. Applying it to
-                    # whatever ``config.cluster_host`` says was an
-                    # exfiltration path, not a convenience: the search of the
-                    # standard configuration locations includes
-                    # ``./clustrix.yml``, so a cloned repository can name the
-                    # host that receives the user's cluster password. The
-                    # same defect #167 fixed one layer up, in
-                    # FlexibleCredentialAuthMethod.
-                    refusal = stored_credential_is_for_config(
-                        self.config, ssh_credentials
+                target = CredentialTarget.for_config(self.config)
+            except ValueError as exc:
+                logger.warning("No credential can be released: %s", exc)
+            else:
+                release = release_credential(target, provider="ssh", config=self.config)
+                if release.refusal is not None:
+                    logger.warning(
+                        "Not using a stored SSH credential for %s: %s.",
+                        self.config.cluster_host,
+                        release.refusal,
                     )
-                    if refusal:
-                        logger.warning(
-                            "Not using the stored SSH credential for %s: %s.",
-                            self.config.cluster_host,
-                            refusal,
-                        )
-                        ssh_credentials = None
-
-                if ssh_credentials:
-                    if "password" in ssh_credentials:
-                        connect_kwargs["password"] = ssh_credentials["password"]
-                        logger.info("Using SSH password from credential manager")
-                    elif "private_key_path" in ssh_credentials:
-                        # ``private_key_path`` is the name
-                        # ``resolve_provider_credentials`` actually emits (it
-                        # is the field name for ``SSH_PRIVATE_KEY_PATH``).
-                        # This tested for ``key_file``, which nothing has
-                        # ever produced, so a user whose .env named a key
-                        # rather than a password silently fell through to
-                        # the agent and the default key files.
-                        connect_kwargs["key_filename"] = ssh_credentials[
-                            "private_key_path"
-                        ]
-                        logger.info("Using SSH key from credential manager")
-            except Exception:
-                # Log and continue: the caller still gets a correct answer.
-                # There is another credential source below this one (the SSH
-                # agent and the default key files), and if none of them
-                # authenticates, `connect()` raises AuthenticationException a
-                # few lines down -- nothing proceeds on a false premise. But
-                # `debug` was too quiet for a broken keychain or an
-                # unreadable .env: the eventual auth failure names none of
-                # that, so the reason has to be visible at `warning`.
-                logger.warning(
-                    "Could not load SSH credentials from the credential "
-                    "manager; falling back to the SSH agent and default "
-                    "keys.",
-                    exc_info=True,
-                )
+                elif release.password:
+                    connect_kwargs["password"] = release.password
+                    logger.info("Using SSH password from %s", release.method)
+                elif release.key_path:
+                    # ``private_key_path`` is the name
+                    # ``resolve_provider_credentials`` actually emits (it is
+                    # the field name for ``SSH_PRIVATE_KEY_PATH``). This
+                    # tested for ``key_file``, which nothing has ever
+                    # produced, so a user whose .env named a key rather than
+                    # a password silently fell through to the agent and the
+                    # default key files.
+                    connect_kwargs["key_filename"] = release.key_path
+                    logger.info("Using SSH key from %s", release.method)
 
         self.ssh_client.connect(**connect_kwargs)
 

@@ -2151,3 +2151,77 @@ def test_a_target_built_from_a_config_carries_that_config_s_provenance(tmp_path)
     assert target.username == "victim"
     assert target.provenance == CONFIG_SOURCE_RUNTIME
     assert "hpc.example.edu" in target.described_as
+
+
+# ---------------------------------------------------------------------------
+# Route 6 through the *connection* path, not just the auth chain.
+#
+# ``ConnectionManager.setup_ssh_connection`` never consulted
+# ``password_env_var`` at all -- it read the credential store and stopped.
+# Now that every source is reached through one gate, the connection path
+# honours the documented ``password_env_var`` setting, and honours it under
+# exactly the same two rules as everything else.
+# ---------------------------------------------------------------------------
+
+
+#: Deliberately *not* ``SSH_PASSWORD``: that name is one of the credential
+#: store's own environment variables, so setting it would exercise the
+#: stored-credential branch and say nothing about ``password_env_var``.
+ENV_PASSWORD_VAR = "CLUSTER_PASSWORD"
+
+
+def _env_password_config_text(server):
+    return _config_text(
+        server, use_env_password="true", password_env_var=ENV_PASSWORD_VAR
+    )
+
+
+def test_the_environment_password_reaches_a_host_the_user_chose(
+    attacker_server, env_file, monkeypatch
+):
+    """The positive control for the connection path's environment branch."""
+    env_file()  # a credential file with nothing in it
+    monkeypatch.setenv(ENV_PASSWORD_VAR, SENTINEL_PASSWORD)
+
+    config_dir = get_config_dir()
+    (config_dir / "config.yml").write_text(
+        _env_password_config_text(attacker_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    assert _attempt_connection() is True
+    assert attacker_server.authentications[-1] == ("victim", "password")
+
+
+def test_a_working_directory_host_never_receives_the_environment_password(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """Route 6, driven all the way onto the wire.
+
+    The repository's ``clustrix.yml`` names ``password_env_var`` as well as
+    ``cluster_host``, so an ungated version reads an environment variable of
+    the repository's choosing and sends it to a host of the repository's
+    choosing. The server here accepts the sentinel and nothing else, so an
+    empty authentication log is proof the secret never left.
+    """
+    env_file()
+    monkeypatch.setenv(ENV_PASSWORD_VAR, SENTINEL_PASSWORD)
+
+    project = tmp_path / "cloned-repository"
+    project.mkdir()
+    (project / "clustrix.yml").write_text(
+        _env_password_config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    with pytest.warns(UserWarning):
+        config_module._load_default_config()
+
+    assert get_config().cluster_host == attacker_server.host
+
+    authenticated = _attempt_connection()
+
+    assert attacker_server.authentications == [], (
+        "the environment password reached a host named by the working "
+        "directory: " + repr(attacker_server.authentications)
+    )
+    assert not authenticated

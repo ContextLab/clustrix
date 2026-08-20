@@ -16,10 +16,10 @@ from .config import ClusterConfig
 from .credential_release import (  # noqa: F401
     CredentialTarget,
     _hostname_matches,
+    describe_stored_credential,
     release_credential,
     stored_credential_is_for_config,
 )
-from .credential_manager import get_credential_manager
 
 
 @dataclass
@@ -140,61 +140,56 @@ class EnvironmentPasswordMethod(AuthMethod):
         return self.config.use_env_password and bool(self.config.password_env_var)
 
     def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
-        """Attempt to get password from environment variable."""
+        """Ask the gate for the environment branch, and report what it said.
+
+        The two checks that used to live here -- rule 2 of
+        ``stored_credential_is_for_config`` and an exact match against
+        ``config.cluster_host`` -- are now inside
+        :func:`clustrix.credential_release.release_credential`, reached with
+        a target that names the recipient. This method is what is left of
+        it: build the target, ask, translate.
+        """
         if not self.config.password_env_var:
             return AuthResult(success=False, error="No environment variable specified")
 
-        # The variable names no host, so this is rule 2 of
-        # ``stored_credential_is_for_config``: the host has to come from
-        # somewhere the user chose. Reused rather than restated -- a second
-        # implementation of "may this credential go to this host" is a
-        # second thing to get wrong.
-        refusal = stored_credential_is_for_config(self.config, {})
-        if refusal:
+        try:
+            target = _target_for(self.config, connection_params)
+        except ValueError as exc:
+            return AuthResult(success=False, error=str(exc))
+
+        release = release_credential(
+            target, provider="ssh", config=self.config, sources=("environment",)
+        )
+        if release.refusal is not None:
             return AuthResult(
                 success=False,
-                error=f"${self.config.password_env_var} was not offered: {refusal}",
+                error=f"${self.config.password_env_var}: {release.refusal}",
                 guidance=(
-                    "The environment variable names no host, so it is only "
-                    "used for a cluster_host you chose."
+                    f"Set password with: export "
+                    f"{self.config.password_env_var}='your_password', and set "
+                    f"cluster_host to the host you are connecting to."
                 ),
             )
+        return AuthResult(success=True, method="environment", password=release.password)
 
-        # And it belongs to *this* config's host, so a connection to some
-        # other host does not get it either.
-        hostname = connection_params.get("hostname", "")
-        if hostname and not _hostname_matches(hostname, self.config.cluster_host):
-            return AuthResult(
-                success=False,
-                error=(
-                    f"${self.config.password_env_var} is configured for "
-                    f"{self.config.cluster_host!r} and this connection is to "
-                    f"{hostname!r}"
-                ),
-                guidance=(
-                    "Set cluster_host to the host you are connecting to, or "
-                    "supply the password for this host another way."
-                ),
-            )
 
-        password = os.environ.get(self.config.password_env_var)
+def _target_for(
+    config: ClusterConfig, connection_params: Dict[str, Any]
+) -> CredentialTarget:
+    """The recipient of the connection ``connection_params`` describes.
 
-        if password:
-            return AuthResult(success=True, method="environment", password=password)
-        else:
-            return AuthResult(
-                success=False,
-                error=f"Environment variable ${self.config.password_env_var} not set",
-                guidance=f"Set password with: export {self.config.password_env_var}='your_password'",
-            )
+    The auth chain is driving a connection that need not be
+    ``config.cluster_host`` at all, so the target names what is actually
+    being connected to -- and falls back to the config when the caller gave
+    nothing, which is what ``AuthenticationManager`` does for SSH key setup.
+    """
+    hostname = connection_params.get("hostname") or None
+    username = connection_params.get("username")
+    return CredentialTarget.for_config(config, hostname=hostname, username=username)
 
 
 class FlexibleCredentialAuthMethod(AuthMethod):
     """Flexible credential authentication using the new credential manager."""
-
-    def __init__(self, config: ClusterConfig):
-        super().__init__(config)
-        self.credential_manager = get_credential_manager()
 
     def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
         """Always applicable as the new primary credential source."""
@@ -207,42 +202,52 @@ class FlexibleCredentialAuthMethod(AuthMethod):
     def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
         """Hand over a stored credential only if it is stored for *this* host.
 
-        A credential is released when the stored host and the requested
-        host are the same host (:func:`_hostname_matches`) *and* the stored
-        username and the requested username are the same non-empty
-        username. Both halves have to name something: a stored credential
-        with no username used to match a connection with no username,
-        because ``"" == ""``, which is the same "absent satisfies the test"
-        defect as the hostname case.
+        The trust decision -- may a secret go to this host, given who chose
+        it -- belongs to
+        :func:`clustrix.credential_release.release_credential` and is made
+        there. What stays here is the auth chain's *applicability* test: of
+        the credentials that may be released, is this one the credential for
+        this connection? It answers yes only when the stored credential
+        itself names both the host and the username, both non-empty and both
+        equal after normalisation. A stored credential with no username used
+        to match a connection with no username, because ``"" == ""``, which
+        is the same "absent satisfies the test" defect as the hostname case.
+
+        This filter can only *refuse* something the gate allowed; it can
+        never release something the gate refused, so it is not a second
+        trust decision with a second way to be wrong. The comparison it uses
+        is the gate's own :func:`_hostname_matches`.
         """
         hostname = connection_params.get("hostname", "")
         username = connection_params.get("username", "")
 
-        # Try SSH credentials first (most common for clusters)
-        ssh_creds = self.credential_manager.ensure_credential("ssh")
-        if ssh_creds:
-            # Check if the SSH credentials match this connection
-            cred_host = ssh_creds.get("host", "")
-            cred_username = ssh_creds.get("username", "")
+        try:
+            target = _target_for(self.config, connection_params)
+        except ValueError as exc:
+            return AuthResult(success=False, error=str(exc))
 
-            host_match = _hostname_matches(hostname, cred_host)
-
-            username_match = bool(username) and username == cred_username
-
+        release = release_credential(
+            target,
+            provider="ssh",
+            config=self.config,
+            sources=("stored-credential",),
+        )
+        if release.refusal is None:
+            stored = describe_stored_credential("ssh")
+            host_match = _hostname_matches(hostname, stored.get("host", ""))
+            username_match = bool(username) and username == stored.get("username", "")
             if host_match and username_match:
-                # Return password if available
-                if "password" in ssh_creds:
+                if release.password:
                     return AuthResult(
                         success=True,
                         method="flexible_credential",
-                        password=ssh_creds["password"],
+                        password=release.password,
                     )
-                # Return SSH key path if available
-                elif "private_key_path" in ssh_creds:
+                if release.key_path:
                     return AuthResult(
                         success=True,
                         method="flexible_credential_key",
-                        key_path=ssh_creds["private_key_path"],
+                        key_path=release.key_path,
                     )
 
         # Fallback: return no credentials found (let other methods try)
