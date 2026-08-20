@@ -21,24 +21,31 @@ from .config import (
 PRIVATE_DIR_MODE = 0o700
 
 
-def _narrow_if_too_wide(path: Path) -> None:
-    """Take the group and other bits off an *existing* ``path``, and say so.
+def _warn_if_too_wide(path: Path) -> None:
+    """Report an *existing* directory that other local users can enter.
 
-    A change of policy, and deliberate. The old rule -- leave what the user
-    set up -- read as restraint but meant that every install created before
-    this fix stayed wide forever: ``~/.clustrix`` is 0755 on a real machine
-    today, and the config files under it are reachable by name from any
-    other local account whatever their own modes are. Narrowing the
-    directory remediates the files inside it without touching a single one
-    of them, which is why this is the right lever to pull.
+    Reports; it does not change it. That is a reversal of the previous
+    behaviour, which chmod-ed any clustrix-owned ancestor down to 0700, and
+    the reversal is deliberate:
 
-    ``~/.clustrix`` is clustrix's own directory and nobody else has a stake
-    in its mode. The user is told rather than left to discover it, which is
-    what separates this from silently re-moding a directory somebody else
-    owns -- and :func:`_clustrix_owned` is what keeps it off ``$HOME``.
+    * ``_clustrix_owned`` stopped at the configuration directory, so with
+      ``CLUSTRIX_CONFIG_DIR=$HOME`` -- an entirely supported setting, and the
+      documented answer for containers and CI images -- the directory it
+      narrowed to 0700 was ``$HOME`` itself.
+    * A configuration directory deliberately shared with a group, mode 0770
+      on a shared research machine, was silently forced to 0700 and the
+      group locked out of a directory the user had set up for them.
 
-    Only bits are removed, never added: whatever the owner can do, they go
-    on being able to do.
+    Both are the same overreach. A directory clustrix created is clustrix's
+    to mode; a directory that was already there belongs to whoever made it,
+    and re-moding it is a decision only they can take. So the user is handed
+    the exact command instead. Nothing is lost that they cannot get back in
+    one line, and the files clustrix writes are 0600 in their own right --
+    the directory mode is defence in depth, not the guarantee.
+
+    ``$HOME`` and everything above it are not even mentioned: see
+    :func:`_clustrix_owned`, which no longer yields them, because a warning
+    that fires on every ordinary machine is one nobody reads.
     """
     try:
         mode = stat.S_IMODE(path.stat().st_mode)
@@ -46,27 +53,12 @@ def _narrow_if_too_wide(path: Path) -> None:
         return
     if not mode & ~PRIVATE_DIR_MODE:
         return
-    narrowed = mode & PRIVATE_DIR_MODE
-    try:
-        path.chmod(narrowed)
-    except OSError as e:
-        # Somebody else owns it. Refusing to save would be a worse
-        # outcome than saving into a directory that was already this wide,
-        # so this reports and continues -- but it reports, because the
-        # user is the only one who can fix it.
-        warnings.warn(
-            f"{path} is mode {oct(mode)}, which lets other local users "
-            f"reach the files inside it by name, and clustrix could not "
-            f"narrow it ({e}). Run: chmod {oct(PRIVATE_DIR_MODE)[2:]} "
-            f"{path}",
-            stacklevel=3,
-        )
-        return
     warnings.warn(
-        f"{path} was mode {oct(mode)}, which lets other local users reach "
-        f"the files inside it by name; clustrix has narrowed it to "
-        f"{oct(narrowed)}. Configuration files, profiles and the .env "
-        f"credential file all live here and are nobody else's business.",
+        f"{path} is mode {oct(mode)}, which lets other local users reach the "
+        f"files inside it by name. Configuration files, profiles and the "
+        f".env credential file all live here. clustrix will not change the "
+        f"mode of a directory it did not create -- run: "
+        f"chmod {oct(PRIVATE_DIR_MODE)[2:]} {path}",
         stacklevel=3,
     )
 
@@ -87,10 +79,8 @@ def _mkdir_private(directory: Path) -> None:
     way made the very next ``mkdir`` fail with ``PermissionError``. The
     ``chmod`` has to happen level by level, before the child is attempted.
 
-    Directories that already exist are narrowed too, as far up as the
-    clustrix configuration directory but never past it -- ``$HOME`` and
-    everything above it belong to the user, not to clustrix. See
-    :func:`_narrow_if_too_wide`.
+    Directories that already exist are reported rather than re-moded --
+    they are not clustrix's to change. See :func:`_warn_if_too_wide`.
     """
     missing = []
     current = directory
@@ -114,28 +104,54 @@ def _mkdir_private(directory: Path) -> None:
 
     for path in _clustrix_owned(directory):
         if path not in created:
-            _narrow_if_too_wide(path)
+            _warn_if_too_wide(path)
 
 
 def _clustrix_owned(directory: Path):
-    """``directory`` and the ancestors of it that clustrix, not the user, owns.
+    """``directory`` and the ancestors of it that are clustrix's concern.
 
     Ownership stops at the configuration directory: creating
-    ``~/.clustrix/profiles`` is a reason to narrow ``~/.clustrix``, and
-    never a reason to touch ``$HOME``. A ``directory`` outside the
+    ``~/.clustrix/profiles`` is a reason to look at ``~/.clustrix``, and
+    never a reason to look at ``$HOME``. A ``directory`` outside the
     configuration directory entirely -- ``ProfileManager(config_dir=...)``
     with somewhere of the caller's choosing -- yields only itself, since
     clustrix asked for that one leaf and nothing above it.
+
+    ``$HOME`` and everything above it are excluded outright, and that is not
+    the same rule as "stop at the configuration directory". The two coincide
+    only while the configuration directory is *inside* ``$HOME``.
+    ``CLUSTRIX_CONFIG_DIR=$HOME`` is supported and documented, and it made
+    the configuration directory ``$HOME``: ``ProfileManager()`` then asked
+    for ``$HOME/profiles``, this yielded ``$HOME``, and the caller chmod-ed
+    the user's home directory from 0755 to 0700. A home directory is the
+    user's, whatever any environment variable makes it also mean.
     """
+    forbidden: set = set()
+    try:
+        home = Path.home().resolve()
+    except (OSError, RuntimeError):
+        # No determinable home directory (a service account, a scrubbed
+        # environment). Nothing can then be shown to be at or above it, so
+        # the configuration-directory rule below is all there is.
+        pass
+    else:
+        forbidden = {home, *home.parents}
+
+    if directory in forbidden:
+        return
     yield directory
     try:
         config_dir = get_config_dir().resolve()
         resolved = directory.resolve()
     except OSError:
         return
+    if resolved in forbidden:
+        return
     if resolved == config_dir or config_dir not in resolved.parents:
         return
     for parent in resolved.parents:
+        if parent in forbidden:
+            return
         yield parent
         if parent == config_dir:
             return
@@ -415,9 +431,10 @@ class ProfileManager:
             "not survive a restart. They still work for the rest of this "
             "session. To supply a password without writing it to disk, set "
             "password_env_var to the name of an environment variable holding "
-            "it. environment_variables is withheld for the same reason: its "
-            "names and values are yours, so clustrix cannot tell a setting "
-            "from a token and does not guess.",
+            "it. environment_variables, gpu_requirements and venv_info are "
+            "withheld for the same reason: their keys and values are yours, "
+            "so clustrix cannot tell a setting from a token and does not "
+            "guess.",
             stacklevel=3,
         )
 

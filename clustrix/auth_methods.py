@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from .config import ClusterConfig
+from .config import ClusterConfig, config_source_is_trusted, get_config_source
 from .credential_manager import get_credential_manager
 
 
@@ -182,6 +182,71 @@ def _hostname_matches(target: object, credential_host: object) -> bool:
         # credentials: an absent value must never satisfy a test.
         return False
     return normalized_target == normalized_credential
+
+
+def stored_credential_is_for_config(
+    config: ClusterConfig, credentials: Dict[str, Any]
+) -> Optional[str]:
+    """Why a stored SSH credential may not be used for ``config``, or ``None``.
+
+    ``FlexibleCredentialAuthMethod`` answers this question for a connection
+    the auth chain is driving. ``ConnectionManager.setup_ssh_connection``
+    reads ``ensure_credential("ssh")`` directly and used to answer it not at
+    all: whatever came out of ``~/.clustrix/.env`` was applied to whatever
+    ``config.cluster_host`` said, so the *file* decided who received the
+    user's cluster password.
+
+    That is a live exfiltration path rather than a theoretical one, because
+    ``config.cluster_host`` is not necessarily the user's. The search of the
+    standard locations includes ``./clustrix.yml``, so a repository that
+    ships one names the host, and the working-directory candidates normally
+    win outright (``~/.clustrix/clustrix.yml`` is not searched -- only
+    ``config.yml`` is). ``git clone && cd && python -c "import clustrix..."``
+    was enough to have the password sent to a host of the repository's
+    choosing.
+
+    Two rules, and the second is the one that keeps the documented setup
+    working:
+
+    1. **If the credential names a host, it must be that host.** Exactly,
+       after normalisation -- :func:`_hostname_matches`, the same comparison
+       and the same reasoning as the auth-chain path. Substring, suffix and
+       first-label matches were each exploitable there and are no better
+       here.
+    2. **If the credential names no host, the host must come from a source
+       the user chose.** A bare ``SSH_PASSWORD=...`` in ``.env`` with the
+       host in a config file is the documented, supported setup and has to
+       keep working, so requiring an ``SSH_HOST`` outright is not available.
+       What separates it from the attack is not the credential at all --
+       both look identical -- it is *who chose the hostname*. A host from
+       ``~/.clustrix/config.yml``, from ``load_config(path)``, or from
+       Python is the user's. A host from ``./clustrix.yml`` is whatever
+       directory the process is in. See
+       :func:`clustrix.config.config_source_is_trusted`.
+
+    Returns the reason it may not be used, so the caller can say so; ``None``
+    means it may.
+    """
+    credential_host = credentials.get("host", "")
+    if _normalize_hostname(credential_host):
+        if _hostname_matches(config.cluster_host, credential_host):
+            return None
+        return (
+            f"the stored credential is for {credential_host!r} and this "
+            f"connection is to {config.cluster_host!r}"
+        )
+
+    if config_source_is_trusted(config):
+        return None
+
+    return (
+        f"the stored credential names no host, and cluster_host="
+        f"{config.cluster_host!r} came from {get_config_source(config)} "
+        f"(a ./clustrix.yml is chosen by the directory the process runs in, "
+        f"not by you). Set SSH_HOST in the credential file, or put the host "
+        f"somewhere you chose: the clustrix configuration directory, "
+        f"load_config(path), or configure(cluster_host=...)"
+    )
 
 
 class FlexibleCredentialAuthMethod(AuthMethod):

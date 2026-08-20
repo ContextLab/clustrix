@@ -133,10 +133,31 @@ class ConnectionManager:
             # Try to get SSH credentials from credential manager
             # This ensures we check .env, environment variables, and GitHub Actions
             try:
+                from .auth_methods import stored_credential_is_for_config
                 from .credential_manager import FlexibleCredentialManager
 
                 credential_manager = FlexibleCredentialManager()
                 ssh_credentials = credential_manager.ensure_credential("ssh")
+
+                if ssh_credentials:
+                    # A stored credential belongs to one host. Applying it to
+                    # whatever ``config.cluster_host`` says was an
+                    # exfiltration path, not a convenience: the search of the
+                    # standard configuration locations includes
+                    # ``./clustrix.yml``, so a cloned repository can name the
+                    # host that receives the user's cluster password. The
+                    # same defect #167 fixed one layer up, in
+                    # FlexibleCredentialAuthMethod.
+                    refusal = stored_credential_is_for_config(
+                        self.config, ssh_credentials
+                    )
+                    if refusal:
+                        logger.warning(
+                            "Not using the stored SSH credential for %s: %s.",
+                            self.config.cluster_host,
+                            refusal,
+                        )
+                        ssh_credentials = None
 
                 if ssh_credentials:
                     if "password" in ssh_credentials:

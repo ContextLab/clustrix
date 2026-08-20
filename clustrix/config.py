@@ -1,10 +1,11 @@
 import json
 import re
 import secrets as _secrets
+import warnings
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, Optional, Any, get_args, get_origin
 from dataclasses import dataclass, asdict, fields
 
 
@@ -211,6 +212,12 @@ class ClusterConfig:
 
         validate_cluster_type(self.cluster_type)
 
+        # Where this configuration came from. A ``ClusterConfig(...)`` call is
+        # somebody's Python, so its default is the trusted end of the scale;
+        # ``load_config`` and ``_load_default_config`` overwrite it with what
+        # they actually read. See ``CONFIG_SOURCE_*`` below.
+        self._clustrix_config_source = CONFIG_SOURCE_RUNTIME
+
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
         if self.use_env_password and self.password_env_var:
@@ -228,9 +235,10 @@ class ClusterConfig:
 
         Secret-bearing fields (passwords, tokens, API keys, etc. -- see
         ``SECRET_FIELDS``) are omitted by default, since a saved config file
-        is easy to accidentally commit, back up, or share. So is
-        ``environment_variables``: its names and values are the user's, so
-        nothing tells ``OMP_NUM_THREADS=4`` from ``GITHUB_PAT=<a token>``
+        is easy to accidentally commit, back up, or share. So is every
+        mapping field -- ``environment_variables``, ``gpu_requirements`` and
+        ``venv_info`` -- whose keys and values are the user's, so nothing
+        tells ``OMP_NUM_THREADS=4`` from ``GITHUB_PAT=<a token>``
         (see ``UNCLASSIFIABLE_FIELDS``). Pass ``include_secrets=True`` to
         write all of it anyway, e.g. for a config file you deliberately keep
         out of version control.
@@ -365,30 +373,55 @@ _SECRET_FIELD_PATTERN = re.compile(
 # protecting nothing.
 _NOT_ACTUALLY_SECRET = re.compile(r"^use_|_env_var$", re.IGNORECASE)
 
-#: The exemptions above, resolved once against the *fixed* set of
-#: ``ClusterConfig`` field names they were written for. ``^use_`` describes
-#: the boolean ``use_env_password`` and ``_env_var$`` describes
-#: ``password_env_var``; neither is a statement about names in general.
-#: Applying the regex to arbitrary keys turned it into a hole -- a
-#: user-chosen environment variable called ``USE_PASSWORD`` was exempted by
-#: a rule about a flag it has nothing to do with. An exemption from a
-#: classifier is only sound over the domain the classifier was designed for,
-#: so it is frozen to that domain here.
-NOT_SECRET_FIELDS = frozenset(
-    f.name for f in fields(ClusterConfig) if _NOT_ACTUALLY_SECRET.search(f.name)
-)
+#: Every name ``_is_secret_field`` will answer for. The classifier is sound
+#: over the ``ClusterConfig`` fields it was written for and over nothing
+#: else, so this is the domain, enforced rather than described.
+DECLARED_FIELD_NAMES = frozenset(f.name for f in fields(ClusterConfig))
 
 
-def _is_secret_field(field_name: str, field_type: object) -> bool:
-    """Classify one *declared* ``ClusterConfig`` field. Not for other keys."""
-    if field_name in NOT_SECRET_FIELDS:
+def _is_secret_field(field_name: str) -> bool:
+    """Classify one *declared* ``ClusterConfig`` field. Not for other keys.
+
+    The exemptions matter and are narrow. ``^use_`` describes the boolean
+    ``use_env_password`` and ``_env_var$`` describes ``password_env_var``,
+    which holds the *name* of an environment variable rather than its value;
+    dropping either breaks the auth-fallback round trip while protecting
+    nothing. Neither is a statement about names in general, and applying
+    them to arbitrary keys was a hole: a user-chosen environment variable
+    called ``USE_PASSWORD`` was exempted by a rule about a flag it has
+    nothing to do with.
+
+    That domain restriction used to be expressed by resolving the exemption
+    regex against the declared field names once, into a ``NOT_SECRET_FIELDS``
+    frozenset. It was **vacuous**: this function has exactly one caller, the
+    ``SECRET_FIELDS`` comprehension immediately below, which only ever passes
+    declared field names -- so the frozen set was equal to the regex by
+    construction and replacing one with the other changed nothing. A mutation
+    test confirmed it (mutant M10, "unfreeze ``^use_``", survived), and a
+    guard that cannot fail is worse than no guard, because the reader thinks
+    it is protected. The ``USE_PASSWORD`` hole was closed by
+    ``UNCLASSIFIABLE_FIELDS`` withholding ``environment_variables`` whole,
+    not by the freeze.
+
+    So the restriction is enforced instead of asserted: a name that is not a
+    declared field is refused rather than classified. There is no correct
+    answer for one -- ``strip_secret_fields`` uses ``PERSISTABLE_KEYS`` to
+    exclude it long before this could be asked -- and returning ``False``
+    for it is how the exemption escaped its domain in the first place.
+    """
+    if field_name not in DECLARED_FIELD_NAMES:
+        raise ValueError(
+            f"{field_name!r} is not a ClusterConfig field, and this "
+            f"classifier is only sound over the fields it was written for. "
+            f"A key from outside the dataclass is excluded by "
+            f"PERSISTABLE_KEYS; it must not be handed an exemption here."
+        )
+    if _NOT_ACTUALLY_SECRET.search(field_name):
         return False
     return bool(_SECRET_FIELD_PATTERN.search(field_name))
 
 
-SECRET_FIELDS = {
-    f.name for f in fields(ClusterConfig) if _is_secret_field(f.name, f.type)
-}
+SECRET_FIELDS = {name for name in DECLARED_FIELD_NAMES if _is_secret_field(name)}
 
 #: The one key a clustrix configuration file carries that is not a
 #: ``ClusterConfig`` field: the label the notebook widget shows in its
@@ -415,15 +448,49 @@ PERSISTABLE_KEYS = frozenset(
     {f.name for f in fields(ClusterConfig)} | CONFIG_FILE_METADATA_KEYS
 )
 
+
+def _is_opaque_mapping(field_type: object) -> bool:
+    """Whether a declared field holds a mapping whose *keys* are not ours.
+
+    A ``Dict`` field on ``ClusterConfig`` is a hole in every name-based
+    classifier, because the names inside it are the user's rather than the
+    dataclass's. ``Optional[...]`` is unwrapped, and both the ``typing``
+    spelling (``Dict[str, str]``) and the bare builtin (``dict``) count.
+    """
+    candidates = [field_type, *get_args(field_type)]
+    for candidate in candidates:
+        origin = get_origin(candidate) or candidate
+        if isinstance(origin, type) and issubclass(origin, dict):
+            return True
+    return False
+
+
 #: Fields whose *values* are chosen by the user and therefore cannot be
-#: classified at all. ``environment_variables`` maps user-chosen names to
-#: user-chosen values: nothing distinguishes ``OMP_NUM_THREADS=4`` from
-#: ``GITHUB_PAT=<a token>`` by name or by shape, and the previous rule --
-#: judge each entry by its key name -- let ``SSH_PASSPHRASE``,
-#: ``GITHUB_PAT``, ``DATABASE_URL`` (with the password in the URL) and
-#: ``USE_PASSWORD`` through. Rather than guess again, the mapping is
-#: withheld whole and the caller is told; ``include_secrets=True`` writes it.
-UNCLASSIFIABLE_FIELDS = frozenset({"environment_variables"})
+#: classified at all -- withheld whole, with the loss announced;
+#: ``include_secrets=True`` writes them.
+#:
+#: ``environment_variables`` is the case that made the rule: nothing
+#: distinguishes ``OMP_NUM_THREADS=4`` from ``GITHUB_PAT=<a token>`` by name
+#: or by shape, and the previous rule -- judge each entry by its key name --
+#: let ``SSH_PASSPHRASE``, ``GITHUB_PAT``, ``DATABASE_URL`` (with the
+#: password in the URL) and ``USE_PASSWORD`` through.
+#:
+#: **Derived, not listed.** It was a literal ``{"environment_variables"}``,
+#: and the rule it stood for applies word for word to the other two mapping
+#: fields, which were not in it: ``gpu_requirements={"api_key": ...}`` and
+#: ``venv_info={"token": ...}`` reached disk verbatim, because
+#: ``strip_secret_fields`` looks at top-level keys and does not descend.
+#:
+#: Recursing into them was the other candidate fix and is the wrong one: it
+#: would classify nested keys by *name*, which is precisely the approach
+#: that failed above and that issue #167 replaced with an allowlist. A
+#: nested ``{"license_blob": <a token>}`` defeats recursion and does not
+#: defeat this. Deriving the set from the field types instead means a
+#: mapping field added later is withheld from the day it is added rather
+#: than from the day somebody remembers it.
+UNCLASSIFIABLE_FIELDS = frozenset(
+    f.name for f in fields(ClusterConfig) if _is_opaque_mapping(f.type)
+)
 
 
 def strip_secret_fields(config_data: dict) -> dict:
@@ -597,6 +664,82 @@ def write_config_file_securely(config_path_obj: Path, config_data: dict) -> None
     write_text_securely(config_path_obj, rendered)
 
 
+# ---------------------------------------------------------------------------
+# Where a configuration came from
+# ---------------------------------------------------------------------------
+#
+# ``cluster_host`` is the identity of the party a stored password is about to
+# be handed to, so "who chose this hostname" is a security question and not
+# bookkeeping. It has to be answerable because the search of the standard
+# locations includes ``./clustrix.yml`` -- a file belonging to whatever
+# directory the process happens to be run from. Cloning a repository that
+# ships one is enough to choose the hostname, and until this existed the
+# credential layer could not tell that apart from a hostname the user put in
+# ``~/.clustrix/config.yml`` themselves.
+#
+# The provenance rides on the config object rather than on a module global
+# because callers hold their own instances: ``ClusterExecutor(config)`` takes
+# whatever it is given, and a global would answer for the singleton instead.
+# It is a plain attribute, deliberately not a dataclass field: ``fields()``,
+# ``asdict()``, ``__eq__`` and therefore ``PERSISTABLE_KEYS`` and
+# ``save_to_file`` are all unchanged by it, so nothing persists it and nothing
+# can set it from a file.
+
+#: Set in Python -- ``ClusterConfig(...)`` or ``configure(cluster_host=...)``.
+CONFIG_SOURCE_RUNTIME = "runtime"
+
+#: ``load_config(path)``: the caller named the file, so the caller chose it.
+CONFIG_SOURCE_EXPLICIT_FILE = "explicit-file"
+
+#: Found in the clustrix configuration directory (``~/.clustrix``, or
+#: ``CLUSTRIX_CONFIG_DIR``). Writing a file there is a deliberate act.
+CONFIG_SOURCE_USER_CONFIG_DIR = "user-config-dir"
+
+#: Found as ``./clustrix.{yml,yaml,json}``. **Not trusted.** Nobody chose
+#: this file by being in the directory; ``git clone && cd`` is enough.
+CONFIG_SOURCE_WORKING_DIRECTORY = "working-directory"
+
+#: The sources that count as "the user configured this". Everything not
+#: listed is untrusted, so a source nobody has thought of yet fails closed.
+TRUSTED_CONFIG_SOURCES = frozenset(
+    {
+        CONFIG_SOURCE_RUNTIME,
+        CONFIG_SOURCE_EXPLICIT_FILE,
+        CONFIG_SOURCE_USER_CONFIG_DIR,
+    }
+)
+
+#: Every source there is. A new one has to be added here *and* decided about
+#: above, so it cannot become trusted by being forgotten.
+CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | {CONFIG_SOURCE_WORKING_DIRECTORY}
+
+
+def set_config_source(config: ClusterConfig, source: str) -> None:
+    """Record where ``config`` was read from."""
+    if source not in CONFIG_SOURCES:
+        raise ValueError(
+            f"Unknown configuration source: {source!r}. "
+            f"Known sources are {sorted(CONFIG_SOURCES)}."
+        )
+    config._clustrix_config_source = source
+
+
+def get_config_source(config: ClusterConfig) -> str:
+    """Where ``config`` was read from.
+
+    Falls back to the *untrusted* answer for an object that somehow has no
+    record -- one restored by ``pickle``, say, which does not run
+    ``__post_init__``. An absent value must never read as "trusted", which
+    is the same rule ``_hostname_matches`` applies to an absent hostname.
+    """
+    return getattr(config, "_clustrix_config_source", CONFIG_SOURCE_WORKING_DIRECTORY)
+
+
+def config_source_is_trusted(config: ClusterConfig) -> bool:
+    """Whether ``config`` came from somewhere the user chose."""
+    return get_config_source(config) in TRUSTED_CONFIG_SOURCES
+
+
 # Global configuration instance
 _config = ClusterConfig()
 
@@ -630,6 +773,12 @@ def configure(**kwargs) -> None:
 
     for key, value in kwargs.items():
         setattr(_config, key, value)
+
+    if "cluster_host" in kwargs:
+        # An explicit configure() call is the user's own Python, so it
+        # replaces whatever a file had said -- including a ./clustrix.yml
+        # that had been picked up from the working directory.
+        set_config_source(_config, CONFIG_SOURCE_RUNTIME)
 
 
 def load_config(config_path: str) -> None:
@@ -687,6 +836,10 @@ def load_config(config_path: str) -> None:
         )
 
     _config = ClusterConfig(**config_data)
+    # The caller named this path, so the caller chose it. The search of the
+    # standard locations overwrites this with what it actually found; see
+    # ``_load_default_config``.
+    set_config_source(_config, CONFIG_SOURCE_EXPLICIT_FILE)
 
 
 def save_config(config_path: str, include_secrets: bool = False) -> None:
@@ -730,8 +883,26 @@ def get_config() -> ClusterConfig:
 
 # Try to load configuration from default locations
 def _load_default_config():
-    """Load configuration from default locations."""
-    default_paths = []
+    """Load configuration from default locations, recording which one won.
+
+    The candidates are not equally trustworthy and are no longer treated as
+    if they were. A file in the clustrix configuration directory is there
+    because the user put it there. ``./clustrix.yml`` is there because of
+    where the process happens to be running: ``git clone`` followed by ``cd``
+    is the whole of what it takes for a repository to supply one, and the
+    working-directory candidates usually *win* outright, because
+    ``~/.clustrix/clustrix.yml`` is not in this list at all (``config.yml``
+    is). Each candidate therefore carries its source, and the credential
+    layer asks (:func:`config_source_is_trusted`) before handing a stored
+    password to the ``cluster_host`` a file named.
+
+    The working-directory candidates are kept, because a project-local
+    ``clustrix.yml`` is a documented and useful way to hold per-project
+    settings, and every non-credential setting in one is the user's own
+    project. Adopting one is announced rather than silent: it is the only
+    candidate the user did not have to go anywhere to create.
+    """
+    candidates = []
     try:
         config_dir = get_config_dir()
     except RuntimeError:
@@ -742,24 +913,36 @@ def _load_default_config():
         # candidates below are still searched.
         pass
     else:
-        default_paths += [
-            config_dir / "config.yml",
-            config_dir / "config.yaml",
-            config_dir / "config.json",
+        candidates += [
+            (config_dir / "config.yml", CONFIG_SOURCE_USER_CONFIG_DIR),
+            (config_dir / "config.yaml", CONFIG_SOURCE_USER_CONFIG_DIR),
+            (config_dir / "config.json", CONFIG_SOURCE_USER_CONFIG_DIR),
         ]
-    default_paths += [
-        Path.cwd() / "clustrix.yml",
-        Path.cwd() / "clustrix.yaml",
-        Path.cwd() / "clustrix.json",
+    candidates += [
+        (Path.cwd() / "clustrix.yml", CONFIG_SOURCE_WORKING_DIRECTORY),
+        (Path.cwd() / "clustrix.yaml", CONFIG_SOURCE_WORKING_DIRECTORY),
+        (Path.cwd() / "clustrix.json", CONFIG_SOURCE_WORKING_DIRECTORY),
     ]
 
-    for path in default_paths:
+    for path, source in candidates:
         if path.exists():
             try:
                 load_config(str(path))
-                break
             except Exception:
                 continue
+            set_config_source(_config, source)
+            if source == CONFIG_SOURCE_WORKING_DIRECTORY:
+                warnings.warn(
+                    f"clustrix adopted the configuration file {path} because "
+                    f"it is in the current working directory, not because "
+                    f"anyone asked for it. Stored credentials are NOT offered "
+                    f"to a cluster_host chosen this way; if this file is "
+                    f"yours, put the host in the clustrix configuration "
+                    f"directory (config.yml) or load it explicitly with "
+                    f"clustrix.config.load_config({str(path)!r}).",
+                    stacklevel=2,
+                )
+            break
 
 
 # Load default configuration on import

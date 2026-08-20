@@ -40,6 +40,24 @@ silently and the search continues.
 Note item 4: a ``clustrix.yml`` in the current working directory is picked up
 automatically. Changing directory does not reload it.
 
+.. warning::
+
+   **Items 4-6 are not trusted with your credentials.** Nobody chooses a
+   working-directory configuration file by being in the directory --
+   ``git clone`` followed by ``cd`` is the whole of what it takes for a
+   repository to supply one, and it usually wins outright, because
+   ``~/.clustrix/clustrix.yml`` is not in this list at all (``config.yml``
+   is). Adopting one therefore emits a ``UserWarning`` naming the file, and
+   a credential stored in ``~/.clustrix/.env`` that does not name a host of
+   its own is **not** offered to a ``cluster_host`` that came from one.
+
+   Nothing else changes: every non-credential setting in a project-local
+   ``clustrix.yml`` takes effect as before. To use a stored credential with
+   such a host, either set ``SSH_HOST`` in the credential file -- which is
+   you naming the host that may receive the secret -- or put the host
+   somewhere you chose: ``<config dir>/config.yml``,
+   ``load_config("path/to/clustrix.yml")``, or ``configure(cluster_host=...)``.
+
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not
 re-exported at the package top level -- replaces the instance wholesale from a
@@ -101,7 +119,10 @@ password. ``FlexibleCredentialManager`` -- the fallback used when neither
 ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``, ``SSH_PORT``, ``HF_TOKEN`` (or
 ``HUGGINGFACE_TOKEN``), ``HUGGINGFACE_USERNAME`` and ``HF_USERNAME``, from a
 ``.env`` file or from the process environment, and switches to its CI source
-when ``GITHUB_ACTIONS`` is ``"true"``. The HuggingFace backend reads
+when ``GITHUB_ACTIONS`` is ``"true"``. A stored SSH credential goes to one
+host and no other: if it sets ``SSH_HOST``, that host must be the one being
+connected to; if it does not, ``cluster_host`` must have come from a source
+you chose (see the warning above). The HuggingFace backend reads
 ``HF_TOKEN`` directly as well, and honours ``HF_HOME`` when locating the token
 that ``hf auth login`` cached. The key-setup helper in ``auth_fallbacks`` has
 its own list: ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
