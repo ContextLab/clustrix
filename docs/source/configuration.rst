@@ -105,6 +105,16 @@ automatically. Changing directory does not reload it.
    offending file is the same story: naming a path you did not write is not
    choosing a host.
 
+   **In the** ``%%clusterfy`` **widget, only the host field lifts it.** The
+   widget remembers which of the configurations in its dropdown it found on
+   disk and which hostname each of those files named, so rearranging them
+   changes nothing: renaming a configuration in the name box, copying it with
+   the *+* button, saving it into your own configuration directory or pasting
+   over it in the *Load* box all keep the refusal, because none of them is
+   you choosing who receives your password. Typing your own hostname over the
+   host field does lift it -- for that hostname -- because a host is only
+   refused by a file that actually named it.
+
    The cost is a refusal when a ``./clustrix.yml`` names the host you were
    going to use anyway. Those two cases are genuinely indistinguishable, so
    the refusal is the safe half of the pair, and the two remedies above are

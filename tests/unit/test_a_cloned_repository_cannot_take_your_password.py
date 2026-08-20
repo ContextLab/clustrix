@@ -2371,3 +2371,260 @@ def test_a_rename_in_one_widget_does_not_edit_the_next_widget_s_templates(
     from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
 
     assert "renamed by me" not in EnhancedClusterConfigWidget().configs
+
+
+# --------------------------------------------------------------------------
+# Route 11. The "+" button. Same defect class as the rename above, and the
+# door next to it: renaming *moves* a configuration between names, copying
+# *creates* a second one -- and ``_on_add_config`` created it out of the live
+# fields, which are still the found file's, then moved
+# ``current_config_name`` onto it without carrying the name-keyed sidecars.
+# ``_discovered_source_for`` then found nothing under the new name and
+# Apply's ``configure()`` stamped ``runtime``, trusted.
+#
+# Measured on the wire before the fix: ``before "+" -> working-directory``,
+# ``after "+" -> None`` / ``runtime`` / ``trusted=True``, and
+# ``server.authentications == [("victim", "password")]`` -- the cloned
+# repository's own host received the stored credential.
+#
+# Copying a configuration is not choosing a hostname.
+# --------------------------------------------------------------------------
+
+
+def _press_plus_then_clear_the_name(widget):
+    """Press "+", then empty the name box, which is what makes Apply run.
+
+    ``_save_config_from_widgets`` emits ``name`` and ``configure()`` rejects
+    it, so Apply is dead for every *named* configuration (issue #165, fixed
+    on its own branch) -- and "+" fills the name box in. Clearing it is
+    therefore not a contrivance to reach the leak: on this branch it is the
+    only state in which Apply applies anything at all. ``_on_config_name_
+    change`` returns early on an empty name, so this renames nothing.
+    """
+    widget._on_add_config(None)
+    assert widget.current_config_name == "New Configuration"
+    widget.config_name.value = ""
+    assert widget.current_config_name == "New Configuration"
+
+
+def test_the_plus_button_does_not_launder_a_found_config_onto_the_wire(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """The reproduction, end to end against a real SSH server.
+
+    RED before the fix: ``source=runtime``, ``trusted=True`` and
+    ``attacker_server.authentications == [("victim", "password")]``.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "config.yml").write_text(
+        _config_text(attacker_server, name='""'), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    # The user's own documented setting; see the identical note above.
+    configure(ssh_host_key_policy="auto_add")
+
+    widget = _clusterfy_widget()
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+    _press_plus_then_clear_the_name(widget)
+    widget._on_apply_config(None)
+
+    assert get_config().cluster_host == attacker_server.host
+    assert attacker_server.authentications == [], (
+        "pressing + on a config.yml the widget found in the working "
+        "directory sent the stored credential to the host that file named: "
+        + repr(attacker_server.authentications)
+    )
+    assert not _attempt_connection()
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_copying_a_found_configuration_carries_its_provenance(tmp_path, monkeypatch):
+    """The same defect at the function it lives in, without a server.
+
+    The sidecars are asserted directly so that a future change which happens
+    to keep the wire safe by some other accident still fails here.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget._on_add_config(None)
+
+    assert widget.current_config_name == "New Configuration"
+    assert widget.config_source_map["New Configuration"] == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+    assert widget.config_source_host_map["New Configuration"] == (
+        UNRELATED_ATTACKER_HOST
+    )
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+    # The original is untouched: copying is not moving.
+    assert widget.config_source_map["config"] == CONFIG_SOURCE_WORKING_DIRECTORY
+
+    # ``config_file_map`` deliberately does not come along -- the copy is a
+    # configuration no file holds, and that map decides which entries a save
+    # writes back, not who may receive a credential.
+    assert "New Configuration" not in widget.config_file_map
+
+
+def test_copying_after_typing_your_own_hostname_does_not_condemn_it(
+    tmp_path, monkeypatch
+):
+    """And the fix is not "condemn every copy".
+
+    A hostname is only condemned by a source that actually named it, so a
+    copy taken *after* the user typed their own host carries nothing. This
+    is the branch that clears the sidecars rather than writing them.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.host_field.value = "my-own-cluster.example"
+    widget._on_add_config(None)
+
+    assert widget.current_config_name == "New Configuration"
+    assert "New Configuration" not in widget.config_source_map
+    assert "New Configuration" not in widget.config_source_host_map
+    assert widget._discovered_source_for(_live_widget_fields(widget)) is None
+
+
+# --------------------------------------------------------------------------
+# The family, not the door. Two of these leaked -- the rename (9b) and the
+# copy (11) -- each found separately, each the same mistake: an operation
+# that creates, moves or removes a configuration *name* without moving what
+# is keyed by that name. So every such operation is walked here, and the
+# invariant is asserted directly rather than one leak at a time.
+# --------------------------------------------------------------------------
+
+
+def _sidecar_names(widget):
+    return (
+        set(widget.config_source_map)
+        | set(widget.config_source_host_map)
+        | set(widget.config_file_map)
+    )
+
+
+@pytest.mark.parametrize(
+    "door",
+    [
+        "rename",
+        "copy",
+        "delete",
+        "paste_over_the_found_name",
+        "paste_under_a_new_name",
+        "save",
+        "select_another",
+    ],
+)
+def test_no_name_mutating_door_leaves_a_sidecar_describing_a_dead_name(
+    door, tmp_path, monkeypatch
+):
+    """A sidecar keyed by a name that no longer exists is the whole bug.
+
+    It stops describing the configuration it was about (the leak) and starts
+    describing whatever is named that next (the false refusal). Neither is
+    visible from any single door, which is why this walks all of them.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    assert _sidecar_names(widget) == {"config"}
+
+    pasted = "\n".join(
+        [
+            "name: {name}",
+            "cluster_type: ssh",
+            f"cluster_host: {UNRELATED_ATTACKER_HOST}",
+            "username: victim",
+        ]
+    )
+    if door == "rename":
+        widget.config_name.value = "mine"
+    elif door == "copy":
+        widget._on_add_config(None)
+    elif door == "delete":
+        widget._on_delete_config(None)
+    elif door == "paste_over_the_found_name":
+        widget.load_config_text.value = pasted.format(name="config") + "\n"
+        widget._on_load_config(None)
+    elif door == "paste_under_a_new_name":
+        widget.load_config_text.value = pasted.format(name="fresh") + "\n"
+        widget._on_load_config(None)
+    elif door == "save":
+        widget._on_save_config(None)
+    elif door == "select_another":
+        widget.config_dropdown.value = "Local Single-core"
+    else:  # pragma: no cover - the parametrisation is the whole list
+        raise AssertionError(door)
+
+    orphaned = _sidecar_names(widget) - set(widget.configs)
+    assert orphaned == set(), (
+        f"the {door!r} door left provenance keyed by a configuration that no "
+        f"longer exists: {sorted(orphaned)}"
+    )
+
+
+def test_pasting_over_a_found_configuration_does_not_launder_it(tmp_path, monkeypatch):
+    """The Load box is a paste, but the name it lands on may not be free.
+
+    Pasting is the user typing, so a *new* name is ``runtime`` and that is
+    right. Pasting onto the name a discovered file already holds is the
+    interesting one, and it has to keep the refusal: the text a user pastes
+    is very often text a repository's README told them to paste, so clearing
+    the provenance here would be a second copy of route 11 with the file
+    replaced by an instruction.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.load_config_text.value = "\n".join(
+        [
+            "name: config",
+            "cluster_type: ssh",
+            f"cluster_host: {UNRELATED_ATTACKER_HOST}",
+            "username: victim",
+        ]
+    )
+    widget._on_load_config(None)
+
+    assert widget.current_config_name == "config"
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+
+
+def test_saving_a_found_configuration_to_your_own_directory_does_not_adopt_it(
+    tmp_path, monkeypatch
+):
+    """Writing it out is not the same as saying you meant it.
+
+    ``_on_save_config`` updates ``config_file_map`` so the next save knows
+    where the configuration lives. If it updated the *source* maps too,
+    pressing Save would silently promote a file a repository shipped to the
+    user's own -- adoption has to stay an explicit act.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget._on_save_config(None)
+
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )

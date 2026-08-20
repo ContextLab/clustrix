@@ -623,6 +623,47 @@ def test_the_refusal_for_an_unrecorded_store_says_what_it_is(tmp_path):
     assert "inherited environment variable" not in reason
 
 
+def test_the_warning_names_only_the_profiles_that_name_a_host(tmp_path):
+    """It lists ``shipped`` and not ``filler``. Both are unrecorded.
+
+    Provenance decides who may receive a credential, so a profile naming
+    nobody has nothing at stake. The filter matters because a pre-fix
+    ``_persist`` copied all six built-in templates into the store, and every
+    one of them is hostless: without it the warning names seven profiles and
+    buries the single entry the user actually has to look at, which is the
+    same as not warning.
+
+    Guards ``profile_manager``'s ``and config.cluster_host``. Removing that
+    clause left the whole suite green -- the message was asserted only by its
+    ``predate clustrix recording`` prefix, never by whom it named.
+    """
+    from clustrix.config import get_config_dir
+
+    store = get_config_dir() / "profiles" / ProfileManager.STORE_FILENAME
+    store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    store.write_text(BUNDLE, encoding="utf-8")
+
+    with pytest.warns(UserWarning, match="predate clustrix recording") as caught:
+        manager = ProfileManager()
+
+    # Both profiles really are unrecorded -- the filter is about what the
+    # message says, not about which profiles carry the doubt.
+    assert get_config_source(manager.profiles["shipped"]) == (
+        CONFIG_SOURCE_UNRECORDED_PROVENANCE
+    )
+    assert get_config_source(manager.profiles["filler"]) == (
+        CONFIG_SOURCE_UNRECORDED_PROVENANCE
+    )
+    assert manager.profiles["filler"].cluster_host is None
+
+    message = str(
+        [w for w in caught if "predate clustrix recording" in str(w.message)][0].message
+    )
+    assert message.startswith("1 profile(s)"), message
+    assert "shipped" in message
+    assert "filler" not in message
+
+
 def test_naming_the_store_is_the_way_back(tmp_path):
     """``adopt_profile_store`` is the remedy the refusal names, and it works.
 

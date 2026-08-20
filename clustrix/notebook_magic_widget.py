@@ -348,6 +348,35 @@ class EnhancedClusterConfigWidget:
             else:
                 mapping.pop(new_name, None)
 
+    def _carry_config_provenance(
+        self,
+        name: str,
+        source: Optional[str],
+        config_data: Dict[str, Any],
+    ) -> None:
+        """Attach ``source`` to ``name``, or make sure nothing is attached.
+
+        ``source`` is what :meth:`_discovered_source_for` said about the
+        fields in ``config_data`` *before* they were copied under a new name.
+        A non-``None`` answer already means the host in those fields is the
+        host the file named, so the host recorded here is that same host.
+
+        The ``else`` branch is what the user typing their own hostname
+        reaches, and it *clears* rather than leaves alone -- the same
+        both-directions rule as :meth:`_rename_config_metadata`, so the two
+        maps track ``self.configs`` exactly however this is called and a name
+        can never end up carrying a file's provenance over fields that file
+        never described.
+        """
+        if source:
+            self.config_source_map[name] = source
+            self.config_source_host_map[name] = normalize_hostname(
+                config_data.get("cluster_host")
+            )
+        else:
+            self.config_source_map.pop(name, None)
+            self.config_source_host_map.pop(name, None)
+
     def _forget_config_metadata(self, name: str) -> None:
         """Drop the sidecars for a configuration that is going away."""
         for attr in self._NAME_KEYED_MAPS:
@@ -821,11 +850,30 @@ class EnhancedClusterConfigWidget:
                 config_name = f"{base_name} {counter}"
                 counter += 1
 
-            # Save current widget state as new config
+            # Save current widget state as new config.
+            #
+            # The provenance of those *live fields* has to be read while
+            # ``current_config_name`` still names the configuration they came
+            # from -- ``_discovered_source_for`` keys off it -- and then
+            # carried onto the new name. Copying moved the fields and left
+            # the sidecars behind, so ``_discovered_source_for`` returned
+            # ``None`` under the new name and Apply's ``configure()`` stamped
+            # ``runtime``: selecting a repository's ``./config.yml`` and
+            # pressing "+" was enough to have the cluster password sent to
+            # the host that file named. Measured on the wire. Copying a
+            # configuration is not choosing a hostname, exactly as renaming
+            # one is not (see ``_rename_config_metadata``).
+            #
+            # ``config_file_map`` deliberately does *not* come along: the
+            # copy is a new configuration that no file holds, and it decides
+            # which entries a save writes back, not who may receive a
+            # credential.
             config_data = self._save_config_from_widgets()
+            discovered_source = self._discovered_source_for(config_data)
             config_data["name"] = config_name
             self.configs[config_name] = config_data
             self.current_config_name = config_name
+            self._carry_config_provenance(config_name, discovered_source, config_data)
 
             # Update UI
             self.config_name.value = config_name
