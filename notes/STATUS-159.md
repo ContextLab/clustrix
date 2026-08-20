@@ -1330,3 +1330,45 @@ gap; and paramiko never reads `ssh_config`.
 Fix round dispatched, with the instruction that F1 must not be fixed by always
 passing `-F /dev/null` — a user's ssh_config legitimately carries `ProxyJump`,
 `Port`, `User` and `HostName`, and discarding it would break real deployments.
+
+## Audit of the F2 class: which declared fields make a security decision
+
+F2 (`ssh_host_key_policy`) and F4 (`hf_image`) share a shape — *a
+security-relevant setting is an ordinary declared field, so an untrusted
+configuration sets it as easily as any other*. Rather than wait for a third, I
+audited all **64** `ClusterConfig` fields. 25 are security-relevant by name.
+Results:
+
+**No escalation via field-mixing. `_load_default_config` does not merge.** The
+candidate loop has exactly one `break` (AST-verified): the first existing
+candidate wins **outright**, and config-dir candidates are ordered before
+working-directory ones. So an untrusted `./clustrix.yml` cannot override
+`pre_execution_commands`, `module_loads`, `venv_post_install_commands` or
+`environment_variables` while a *trusted* file supplies the host. One file wins
+entirely — which is why **F2 works only because the attacker's file supplies
+both the host and the policy**. That bounds the class rather than widening it.
+
+Note the documented sharp edge in that function: `~/.clustrix/clustrix.yml` is
+**not** a candidate (only `config.yml` is), so a user file with that name loses
+to `./clustrix.yml`.
+
+**Local-effect fields are better defended than expected:**
+- `python_executable` is remote-only and passes through
+  `validate_shell_fragment`; nothing runs it locally via `subprocess`.
+- `local_cache_dir`'s deletion path (`_discard_local_cache`) removes only
+  `<local_cache_dir>/data-packages/<package_id>` — keyed by an id nothing else
+  uses — and explicitly declines when the resolved cache equals the caller's
+  own `local_root`. Its docstring records the real past bug that motivated the
+  guard: `materialize(dest="~/myproject")` followed by `delete()` removed the
+  project.
+- `local_work_dir` only redirects local filesystem *reads*
+  (`filesystem.py:275`).
+
+**So the exposures are the two already found**, not a family of them.
+
+### A merge detail this turned up
+`_load_default_config`'s candidate loop on the **gate** branch still contains
+`except Exception: continue` — the silent-swallow shape #123 exists to remove.
+`work/silent-failures` removes it. **At the `config.py` reconciliation, take
+#123's error handling and the gate's provenance**; do not carry the gate's
+`except Exception: continue` forward.
