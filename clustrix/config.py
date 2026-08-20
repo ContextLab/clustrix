@@ -579,36 +579,67 @@ def configure(**kwargs) -> None:
     """
     Configure Clustrix settings.
 
+    Runs under ``_DEFAULT_CONFIG_LOCK`` for the same reason
+    :func:`load_config` does, and the lock has to cover the ``setattr`` loop
+    at the bottom, not just the search above it. The loop reads the module
+    global ``_config`` on every iteration, and :func:`load_config` *rebinds*
+    it. With the loop unlocked, a ``load_config`` landing in the middle of it
+    left the keywords already applied written to the object that was just
+    discarded and the rest written to the new one -- a torn write in which
+    neither writer won, reported as success. Measured:
+    ``configure(cluster_host=..., username=..., cluster_port=...,
+    remote_work_dir=...)`` returned with ``cluster_host`` silently reverted to
+    the file's value and the other three applied.
+
+    So each of the two writers is now atomic with respect to the other, and
+    the loser loses whole: whichever acquires the lock second sees a
+    consistent configuration and writes a consistent one. What this does
+    *not* do is make ``configure`` beat a ``load_config`` that acquires the
+    lock after it -- an explicit file load replaces the configuration
+    wholesale, by design, and that includes replacing keywords set before it.
+    The documented precedence (defaults -> file -> runtime keywords) is about
+    the layering within one sequence of calls, not about which of two
+    concurrent writers wins; the only guarantee across threads is that
+    neither call is observed half-applied.
+
     Args:
         **kwargs: Configuration parameters matching ClusterConfig fields
     """
     global _config  # noqa: F824
 
-    # The file is the layer underneath these keywords (defaults -> file ->
-    # runtime), so it has to be in place before they are applied on top --
-    # otherwise a later get_config() would run the search and overwrite them.
-    _ensure_default_config_loaded()
+    with _DEFAULT_CONFIG_LOCK:
+        # The file is the layer underneath these keywords (defaults -> file
+        # -> runtime), so it has to be in place before they are applied on
+        # top -- otherwise a later get_config() would run the search and
+        # overwrite them. Re-entrant: this is the same lock, and it is an
+        # RLock.
+        _ensure_default_config_loaded()
 
-    # Validate everything before applying anything: a rejected keyword used
-    # to leave the earlier ones already written to the live config, so a
-    # failed configure() call still changed the process's behaviour.
-    for key in kwargs:
-        if hasattr(_config, key):
-            continue
-        removed = _removed_setting_reason(key)
-        if removed:
-            raise ValueError(removed)
-        raise ValueError(f"Unknown configuration parameter: {key}")
+        # Validate everything before applying anything: a rejected keyword
+        # used to leave the earlier ones already written to the live config,
+        # so a failed configure() call still changed the process's behaviour.
+        for key in kwargs:
+            if hasattr(_config, key):
+                continue
+            removed = _removed_setting_reason(key)
+            if removed:
+                raise ValueError(removed)
+            raise ValueError(f"Unknown configuration parameter: {key}")
 
-    if "cluster_type" in kwargs:
-        # setattr below does not re-run __post_init__, so without this a
-        # removed backend reaches the executor and fails there instead --
-        # after connect(), i.e. after an SSH round trip to a host that was
-        # never going to be used.
-        validate_cluster_type(kwargs["cluster_type"])
+        if "cluster_type" in kwargs:
+            # setattr below does not re-run __post_init__, so without this a
+            # removed backend reaches the executor and fails there instead --
+            # after connect(), i.e. after an SSH round trip to a host that was
+            # never going to be used.
+            validate_cluster_type(kwargs["cluster_type"])
 
-    for key, value in kwargs.items():
-        setattr(_config, key, value)
+        # Bound once. Even under the lock, re-reading the global on every
+        # iteration would make this loop depend on _config not being rebound
+        # mid-loop, which is the property the lock exists to provide rather
+        # than one to lean on twice.
+        target = _config
+        for key, value in kwargs.items():
+            setattr(target, key, value)
 
 
 def load_config(config_path: str) -> None:
@@ -628,8 +659,11 @@ def load_config(config_path: str) -> None:
     itself calls this function.
 
     Holding it across the parse as well as the assignment means the winner is
-    the last caller to *enter*, not the last to *finish*; a slow large file
-    cannot land on top of a small one loaded after it.
+    the last caller to *acquire the lock*, not the last to finish; a slow
+    large file cannot land on top of a small one loaded after it. Note the
+    correction: "the last caller to enter" was the wording here, and it was
+    false against a :func:`configure` competitor, which took no lock at all
+    and so could not queue behind anything. It does now.
 
     Args:
         config_path: Path to configuration file

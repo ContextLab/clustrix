@@ -1126,20 +1126,44 @@ def get_unreproducible_requirements() -> Dict[str, str]:
 
 
 def _distribution_import_names(dist: Any) -> List[str]:
-    """Top-level module names a distribution provides."""
+    """Top-level module names a distribution provides.
+
+    An empty result is not a neutral answer. The only caller,
+    :func:`unreproducible_module_owners`, uses this to *refuse* a submission
+    that reaches into a package the worker cannot reinstall. A distribution
+    whose metadata could not be read contributes no import names, the
+    submission is allowed, and the job dies on the worker at ``import`` --
+    minutes later, naming a module rather than the metadata that could not be
+    read. So a failure here is a warning, not a debug line: it is the
+    difference between a refusal now and a wrong answer later.
+    """
     names: Set[str] = set()
     try:
         text = dist.read_text("top_level.txt")
-    except Exception as exc:  # pragma: no cover - unreadable metadata file
-        logger.debug("Could not read top_level.txt for %s: %s", dist, exc)
+    except Exception as exc:
+        logger.warning(
+            "Could not read top_level.txt for %s (%s); the modules it "
+            "provides will be missing from the reproducibility check, so a "
+            "job that imports them may be allowed to run and then fail on "
+            "the worker.",
+            dist,
+            exc,
+        )
         text = None
     if text:
         names.update(line.strip() for line in text.splitlines() if line.strip())
     if not names:
         try:
             files = dist.files or []
-        except Exception as exc:  # pragma: no cover - metadata without a file list
-            logger.debug("Could not list the files of %s: %s", dist, exc)
+        except Exception as exc:
+            logger.warning(
+                "Could not list the files of %s (%s); the modules it provides "
+                "will be missing from the reproducibility check, so a job "
+                "that imports them may be allowed to run and then fail on the "
+                "worker.",
+                dist,
+                exc,
+            )
             files = []
         for entry in files:
             head = str(entry).replace("\\", "/").split("/")[0]
@@ -2052,12 +2076,26 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
     wanted = f"python{_sys.version_info.major}.{_sys.version_info.minor}"
 
     def exists(candidate: str) -> bool:
+        """True if ``candidate`` is on the remote PATH; raises if unmeasured.
+
+        There is no honest ``False`` to return when the probe itself fails.
+        Returning one used to send the caller into the ``RuntimeError`` at
+        the bottom of this function, which states flatly that there is no
+        matching interpreter on the remote host and tells the user to go and
+        install one -- a confident claim about a machine clustrix never
+        managed to ask. A dead transport is a failure of this end, so it is
+        raised as one, with the exception that caused it chained on.
+        """
         try:
             stdin, stdout, stderr = ssh_client.exec_command(f"command -v {candidate}")
             return bool(stdout.read().decode().strip())
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.debug("Could not probe the remote host for %s: %s", candidate, exc)
-            return False
+        except Exception as exc:
+            host = getattr(config, "cluster_host", None) or "the remote host"
+            raise RuntimeError(
+                f"Could not ask {host} whether {candidate} is installed: "
+                f"{exc}. This is a failure of the connection, not evidence "
+                f"that {candidate} is absent."
+            ) from exc
 
     if exists(wanted):
         logger.debug("Using remote interpreter %s", wanted)

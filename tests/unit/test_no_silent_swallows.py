@@ -6,36 +6,47 @@ could not tell" must never be returned as "no".
 
 Nothing is mocked. The connection-shaped tests drive a real in-process
 paramiko server with real SFTP and real shell commands; the rest use real
-functions, real sockets and real files.
+functions, real sockets, real files on disk and real distribution metadata.
 
-Two kinds of test live here:
+Two kinds of test live here, and they are not equals.
 
-* behavioural tests for the sites where a swallowed exception produced a
-  *wrong answer* -- a finished job reported as running, an unserializable
-  payload shipped by reference;
-* one structural guard (:func:`test_every_silent_swallow_has_a_recorded_decision`)
-  that walks the AST of the whole package -- subpackages included -- and
-  refuses any handler that catches everything and then does nothing about it,
-  unless the site is recorded: as a decision in ``JUSTIFIED_SWALLOWS`` or as a
-  defect with an issue number in ``TRACKED_DEFECTS``. That makes the audit
-  executable, and it is the regression test for the handlers that are
-  genuinely unreachable with real inputs and so cannot be driven from a test.
+**The guarantee is behavioural.** Each test in the first half of this module
+takes a real clustrix surface, breaks something real underneath it -- a file
+whose permissions forbid reading, a socket that cannot be opened, an SSH
+transport that has been closed, package metadata that is not valid UTF-8, a
+directory where a file was expected -- and asserts that the failure was
+*audible*. Audible means one of exactly three things, and each test says which
+one it expects:
 
-  The guard is stated as something a handler must *do*, not as a list of bad
-  spellings, because the first version was the latter and was defeated
-  seventeen ways -- ``except BaseException``, a bare ``except:``, ``except
-  (Exception,)``, an aliased ``Exception``, ``contextlib.suppress``, ``return
-  False``, ``...``, ``break``, a dead assignment, ``if False: raise``,
-  ``finally: return``, a log line with no exception in it, and a nested
-  function renamed to match an allowlist key. Every one of those is now a
-  parametrised test (``BYPASSES``), as are the handlers that legitimately do
-  report (``ACCEPTED``) and the seven ways past it that remain open
-  (``BLIND_SPOTS`` / ``KNOWN_BLIND_SPOTS``), which are asserted to be missed
-  so that the guard is never mistaken for more than it is.
+1. the exception propagated, carrying what went wrong;
+2. a log record was really emitted, at a level someone watches, with the
+   reason in it;
+3. the value handed back is one the caller can tell apart from a real answer
+   -- ``"unknown"`` rather than ``"running"``, ``None`` rather than ``False``.
+
+A handler cannot pass these by being spelled differently, because the spelling
+is never examined. That is the same move
+``tests/unit/test_persisted_files_are_private.py`` made for file permissions
+after two static guards there had been defeated, and it is made here for the
+same reason.
+
+**The lint is not the guarantee.** The second half of this module walks the
+AST of the whole package -- subpackages included -- and refuses any handler
+that catches everything and then does nothing about it, unless the site is
+recorded: as a decision in ``JUSTIFIED_SWALLOWS`` or as a defect with an issue
+number in ``TRACKED_DEFECTS``. It is fast, it reaches handlers no test can
+drive, and it is worth having for that. It is also porous, and this module
+says how porous rather than implying otherwise: four successive AST guards in
+this repository have now been defeated 12, 30, 14-and-16, and 22 ways
+respectively. Its reach is executable -- ``BYPASSES`` (caught), ``ACCEPTED``
+(correctly ignored), ``BLIND_SPOTS`` (missed on purpose, each asserted to be
+missed, counted by ``KNOWN_BLIND_SPOTS``).
 """
 
 import ast
+import importlib.metadata
 import logging
+import os
 import pathlib
 import socket
 import sys
@@ -44,11 +55,18 @@ from typing import NamedTuple
 
 import pytest
 
-from clustrix.config import ClusterConfig
+from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig
 from clustrix.executor_connections import ConnectionManager
 from clustrix.executor_scheduler_status import SchedulerStatusManager
 from clustrix.loop_analysis import find_parallelizable_loops
-from clustrix.utils import _dumps_by_value, get_environment_info
+from clustrix.modern_notebook_widget import ModernClustrixWidget
+from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+from clustrix.utils import (
+    _distribution_import_names,
+    _dumps_by_value,
+    get_environment_info,
+    resolve_remote_python,
+)
 from tests.ssh_server import LocalSSHServer
 
 # The repository's own committed-credential check (scripts/check_for_secrets.py)
@@ -382,35 +400,308 @@ def test_a_failed_environment_capture_is_reported(monkeypatch, caplog):
 
 
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# The structural guard: every remaining swallow is a recorded decision
+# The sites that were annotated rather than fixed
 # ---------------------------------------------------------------------------
 #
-# A note on what this guard is and is not, because this project has been here
-# before. Three earlier AST guards in this repository were defeated 12, then
-# 30, then 14 and 16 ways, and the eventual answer for file permissions
-# (tests/unit/test_persisted_files_are_private.py) was to stop reading source
-# and observe the property instead. That move is not available here: there is
-# no runtime observation that says "this handler discarded a reason", because
-# the whole point of a swallowed exception is that it leaves no trace. Every
-# handler would have to be driven with a real failure to be observed, and most
-# of them cannot be reached at all with real inputs.
+# Nine handlers were exposed when the lint's rule was inverted, and seven of
+# them were given a `logger.debug` line and left otherwise alone. A debug line
+# is not a fix: the caller still receives the same wrong answer, and the level
+# is one the lint itself classifies as unwatched. Each test below drives the
+# real code with a real broken input and asserts the outcome, not the source.
+
+
+def test_a_connectivity_probe_that_never_ran_is_not_reported_as_unreachable(caplog):
+    """ "Cannot reach that host" is a claim about somebody else's machine.
+
+    The widget's probe returned ``False`` both for a connection that was
+    refused and for a probe that never got as far as connecting -- an
+    unresolvable name, a port outside 0-65535 -- and the caller renders
+    ``False`` as "Cannot reach {host}:{port}. Check if the hostname/IP is
+    correct and accessible". For a DNS failure that is a confident, wrong
+    statement about a machine clustrix never managed to ask, and it sends the
+    user to check the wrong thing.
+
+    The trigger is real: ``.invalid`` is reserved by RFC 2606 precisely so
+    that it can never resolve, and ``connect_ex`` really raises
+    ``socket.gaierror`` for it.
+    """
+    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
+        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
+            None, "no-such-host.invalid", 22, timeout=2
+        )
+
+    assert reachable is None, (
+        "a probe that could not be run was reported as a host that could not "
+        "be reached"
+    )
+    assert reason, "the third value has to carry why, or the caller cannot say"
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("no-such-host.invalid" in message for message in messages), messages
+    assert any(
+        "says nothing about whether the host is reachable" in message
+        for message in messages
+    ), messages
+
+
+def test_a_connection_that_was_really_refused_is_still_a_refusal(caplog):
+    """The honest answers are unchanged, or the test above is just noise.
+
+    Port 1 on the loopback interface is a real TCP connect that is really
+    refused: ``connect_ex`` returns ECONNREFUSED rather than raising.
+    """
+    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
+        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
+            None, "127.0.0.1", 1, timeout=2
+        )
+
+    assert reachable is False
+    assert reason
+    assert caplog.records == [], "a real measurement must not warn"
+
+
+def test_a_listening_socket_is_reported_as_reachable(server, caplog):
+    """...and so is the positive answer, against the real SSH server."""
+    with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
+        reachable, reason = EnhancedClusterConfigWidget._test_remote_connectivity(
+            None, server.host, server.port, timeout=5
+        )
+
+    assert (reachable, reason) == (True, "")
+    assert caplog.records == []
+
+
+def test_a_profile_file_that_could_not_be_read_says_so(tmp_path, caplog):
+    """A missing entry in the Load menu is the symptom; silence was the cause.
+
+    The widget offers only files that parse as a profile bundle. A file it
+    could not open at all was dropped by the same ``return False`` as a file
+    that parsed and turned out to be something else -- so the profile store
+    the user is looking for disappears from the menu with nothing said, and
+    the two cases call for completely different fixes.
+
+    The trigger is a real permission bit on a real file, not a patched
+    ``open``.
+    """
+    path = tmp_path / "profiles.yml"
+    path.write_text("profiles:\n  mine: {}\n")
+    os.chmod(path, 0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="clustrix.modern_notebook_widget"):
+            offered = ModernClustrixWidget._looks_like_a_profile_bundle(path)
+    finally:
+        os.chmod(path, 0o600)
+
+    assert offered is False
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("profiles.yml" in message for message in messages), messages
+    assert any(
+        "not evidence that it holds no profiles" in message for message in messages
+    ), messages
+
+    # And the same file, readable, really is a profile bundle -- so the
+    # warning above is about the permission bit and nothing else.
+    assert ModernClustrixWidget._looks_like_a_profile_bundle(path) is True
+
+
+def test_a_file_that_is_simply_not_a_profile_stays_quiet(tmp_path, caplog):
+    """A working tree is full of YAML. Warning about all of it is noise.
+
+    This is the answer the handler is entitled to give: the file was read in
+    full and is not a profile bundle. Nothing failed, so nothing is said above
+    debug.
+    """
+    path = tmp_path / "not-a-profile.yml"
+    path.write_text("profiles: [unclosed\n")
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.modern_notebook_widget"):
+        assert ModernClustrixWidget._looks_like_a_profile_bundle(path) is False
+
+    assert caplog.records == [], [r.getMessage() for r in caplog.records]
+
+
+def _distribution_with(tmp_path, name, **files):
+    """A real ``importlib.metadata`` distribution backed by real files."""
+    directory = tmp_path / f"{name}-1.0.dist-info"
+    directory.mkdir()
+    (directory / "METADATA").write_text(f"Name: {name}\nVersion: 1.0\n")
+    for filename, content in files.items():
+        (directory / filename).write_bytes(content)
+    return importlib.metadata.PathDistribution(directory)
+
+
+def test_unreadable_top_level_metadata_is_reported(tmp_path, caplog):
+    """An empty import-name list is a claim, and a load-bearing one.
+
+    ``_distribution_import_names`` feeds ``unreproducible_module_owners``,
+    which exists to *refuse* a submission that reaches into a package the
+    worker cannot reinstall. A distribution whose metadata could not be read
+    contributes no import names, so the submission is allowed and the job dies
+    on the worker at ``import`` -- minutes later, naming a module rather than
+    the metadata that could not be read.
+
+    The trigger is real and needs no patching: ``PathDistribution.read_text``
+    suppresses the missing-file and permission cases but not a decode failure,
+    and a ``top_level.txt`` that is not valid UTF-8 really raises.
+    """
+    dist = _distribution_with(tmp_path, "brokenmeta", **{"top_level.txt": b"\xff\xfe"})
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+        assert _distribution_import_names(dist) == []
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("top_level.txt" in message for message in messages), messages
+    assert any("fail on the worker" in message for message in messages), messages
+
+
+def test_a_distribution_whose_file_list_cannot_be_read_is_reported(tmp_path, caplog):
+    """The fallback path has the same consequence, so it gets the same answer.
+
+    With no ``top_level.txt`` the import names come from ``dist.files``, which
+    reads ``RECORD``. Same real trigger, same silence before this.
+    """
+    dist = _distribution_with(tmp_path, "brokenrecord", RECORD=b"\xff\xfe,,\n")
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+        assert _distribution_import_names(dist) == []
+
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("files of" in message for message in messages), messages
+    assert any("fail on the worker" in message for message in messages), messages
+
+
+def test_a_readable_distribution_is_read_without_a_word(tmp_path, caplog):
+    """The ordinary path must stay silent, or the two warnings above are noise."""
+    dist = _distribution_with(tmp_path, "goodmeta", **{"top_level.txt": b"goodmeta\n"})
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+        assert _distribution_import_names(dist) == ["goodmeta"]
+
+    assert caplog.records == []
+
+
+def test_a_transport_failure_is_not_reported_as_a_missing_interpreter(connection):
+    """The message told the user to go and install Python on the wrong machine.
+
+    ``resolve_remote_python`` probes for ``pythonX.Y`` with ``command -v``. When
+    that probe raised, it answered ``False`` -- indistinguishable from "the
+    interpreter is not installed" -- and fell through to a ``RuntimeError``
+    stating flatly that there is no matching interpreter on the remote host
+    and listing what is there instead. Every word of that is a claim about a
+    machine clustrix never managed to ask.
+
+    The trigger is a real closed transport on the real in-process SSH server:
+    ``exec_command`` on it really raises.
+    """
+    config = connection.config
+    client = connection.ssh_client
+    client.close()
+
+    with pytest.raises(RuntimeError) as raised:
+        resolve_remote_python(client, config)
+
+    message = str(raised.value)
+    assert "not evidence that" in message, message
+    assert "failure of the connection" in message, message
+    assert "No python" not in message, (
+        "a dead transport still produced the confident claim that the remote "
+        "host has no matching interpreter: " + message
+    )
+
+
+def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
+    tmp_path, monkeypatch, caplog
+):
+    """An empty overwrite list is a claim about the filesystem.
+
+    The widget offers "Overwrite: <file>" for every configuration file it can
+    find. When the scan itself raised, the list was emptied in silence, which
+    reads as "there is nothing here to overwrite" -- and the user is one click
+    from writing a new file beside the one they meant to replace.
+
+    The trigger is a real permission bit on a real directory, and it is the
+    *parent* that is closed rather than the configuration directory itself:
+    ``Path.exists()`` answers False for a path that is not there but
+    propagates EACCES for one it is not allowed to look for, and pathlib's
+    ``glob`` swallows ``PermissionError`` internally, so closing the
+    configuration directory itself would prove nothing.
+    """
+    outer = tmp_path / "outer"
+    config_dir = outer / "conf"
+    config_dir.mkdir(parents=True)
+    monkeypatch.setenv(CONFIG_DIR_ENV_VAR, str(config_dir))
+    monkeypatch.chdir(tmp_path)
+
+    widget = EnhancedClusterConfigWidget()
+    os.chmod(outer, 0o000)
+    try:
+        with caplog.at_level(logging.WARNING, logger="clustrix.notebook_magic_widget"):
+            widget._update_existing_files()
+    finally:
+        os.chmod(outer, 0o700)
+
+    assert widget.save_file_select.options == ("",) or list(
+        widget.save_file_select.options
+    ) == [""]
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "not because there are no files" in message for message in messages
+    ), messages
+
+
+# ---------------------------------------------------------------------------
+# THE LINT. Not the guarantee -- the guarantee is above.
+# ---------------------------------------------------------------------------
 #
-# So this stays a source guard, and the honest thing to do is (a) state the
-# rule as something a handler must *do* rather than a list of bad spellings,
-# since enumerating spellings is exactly what lost the previous three rounds,
-# (b) test the guard against every bypass anyone has thought of, so its reach
-# is executable rather than assumed, and (c) write down what it still cannot
-# see, in KNOWN_BLIND_SPOTS, so nobody reads a green run as more than it is.
+# Read this before trusting a green run of anything below.
+#
+# This repository has now had four AST guards written to stop silent swallows,
+# and all four were defeated: 12 ways, then 30, then 14 and 16, and then this
+# one 22 ways out of 24 attempts. That is not four unlucky implementations. It
+# is the same result four times, and the conclusion it supports is that "did
+# this handler do something useful about the failure?" is not decidable by
+# inspecting the handler. A call might report or might be a no-op; following
+# it needs whole-program analysis and the callee is often not even in this
+# package.
+#
+# The precedent that actually worked here is
+# tests/unit/test_persisted_files_are_private.py, which stopped reading source
+# and observed the property instead. So the structure of this module is:
+#
+#   * the behavioural tests ABOVE are the guarantee. Each drives a real
+#     clustrix surface with a real failure -- an unreadable file, a dead
+#     socket, a closed SSH transport, metadata that is not valid UTF-8 -- and
+#     asserts the failure was *audible*: an exception propagated, or a log
+#     record was actually emitted at a level someone watches with the reason
+#     in it, or the returned value is one the caller can tell apart from a
+#     real answer. A handler cannot pass those by being spelled differently,
+#     because the spelling is never examined.
+#
+#   * everything BELOW is a lint. It is fast, it runs over the whole package
+#     including handlers no test can reach, and it is worth having for
+#     exactly that. It is *not* evidence that a handler reports, and the 12
+#     entries in KNOWN_BLIND_SPOTS are the executable statement of how much
+#     it misses -- each asserted to be missed, so the list cannot quietly
+#     become optimistic.
+#
+# The rule it applies is stated as something a handler must *do* rather than
+# as a list of bad spellings, because enumerating spellings is what lost the
+# earlier rounds; and its reach is measured rather than assumed, in BYPASSES
+# (caught), ACCEPTED (correctly ignored) and BLIND_SPOTS (missed, on purpose,
+# recorded).
 
 #: Names that catch everything. A handler for either of these, a bare
 #: ``except:``, or a tuple containing either, stops every failure.
 CATCH_ALL_NAMES = frozenset({"Exception", "BaseException"})
 
-#: Logging levels nobody is watching in production. A call at one of these
-#: levels whose arguments are all constants cannot be conveying what went
-#: wrong, because it does not have the exception in it.
-QUIET_LOG_LEVELS = frozenset({"debug", "info"})
+#: Logging methods a handler might use to report. ``exception`` is absent on
+#: purpose: it attaches the traceback whatever its arguments are, so it always
+#: reports. The rest are content-free when every argument is a constant --
+#: ``logger.warning("")`` and ``logger.error("oops")` say nothing about the
+#: failure, and restricting this to ``debug``/``info`` was two ways past this
+#: lint.
+LOG_METHODS = frozenset(
+    {"debug", "info", "warning", "warn", "error", "critical", "log"}
+)
 
 #: Names that pull the current exception out of the interpreter, so a handler
 #: that uses one is reporting the failure even without an ``as`` binding.
@@ -462,36 +753,40 @@ TRACKED_DEFECTS = {
     ),
 }
 
-#: What this guard cannot see. Each one is asserted below, in
-#: ``test_the_guard_admits_what_it_cannot_see``, so the list is executable
+#: What this lint cannot see. Each one is asserted below, in
+#: ``test_the_lint_admits_what_it_cannot_see``, so the list is executable
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: 1. **A handler that calls a helper which shrugs.**
-#:    ``except Exception as exc: _record(exc)`` where ``_record`` has an empty
-#:    body. The call looks like reporting; following it needs whole-program
-#:    analysis, and the helper may not even be in this package.
-#: 2. **A state change that reports nothing.** ``except Exception: self.ok =
-#:    False``. Assigning to an attribute or a subscript is treated as doing
-#:    something, because in most of this package it is -- but it does not tell
-#:    anyone why.
-#: 3. **A log line that mentions a variable instead of the exception.**
+#: They fall into seven root causes, and the first one is the big one:
+#:
+#: A. **Any call at all counts as reporting.** Six spellings are recorded
+#:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
+#:    ``int()``, ``NULL_REPORTER.report(exc)``, ``if want_to_log(): pass``,
+#:    ``message = str(exc)``). Following a call to decide whether it reports
+#:    needs whole-program analysis, and the callee may not even be in this
+#:    package. This is why the lint is a lint and the behavioural tests above
+#:    are the guarantee.
+#: B. **The exception stashed and dropped.** ``_ = exc`` is indistinguishable
+#:    from ``failure = exc``, which this package really does and which really
+#:    does hand the failure onward.
+#: C. **A log line that mentions a variable instead of the exception.**
 #:    ``logger.debug("failed for %s", host)`` passes, because requiring the
-#:    exception itself in every log call would flag 21 handlers here that do
+#:    exception itself in every log call would flag handlers here that do
 #:    explain themselves in prose.
-#: 4. **A narrower ``except`` that is broad in practice.** ``except OSError``
+#: D. **A narrower ``except`` that is broad in practice.** ``except OSError``
 #:    around a body that only ever raises ``OSError`` is a catch-all in
-#:    effect; the guard reads the name, not the body it guards.
-#: 5. **An exception replaced by a worse one.** ``raise RuntimeError("failed")``
+#:    effect; the lint reads the name, not the body it guards.
+#: E. **An exception replaced by a worse one.** ``raise RuntimeError("failed")``
 #:    with no ``from exc`` re-raises, so it passes, while still throwing the
 #:    cause away.
-#: 6. **Code that is not in a ``.py`` file in this package.** The remote job
+#: F. **Code that is not in a ``.py`` file in this package.** The remote job
 #:    scripts assembled as strings in ``utils.py`` are never parsed here, and
 #:    neither is anything in a dependency.
-#: 7. **Two swallows in one function.** Keys are per function, so a justified
+#: G. **Two swallows in one function.** Keys are per function, so a justified
 #:    site licenses a second, unjustified one beside it. Narrowing the key to
 #:    a line number would make every entry rot on the next edit above it.
-KNOWN_BLIND_SPOTS = 7
+KNOWN_BLIND_SPOTS = 12
 
 
 class Swallow(NamedTuple):
@@ -580,14 +875,53 @@ def _catches_everything(handler, aliases):
     return any(isinstance(item, ast.Name) and item.id in aliases for item in candidates)
 
 
-def _is_quiet_constant_log(call):
-    """``logger.debug("")`` -- a call that conveys nothing about the failure."""
+def _is_contentless_log(call):
+    """A logging call that cannot be conveying what went wrong.
+
+    Every argument a constant and no ``exc_info``/``stack_info``: the
+    exception is not in it at any level, so ``logger.warning("")`` and
+    ``logger.error("oops")`` are as silent as ``logger.debug("")``.
+    """
     if not isinstance(call.func, ast.Attribute):
         return False
-    if call.func.attr not in QUIET_LOG_LEVELS:
+    if call.func.attr not in LOG_METHODS:
+        return False
+    if any(keyword.arg in EXCEPTION_KEYWORDS for keyword in call.keywords):
         return False
     arguments = list(call.args) + [keyword.value for keyword in call.keywords]
     return all(isinstance(argument, ast.Constant) for argument in arguments)
+
+
+def _walk_own_scope(node):
+    """``ast.walk`` that stops at a nested ``def`` or ``lambda``.
+
+    ``except Exception:`` followed by ``def retry(): raise`` -- a function
+    nothing calls -- reads as a re-raise to a plain walk, and did. So does a
+    ``lambda: (_ for _ in ()).throw(exc)``. Neither runs.
+
+    A nested scope passed in as the root yields nothing at all, for the same
+    reason: ``except Exception:`` whose entire body is ``def retry(): raise``
+    has defined a function and done nothing else.
+    """
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+        return
+    todo = [node]
+    while todo:
+        current = todo.pop()
+        yield current
+        for child in ast.iter_child_nodes(current):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                continue
+            todo.append(child)
+
+
+def _mentions(node, name):
+    """True if ``name`` is read anywhere in ``node``."""
+    if node is None or not name:
+        return False
+    return any(
+        isinstance(child, ast.Name) and child.id == name for child in ast.walk(node)
+    )
 
 
 def _live_statements(body):
@@ -616,45 +950,45 @@ def _accounts_for_the_failure(body, bound_name):
     Stated as a requirement on the handler rather than a list of forbidden
     bodies, because the forbidden-body formulation is what let ``return
     False``, ``...``, ``break``, ``if False: raise`` and a dead assignment
-    through. Anything that re-raises, names the exception, reaches for the
-    interpreter's current exception, calls out, changes state beyond a local,
-    or leaves the frame in a way the caller can notice counts. A body that
-    only rebinds a local to a constant, or falls off the end, does not.
+    through. What counts is narrow on purpose, because the previous, broader
+    version was defeated by things that are *not* reporting: mentioning the
+    bound name anywhere however deadly (``_ = exc``, ``f"{exc}"``, ``None if
+    exc else None``), any statement at all that looked like bookkeeping
+    (``n += 1``, ``del x``, ``assert True``, ``import os``, ``global FLAG``,
+    ``cache[k] = 1``), and a ``raise`` inside a nested ``def`` nothing calls.
+
+    A handler accounts for the failure when it
+
+    * re-raises in its own scope, or yields/awaits out of it;
+    * calls something that is not a content-free log (see
+      :func:`_is_contentless_log`) -- this is broad, and it is the lint's
+      largest blind spot, recorded as such;
+    * reaches for the interpreter's current exception
+      (``traceback.format_exc`` and friends);
+    * or stashes the bound exception somewhere -- ``failure = exc``,
+      ``self.error = exc``, ``results[job] = exc`` -- which this package
+      really does, and which hands the failure to the caller.
+
+    Anything else -- including every statement that merely changes local or
+    even attribute state without carrying the exception -- does not.
     """
     for statement in _live_statements(body):
-        if isinstance(
-            statement,
-            (
-                ast.Raise,
-                ast.With,
-                ast.AsyncWith,
-                ast.Global,
-                ast.Nonlocal,
-                ast.AugAssign,
-                ast.Delete,
-                ast.Assert,
-                ast.Import,
-                ast.ImportFrom,
-            ),
-        ):
-            return True
-        if isinstance(statement, ast.Assign) and any(
-            isinstance(target, (ast.Attribute, ast.Subscript))
-            for target in statement.targets
-        ):
-            return True
-        for node in ast.walk(statement):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Defining a function is not calling it, so neither its body nor
+            # its recursion below may count towards this handler.
+            continue
+        for node in _walk_own_scope(statement):
             if isinstance(node, ast.Raise):
                 return True
             if isinstance(node, (ast.Yield, ast.YieldFrom, ast.Await)):
                 return True
-            if isinstance(node, ast.Name) and bound_name and node.id == bound_name:
-                return True
             if isinstance(node, ast.Attribute) and node.attr in EXCEPTION_ACCESSORS:
                 return True
-            if isinstance(node, ast.keyword) and node.arg in EXCEPTION_KEYWORDS:
+            if isinstance(node, ast.Call) and not _is_contentless_log(node):
                 return True
-            if isinstance(node, ast.Call) and not _is_quiet_constant_log(node):
+            if isinstance(
+                node, (ast.Assign, ast.AugAssign, ast.AnnAssign)
+            ) and _mentions(node.value, bound_name):
                 return True
         # Recurse into compound statements the walk above already covered for
         # expressions but whose nested *statements* need dead-branch pruning.
@@ -752,7 +1086,7 @@ def _package_swallows():
     return scan_tree(PACKAGE)
 
 
-def test_every_silent_swallow_has_a_recorded_decision():
+def test_the_lint_finds_no_unrecorded_silent_swallow():
     """No handler may discard the reason a failure happened.
 
     This is the executable form of the issue's own acceptance criterion: every
@@ -760,11 +1094,13 @@ def test_every_silent_swallow_has_a_recorded_decision():
     decision in JUSTIFIED_SWALLOWS, or as a defect with an issue number in
     TRACKED_DEFECTS.
 
-    It is also the regression test for the handlers a behavioural test cannot
-    reach. Several sites (``_distribution_import_names``, the remote
-    interpreter probe) are unreachable with real package metadata and carry
-    ``# pragma: no cover`` for that reason; this guard is what would catch
-    them reverting to silence.
+    It is also the only cover the handlers no behavioural test can reach have
+    -- and there are fewer of those than the previous round assumed. Both
+    ``_distribution_import_names`` sites and the remote interpreter probe were
+    marked ``# pragma: no cover - unreachable``; all three are now driven by
+    real tests above (invalid UTF-8 in ``top_level.txt`` and ``RECORD``, a
+    closed SSH transport), and the pragmas are gone. "Unreachable" is worth
+    checking before it is written down.
     """
     recorded = set(JUSTIFIED_SWALLOWS) | set(TRACKED_DEFECTS)
     offenders = [
@@ -952,11 +1288,145 @@ BYPASSES = {
                         pass
                 return __del__
     """,
+    # ---- found by red-teaming the inverted rule, 2026-08-20 --------------
+    # Five spellings that only *mention* the bound name. The rule counted any
+    # mention as reporting; none of these conveys anything anywhere.
+    "an f-string built from the exception and dropped": """
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                f"{exc}"
+    """,
+    "the bound name as a bare expression statement": """
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                exc
+    """,
+    "the exception in a conditional expression that is thrown away": """
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                None if exc else None
+    """,
+    # Six statements the rule treated as unconditional accounting. None of
+    # them tells anyone anything.
+    "an augmented assignment to a dead local": """
+        def f():
+            try:
+                g()
+            except Exception:
+                n = 0
+                n += 1
+    """,
+    "del": """
+        def f():
+            x = 1
+            try:
+                g()
+            except Exception:
+                del x
+    """,
+    "an assert that cannot fail": """
+        def f():
+            try:
+                g()
+            except Exception:
+                assert True
+    """,
+    "an import": """
+        def f():
+            try:
+                g()
+            except Exception:
+                import os
+    """,
+    "a global declaration": """
+        FLAG = None
+
+        def f():
+            try:
+                g()
+            except Exception:
+                global FLAG
+    """,
+    "a subscript assignment that does not carry the exception": """
+        def f(cache, key):
+            try:
+                g()
+            except Exception:
+                cache[key] = 1
+    """,
+    "an attribute assignment that does not carry the exception": """
+        class C:
+            def f(self):
+                try:
+                    g()
+                except Exception:
+                    self.ok = False
+    """,
+    # A raise the interpreter will never reach.
+    "a raise inside a nested def nothing calls": """
+        def f():
+            try:
+                g()
+            except Exception:
+                def retry():
+                    raise
+    """,
+    "a raise inside a nested async def nothing awaits": """
+        def f():
+            try:
+                g()
+            except Exception:
+                async def retry():
+                    raise
+    """,
+    # A log record at a level people do watch that still says nothing.
+    "an empty warning": """
+        def f():
+            try:
+                g()
+            except Exception:
+                logger.warning("")
+    """,
+    "a constant error line with no exception in it": """
+        def f():
+            try:
+                g()
+            except Exception:
+                logger.error("oops")
+    """,
+    # Two that were already caught, kept so a regression in either shows up
+    # here rather than in the package.
+    "contextlib.suppress nested inside a handler": """
+        import contextlib
+
+        def f():
+            try:
+                g()
+            except Exception:
+                with contextlib.suppress(Exception):
+                    h()
+    """,
+    "a nested try whose handler does nothing": """
+        def f():
+            try:
+                g()
+            except Exception:
+                try:
+                    h()
+                except Exception:
+                    pass
+    """,
 }
 
 
 @pytest.mark.parametrize("bypass", sorted(BYPASSES), ids=sorted(BYPASSES))
-def test_the_guard_catches_every_known_bypass(bypass):
+def test_the_lint_catches_every_known_bypass(bypass):
     """Each of these was, at some point, a way to swallow a failure silently.
 
     Written as data so a newly discovered spelling is one entry rather than
@@ -966,7 +1436,7 @@ def test_the_guard_catches_every_known_bypass(bypass):
 
     found = find_silent_swallows(source, "probe.py")
 
-    assert found, f"the guard does not catch: {bypass}"
+    assert found, f"the lint does not catch: {bypass}"
 
 
 def test_the_renamed_nested_function_is_not_licensed_by_the_allowlist():
@@ -1051,15 +1521,16 @@ ACCEPTED = {
 
 
 @pytest.mark.parametrize("accepted", sorted(ACCEPTED), ids=sorted(ACCEPTED))
-def test_the_guard_stays_quiet_on_handlers_that_do_report(accepted):
+def test_the_lint_stays_quiet_on_handlers_that_do_report(accepted):
     source = textwrap.dedent(ACCEPTED[accepted])
 
     assert find_silent_swallows(source, "probe.py") == []
 
 
-#: The bypasses that remain open, kept next to the numbered prose in
+#: The bypasses that remain open, kept next to the lettered prose in
 #: KNOWN_BLIND_SPOTS so the two cannot drift apart.
 BLIND_SPOTS = {
+    # A. any call at all reads as reporting
     "a helper that shrugs on the handler's behalf": """
         def _record(exc):
             pass
@@ -1070,14 +1541,57 @@ BLIND_SPOTS = {
             except Exception as exc:
                 _record(exc)
     """,
-    "a state change that reports nothing": """
-        class C:
-            def f(self):
-                try:
-                    g()
-                except Exception:
-                    self.ok = False
+    "a bookkeeping call that reports nowhere": """
+        def f(errors):
+            try:
+                g()
+            except Exception as exc:
+                errors.append(exc)
     """,
+    "a call with no arguments and no effect": """
+        def f():
+            try:
+                g()
+            except Exception:
+                int()
+    """,
+    "a reporter object that reports nowhere": """
+        class _Null:
+            def report(self, exc):
+                pass
+
+        NULL_REPORTER = _Null()
+
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                NULL_REPORTER.report(exc)
+    """,
+    "a call in a condition whose body is empty": """
+        def f():
+            try:
+                g()
+            except Exception:
+                if want_to_log():
+                    pass
+    """,
+    "a call that only formats the exception and drops it": """
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                message = str(exc)
+    """,
+    # B. the exception stashed and then dropped
+    "the exception assigned to a throwaway": """
+        def f():
+            try:
+                g()
+            except Exception as exc:
+                _ = exc
+    """,
+    # C-G, one apiece
     "a log line that names a variable instead of the exception": """
         def f(host):
             try:
@@ -1123,7 +1637,7 @@ BLIND_SPOTS = {
 
 
 @pytest.mark.parametrize("spot", sorted(BLIND_SPOTS), ids=sorted(BLIND_SPOTS))
-def test_the_guard_admits_what_it_cannot_see(spot):
+def test_the_lint_admits_what_it_cannot_see(spot):
     """These are *not* caught, and saying so is the point.
 
     A guard that looks stronger than it is invites exactly the commit it was
@@ -1137,7 +1651,7 @@ def test_the_guard_admits_what_it_cannot_see(spot):
     unrecorded = [swallow for swallow in found if swallow.key not in JUSTIFIED_SWALLOWS]
 
     assert not unrecorded, (
-        f"the guard now catches {spot!r}; delete it from BLIND_SPOTS and from "
+        f"the lint now catches {spot!r}; delete it from BLIND_SPOTS and from "
         "the KNOWN_BLIND_SPOTS prose"
     )
 

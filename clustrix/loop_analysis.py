@@ -272,7 +272,20 @@ class SafeRangeEvaluator(ast.NodeVisitor):
                 else:
                     self.safe = False
 
-            except Exception:
+            except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+                # Narrowed to match the sibling handler in _evaluate_binop,
+                # and for the same reason: ``safe = False`` is a correct
+                # answer to give the caller for these (the loop runs whole,
+                # unchunked), but it is the *only* answer this handler can
+                # give, so anything else raised in here -- a bug in the
+                # evaluator -- was being laundered into "this bound is not
+                # statically known" and never seen by anyone.
+                logger.debug(
+                    "Could not fold the range() at line %s (%s); its bounds "
+                    "will be treated as unknown.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 self.safe = False
         else:
             self.safe = False

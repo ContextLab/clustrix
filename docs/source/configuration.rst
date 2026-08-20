@@ -326,7 +326,10 @@ Paths and the remote environment
      - Command used to create the single-venv fallback and to run the job
        script. Note that many systems have no ``python``, only ``python3``;
        ``resolve_remote_python`` probes for a working interpreter rather than
-       trusting this blindly.
+       trusting this blindly. If the probe itself cannot be run -- a dropped
+       SSH transport, a closed session -- it raises saying so, rather than
+       reporting that the remote host has no matching interpreter: that would
+       be a claim about a machine clustrix never managed to ask.
    * - ``package_manager``
      - ``"pip"``
      - ``"pip"``, ``"uv"`` (``uv pip``), ``"conda"``, or ``"auto"`` (uv, then

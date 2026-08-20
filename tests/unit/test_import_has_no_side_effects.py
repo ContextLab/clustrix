@@ -24,6 +24,7 @@ here:
   than where it was told to.
 """
 
+import ast
 import json
 import os
 import pathlib
@@ -430,7 +431,20 @@ def test_the_search_runs_once_under_concurrent_first_use(unloaded_config):
 
 
 def test_an_explicit_load_supersedes_the_search(unloaded_config, tmp_path):
-    """``load_config`` must not be undone by a search that had not run yet."""
+    """``load_config`` must not be undone by a search that had not run yet.
+
+    The mechanism is one line at the end of ``_load_config_locked``: an
+    explicit load publishes ``_default_config_loaded``, because it has
+    replaced the configuration wholesale and the search of the standard
+    locations has nothing left to contribute. Without it the very next
+    ``get_config()`` runs the search and rebinds ``_config`` to whatever is in
+    the configuration directory -- the file the caller named is accepted,
+    reported as loaded, and thrown away, which is the whole subject of this
+    issue.
+
+    Both halves are asserted: the flag, so the failure names the line, and the
+    behaviour, so the flag cannot be set without the effect.
+    """
     (unloaded_config / "config.yml").write_text(
         "cluster_type: ssh\ncluster_host: fromsearch.example\n"
     )
@@ -439,50 +453,130 @@ def test_an_explicit_load_supersedes_the_search(unloaded_config, tmp_path):
 
     config_module.load_config(str(explicit))
 
+    assert config_module._default_config_loaded is True, (
+        "an explicit load did not publish that the configuration is settled, "
+        "so the next get_config() will search the standard locations and "
+        "overwrite it"
+    )
     assert get_config().cluster_host == "explicit.example"
 
 
-#: Forks a child while the lazy search is *in flight* on another thread and
+#: Starts a child while the lazy search is *in flight* on another thread and
 #: asks the child for its configuration. Run in a fresh interpreter because it
 #: needs a clean, unsearched module state and a $HOME of its own.
+#:
+#: Two things about how the window is entered, because the first version of
+#: this probe got both wrong and could not see two thirds of the handler it
+#: was testing.
+#:
+#: It waits on ``_default_config_loading`` rather than sleeping half a second
+#: and hoping. That flag is set inside the lock immediately before the parse
+#: and cleared immediately after it, so it is true exactly while the window is
+#: open; sleeping instead meant the search sometimes finished first, and the
+#: probe reported a green result for a window it never entered.
+#:
+#: And it uses ``os.fork()`` directly rather than ``multiprocessing.Process``.
+#: That is not a shortcut around multiprocessing -- it is what
+#: ``multiprocessing`` calls, one layer down -- and it removes the process
+#: setup, argument pickling and ``Queue`` construction that used to sit
+#: between "the window is open" and the actual fork. With those in the way the
+#: search could finish in the gap, which is why deleting the fork handler
+#: outright still passed four runs in five.
 _FORK_PROBE = textwrap.dedent(r"""
-    import multiprocessing, os, sys, threading, time
+    import multiprocessing, os, select, sys, threading, time
 
     from clustrix import config as config_module
+
+    ROUNDS = 5
+    HANG = 15          # seconds a child gets to answer before it is a deadlock
 
     def child(queue):
         queue.put(config_module.get_config().cluster_host)
 
-    if __name__ == "__main__":
-        method = sys.argv[1]
-        ctx = multiprocessing.get_context(method)
+    def rewind():
+        # The state a fresh process starts in: nothing searched, nothing
+        # loaded. Reproduced here so the window can be entered more than once
+        # per interpreter -- a race that reproduces one run in five is still a
+        # race, and one round proves nothing. Nothing else is touched; the
+        # search that follows is the real one over the real file.
+        config_module._config = config_module.ClusterConfig()
+        config_module._default_config_loaded = False
+        config_module._default_config_loading = False
+
+    def open_the_window():
+        searcher = threading.Thread(target=config_module.get_config, daemon=True)
+        searcher.start()
+        deadline = time.time() + 60
+        while not config_module._default_config_loading:
+            if config_module._default_config_loaded or time.time() > deadline:
+                return searcher, False
+            time.sleep(0.0002)
+        return searcher, True
+
+    def fork_round():
+        searcher, open_now = open_the_window()
+        if not open_now:
+            searcher.join(120)
+            return "WINDOW-MISSED"
+        read_fd, write_fd = os.pipe()
+        pid = os.fork()
+        if pid == 0:
+            try:
+                os.close(read_fd)
+                answer = str(config_module.get_config().cluster_host)
+                os.write(write_fd, answer.encode())
+            finally:
+                os._exit(0)
+        os.close(write_fd)
+        answered = bool(select.select([read_fd], [], [], HANG)[0])
+        if not answered:
+            os.kill(pid, 9)
+            outcome = "DEADLOCK"
+        else:
+            outcome = "HOST " + os.read(read_fd, 4096).decode()
+        os.close(read_fd)
+        os.waitpid(pid, 0)
+        searcher.join(120)
+        return outcome
+
+    def spawn_round():
+        ctx = multiprocessing.get_context("spawn")
         # Built before the search starts: constructing a Queue is itself slow
         # enough to close the window being aimed at.
         queue = ctx.Queue()
-
-        threading.Thread(target=config_module.get_config, daemon=True).start()
-        time.sleep(0.5)
-        if config_module._default_config_loaded:
-            print("@@WINDOW-MISSED")
-            raise SystemExit(0)
-
+        searcher, open_now = open_the_window()
+        if not open_now:
+            searcher.join(120)
+            return "WINDOW-MISSED"
         process = ctx.Process(target=child, args=(queue,))
         process.start()
-        process.join(30)
+        process.join(HANG * 2)
         if process.is_alive():
             process.kill()
             process.join()
-            print("@@DEADLOCK")
+            outcome = "DEADLOCK"
         else:
             try:
-                print("@@HOST " + str(queue.get_nowait()))
+                outcome = "HOST " + str(queue.get_nowait())
             except Exception as exc:
-                print("@@DIED exitcode=%s (%s)" % (process.exitcode, exc))
+                outcome = "DIED exitcode=%s (%s)" % (process.exitcode, exc)
+        searcher.join(120)
+        return outcome
+
+    if __name__ == "__main__":
+        method = sys.argv[1]
+        rounds = []
+        for _ in range(ROUNDS):
+            rewind()
+            rounds.append(fork_round() if method == "fork" else spawn_round())
+            if rounds[-1] != "HOST fromhome.example":
+                break          # a single bad round is the answer; stop early
+        print("@@" + " | ".join(rounds))
     """)
 
 
 def _fork_probe(home, workdir, method):
-    """Run ``_FORK_PROBE`` for one start method; return its @@ marker line."""
+    """Run ``_FORK_PROBE`` for one start method; return its ``@@`` result line."""
     env = dict(os.environ)
     env["HOME"] = str(home)
     env["USERPROFILE"] = str(home)
@@ -496,14 +590,14 @@ def _fork_probe(home, workdir, method):
         cwd=str(workdir),
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=600,
     )
     markers = [line for line in completed.stdout.splitlines() if line.startswith("@@")]
     assert markers, (
         "probe produced no result\n"
         f"stdout:\n{completed.stdout}\nstderr:\n{completed.stderr}"
     )
-    return markers[0]
+    return markers[0][2:]
 
 
 @pytest.mark.parametrize("method", ["fork", "spawn"])
@@ -525,28 +619,172 @@ def test_a_child_process_started_during_the_search_can_read_the_config(
     ``ProcessPoolExecutor`` and ``fork`` is a real start method. Both methods
     are checked, because ``spawn`` re-imports and must keep working too.
 
-    Nothing is patched or mocked. The window is held open with a real 5 MB
-    configuration file whose YAML parse genuinely takes seconds, a real thread,
-    and a real child process.
+    Both halves of the handler are covered, and neither was before:
+
+    * deleting the whole ``os.register_at_fork`` registration leaves the child
+      holding a lock no thread will release, and every round reports
+      ``DEADLOCK``;
+    * deleting only ``_default_config_loading = False`` leaves the child
+      taking the re-entrancy early return and answering with the pre-search
+      default, so every round reports ``HOST None``.
+
+    Measured against this probe, both are 5/5 fatal. Against the version that
+    slept and hoped they were 0/5 and 1/5 respectively.
+
+    Nothing is patched or mocked. The window is held open with a real ~1 MB
+    configuration file whose YAML parse genuinely takes a moment, a real
+    thread, a real ``os.fork()`` and a real pipe.
     """
     clustrix_dir = home / ".clustrix"
     clustrix_dir.mkdir()
-    padding = "\n".join(f"# pad {index} {'x' * 80}" for index in range(60000))
+    padding = "\n".join(f"# pad {index} {'x' * 80}" for index in range(12000))
     (clustrix_dir / "config.yml").write_text(
         "cluster_type: ssh\ncluster_host: fromhome.example\n" + padding + "\n"
     )
 
-    marker = _fork_probe(home, workdir, method)
+    rounds = _fork_probe(home, workdir, method).split(" | ")
 
-    assert marker != "@@WINDOW-MISSED", (
+    assert "WINDOW-MISSED" not in rounds, (
         "the search finished before the child was started; the test never "
-        "exercised the window it exists for"
+        f"exercised the window it exists for: {rounds}"
     )
-    assert marker != "@@DEADLOCK", (
+    assert "DEADLOCK" not in rounds, (
         f"a child started with {method!r} during the lazy search never "
-        "returned from its first get_config()"
+        f"returned from its first get_config(): {rounds}"
     )
-    assert marker == "@@HOST fromhome.example", marker
+    assert rounds == ["HOST fromhome.example"] * 5, rounds
+
+
+#: The keywords the torn-write test applies. More than one, and none of them
+#: equal to what the competing file sets, so a half-applied result is
+#: recognisable as one rather than having to be inferred.
+_CONFIGURE_KEYWORDS = {
+    "cluster_host": "configured.example",
+    "username": "configured-user",
+    "cluster_port": 2222,
+    "remote_work_dir": "/configured/work",
+    "default_cores": 7,
+    "default_memory": "9GB",
+}
+
+
+def _setattr_line():
+    """The line of the ``setattr`` inside ``configure``'s apply loop.
+
+    Found by parsing the module rather than written down, so an edit above it
+    cannot silently move the preemption to a line that proves nothing.
+    """
+    tree = ast.parse(pathlib.Path(config_module.__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name == "configure":
+            for inner in ast.walk(node):
+                if (
+                    isinstance(inner, ast.For)
+                    and isinstance(inner.target, ast.Tuple)
+                    and isinstance(inner.iter, ast.Call)
+                ):
+                    return inner.body[-1].lineno
+    raise AssertionError("could not find configure()'s apply loop")
+
+
+def test_a_configure_is_not_torn_in_half_by_a_concurrent_load(
+    unloaded_config, tmp_path
+):
+    """``configure`` must be all-or-nothing against a concurrent ``load_config``.
+
+    ``configure`` took the lock only for the search at the top; its apply loop
+    ran unlocked. The loop reads the module global ``_config`` on every
+    iteration and ``load_config`` *rebinds* it, so a load landing mid-loop
+    left the keywords already applied written to the object that was just
+    discarded and the rest written to the new one. The call returned success
+    with ``cluster_host`` silently reverted to the file's value and the other
+    three keywords applied -- neither writer won, and nothing said so.
+
+    Unforced this is rare: 200 trials of the two calls racing on a barrier,
+    with ``sys.setswitchinterval`` at a nanosecond, produced 0 torn results,
+    which is why the suite could not see it. The interpreter may switch
+    threads at any bytecode in that loop, so the interleaving is scheduled
+    here instead of waited for: a trace function on the ``configure`` thread
+    releases the loader after the *first* attribute has been written and waits
+    for it. Nothing is patched or replaced -- both calls are the real ones,
+    running on real threads, against a real file.
+
+    With the loop unlocked this is deterministic; the timeouts below are what
+    keep it terminating once the loop *is* locked, where the loader simply
+    queues and the trace function has nothing to wait for.
+    """
+    explicit = tmp_path / "explicit.yml"
+    explicit.write_text(
+        "cluster_type: ssh\ncluster_host: fromfile.example\nusername: file-user\n"
+    )
+    config_module._config = ClusterConfig()
+    config_module._default_config_loaded = True
+
+    setattr_line = _setattr_line()
+    config_file = config_module.__file__
+    released = threading.Event()
+    loaded = threading.Event()
+    arrivals = []
+
+    def watch_lines(frame, event, arg):
+        if event == "line" and frame.f_lineno == setattr_line:
+            arrivals.append(frame.f_lineno)
+            if len(arrivals) == 2:  # the first attribute is now written
+                released.set()
+                loaded.wait(timeout=2)
+        return watch_lines
+
+    def watch_calls(frame, event, arg):
+        if (
+            frame.f_code.co_name == "configure"
+            and frame.f_code.co_filename == config_file
+        ):
+            return watch_lines
+        return None
+
+    def apply_keywords():
+        sys.settrace(watch_calls)
+        try:
+            configure(**_CONFIGURE_KEYWORDS)
+        finally:
+            sys.settrace(None)
+
+    def load_the_file():
+        released.wait(timeout=30)
+        config_module.load_config(str(explicit))
+        loaded.set()
+
+    threads = [
+        threading.Thread(target=load_the_file),
+        threading.Thread(target=apply_keywords),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=60)
+    for thread in threads:
+        assert not thread.is_alive(), "a writer never returned"
+
+    assert len(arrivals) == len(_CONFIGURE_KEYWORDS), (
+        "the preemption was never scheduled inside the apply loop, so this "
+        f"test proved nothing: {arrivals}"
+    )
+
+    final = get_config()
+    from_keywords = {
+        name: getattr(final, name) == value
+        for name, value in _CONFIGURE_KEYWORDS.items()
+    }
+    assert set(from_keywords.values()) in ({True}, {False}), (
+        "configure() was torn in half by a concurrent load_config: "
+        f"{ {name: getattr(final, name) for name in _CONFIGURE_KEYWORDS} }"
+    )
+    if not any(from_keywords.values()):
+        # The load won outright, which is the other legal outcome: an explicit
+        # file load replaces the configuration wholesale. It must have won
+        # wholesale too.
+        assert final.cluster_host == "fromfile.example"
+        assert final.username == "file-user"
 
 
 #: Trials for the race below. A race that reproduces one time in fifty is
