@@ -25,7 +25,6 @@ def cluster(
     memory: Optional[str] = None,
     time: Optional[str] = None,
     partition: Optional[str] = None,
-    queue: Optional[str] = None,
     parallel: Optional[bool] = None,
     auto_gpu_parallel: Optional[bool] = None,
     environment: Optional[str] = None,
@@ -40,7 +39,6 @@ def cluster(
         memory: Memory to request (e.g., "8GB")
         time: Time limit (e.g., "01:00:00")
         partition: Cluster partition to use
-        queue: Queue to submit to
         parallel: Whether to parallelize loops automatically
         auto_gpu_parallel: NO EFFECT. The client-side GPU path it selected
             never called the decorated function -- it ran a fixed torch
@@ -68,7 +66,6 @@ def cluster(
                 "memory": memory or config.default_memory,
                 "time": time or config.default_time,
                 "partition": partition or config.default_partition,
-                "queue": queue or config.default_queue,
                 "environment": environment or config.conda_env_name,
             }
 
@@ -97,6 +94,22 @@ def cluster(
                     "effect. Recognised extras: %s",
                     ", ".join(unknown_kwargs),
                     ", ".join(sorted(passthrough_params)),
+                )
+
+            # #158: ``default_queue`` outlived its only consumers. ``queue``
+            # was the PBS and SGE spelling of what SLURM calls a partition, and
+            # both of those backends are gone, so nothing on the execution path
+            # has read it since. ``@cluster(queue=...)`` is no longer a
+            # parameter at all -- it now lands in ``**kwargs`` and is reported
+            # by the warning above -- but a value left behind in a config file
+            # or a saved widget profile still has to say that it does nothing.
+            stale_queue = getattr(config, "default_queue", None)
+            if stale_queue:
+                logger.warning(
+                    "ClusterConfig.default_queue=%r has no effect: no backend "
+                    "reads it. SLURM takes a partition, so set default_partition "
+                    "or @cluster(partition=...) instead.",
+                    stale_queue,
                 )
 
             # Determine execution mode
@@ -183,7 +196,6 @@ def cluster(
             "memory": memory,
             "time": time,
             "partition": partition,
-            "queue": queue,
             "parallel": parallel,
             "auto_gpu_parallel": auto_gpu_parallel,
             "environment": environment,

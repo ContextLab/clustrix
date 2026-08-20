@@ -35,7 +35,9 @@ class TestClusterDecorator:
             "memory": None,
             "time": None,
             "partition": None,
-            "queue": None,
+            # No "queue": it was accepted, resolved into job_config and read by
+            # nothing, so #158 removed it. @cluster(queue=...) now lands in
+            # **kwargs and hits the unrecognised-option warning.
             "parallel": None,
             "auto_gpu_parallel": None,
             "environment": None,
