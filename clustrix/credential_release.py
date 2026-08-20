@@ -32,10 +32,17 @@ positional parameter is the recipient**.
 Three locks, in decreasing strength:
 
 1. **There is nothing else public to call.** The store's entry point is
-   ``FlexibleCredentialManager._ensure_credential_unchecked``, and the
-   module-level convenience function that used to sit beside it is gone. A
-   developer who wants a password and greps for one finds one name, and it
-   demands a target.
+   ``FlexibleCredentialManager._ensure_credential_unchecked``; the
+   module-level convenience function that used to sit beside it is gone,
+   and so are the three doors round one left open --
+   ``load_credentials_optional`` (a public function *and* a public method,
+   thirty lines above the one that was privatised, with zero callers in the
+   tree and the password in its return value), the ``sources`` attribute
+   (``mgr.sources[0].get_credentials("ssh")``: privatising the method while
+   leaving the objects it reads reachable closed the door and left the
+   window open), and ``_stored_credential``, which anything could import.
+   A developer who wants a password and greps for one finds one name, and
+   it demands a target.
 2. **A target that names nobody cannot be constructed.**
    :meth:`CredentialTarget.__post_init__` refuses a hostname that does not
    normalise, so route 1 -- "a credential with no host, offered to a host
@@ -43,9 +50,14 @@ Three locks, in decreasing strength:
    that cannot exist. :class:`CredentialRelease` refuses to carry both a
    secret and a refusal, or neither, so "empty means configured" cannot come
    back in a new costume.
-3. **The store checks its caller's module.**
-   ``_ensure_credential_unchecked`` raises unless the frame above it belongs
-   to this module. That check is **always on**: it makes no reference to
+3. **The store checks its caller's module and its name.**
+   ``_ensure_credential_unchecked`` raises unless the frame above it is
+   :data:`STORE_CALLERS`, and ``_stored_credential`` raises unless the frame
+   above *it* is :data:`CREDENTIAL_OBTAINERS`. The second half is what makes
+   it a lock rather than a coincidence: a module check alone is satisfied
+   **by construction** for anything reached from inside this file, so an
+   outsider who imported ``_stored_credential`` was judged one frame too
+   late and passed. That check is **always on**: it makes no reference to
    tests and behaves identically whether or not pytest is running, so it is
    not the test-awareness ``CLAUDE.md`` forbids. An eighth route written the
    old way raises on its first run rather than at review. Its honest limit is
@@ -139,6 +151,18 @@ GATE_MODULE = __name__
 #: The branches :func:`release_credential` can answer from.
 RELEASE_SOURCES = ("stored-credential", "environment")
 
+#: The functions *of this module* that may obtain a raw stored credential.
+#: A module-name check alone is satisfied by construction for anything
+#: reached from inside this file, which made ``_stored_credential`` an
+#: import away from being a public store; see
+#: :func:`assert_called_from_the_gate`.
+CREDENTIAL_OBTAINERS = ("describe_credential", "_release_stored")
+
+#: The function of this module that may call the store. Named here rather
+#: than in ``credential_manager`` so that the gate owns both halves of its
+#: own rule.
+STORE_CALLERS = ("_stored_credential",)
+
 #: Hosts :meth:`CredentialTarget.fixed_service` may name: services compiled
 #: into clustrix, which no configuration file can move. Not a registry and
 #: not a plugin point -- a name that belongs here is one written in this
@@ -158,6 +182,15 @@ SECRET_SURFACES = (
         "FlexibleCredentialManager._ensure_credential_unchecked",
     ),
     ("clustrix.credential_manager", "CredentialSource.get_credentials"),
+    # The sources themselves. Privatising the *method* while leaving the
+    # objects it reads on a public attribute closed the door and left the
+    # window open: ``mgr.sources[0].get_credentials("ssh")`` returned the
+    # password with no recipient named.
+    ("clustrix.credential_manager", "FlexibleCredentialManager._sources"),
+    # The gate's own one-line call to the store. Importable, and until it
+    # started checking its caller by *function* the store's frame check
+    # passed it by construction.
+    ("clustrix.credential_release", "_stored_credential"),
     ("clustrix.config", "ClusterConfig.password"),
     ("clustrix.config", "ClusterConfig.key_file"),
     ("clustrix.config", "ClusterConfig.password_env_var"),
@@ -509,9 +542,16 @@ class CredentialRelease:
 def _stored_credential(provider: str) -> Optional[Dict[str, str]]:
     """The raw stored credential for ``provider``. Gate-internal.
 
-    Separated only so that the one call to the private store is a single,
-    greppable line inside this module.
+    The one call to the private store, so that it is a single greppable
+    line inside this module -- and a door of its own until it started
+    checking. ``from clustrix.credential_release import _stored_credential``
+    is a public import in every way that matters, and the store's frame
+    check passed it *by construction*: the frame it judges is this
+    function's, which is in this module whoever called it. So this asks the
+    same question one frame further down, about the function calling it.
     """
+    assert_called_from_the_gate(CREDENTIAL_OBTAINERS)
+
     from .credential_manager import get_credential_manager
 
     return get_credential_manager()._ensure_credential_unchecked(provider)
@@ -760,8 +800,8 @@ def release_credential(
     )
 
 
-def assert_called_from_the_gate() -> None:
-    """Raise unless the module calling the store is this one.
+def assert_called_from_the_gate(allowed: Sequence[str] = ()) -> None:
+    """Raise unless the frame two up belongs to this module.
 
     Lock 3. **Always on**, in production, with no reference to tests and no
     different behaviour under pytest -- it is a fact about which module may
@@ -770,19 +810,32 @@ def assert_called_from_the_gate() -> None:
 
     ``sys._getframe`` rather than ``inspect.stack()``: the latter reads
     source files off disk for every frame, and this runs on the connection
-    path. Frame 0 is this function, frame 1 is the store method that called
-    it, and frame 2 is the module that called *that* -- the one being
-    judged.
+    path. Frame 0 is this function, frame 1 is the function that wants its
+    own caller judged, and frame 2 is that caller -- the one being judged.
+
+    ``allowed`` names the functions *of this module* that may make the call,
+    and it is not decoration. A module-name check alone passes **by
+    construction** for anything reached from inside this file: an outsider
+    who imports ``_stored_credential`` and calls it is judged one frame too
+    late, at ``_ensure_credential_unchecked``, where the caller is
+    ``_stored_credential`` and the module is therefore this one. What
+    distinguishes the gate calling its own helper from somebody importing
+    that helper is *which function* is calling, so that is what is checked.
+    Its honest limit is unchanged: a caller that rebinds ``__name__``, or
+    that runs code compiled into a frame of its choosing, defeats it -- and
+    a caller that hostile already has the interpreter.
     """
     try:
-        caller = sys._getframe(2).f_globals.get("__name__")
+        frame = sys._getframe(2)
     except ValueError:  # pragma: no cover - not enough frames to judge
-        caller = None
-    if caller != GATE_MODULE:
+        frame = None
+    caller = frame.f_globals.get("__name__") if frame is not None else None
+    function = frame.f_code.co_name if frame is not None else None
+    if caller != GATE_MODULE or (allowed and function not in allowed):
         raise RuntimeError(
             "Stored credentials are released only through "
             "clustrix.credential_release.release_credential(target), which "
             "requires the host that is about to receive them. "
-            f"{caller!r} called the store directly. See issue #167 and the "
-            "module docstring of clustrix.credential_release."
+            f"{caller!r}.{function} called the store directly. See issue "
+            "#167 and the module docstring of clustrix.credential_release."
         )

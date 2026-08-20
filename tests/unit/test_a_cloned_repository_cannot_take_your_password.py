@@ -43,6 +43,7 @@ import pytest
 
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
+import clustrix.credential_release as credential_release_module
 from clustrix.auth_methods import stored_credential_is_for_config
 from clustrix.credential_release import (
     CredentialRelease,
@@ -2427,6 +2428,33 @@ def test_bypassing_the_gate_raises():
 def test_the_module_level_convenience_is_gone():
     """The other way in, and the one a developer would have found by grep."""
     assert not hasattr(credential_manager_module, "ensure_credential")
+
+
+def test_importing_the_gates_own_helper_does_not_make_you_the_gate():
+    """A frame check that passes by construction is not a lock.
+
+    ``_stored_credential`` is importable, and the store's guard judged the
+    frame above ``_ensure_credential_unchecked`` -- which is
+    ``_stored_credential``'s own frame, in the gate's module, whoever
+    called it. So ``from clustrix.credential_release import
+    _stored_credential`` was a public store with an underscore on it. What
+    separates the gate calling its own helper from somebody importing that
+    helper is *which function* is calling, and that is now what is checked.
+    """
+    with pytest.raises(RuntimeError) as raised:
+        credential_release_module._stored_credential("ssh")
+
+    assert "release_credential" in str(raised.value)
+
+
+def test_the_gate_can_still_obtain_the_credential_it_guards():
+    """The lock above is not simply "nothing works".
+
+    ``describe_credential`` reaches the same helper from inside the gate,
+    and must keep doing so -- a guard that also blocked the one legitimate
+    caller would be indistinguishable from a broken import.
+    """
+    assert credential_release_module.describe_credential("ssh") is not None
 
 
 # ---------------------------------------------------------------------------

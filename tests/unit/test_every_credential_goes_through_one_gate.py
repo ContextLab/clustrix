@@ -236,5 +236,13 @@ def test_every_declared_secret_surface_still_exists(module, symbol):
 
     obj = importlib.import_module(module)
     for part in symbol.split("."):
-        assert hasattr(obj, part), f"{module}.{symbol} no longer exists"
-        obj = getattr(obj, part)
+        if hasattr(obj, part):
+            obj = getattr(obj, part)
+            continue
+        # An instance attribute exists only on instances, so the class
+        # declaration is what a reader -- and this test -- can point at.
+        # ``_sources`` is one: constructing a manager to look for it would
+        # create a ~/.clustrix directory as a side effect of an AST test.
+        annotations = getattr(obj, "__annotations__", {})
+        assert part in annotations, f"{module}.{symbol} no longer exists"
+        return

@@ -258,7 +258,7 @@ class TestFlexibleCredentialManager:
             # integration -- use only .env, environment vars, and GitHub
             # secrets"); this assertion is stale from before that removal
             # (Issue #114).
-            assert len(manager.sources) == 3
+            assert len(manager._sources) == 3
 
     def test_env_file_creation(self):
         """Test that .env file is created automatically."""
@@ -329,6 +329,35 @@ class TestFlexibleCredentialManager:
                 manager._ensure_credential_unchecked("ssh")
 
             assert "release_credential" in str(raised.value)
+
+    def test_the_sources_are_not_reachable_through_a_public_attribute(self):
+        """Lock 1, at the level the store actually is.
+
+        ``_ensure_credential_unchecked`` was privatised and the sources it
+        reads were left on ``mgr.sources``, so
+        ``mgr.sources[0].get_credentials("ssh")`` still returned the
+        password with no recipient named and no gate consulted. Closing the
+        door and leaving the window open is not closing anything.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert not hasattr(manager, "sources")
+
+    def test_there_is_no_public_bulk_credential_loader(self):
+        """``load_credentials_optional`` returned the password, to anyone.
+
+        A public module function *and* a public method, thirty lines above
+        the one that was privatised, with zero callers in the tree. It was
+        deleted rather than renamed: an unused way to obtain a secret
+        without naming a recipient is not a feature with no users, it is a
+        door with no lock.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert not hasattr(manager, "load_credentials_optional")
+            assert not hasattr(credential_manager_module, "load_credentials_optional")
 
     def test_get_credential_status(self):
         """Test getting comprehensive credential status."""

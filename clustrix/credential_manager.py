@@ -242,13 +242,27 @@ class GitHubActionsCredentialSource(CredentialSource):
 class FlexibleCredentialManager:
     """Main credential manager with automatic .env file creation and multiple sources."""
 
+    #: Declared here, and private, because it is a secret-bearing surface in
+    #: its own right: every element answers ``get_credentials(provider)``
+    #: with the password in it. It is named in
+    #: ``clustrix.credential_release.SECRET_SURFACES``, and this annotation
+    #: is what that entry points at.
+    _sources: List[CredentialSource]
+
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize credential manager with automatic setup."""
         self.config_dir = config_dir or get_config_dir()
         self.env_file = self.config_dir / ".env"
 
-        # Initialize credential sources in priority order
-        self.sources = [
+        # The credential sources, in priority order. **Private**, because a
+        # source is a store: ``mgr.sources[0].get_credentials("ssh")``
+        # returned the password with no recipient named and no gate
+        # consulted, which is the whole defect
+        # ``_ensure_credential_unchecked`` was privatised to close. Making
+        # the *method* private while leaving the objects it reads reachable
+        # through a public attribute closed the door and left the window
+        # open.
+        self._sources = [
             DotEnvCredentialSource(self.env_file),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
@@ -319,55 +333,6 @@ class FlexibleCredentialManager:
 # 5. Use 'clustrix credentials edit' to safely edit this file
 """
 
-    def load_credentials_optional(
-        self, provider: Optional[str] = None
-    ) -> Dict[str, Dict[str, str]]:
-        """Load available credentials from all sources.
-
-        Args:
-            provider: Specific provider to load, or None for all providers
-
-        Returns:
-            Dictionary mapping provider names to their credentials
-        """
-        credentials = {}
-
-        if provider:
-            # Load credentials for specific provider
-            for source in self.sources:
-                try:
-                    creds = source.get_credentials(provider)
-                    if creds:
-                        credentials[provider] = creds
-                        logger.debug(
-                            f"Loaded {provider} credentials from {source.__class__.__name__}"
-                        )
-                        break  # Use first successful source
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to load {provider} from {source.__class__.__name__}: {e}"
-                    )
-        else:
-            # Load all available credentials
-            all_providers = ["ssh", "huggingface"]
-
-            for prov in all_providers:
-                for source in self.sources:
-                    try:
-                        creds = source.get_credentials(prov)
-                        if creds and prov not in credentials:
-                            credentials[prov] = creds
-                            logger.debug(
-                                f"Loaded {prov} credentials from {source.__class__.__name__}"
-                            )
-                            break  # Use first successful source
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to load {prov} from {source.__class__.__name__}: {e}"
-                        )
-
-        return credentials
-
     def _ensure_credential_unchecked(self, provider: str) -> Optional[Dict[str, str]]:
         """The stored credential for ``provider``, secrets and all.
 
@@ -388,13 +353,16 @@ class FlexibleCredentialManager:
         convenience function beside it. Both were how a caller obtained the
         cluster password without saying who for.
         """
-        from .credential_release import assert_called_from_the_gate
+        from .credential_release import (
+            STORE_CALLERS,
+            assert_called_from_the_gate,
+        )
 
-        assert_called_from_the_gate()
+        assert_called_from_the_gate(STORE_CALLERS)
 
         logger.debug(f"Looking up {provider} credentials...")
 
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
 
             try:
@@ -450,7 +418,7 @@ class FlexibleCredentialManager:
         *names* only -- ``["host", "username", "password"]`` says a password
         is configured without being one.
         """
-        for source in self.sources:
+        for source in self._sources:
             try:
                 if not source.is_available():
                     continue
@@ -470,7 +438,7 @@ class FlexibleCredentialManager:
         available = {}
 
         for provider in ["ssh", "huggingface"]:
-            for source in self.sources:
+            for source in self._sources:
                 try:
                     if source.is_available() and source.get_credentials(provider):
                         available[provider] = source.__class__.__name__
@@ -495,7 +463,7 @@ class FlexibleCredentialManager:
         }
 
         # Check each source
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
             try:
                 source_status: Dict[str, Any] = {
@@ -543,14 +511,6 @@ def get_credential_manager() -> FlexibleCredentialManager:
 
 
 # Convenience functions for common credential operations
-def load_credentials_optional(
-    provider: Optional[str] = None,
-) -> Dict[str, Dict[str, str]]:
-    """Load available credentials from all sources."""
-    manager = get_credential_manager()
-    return manager.load_credentials_optional(provider)
-
-
 def get_missing_providers(required: List[str]) -> List[str]:
     """Identify which required providers are missing credentials."""
     manager = get_credential_manager()
