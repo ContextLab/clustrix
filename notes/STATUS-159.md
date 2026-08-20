@@ -1277,3 +1277,56 @@ That is a documented trade-off in the handler's docstring — resetting the fiel
 would fight the keystream — and there is no data loss. Filing an issue for a
 deliberate, documented trade-off would work against ending with a clean issue
 list. **Add it to the CHANGELOG's Known limitations section instead.**
+
+## The gate does NOT hold: a full compromise chain, proven on the wire (`19a5026`)
+
+Baseline confirmed 2045 passed / 2089 collected. This is the most serious
+finding since route 13 itself, and it is a *chain*, not four separate bugs.
+
+**F1 — an eighth discovery path: OpenSSH reads `~/.ssh/config`.**
+`deploy_public_key`'s `ssh-copy-id` passes no `-F`, and OpenSSH resolves its own
+home directory from the **passwd database**, so redirecting `HOME` does not
+move it. An `IdentityFile` supplied by that config is loaded as **"explicit"**,
+which means the `IdentitiesOnly=yes` added last round does not filter it.
+Measured with otherwise identical flags: `-F /dev/null` → `rc=255, auths=[]`;
+add a `Host * / IdentityFile` stanza → `rc=0, [('victim','publickey')]`.
+
+**F2 — `ssh_host_key_policy` weaponised. This is the compromise.**
+A `./clustrix.yml` naming **only** a host plus `ssh_host_key_policy: auto_add`,
+carrying **no credential at all**: the gate refuses, and `deploy_public_key`
+still returns True with the server logging two `('victim','publickey')`
+authentications — F1 supplies the identity, F2 removes the host-key barrier.
+**And it persists**: process 1 writes 8 entries into the global `known_hosts`;
+process 2 — fresh, no attacker file, default `reject` — finds the host already
+trusted for all three algorithms.
+
+This is exactly the question I asked the reviewer to settle rather than leave
+as a caveat, and the answer is that the previously-recorded
+"`ssh_host_key_policy` is an ordinary declared field" note was understating a
+live compromise.
+
+**F3 — a planted leaker survived the full suite.** A module doing
+`os.environ.get("SSH_PASSWORD")` → `paramiko.connect(hostname=…)` with no gate
+call: 2045 passed. `_is_environ_lookup` exempts **literal** keys, and
+`SECRET_SURFACES` only checks that declared surfaces still exist — it never
+finds new ones.
+
+**F4 — `hf_image` chooses the container that receives the token.** An ordinary
+field, so an untrusted yml picks the image that gets `CLUSTRIX_HF_TOKEN` as a
+job secret; its `hf_hub_download` lives inside a *string* of generated remote
+code, so rule 7 cannot see it.
+
+**P5-P8 — the admitted AST blind spots are exploitable.** `rsync`, a command
+built into a variable, `shell=True`, and a list built across functions each
+**survived and wire-authenticated**. An admitted limitation that is
+demonstrably exploitable is a defect, not a caveat.
+
+**Confirmed sound:** the default-identity half is correct — `-o IdentityFile`
+*replaces* the five passwd-DB defaults, measured rather than assumed; the HF
+token and endpoint are pinned in `staging`, `hf_jobs` and `cli_credentials`; no
+git/curl/wget paths; the flat package means `glob("*.py")` has no subdirectory
+gap; and paramiko never reads `ssh_config`.
+
+Fix round dispatched, with the instruction that F1 must not be fixed by always
+passing `-F /dev/null` — a user's ssh_config legitimately carries `ProxyJump`,
+`Port`, `User` and `HostName`, and discarding it would break real deployments.
