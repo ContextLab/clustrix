@@ -759,3 +759,51 @@ needs a `LocalSSHServer` with a real `conda` executable on PATH and no
 Queued, not dispatched (three agents already running). If it proves out it is a
 new issue; if not, the branch still needs a test, because an untested fallback
 in the environment-setup path is how #172's defect survived.
+
+## Route 13: six sites closed, a seventh dispatched (`9a7e54f`)
+
+2036 passed / 0 failed; black 26.3.1, flake8, mypy clean.
+
+**Site 5 — the widget.** `_test_ssh_connectivity` now builds a real
+`ClusterConfig` (`_config_under_test`, stamped with the same
+`config_source_map` provenance Apply uses) and asks
+`release_credential(..., sources=("config-field","stored-credential","environment"))`;
+`look_for_keys`/`allow_agent` start `False` and take `release.local_identities`.
+Wire evidence: before `[('victim','publickey')]`, after `[]`; control arm with
+`~/.clustrix/config.yml` authenticates both before and after.
+
+**My direction for that fix was wrong and the agent was right to ignore it.** I
+told it to use `split_config_kwargs` / `PROFILE_BOOKKEEPING_KEYS`. Those do not
+exist on `work/credential-gate` — they come from `work/widget-apply`, so I was
+reasoning from the merged tree rather than the branch being edited. **Merge-time
+note:** once widget-apply and the gate are both in, check whether
+`_config_under_test` and `split_config_kwargs` overlap, and collapse them if so.
+
+**Site 6, found by the new AST rule** (any `x.connect(...)` with keywords must
+name both settings; it reads the innermost enclosing function so `**kwargs`
+sites count): `ssh_utils.deploy_public_key`. Measured at `f31a98f`:
+`RESULT True AUTH [('victim','publickey')]` — the victim's key authenticated
+*and* the requested key was installed. Now gated.
+
+Also fixed: `CredentialTarget.for_config` turned a `None` host into the
+hostname `"None"`, so the `ValueError` that four call sites catch never fired
+for the no-host case.
+
+**Site 7, dispatched.** `deploy_public_key` shells out to `ssh-copy-id` before
+the paramiko path, and the subprocess is outside both the gate and the AST
+rule. Two defects there, both confirmed by reading the code:
+
+1. No `IdentitiesOnly=yes`, so OpenSSH offers the `-i` key **plus** the default
+   identities **plus** any running agent — route 13 by subprocess.
+2. `StrictHostKeyChecking=accept-new` is hardcoded, so the one path that
+   reaches for OpenSSH applies a weaker host-key policy than every paramiko
+   call in the codebase, where the default is deliberately `reject`.
+
+`UserKnownHostsFile={_user_known_hosts_path()}` there is correct and must stay:
+OpenSSH resolves `~` from the passwd database rather than `$HOME`, so without
+it clustrix verifies against a file it is not writing to.
+
+**Known and left alone, correctly:** `EnhancedClusterConfigWidget._on_apply_config`
+raises `ValueError: Unknown configuration parameter: name` for any named
+profile — pre-existing, documented in the suite's route-5 comment, orthogonal
+to credentials.
