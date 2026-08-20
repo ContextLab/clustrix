@@ -163,13 +163,29 @@ raises ``BadHostKeyException`` without consulting the policy at all.
 The ``reject`` policy never writes to your filesystem, since verifying is not
 a reason to create anything.
 
-The automated key setup described above writes to that same file, and says so
-explicitly: ``ssh-keyscan`` output is appended to it, and ``ssh-copy-id`` is
-handed it with ``-o UserKnownHostsFile=``. OpenSSH resolves ``~`` from the
-passwd database rather than from the environment, so without that flag the
-Python half of clustrix would verify against one file while ``ssh-copy-id``
-appended to another -- which differ in a container, under ``sudo -u``, and on
-a login node with a relocated home.
+The automated key setup described above obeys the same policy, and the
+``ssh-copy-id`` it shells out to obeys it too: the subprocess is handed
+``-o StrictHostKeyChecking=yes`` under ``reject`` and ``accept-new`` under
+``auto_add``, so the one place clustrix reaches for OpenSSH cannot be more
+permissive than the paramiko connections beside it. Under ``auto_add`` -- and
+only then -- key setup also runs ``ssh-keyscan`` and appends the result to
+your ``known_hosts``. Under the default ``reject`` it does not: it fails with
+the message above, which names the exact ``ssh-keyscan`` command to run, and
+trusting a new host stays your decision rather than a side effect of
+deploying a key. Both the scan and ``ssh-copy-id`` are pointed at the
+``known_hosts`` clustrix itself reads, with ``-o UserKnownHostsFile=``:
+OpenSSH resolves ``~`` from the passwd database rather than from the
+environment, so without that flag the Python half of clustrix would verify
+against one file while ``ssh-copy-id`` appended to another -- which differ in
+a container, under ``sudo -u``, and on a login node with a relocated home.
+
+Key deployment is also held to the credential gate. If the ``cluster_host``
+came from somewhere you did not choose -- a ``./clustrix.yml`` in a cloned
+repository, say -- ``ssh-copy-id`` is additionally given
+``-o IdentitiesOnly=yes``, ``-o IdentityFile=<the key being deployed>`` and
+``-o IdentityAgent=none``, so OpenSSH offers that one key and neither your
+default identities nor anything in your ssh-agent. For a host you chose,
+nothing changes.
 
 .. code-block:: python
 

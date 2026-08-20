@@ -36,8 +36,14 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 ``clustrix.auth_methods.stored_credential_is_for_config``.
 """
 
+import contextlib
 import os
 import pathlib
+import re
+import shutil
+import signal
+import subprocess
+import tempfile
 import warnings
 
 import paramiko
@@ -3697,3 +3703,356 @@ def test_ssh_key_setup_still_runs_for_a_host_the_user_chose(key_only_server, env
         "key setup did not even try the existing keys for a host the user "
         "chose, so the gate has become an outage"
     )
+
+
+# ---------------------------------------------------------------------------
+# Route 13, seventh site: the ``ssh-copy-id`` subprocess.
+#
+# ``deploy_public_key`` shells out before it reaches paramiko, so the AST
+# rule above -- which reads ``x.connect(...)`` calls -- could not see it, and
+# the gate's decision stopped at the Python boundary. OpenSSH offers the
+# default identity files *and* every key in the running agent unless told
+# otherwise, and ``ssh-copy-id`` pins identities only while it is testing
+# which keys are already installed: the invocation that actually logs in and
+# appends to ``authorized_keys`` runs plain ``ssh``.
+# ---------------------------------------------------------------------------
+
+#: The OpenSSH programs that open a connection on clustrix's behalf. Each
+#: one performs its own credential discovery and its own host key check, so
+#: each one has to be told the two decisions the paramiko sites are told.
+OPENSSH_CONNECTING_PROGRAMS = ("ssh", "ssh-copy-id", "scp", "sftp")
+
+#: What such an invocation must name, somewhere in the function that builds
+#: it. ``IdentitiesOnly`` (with ``IdentityFile``) is the local-identity
+#: decision; ``StrictHostKeyChecking`` is the host key policy.
+OPENSSH_REQUIRED_OPTIONS = ("IdentitiesOnly", "StrictHostKeyChecking")
+
+
+def _unpinned_openssh_subprocesses(text):
+    """``subprocess`` calls in ``text`` that exec an OpenSSH client unpinned.
+
+    Matches a call on the ``subprocess`` module whose command argument is a
+    list whose first element is the literal name of one of
+    :data:`OPENSSH_CONNECTING_PROGRAMS` -- either written inline or built as
+    a local name in the same function, which is the shape ``ssh_utils``
+    uses. Both option names must appear as string constants somewhere in the
+    innermost enclosing function, the same allowance
+    :func:`_unpinned_paramiko_connects` makes for the ``**kwargs`` shape and
+    with the same limit: a function that merely mentions the names passes.
+    It detects "somebody added another shell-out to ssh", which is the
+    realistic regression, not an adversary.
+
+    **Stated limits.** It does not follow a command list assembled across
+    functions, a program named through a variable, or a command string
+    handed to ``shell=True``. Requiring the call to be on ``subprocess`` is
+    what keeps ``["ssh", "huggingface"]`` -- a list of credential providers
+    -- from being read as an invocation. And it says nothing about
+    ``ssh-keyscan``, which connects but authenticates nothing: what matters
+    there is that its output is appended to ``known_hosts``, and the guard
+    on that is its caller being conditional on the host key policy, covered
+    by ``tests/unit/test_host_key_policy.py``.
+    """
+    import ast
+
+    tree = ast.parse(text)
+    offenders = []
+
+    def options_named_in(scope):
+        found = set()
+        for node in ast.walk(scope):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for option in OPENSSH_REQUIRED_OPTIONS:
+                    if option in node.value:
+                        found.add(option)
+        return found
+
+    def program_of(node, scope):
+        """The OpenSSH program a command argument names, if any."""
+        if isinstance(node, ast.List) and node.elts:
+            first = node.elts[0]
+            if isinstance(first, ast.Constant):
+                return first.value
+            return None
+        if isinstance(node, ast.Name):
+            for assigned in ast.walk(scope):
+                if (
+                    isinstance(assigned, ast.Assign)
+                    and any(
+                        isinstance(t, ast.Name) and t.id == node.id
+                        for t in assigned.targets
+                    )
+                    and isinstance(assigned.value, ast.List)
+                    and assigned.value.elts
+                    and isinstance(assigned.value.elts[0], ast.Constant)
+                ):
+                    return assigned.value.elts[0].value
+        return None
+
+    def is_subprocess_call(call):
+        func = call.func
+        return (
+            isinstance(func, ast.Attribute)
+            and isinstance(func.value, ast.Name)
+            and func.value.id == "subprocess"
+        )
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.Call) and is_subprocess_call(child) and child.args:
+                program = program_of(child.args[0], scope)
+                if program in OPENSSH_CONNECTING_PROGRAMS:
+                    named = options_named_in(scope)
+                    missing = tuple(
+                        o for o in OPENSSH_REQUIRED_OPTIONS if o not in named
+                    )
+                    if missing:
+                        offenders.append((child.lineno, missing))
+            inner = (
+                child
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                else scope
+            )
+            visit(child, inner)
+
+    visit(tree, tree)
+    return sorted(set(offenders))
+
+
+def test_no_openssh_subprocess_leaves_the_identity_search_or_host_policy_open():
+    """The rule that stops an eighth route-13 site appearing as a subprocess.
+
+    ``deploy_public_key`` was the seventh, and the sixth site's rule could
+    not see it: it reads ``connect()`` calls, and this one is an ``execve``.
+    """
+    package = pathlib.Path(config_module.__file__).parent
+
+    offenders = {}
+    for path in sorted(package.glob("*.py")):
+        found = _unpinned_openssh_subprocesses(path.read_text(encoding="utf-8"))
+        if found:
+            offenders[path.name] = found
+
+    assert not offenders, (
+        "an OpenSSH client was exec'd without naming IdentitiesOnly and "
+        "StrictHostKeyChecking, so it performs its own credential discovery "
+        "and its own host key check outside the gate and outside "
+        "ssh_security (route 13, via subprocess): " + repr(offenders)
+    )
+
+
+def test_the_openssh_subprocess_rule_fires_on_what_it_is_for_and_nothing_else():
+    """Kills: matching any list, and matching only an inline command."""
+    assert _unpinned_openssh_subprocesses(
+        "def f(h):\n"
+        "    cmd = ['ssh-copy-id', '-i', 'k.pub']\n"
+        "    subprocess.run(cmd)\n"
+    ) == [(3, ("IdentitiesOnly", "StrictHostKeyChecking"))]
+    assert _unpinned_openssh_subprocesses(
+        "def f(h):\n    subprocess.run(['ssh', h])\n"
+    ) == [(2, ("IdentitiesOnly", "StrictHostKeyChecking"))]
+    assert _unpinned_openssh_subprocesses(
+        "def f(h):\n"
+        "    cmd = ['ssh', h]\n"
+        "    cmd += ['-o', 'StrictHostKeyChecking=yes']\n"
+        "    subprocess.run(cmd)\n"
+    ) == [(4, ("IdentitiesOnly",))]
+    assert (
+        _unpinned_openssh_subprocesses(
+            "def f(h):\n"
+            "    cmd = ['ssh', h]\n"
+            "    cmd += ['-o', 'StrictHostKeyChecking=yes']\n"
+            "    cmd += ['-o', 'IdentitiesOnly=yes']\n"
+            "    subprocess.run(cmd)\n"
+        )
+        == []
+    )
+    # A list of credential providers is not an invocation, and a program
+    # that authenticates nothing is not one either.
+    assert _unpinned_openssh_subprocesses("def f():\n    x = ['ssh', 'hf']\n") == []
+    assert (
+        _unpinned_openssh_subprocesses(
+            "def f(h):\n    subprocess.run(['ssh-keyscan', h])\n"
+        )
+        == []
+    )
+    # A sibling function's pinning does not vouch for this one.
+    assert _unpinned_openssh_subprocesses(
+        "def pinned(h):\n"
+        "    subprocess.run(['ssh', '-o', 'IdentitiesOnly=yes',\n"
+        "                    '-o', 'StrictHostKeyChecking=yes', h])\n"
+        "\n"
+        "def unpinned(h):\n"
+        "    subprocess.run(['ssh', h])\n"
+    ) == [(6, ("IdentitiesOnly", "StrictHostKeyChecking"))]
+
+
+@pytest.fixture
+def agent_identity(tmp_path, monkeypatch):
+    """A real ``ssh-agent`` holding one synthetic identity.
+
+    The agent is the half of route 13 a redirected ``$HOME`` can actually
+    reach: OpenSSH resolves ``~/.ssh/id_rsa`` from the passwd database, so a
+    test cannot put a synthetic key where ``ssh`` looks for its defaults --
+    but ``SSH_AUTH_SOCK`` *is* read from the environment. An agent identity
+    and a default identity file are the same kind of secret (one that names
+    no host), and OpenSSH offers both from the same invocation, so pinning
+    measured on the agent is pinning.
+    """
+    if shutil.which("ssh-agent") is None or shutil.which("ssh-add") is None:
+        pytest.skip("ssh-agent/ssh-add are not installed")
+
+    key = paramiko.RSAKey.generate(2048)
+    private = tmp_path / "victim_agent_id"
+    key.write_private_key_file(str(private))
+    private.chmod(0o600)
+    public = tmp_path / "victim_agent_id.pub"
+    public.write_text(f"ssh-rsa {key.get_base64()} victim-agent\n", encoding="utf-8")
+
+    # A unix socket path is capped near 104 bytes and pytest's tmp_path is
+    # already longer than that, so the agent gets its own short directory.
+    agent_dir = pathlib.Path(
+        tempfile.mkdtemp(
+            prefix="cx-agent-", dir="/tmp" if os.path.isdir("/tmp") else None
+        )
+    )
+    sock = str(agent_dir / "s")
+    started = subprocess.run(
+        ["ssh-agent", "-a", sock], capture_output=True, text=True, check=True
+    )
+    pid = re.search(r"SSH_AGENT_PID=(\d+)", started.stdout)
+    monkeypatch.setenv("SSH_AUTH_SOCK", sock)
+    subprocess.run(
+        ["ssh-add", str(private)], capture_output=True, text=True, check=True
+    )
+    # ssh-copy-id makes its scratch directory with `mktemp -d ~/.ssh/...`,
+    # which the shell expands from $HOME -- the isolated one.
+    (pathlib.Path.home() / ".ssh").mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    yield public
+
+    if pid:
+        with contextlib.suppress(ProcessLookupError):
+            os.kill(int(pid.group(1)), signal.SIGTERM)
+    shutil.rmtree(agent_dir, ignore_errors=True)
+
+
+@pytest.fixture
+def agent_only_server(tmp_path, agent_identity):
+    """A server that accepts the agent's identity and nothing else."""
+    root = tmp_path / "attacker-root"
+    root.mkdir()
+    with LocalSSHServer(
+        root=str(root), password=None, authorized_keys=[str(agent_identity)]
+    ) as server:
+        yield server
+
+
+def _a_key_pair_to_deploy(tmp_path):
+    """A real pair, because ``ssh-copy-id -i x.pub`` demands the private half.
+
+    ``use_id_file`` in ``/usr/bin/ssh-copy-id`` derives ``PRIV_ID_FILE`` by
+    stripping ``.pub`` and exits before connecting if it cannot read it, so
+    a lone ``.pub`` would have exercised nothing at all.
+    """
+    key = paramiko.RSAKey.generate(2048)
+    private = tmp_path / "id_rsa_clustrix_victim"
+    key.write_private_key_file(str(private))
+    private.chmod(0o600)
+    public = tmp_path / "id_rsa_clustrix_victim.pub"
+    public.write_text(f"ssh-rsa {key.get_base64()} clustrix\n", encoding="utf-8")
+    return key, public
+
+
+def _trust_this_host_deliberately(server):
+    """What the reject-policy error message tells the user to run, run by hand.
+
+    Keeping the host key question answered separates it from the identity
+    question: with the key already in ``known_hosts`` a refused deployment
+    was refused over identities, not over host verification.
+    """
+    scan = subprocess.run(
+        ["ssh-keyscan", "-p", str(server.port), server.host],
+        capture_output=True,
+        text=True,
+    )
+    known_hosts = pathlib.Path.home() / ".ssh" / "known_hosts"
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    known_hosts.write_text(scan.stdout, encoding="utf-8")
+    assert scan.stdout.strip(), "ssh-keyscan produced nothing to trust"
+
+
+def test_key_deployment_does_not_offer_your_agent_to_a_repo_named_host(
+    agent_only_server, agent_identity, env_file, tmp_path, monkeypatch
+):
+    """Route 13's seventh site, on the wire.
+
+    Measured at ``9a7e54f`` with a ``./clustrix.yml`` naming only the host:
+    ``RESULT True``, ``AUTH [('victim', 'publickey'), ('victim',
+    'publickey')]`` and the requested key installed in the attacker's
+    ``authorized_keys`` -- the agent identity authenticated through
+    ``ssh-copy-id`` while the gate refused the same host in the same call.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    if shutil.which("ssh-copy-id") is None:
+        pytest.skip("ssh-copy-id is not installed")
+
+    env_file()
+    key, public = _a_key_pair_to_deploy(tmp_path)
+    _trust_this_host_deliberately(agent_only_server)
+    _repository_naming_only_the_host(agent_only_server, tmp_path, monkeypatch)
+
+    with contextlib.suppress(Exception):
+        deploy_public_key(
+            agent_only_server.host,
+            "victim",
+            str(public),
+            agent_only_server.port,
+            None,
+            config=get_config(),
+        )
+
+    assert agent_only_server.authentications == [], (
+        "ssh-copy-id authenticated with an identity out of the ssh-agent to "
+        "a host named by a working-directory file: "
+        + repr(agent_only_server.authentications)
+    )
+    installed = pathlib.Path(agent_only_server.root) / ".ssh" / "authorized_keys"
+    assert not installed.exists() or key.get_base64() not in installed.read_text()
+
+
+def test_key_deployment_over_ssh_copy_id_still_works_for_a_chosen_host(
+    agent_only_server, agent_identity, env_file, tmp_path
+):
+    """The control arm: this must not become a blanket disable.
+
+    Same agent, same server, same ``ssh-copy-id`` path -- the only
+    difference is that the host comes from ``~/.clustrix/config.yml``, which
+    the user chose.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    if shutil.which("ssh-copy-id") is None:
+        pytest.skip("ssh-copy-id is not installed")
+
+    env_file()
+    key, public = _a_key_pair_to_deploy(tmp_path)
+    _trust_this_host_deliberately(agent_only_server)
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(agent_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    deployed = deploy_public_key(
+        agent_only_server.host,
+        "victim",
+        str(public),
+        agent_only_server.port,
+        None,
+        config=get_config(),
+    )
+
+    assert deployed is True
+    assert agent_only_server.authentications, "nothing authenticated at all"
+    installed = pathlib.Path(agent_only_server.root) / ".ssh" / "authorized_keys"
+    assert key.get_base64() in installed.read_text(encoding="utf-8")

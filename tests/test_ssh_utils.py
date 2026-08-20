@@ -215,14 +215,28 @@ class TestDeployPublicKey:
             # known_hosts.
             from clustrix.ssh_utils import _user_known_hosts_path
 
+            # This assertion used to expect ``StrictHostKeyChecking=accept-new``
+            # and nothing about identities, and it was asserting a defect
+            # rather than a decision, so it is rewritten rather than relaxed.
+            # With no ``config`` the host key policy is the ``ClusterConfig``
+            # default, ``reject`` -- OpenSSH's ``yes`` -- and nothing says who
+            # chose ``test.host.com``, so the gate does not license the local
+            # identities and OpenSSH is given the key being deployed and
+            # nothing else.
             expected_cmd = [
                 "ssh-copy-id",
                 "-i",
                 pub_key_path,
                 "-o",
-                "StrictHostKeyChecking=accept-new",
+                "StrictHostKeyChecking=yes",
                 "-o",
                 f"UserKnownHostsFile={_user_known_hosts_path()}",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                f"IdentityFile={pub_key_path[: -len('.pub')]}",
+                "-o",
+                "IdentityAgent=none",
                 "testuser@test.host.com",
             ]
             mock_run.assert_called_with(

@@ -18,6 +18,8 @@ from clustrix.credential_release import CredentialTarget, hostless_secret_refusa
 from clustrix.auth_fallbacks import setup_auth_with_fallback
 from clustrix.ssh_security import (
     configure_host_key_policy,
+    host_key_policy_name,
+    openssh_strict_host_key_checking,
     user_known_hosts_path as _user_known_hosts_path,
 )
 from clustrix.credential_manager import write_text_securely
@@ -302,15 +304,29 @@ def generate_ssh_key(
 
 
 def add_host_key(hostname: str, port: int = 22) -> bool:
-    """
-    Add host key to known_hosts file to avoid verification prompts.
+    """Scan ``hostname``'s host key and append it to ``known_hosts``.
+
+    **Calling this is a decision, not a convenience.** It trusts whatever
+    key the host presents, right now, with nothing to verify it against,
+    and the result is persistent and global: the host counts as verified
+    for every future connection this machine makes, clustrix's and the
+    user's ``ssh`` alike. That is precisely the ``auto_add`` opt-out of
+    ``ClusterConfig.ssh_host_key_policy``, which defaults to ``reject``.
+
+    It stays exported because a user who calls it has chosen it. What was
+    wrong was ``deploy_public_key`` calling it *unconditionally* "to avoid
+    verification prompts": one deployment against a host named by a
+    working-directory ``clustrix.yml`` silently marked that host verified
+    forever, undoing on a later run the host key checking every paramiko
+    path performs. It is now called only when the configured policy is
+    ``auto_add``.
 
     Args:
         hostname: Target hostname
         port: SSH port (default 22)
 
     Returns:
-        True if successful, False otherwise
+        True if a key was scanned and appended, False otherwise.
     """
     try:
         cmd = ["ssh-keyscan"]
@@ -332,8 +348,17 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
 
             logger.info(f"Added host key for {hostname} to known_hosts")
             return True
+        # Distinguishing these two matters: both used to return False and
+        # log nothing above debug, so "the host offered no key" and "the
+        # scan blew up" were the same answer to the caller (issue #123).
+        logger.warning(
+            "ssh-keyscan produced no host key for %s (exit %s): %s",
+            hostname,
+            result.returncode,
+            result.stderr.strip() or "no output",
+        )
     except Exception as e:
-        logger.debug(f"Failed to add host key for {hostname}: {e}")
+        logger.warning("Could not scan the host key of %s: %s", hostname, e)
 
     return False
 
@@ -385,14 +410,40 @@ def deploy_public_key(
     except IOError as e:
         raise SSHKeyDeploymentError(f"Cannot read public key file: {e}")
 
-    # First, add the host key to known_hosts to avoid verification prompts
-    add_host_key(hostname, port)
+    # Whether OpenSSH and paramiko may offer the identities the user
+    # already has -- ``~/.ssh/id_rsa``, ``~/.ssh/id_ed25519``, the running
+    # ssh-agent. They are secrets that name no host, so the question is
+    # rule 2 of the gate and is asked once, here, for both halves of this
+    # function. Asking it twice is how the subprocess came to disagree with
+    # the paramiko fallback three lines below it.
+    local_identities = config is not None and (
+        hostless_secret_refusal(
+            CredentialTarget.for_config(config, hostname=hostname, username=username),
+            config,
+        )
+        is None
+    )
 
-    # Try ssh-copy-id first (most reliable method) with host key acceptance
+    # Trusting this host's key on first contact is the ``auto_add`` opt-out,
+    # and it is persistent and global -- see ``add_host_key``. Under the
+    # default ``reject`` policy the user is told the exact ``ssh-keyscan``
+    # command to run deliberately (see ``RejectUnknownHostKeyPolicy``), and
+    # clustrix does not run it for them.
+    if host_key_policy_name(config) == "auto_add":
+        add_host_key(hostname, port)
+
+    # Try ssh-copy-id first (most reliable method)
     try:
         cmd = ["ssh-copy-id", "-i", public_key_path]
-        # Add SSH options to automatically accept new host keys
-        cmd.extend(["-o", "StrictHostKeyChecking=accept-new"])
+        # The same host key policy every paramiko connection here obeys.
+        # This used to be a hardcoded ``accept-new``: the one place clustrix
+        # reaches for OpenSSH applied the deliberate opt-out to everybody.
+        cmd.extend(
+            [
+                "-o",
+                f"StrictHostKeyChecking={openssh_strict_host_key_checking(config)}",
+            ]
+        )
         # Point OpenSSH at the same known_hosts this module reads. It does
         # NOT resolve "~" from $HOME -- it reads the passwd database -- so
         # without this the Python half of clustrix loads one file while
@@ -402,6 +453,23 @@ def deploy_public_key(
         # `ssh -G`: with HOME set to a temporary directory it still reported
         # `userknownhostsfile /Users/<me>/.ssh/known_hosts`.
         cmd.extend(["-o", f"UserKnownHostsFile={_user_known_hosts_path()}"])
+        if not local_identities:
+            # ssh-copy-id pins identities only while it is *testing* which
+            # keys are already installed; the invocation that actually logs
+            # in and appends to authorized_keys runs plain ``ssh``, so
+            # OpenSSH offers the default identity files and every key in the
+            # agent -- to whatever host was named. Measured before this:
+            # ``AUTH [('victim', 'publickey')]`` from an agent identity,
+            # with the requested key installed, while the gate was refusing
+            # the same host in the same call. IdentitiesOnly alone is not
+            # enough: it constrains the agent but leaves the *default*
+            # identity files in play (``ssh -G`` reports them either way),
+            # so the identity list is replaced with the key being deployed,
+            # which is the only one this operation is entitled to offer.
+            private_key_path = re.sub(r"\.pub$", "", public_key_path)
+            cmd.extend(["-o", "IdentitiesOnly=yes"])
+            cmd.extend(["-o", f"IdentityFile={private_key_path}"])
+            cmd.extend(["-o", "IdentityAgent=none"])
         if port != 22:
             cmd.extend(["-p", str(port)])
         cmd.append(f"{username}@{hostname}")
@@ -459,18 +527,8 @@ def deploy_public_key(
         else:
             # "Try with existing keys" *is* paramiko's own search of
             # ``~/.ssh`` and the agent -- secrets that name no host, so the
-            # same rule as everywhere else, asked of the same function. With
-            # no config there is nothing that says who chose ``hostname``,
-            # and that is a refusal rather than a default.
-            local_identities = config is not None and (
-                hostless_secret_refusal(
-                    CredentialTarget.for_config(
-                        config, hostname=hostname, username=username
-                    ),
-                    config,
-                )
-                is None
-            )
+            # same rule as everywhere else, and the same answer the
+            # ssh-copy-id invocation above was built from.
             client.connect(
                 hostname=hostname,
                 username=username,

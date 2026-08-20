@@ -41,6 +41,12 @@ logger = logging.getLogger(__name__)
 #: The only values accepted for ``ClusterConfig.ssh_host_key_policy``.
 VALID_HOST_KEY_POLICIES = ("reject", "auto_add")
 
+#: How OpenSSH spells each of those policies in ``StrictHostKeyChecking``.
+#: ``yes`` refuses a host whose key is not already in ``known_hosts``;
+#: ``accept-new`` trusts it on first contact and records it, which is what
+#: :class:`AppendUnknownHostKeyPolicy` does on the paramiko side.
+OPENSSH_STRICT_HOST_KEY_CHECKING = {"reject": "yes", "auto_add": "accept-new"}
+
 
 class HostKeyVerificationError(paramiko.SSHException):
     """Raised when a remote host's SSH key is not in the known_hosts files.
@@ -215,6 +221,48 @@ def _load_known_hosts(client: paramiko.SSHClient) -> None:
         client.load_host_keys(str(user_known_hosts))
 
 
+def host_key_policy_name(config: Optional[object] = None) -> str:
+    """The validated ``ssh_host_key_policy`` that applies to ``config``.
+
+    Split out of :func:`configure_host_key_policy` because paramiko is not
+    the only thing in clustrix that opens an SSH connection:
+    ``ssh_utils.deploy_public_key`` shells out to ``ssh-copy-id``, and that
+    subprocess used to hardcode ``StrictHostKeyChecking=accept-new`` --
+    silently applying the deliberate opt-out to every user, including the
+    default ``reject``. Two readings of the same setting drift, so there is
+    one reading and both callers use it.
+
+    Args:
+        config: A ``ClusterConfig``, a mapping carrying an
+            ``"ssh_host_key_policy"`` key (the notebook widget hands its
+            configuration over as a dict), or ``None``. ``None`` and a
+            missing key both mean the secure default, ``"reject"``.
+
+    Raises:
+        ValueError: if the value is neither ``"reject"`` nor ``"auto_add"``.
+    """
+    if isinstance(config, Mapping):
+        policy_name = config.get("ssh_host_key_policy") or "reject"
+    else:
+        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
+    if policy_name not in VALID_HOST_KEY_POLICIES:
+        raise ValueError(
+            f"Invalid ssh_host_key_policy={policy_name!r}. "
+            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
+        )
+    return policy_name
+
+
+def openssh_strict_host_key_checking(config: Optional[object] = None) -> str:
+    """``StrictHostKeyChecking`` value for an OpenSSH subprocess.
+
+    The one translation of :func:`host_key_policy_name` into OpenSSH's
+    vocabulary, so a ``ssh``/``ssh-copy-id`` invocation cannot end up more
+    permissive than the paramiko connections beside it.
+    """
+    return OPENSSH_STRICT_HOST_KEY_CHECKING[host_key_policy_name(config)]
+
+
 def configure_host_key_policy(
     client: paramiko.SSHClient, config: Optional[object] = None
 ) -> None:
@@ -240,19 +288,7 @@ def configure_host_key_policy(
     """
     _load_known_hosts(client)
 
-    # The notebook widget carries its configuration as a plain dict rather
-    # than a ClusterConfig, so accept either. Reading it here keeps every
-    # call site on the one policy decision instead of each one inventing a
-    # way to hand its own shape over.
-    if isinstance(config, Mapping):
-        policy_name = config.get("ssh_host_key_policy") or "reject"
-    else:
-        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
-    if policy_name not in VALID_HOST_KEY_POLICIES:
-        raise ValueError(
-            f"Invalid ssh_host_key_policy={policy_name!r}. "
-            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
-        )
+    policy_name = host_key_policy_name(config)
 
     if policy_name == "auto_add":
         logger.warning(
