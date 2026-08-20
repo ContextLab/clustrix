@@ -96,6 +96,22 @@ def pids_once_every_worker_has_arrived(n, arrivals=None, expected=1, _parallel_i
     return {"marker": marker, "pids": [(j, pid) for j in indices]}
 
 
+def indices_of_slice(n, _parallel_i=None):
+    """Return this worker's indices as a list, so the combined answer is ordered.
+
+    ``_combine_local_results`` concatenates per-chunk lists, so a run of this
+    over ``range(N)`` must come back as ``list(range(N))`` however it was cut
+    up. A dict-returning helper cannot see that: the combiner does not
+    concatenate those, so the chunk order is only visible through a list.
+    """
+    indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
+    marker = 0
+    for i in range(n):
+        marker = i * i
+    del marker
+    return list(indices)
+
+
 def pid_of_whole_call(n):
     """Take no chunk keyword, so this can only ever run as one unit of work."""
     marker = 0
@@ -283,6 +299,98 @@ def test_the_call_site_hands_the_pool_size_to_the_chunker(cores, machine_with_tw
     assert [chunk["marker"] for chunk in result] == [TOP_MARKER] * len(result)
 
 
+def test_a_configured_default_cores_sizes_the_chunks_too(machine_with_two_cpus):
+    """The other route into the pool: ``configure(default_cores=N)``, no keyword.
+
+    Every other test here drives ``@cluster(cores=N)``, and the two routes meet
+    only at ``job_config["cores"] = cores or config.default_cores``. Replace
+    that fallback with the shipped constant -- it reads like a tidy-up, since
+    4 *is* what ``default_cores`` ships as -- and a user who wrote
+    ``configure(default_cores=16)`` gets a 4-worker pool cut into 8 chunks
+    while the whole suite stays green.
+
+    It is worse than an untested branch. ``_requested_cores`` still reads
+    ``default_cores`` when it decides whether to warn, so under that change the
+    caller would be told about a number that no longer sizes anything: the
+    message and the behaviour would disagree in silence, which is the shape of
+    #152 itself.
+
+    The machine is pinned to two CPUs, so 32 chunks cannot have come from
+    ``os.cpu_count()``; the only place 16 exists is the configured default.
+    """
+    configure(default_cores=16, auto_parallel=True)
+    assert get_config().default_cores == 16
+
+    # No ``cores`` keyword anywhere: the only worker count in play is the
+    # configured one. One result comes back per chunk.
+    result = cluster(pids_of_slice)(N)
+    assert isinstance(result, list), f"expected per-chunk results, got {result!r}"
+
+    assert len(result) >= 2 * 16, (
+        f"configure(default_cores=16) cut {N} iterations into {len(result)} "
+        f"chunk(s) on a machine reporting {os.cpu_count()} CPUs -- the "
+        "configured default did not reach the pool"
+    )
+
+    indices = sorted(j for chunk in result for j, _ in chunk["pids"])
+    assert indices == list(range(N)), "parallelism that loses work is not a win"
+    assert os.getpid() not in worker_pids(result)
+
+
+def test_a_configured_default_cores_is_how_wide_the_pool_gets():
+    """The same route, measured as a pool width rather than a chunk count.
+
+    ``configure(default_cores=8)`` with a bare ``@cluster()`` must put eight
+    workers on the work. Each one holds its chunk until eight distinct pids
+    have checked in, so a narrower pool reports too few and a wider one too
+    many -- not a race either way. A fallback pinned to the shipped 4 answers
+    four here.
+    """
+    configure(default_cores=8, auto_parallel=True)
+
+    with multiprocessing.Manager() as manager:
+        arrivals = manager.dict()
+        result = cluster(pids_once_every_worker_has_arrived)(
+            N, arrivals=arrivals, expected=8
+        )
+        pids = worker_pids(result)
+
+    assert os.getpid() not in pids, f"the work ran in the caller's process: {pids}"
+    assert len(pids) == 8, (
+        f"configure(default_cores=8) sized a pool {len(pids)} worker(s) wide "
+        f"({pids}); every one was held until the others arrived, so this is "
+        "the pool's width and not a timing artefact"
+    )
+
+    indices = sorted(j for chunk in result for j, _ in chunk["pids"])
+    assert indices == list(range(N)), "parallelism that loses work is not a win"
+
+
+def test_a_parallel_run_returns_its_results_in_order():
+    """Chunk order is user-visible output order, and nothing else pins it.
+
+    ``_combine_local_results`` concatenates the per-chunk lists in the order
+    the chunks were built, so reversing that order reverses the caller's
+    answer: ``[56, 57, ..., 48, 49]`` instead of ``[0, 1, 2, ...]``. Every
+    other assertion in this file sorts the indices before comparing -- which is
+    right for "no work was lost" and blind to "the work came back shuffled".
+
+    A parallel run that answers in a different order from a sequential one is a
+    correctness defect, so the decorated and undecorated results are compared
+    as sequences, at two pool sizes so the comparison is not accidentally
+    reading a single chunk.
+    """
+    sequential = indices_of_slice(N)
+    assert sequential == list(range(N))
+
+    for cores in (2, 4):
+        parallel = cluster(parallel=True, cores=cores)(indices_of_slice)(N)
+        assert parallel == sequential, (
+            f"cores={cores} returned the work in a different order from the "
+            "undecorated call"
+        )
+
+
 def test_the_chunk_count_moves_with_cores_on_a_fixed_machine(machine_with_two_cpus):
     """Two pool sizes, one machine: the counts must differ, through the decorator.
 
@@ -314,11 +422,23 @@ def test_a_worker_is_offered_more_than_one_chunk():
     granularity is the part that is a fact, so that is what is checked, at
     several pool sizes and with a range long enough for the division to have
     room.
+
+    ``workers=1`` is in the list deliberately, and it was a judgement call.
+    "One worker, one chunk, no rebalancing possible" is a defensible reading,
+    and a special case returning a single chunk there survived the rest of this
+    file. It is rejected: the rule is one rule, and at one worker it still has
+    an observable consequence, because ``_combine_local_results`` returns
+    ``results[0]`` unchanged when there is exactly one of them. A single chunk
+    at ``cores=1`` would therefore make the *shape* of the returned value
+    depend on the worker count -- a bare chunk result at 1, a combined list at
+    2 -- for a saving of one dispatch round trip on a pool that is not
+    contending for anything. The uniform rule costs nothing and keeps
+    ``cores=1`` and ``cores=2`` answering the same kind of thing.
     """
     loops = find_parallelizable_loops(pids_of_slice, (N,), {})
     assert loops, "pids_of_slice has a loop clustrix considers parallelizable"
 
-    for workers in (2, 4, 8, 16):
+    for workers in (1, 2, 4, 8, 16):
         chunks = _create_local_work_chunks(pids_of_slice, (N,), {}, loops[0], workers)
         assert len(chunks) >= 2 * workers, (
             f"a {workers}-worker pool was offered {len(chunks)} chunk(s) of "
@@ -515,6 +635,73 @@ def test_a_changed_request_is_reported_again(caplog):
     assert len(said) == 2, f"expected one warning per distinct request: {said}"
     assert sum("default_cores=8" in m for m in said) == 1, said
     assert sum("default_cores=16" in m for m in said) == 1, said
+
+
+def test_a_different_decline_reason_is_reported_again(caplog):
+    """One request, two reasons to drop it: the caller hears about both.
+
+    ``_warn_cores_unused`` keys its record on ``(where, because)``, and
+    ``test_a_changed_request_is_reported_again`` only ever varies ``where``.
+    Drop ``because`` from the key -- it looks redundant, the message already
+    names the request -- and the same decorated function that has been told
+    "the local backend runs this once" goes quiet when it later declines for a
+    completely different reason. The two facts are not interchangeable: the
+    first says *this route* cannot use eight workers, the second says the
+    parallel route looked and found no loop to split.
+
+    Both halves are asserted, because a throttle that has stopped throttling
+    would pass a bare count of two.
+    """
+    once = cluster(cores=8)(has_no_loop_to_split)
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        configure(auto_parallel=False)
+        assert once(N) == N * N  # plain local path: run here, once
+        assert once(N) == N * N  # ... and throttled
+
+        configure(auto_parallel=True)
+        assert once(N) == N * N  # the parallel path: no loop to split
+        assert once(N) == N * N  # ... and throttled
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 2, f"expected one warning per distinct reason: {said}"
+    assert sum("runs the decorated function once" in m for m in said) == 1, said
+    assert sum("no parallelizable loop was found" in m for m in said) == 1, said
+
+
+def test_a_warning_nobody_could_hear_does_not_spend_the_budget(caplog):
+    """The one message is spent on delivery, not on the attempt.
+
+    The throttle is right -- a warning repeated on every iteration is a warning
+    that gets filtered out -- but it used to record the key before asking
+    whether anything was listening. A library that raises clustrix's log level,
+    or a script that calls the decorated function before
+    ``logging.basicConfig()``, therefore spent the single message on a record
+    that went nowhere, and every later call was silent: zero warnings
+    delivered. That is #152's own silence, rebuilt inside the fix for it.
+    """
+    decorator_logger = logging.getLogger("clustrix.decorator")
+    saved = decorator_logger.level
+    said_once = cluster(cores=8)(pid_of_whole_call)
+
+    try:
+        decorator_logger.setLevel(logging.CRITICAL)
+        for _ in range(50):
+            assert said_once(N)["pid"] == os.getpid()
+        heard = [m for m in warnings_from(caplog) if "cores=8" in m]
+        assert not heard, f"the logger was off and something got through: {heard}"
+    finally:
+        decorator_logger.setLevel(saved)
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        for _ in range(3):
+            assert said_once(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 1, (
+        "the caller turned warnings on and was told exactly once; got "
+        f"{len(said)}: {said}"
+    )
 
 
 @pytest.mark.parametrize("cores", [True, False])

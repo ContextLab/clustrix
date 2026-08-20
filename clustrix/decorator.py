@@ -543,13 +543,22 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     ``configure(default_cores=...)`` changed between calls, say -- is a
     different pair and speaks again, and every separately decorated function
     starts with its own empty record.
+
+    The budget is spent at **delivery**, not at the attempt. Recording the key
+    unconditionally meant that a first call made before the caller had turned
+    warnings on burned the single message on a record nothing was listening
+    for, and the fifty calls after ``logging.basicConfig()`` were then silent:
+    zero warnings delivered, which is #152's silence rebuilt by the fix for it.
+    ``isEnabledFor`` is the same question the ``logger.warning`` below asks, so
+    the two cannot disagree.
     """
     if request is None or request.value <= 1:
         return
     key = (request.where, because)
     if key in request.reported:
         return
-    request.reported.add(key)
+    if logger.isEnabledFor(logging.WARNING):
+        request.reported.add(key)
     logger.warning(
         "%s has no effect here: %s. Locally, cores bounds the worker pool only "
         "when parallel=True finds a parallelizable loop and the function "

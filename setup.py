@@ -71,6 +71,10 @@ setup(
             # Several deadlock regression tests use @pytest.mark.timeout and
             # hang forever without it.
             "pytest-timeout>=2.0",
+            # test_edge_cases_real.py::test_memory_string_formats imports
+            # psutil in the function it submits, and is not marked real_world;
+            # nothing else here pulls psutil in. See pyproject.toml.
+            "psutil>=5.8",
         ],
         "test": [
             "pytest>=6.0",
