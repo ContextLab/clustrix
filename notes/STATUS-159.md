@@ -1087,3 +1087,26 @@ second instance of it in this campaign.
 here) and can be closed with evidence after the merge — which also means it
 must be removed from `TRACKED_DEFECTS` rather than left pointing at a closed
 issue.
+
+### The predicted merge failure is VERIFIED, not assumed
+
+Both halves checked directly:
+
+1. The merged tree `376701f` (base + silent-failures + widget-apply +
+   named-env) carries the entry at
+   `tests/unit/test_no_silent_swallows.py:1239`:
+   `("notebook_magic_config.py", "load_config_from_file")`.
+2. `test_the_allowlists_have_no_stale_entries` (`:1766`) computes
+   `(set(JUSTIFIED_SWALLOWS) | set(TRACKED_DEFECTS)) - live` and asserts it is
+   empty, where `live` is the set of sites the lint currently detects.
+3. On `work/fixes` at `4e76040` that handler **no longer discards** — it logs
+   the absolute path and the reason at `WARNING` ("This is not the same as the
+   file holding no configurations") and only for the `discovered=True` branch;
+   the named branch returns `_read_config_document(...)` directly and raises.
+
+So the lint will not report it, `live` will not contain the key,
+`TRACKED_DEFECTS - live` will be non-empty, and the test fails.
+
+**Fix at merge time:** delete that one entry from `TRACKED_DEFECTS` in the
+merge commit, and re-count the swallow audit. Nothing else is required — this
+is a bookkeeping consequence of the fix, not a defect in either branch.
