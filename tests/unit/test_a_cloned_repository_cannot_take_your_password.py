@@ -2365,3 +2365,90 @@ def test_bypassing_the_gate_raises():
 def test_the_module_level_convenience_is_gone():
     """The other way in, and the one a developer would have found by grep."""
     assert not hasattr(credential_manager_module, "ensure_credential")
+
+
+# ---------------------------------------------------------------------------
+# Route 7: the write side.
+#
+# ``AuthenticationManager._offer_credential_storage`` offered to write
+# ``SSH_HOST=<whatever cluster_host says>`` plus the password the user had
+# just typed into ``~/.clustrix/.env``. A credential file naming a host
+# exactly is rule 1, released unconditionally in every future process --
+# so this manufactured a permanently trusted binding for a host the user
+# never chose, in the one file every remedy text tells them to trust.
+# ---------------------------------------------------------------------------
+
+
+def _env_file_keys(path):
+    """The setting names in a ``.env``, ignoring comments and values.
+
+    Parsed rather than substring-matched, and only the *keys* are returned:
+    a test that asserted on the file's text would put a credential-shaped
+    literal in the assertion.
+    """
+    if not path.exists():
+        return set()
+    keys = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            keys.add(line.split("=", 1)[0].strip())
+    return keys
+
+
+def test_an_untrusted_host_is_never_written_into_the_credential_file(
+    env_file, tmp_path, monkeypatch
+):
+    """RED before the fix: ``SSH_HOST`` appears, naming the repository's host."""
+    from clustrix.auth_manager import AuthenticationManager
+
+    path = env_file()
+
+    project = tmp_path / "cloned-repository"
+    project.mkdir()
+    (project / "clustrix.yml").write_text(
+        "cluster_type: ssh\n"
+        "cluster_host: named.by.the.repository\n"
+        "username: victim\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    with pytest.warns(UserWarning):
+        config_module._load_default_config()
+
+    # If the storage offer is ever reached, this would be the answer -- so a
+    # test that leaves it in place and still finds nothing written is
+    # measuring the refusal rather than a declined prompt.
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "y")
+
+    AuthenticationManager(get_config())._offer_credential_storage(SENTINEL_PASSWORD)
+
+    assert "SSH_HOST" not in _env_file_keys(path), (
+        "the interactive prompt wrote a permanent authorisation for a host "
+        "named by the working directory"
+    )
+    assert "SSH_PASSWORD" not in _env_file_keys(path)
+
+
+def test_the_credential_file_is_still_written_for_a_host_the_user_chose(
+    env_file, monkeypatch
+):
+    """The positive control: the offer still works where it should."""
+    from clustrix.auth_manager import AuthenticationManager
+
+    path = env_file()
+
+    config_dir = get_config_dir()
+    (config_dir / "config.yml").write_text(
+        "cluster_type: ssh\n" "cluster_host: chosen.example.edu\n" "username: victim\n",
+        encoding="utf-8",
+    )
+    config_module._load_default_config()
+    monkeypatch.setattr("builtins.input", lambda *a, **k: "y")
+
+    AuthenticationManager(get_config())._offer_credential_storage(SENTINEL_PASSWORD)
+
+    keys = _env_file_keys(path)
+    assert "SSH_HOST" in keys
+    assert "SSH_USERNAME" in keys
+    assert "SSH_PASSWORD" in keys

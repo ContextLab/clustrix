@@ -2,7 +2,7 @@
 
 from typing import Optional, List, Dict, Any
 
-from .config import ClusterConfig
+from .config import TRUSTED_CONFIG_SOURCES, ClusterConfig
 from .credential_manager import get_credential_manager
 from .credential_release import CredentialTarget, release_credential
 from .auth_methods import (
@@ -145,11 +145,48 @@ class AuthenticationManager:
         return methods
 
     def _offer_credential_storage(self, password: str):
-        """Offer to store credentials in .env file."""
+        """Offer to store credentials in .env file -- for a host you chose.
+
+        Route 7 of issue #167, and the only one on the *write* side. This
+        offered to write ``SSH_HOST=<whatever cluster_host says>`` plus the
+        password the user had just typed into ``~/.clustrix/.env``. The user
+        is shown the hostname first, so it was never a silent leak -- but a
+        ``./clustrix.yml`` names ``cluster_host``, and a credential file
+        naming a host *exactly* is rule 1 of the release rules: it is
+        released unconditionally, in every future process, forever. The
+        taint model is per-process and append-only; this route wrote around
+        it, onto disk, into the one file every remedy text tells the user to
+        trust.
+
+        So a write is a release decision too, and it is refused for a host
+        nobody chose. The remedy is the one that actually works: move the
+        host somewhere you chose, and run this again.
+        """
         hostname = self.config.cluster_host
         username = self.config.username
 
         if not hostname or not username:
+            return
+
+        try:
+            target = CredentialTarget.for_config(self.config)
+        except ValueError as exc:
+            print(f"   ⚠️  Not storing the credential: {exc}")
+            return
+
+        if target.provenance not in TRUSTED_CONFIG_SOURCES:
+            print(
+                f"   ⚠️  Not storing these credentials in ~/.clustrix/.env: "
+                f"cluster_host={hostname!r} came from {target.provenance} -- "
+                f"a file chosen by where this process runs or by an "
+                f"inherited environment variable, not by you. Writing "
+                f"SSH_HOST={hostname!r} there would authorise that host "
+                f"permanently, in every future process, which is a stronger "
+                f"statement than the one you just made by typing a password "
+                f"once. Move the host into the clustrix configuration "
+                f"directory (config.yml), remove the file it came from, "
+                f"start a new process, and this offer will be made again."
+            )
             return
 
         # Offer to store in .env file
