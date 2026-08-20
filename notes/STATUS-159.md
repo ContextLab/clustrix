@@ -550,3 +550,54 @@ through the same conflict repeatedly, and it already fails on the first.
 
 Two conflicts are unavoidable and everything else is bookkeeping: fixes↔gate,
 and #123↔#167 in `config.py`.
+
+## Route 13 closed at four of six sites (`f31a98f` on `work/credential-gate`)
+
+2028 passed / 0 failed; black 26.3.1, flake8, mypy clean.
+
+The gate now decides paramiko's own discovery rather than each call site:
+`CredentialRelease.local_identities` (= `hostless_secret_refusal(...) is None`),
+read by `filesystem.py` and `executor_connections.py`, with
+`validation.validate_ssh_key_auth` asking the same rule directly.
+
+**Wire proof**, fresh process, redirected `HOME`+`CLUSTRIX_CONFIG_DIR`, real
+`LocalSSHServer`, victim key at `~/.ssh/id_rsa`, `./clustrix.yml` naming only
+`cluster_host`: **before** `[('victim','publickey')]` on all three paths,
+**after** `[]` on all three. Control arm: a trusted host
+(`~/.clustrix/config.yml`) still gets all three — not a blanket disable.
+Route 10's test was repaired too: `_victim_keypair` now writes to
+`~/.ssh/id_rsa` rather than `tmp_path`, which is why it had missed this.
+
+**My third site was confirmed and a fourth was found.** `validation.py:98` was
+exactly as I described. `ssh_utils.setup_ssh_keys` additionally offers *every*
+key in `~/.ssh` to `config.cluster_host`, one `key_filename=` at a time via
+`detect_existing_ssh_key` — reachable from `clustrix ssh-setup`, both widgets,
+and `setup_auth_with_fallback`. So route 13 had **five** sites, not the two the
+red-team reported.
+
+**A sixth is still open** and is why route 13 is not yet closed:
+`notebook_magic_widget._test_ssh_connectivity` (`:1058`, called at `:1162`)
+takes a **dict of widget fields** rather than a `ClusterConfig`, and calls
+`ssh_client.connect(**connect_params)` with the defaults left in place. Fix
+round dispatched: build a real `ClusterConfig` via `split_config_kwargs` — the
+route `_on_apply_config` already uses — and ask the same rule. Explicitly NOT a
+second copy of the rule.
+
+**13b closed properly.** One helper, `huggingface_client_kwargs()`, across all
+five sites plus a real_world debug script. Wire proof with `HF_ENDPOINT` at a
+loopback listener: before, 2 requests carrying the sentinel token to
+`http://127.0.0.1:…`; after, 0 token-bearing requests and endpoint
+`https://huggingface.co`. AST rule 7 blocks a sixth unpinned client.
+
+**`dataclasses.replace` deliberately NOT "fixed", and said so.** Every loader
+records the hostname itself (`record_host=True`), so an attacker's config
+survives `replace`; only the `record_host=False` *guess* is reversed. Making
+the guess survive would mean a permanent hostname claim derived from a guess —
+the thing that over-tainted 96,739 of 96,740. Documented, with a test pinning
+both halves. This is the right call.
+
+Mutants M6, M8, M10 now die. Enforcement gained rule 5 (bulk `os.environ` via
+`dict()`, `{**}`, `.copy()`, alias, argument, iteration) and rule 6 (the
+credential file: `".env"` literal plus `env_file`/`env_file_path`), so the
+planted L1/L2 leakers are now caught. The documented limits were rewritten to
+list what actually remains rather than staying silent about L1 and L2.
