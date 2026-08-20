@@ -312,7 +312,31 @@ Paths and the remote environment
        conda, then pip). Applies to the single-venv fallback path.
    * - ``conda_env_name``
      - ``None``
-     - Passed through as the job's ``environment``.
+     - Names a conda environment that **already exists on the cluster**. The
+       job's function is then executed there, with ``conda run -n <name>``:
+       the name replaces the *execution* environment clustrix would otherwise
+       replicate from your local one, and takes precedence over that
+       replication. Clustrix's own serialization environment (VENV1 in
+       :ref:`two-venv`) is never replaced. ``@cluster(environment=...)`` is
+       the per-call spelling and wins over this field.
+
+       Because a batch job runs under a non-login shell, conda is not
+       initialised there, so the generated script sources ``conda.sh`` first.
+       It uses the location measured over SSH when environment replication
+       ran; otherwise it searches, in order, ``$CONDA_PREFIX``, ``conda info
+       --base``, ``~/miniconda3``, ``~/anaconda3``, ``~/miniforge3``,
+       ``/opt/conda``, ``/usr/local/miniconda3`` and
+       ``/usr/local/anaconda3``. A site that keeps conda somewhere else, or
+       behind a module, is not discoverable by that search: put its
+       initialisation in ``module_loads`` or ``pre_execution_commands``,
+       which run earlier in the same script. If none of it works the job
+       stops with a message naming the environment and the places searched,
+       rather than with ``conda: command not found``.
+
+       This field was accepted and never used before clustrix honoured it
+       (`#164 <https://github.com/ContextLab/clustrix/issues/164>`_), so a
+       value left in an old ``clustrix.yml`` changes behaviour now. The first
+       job that uses it logs a warning saying so.
    * - ``use_two_venv``
      - ``True``
      - Build the two-environment layout described in :ref:`two-venv`. Turning

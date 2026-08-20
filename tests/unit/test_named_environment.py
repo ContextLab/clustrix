@@ -339,3 +339,355 @@ def test_job_execution_lines_default_is_the_replication_path():
     assert job_execution_lines("/remote/job", config) == job_execution_lines(
         "/remote/job", config, None
     )
+
+
+class TestCondaIsUsableBeforeItIsUsed:
+    """`conda run` in a batch shell needs conda initialised first.
+
+    A SLURM (or `ssh host bash script.sh`) job runs under a non-login,
+    non-interactive shell, which sources no profile script, so `conda` is
+    either absent from PATH or is a wrapper that refuses to work until
+    conda.sh has been sourced. Emitting `conda run -n prod python` with
+    nothing before it is "conda: command not found", and it was the flagship
+    path of #164 -- a named environment with `use_two_venv=False`.
+    """
+
+    @staticmethod
+    def _before_conda_run(text):
+        """Everything the script does before it first invokes `conda run`."""
+        lines = text.split("\n")
+        for i, line in enumerate(lines):
+            if line.startswith("conda run -n "):
+                return "\n".join(lines[:i])
+        raise AssertionError(f"no `conda run` line in:\n{text}")
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_a_named_environment_initialises_conda_first(self, cluster_type):
+        preamble = self._before_conda_run(script(cluster_type, environment="prod"))
+        assert "etc/profile.d/conda.sh" in preamble, preamble
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_the_search_covers_the_usual_installation_locations(self, cluster_type):
+        preamble = self._before_conda_run(script(cluster_type, environment="prod"))
+        for location in (
+            "$CONDA_PREFIX",
+            "conda info --base",
+            "$HOME/miniconda3",
+            "$HOME/anaconda3",
+            "$HOME/miniforge3",
+            "/opt/conda",
+        ):
+            assert location in preamble, (location, preamble)
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_a_named_environment_stops_the_job_when_conda_cannot_be_found(
+        self, cluster_type
+    ):
+        """Loud and diagnosable beats `conda: command not found` three lines on.
+
+        clustrix cannot know where a given cluster keeps conda, so the honest
+        outcome when the search fails is a stop with a reason, not a job that
+        dies in the middle of someone else's error message.
+        """
+        preamble = self._before_conda_run(script(cluster_type, environment="prod"))
+        assert "exit 1" in preamble
+        assert "no conda installation was found on this node" in preamble
+        assert "module_loads" in preamble and "pre_execution_commands" in preamble
+
+    def test_a_plain_two_venv_named_environment_also_initialises_conda(self):
+        """VENV1 is a virtualenv here, so nothing measured a conda location.
+
+        This is the combination that is easiest to miss: replication ran, so
+        `venv_info` exists, but it found no conda, so `conda_setup_prefix` is
+        absent -- and the named VENV2 still needs `conda run` to work.
+        """
+        text = script(
+            "slurm", environment="production", venv_info=dict(PLAIN_VENV_INFO)
+        )
+        assert "conda run -n production" in text
+        assert "etc/profile.d/conda.sh" in self._before_conda_run(text)
+
+    def test_a_conda_location_measured_on_the_cluster_is_preferred(self):
+        """A probed answer beats a blind search; the search is the fallback."""
+        text = script(
+            "slurm", environment="production", venv_info=dict(CONDA_VENV_INFO)
+        )
+        preamble = self._before_conda_run(text)
+        assert "source /opt/conda/etc/profile.d/conda.sh" in preamble
+        # The blind in-script search is not emitted when there is nothing to
+        # search for.
+        assert "_clustrix_conda_sh" not in text
+
+    def test_replication_without_a_named_environment_is_untouched(self):
+        text = script("slurm", venv_info=dict(PLAIN_VENV_INFO))
+        assert "_clustrix_conda_sh" not in text
+        assert "etc/profile.d/conda.sh" not in text
+
+
+class TestTheEmittedShellActuallyWorks:
+    """The discovery block is bash, so it is checked by running bash."""
+
+    SYSTEM_LOCATIONS = ("/opt/conda", "/usr/local/miniconda3", "/usr/local/anaconda3")
+
+    @staticmethod
+    def _run(tmp_path, home, extra=""):
+        import subprocess
+
+        from clustrix.utils import _conda_discovery_lines
+
+        script_path = tmp_path / "probe.sh"
+        script_path.write_text(
+            "\n".join(_conda_discovery_lines("prod"))
+            + '\necho "SOURCED=${CLUSTRIX_FAKE_CONDA:-no}"\n'
+            + extra
+        )
+        return subprocess.run(
+            ["bash", str(script_path)],
+            capture_output=True,
+            text=True,
+            # A pristine environment: no inherited CONDA_PREFIX, no conda on
+            # PATH, and HOME pointed at the fixture. Without this the test
+            # would pass or fail according to the developer's own conda.
+            env={"HOME": str(home), "PATH": "/usr/bin:/bin"},
+        )
+
+    @pytest.mark.parametrize("location", ["miniconda3", "anaconda3", "miniforge3"])
+    def test_a_conda_in_a_usual_home_location_is_found_and_sourced(
+        self, tmp_path, location
+    ):
+        home = tmp_path / "home"
+        profile = home / location / "etc" / "profile.d"
+        profile.mkdir(parents=True)
+        (profile / "conda.sh").write_text("CLUSTRIX_FAKE_CONDA=yes\n")
+        result = self._run(tmp_path, home)
+        assert result.returncode == 0, result.stderr
+        assert "SOURCED=yes" in result.stdout
+
+    def test_nothing_found_stops_the_job_with_a_diagnosable_message(self, tmp_path):
+        import os
+
+        if any(
+            os.path.isfile(f"{p}/etc/profile.d/conda.sh") for p in self.SYSTEM_LOCATIONS
+        ):
+            pytest.skip("this machine has a system-wide conda; nothing to not find")
+        home = tmp_path / "empty_home"
+        home.mkdir()
+        result = self._run(tmp_path, home)
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert "no conda installation was found on this node" in result.stderr
+        assert "prod" in result.stderr
+        # The list of places searched is printed literally, not expanded away
+        # to nothing by the shell that prints it.
+        assert "$CONDA_PREFIX" in result.stderr
+        # The script stopped: nothing after the block ran.
+        assert "SOURCED" not in result.stdout
+
+    def test_a_conda_already_on_path_is_left_alone(self, tmp_path):
+        home = tmp_path / "home_with_path_conda"
+        bindir = tmp_path / "bin"
+        home.mkdir()
+        bindir.mkdir()
+        conda = bindir / "conda"
+        conda.write_text("#!/bin/bash\nexit 0\n")
+        conda.chmod(0o755)
+        import subprocess
+
+        from clustrix.utils import _conda_discovery_lines
+
+        script_path = tmp_path / "probe.sh"
+        script_path.write_text(
+            "\n".join(_conda_discovery_lines("prod")) + "\necho OK\n"
+        )
+        result = subprocess.run(
+            ["bash", str(script_path)],
+            capture_output=True,
+            text=True,
+            env={"HOME": str(home), "PATH": f"{bindir}:/usr/bin:/bin"},
+        )
+        assert result.returncode == 0, result.stderr
+        assert "OK" in result.stdout
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_the_whole_generated_script_is_valid_bash(self, tmp_path, cluster_type):
+        import subprocess
+
+        script_path = tmp_path / "job.sh"
+        script_path.write_text(script(cluster_type, environment="prod"))
+        result = subprocess.run(
+            ["bash", "-n", str(script_path)], capture_output=True, text=True
+        )
+        assert result.returncode == 0, result.stderr
+
+
+class TestThePythonExecutableIsNotDiscarded:
+    """`python_executable` is honoured on the replication path; honour it here.
+
+    Accepting a setting and discarding it is the defect #164 itself was, so
+    the fix must not reintroduce it one line further along.
+    """
+
+    @pytest.mark.parametrize("cluster_type", SCHEDULERS)
+    def test_a_named_environment_runs_the_configured_interpreter(self, cluster_type):
+        text = script(cluster_type, environment="prod", python_executable="python3.11")
+        assert "conda run -n prod python3.11 -c" in text
+
+    def test_a_named_two_venv_execution_environment_honours_it_too(self):
+        text = script(
+            "slurm",
+            environment="prod",
+            python_executable="python3.11",
+            venv_info=dict(CONDA_VENV_INFO),
+        )
+        assert "conda run -n prod python3.11 -c" in text
+
+    def test_the_serialization_environment_keeps_clustrix_own_interpreter(self):
+        """VENV1 must stay on the version dill was pinned to, whatever the user set."""
+        text = script(
+            "slurm",
+            environment="prod",
+            python_executable="python3.11",
+            venv_info=dict(CONDA_VENV_INFO),
+        )
+        assert "conda run -n clustrix_venv1_abc123 python -c" in text
+        assert "conda run -n clustrix_venv1_abc123 python3.11" not in text
+
+    def test_the_replicated_execution_environment_keeps_it_too(self):
+        """No named environment: VENV2 is clustrix's own, pinned build."""
+        text = script(
+            "slurm", python_executable="python3.11", venv_info=dict(CONDA_VENV_INFO)
+        )
+        assert "conda run -n clustrix_venv2_abc123 python -c" in text
+        assert "python3.11" not in text
+
+
+class TestAnEnvironmentNameIsNotAnOptionFlag:
+    """`conda run -n <name>` is an argument position, so `-` is not a name.
+
+    `validate_shell_fragment`'s allowlist contains `-` because scheduler
+    directives need it, which let `environment="--no-capture-output"` through:
+    `conda run -n --no-capture-output python` parses the value as an option,
+    and the job then runs somewhere other than where the user asked, quietly.
+    """
+
+    @pytest.mark.parametrize(
+        "flag", ["--no-capture-output", "-n", "-p", "--name", "-name", "--live-stream"]
+    )
+    def test_a_name_that_is_an_option_is_refused(self, flag):
+        with pytest.raises(ValueError) as excinfo:
+            script("slurm", environment=flag)
+        assert "conda_env_name" in str(excinfo.value)
+        assert "-" in str(excinfo.value)
+
+    @pytest.mark.parametrize("flag", ["--no-capture-output", "-n", "-p"])
+    def test_the_two_venv_path_refuses_it_too(self, flag):
+        with pytest.raises(ValueError):
+            script("slurm", environment=flag, venv_info=dict(CONDA_VENV_INFO))
+
+    def test_a_name_containing_a_dash_is_still_fine(self):
+        assert "conda run -n py3-11-torch" in script(
+            "slurm", environment="py3-11-torch"
+        )
+
+    def test_an_absurdly_long_name_is_refused(self):
+        with pytest.raises(ValueError) as excinfo:
+            script("slurm", environment="e" * 5000)
+        assert "conda_env_name" in str(excinfo.value)
+        assert "255" in str(excinfo.value)
+
+    def test_the_longest_plausible_name_is_accepted(self):
+        name = "e" * 255
+        assert f"conda run -n {name} " in script("slurm", environment=name)
+
+
+class TestTheSilentBehaviourChangeIsAnnounced:
+    """`conda_env_name` was inert for its whole life; now it reroutes jobs.
+
+    An old ``~/.clustrix/clustrix.yml`` can still carry a value nobody has
+    thought about, and honouring it without a word is the same silence #164
+    was filed about, one level up.
+    """
+
+    @staticmethod
+    def _notices(caplog):
+        return [
+            r.getMessage()
+            for r in caplog.records
+            if "conda_env_name" in r.getMessage() and "now honoured" in r.getMessage()
+        ]
+
+    @pytest.fixture(autouse=True)
+    def _forget_previous_announcements(self):
+        from clustrix.utils import _CONDA_ENV_NAME_MIGRATION_ANNOUNCED
+
+        _CONDA_ENV_NAME_MIGRATION_ANNOUNCED.clear()
+        yield
+        _CONDA_ENV_NAME_MIGRATION_ANNOUNCED.clear()
+
+    def test_the_config_field_announces_itself(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+            script("slurm", conda_env_name="legacy")
+        notices = self._notices(caplog)
+        assert notices, [r.getMessage() for r in caplog.records]
+        assert "'legacy'" in notices[0]
+        assert "previously accepted and never used" in notices[0]
+
+    def test_it_is_announced_once_per_process_not_once_per_job(self, caplog):
+        """A notice repeated on every submission is noise, and noise goes unread."""
+        with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+            for _ in range(3):
+                script("slurm", conda_env_name="legacy")
+        assert len(self._notices(caplog)) == 1, self._notices(caplog)
+
+    def test_a_per_call_environment_is_not_a_migration(self, caplog):
+        """`@cluster(environment=...)` is a decision made today, not a leftover."""
+        with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+            script("slurm", environment="chosen_now")
+        assert not self._notices(caplog)
+
+    def test_naming_nothing_announces_nothing(self, caplog):
+        with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+            script("slurm", venv_info=dict(CONDA_VENV_INFO))
+        assert not self._notices(caplog)
+
+    def test_the_decorator_falling_back_to_the_field_still_announces(self, caplog):
+        """decorator.py writes ``environment or config.conda_env_name`` into
+        job_config, so the config field arrives through the decorator's slot
+        as well. It is the same leftover value either way."""
+        with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
+            script("slurm", environment="legacy", conda_env_name="legacy")
+        assert self._notices(caplog)
+
+
+class TestSetupEnvironmentValidatesTheNameToo:
+    """The second interpolation site for the same user input (utils.py:1168).
+
+    #164 blessed ``conda_env_name`` as user input on the job-script path and
+    left this one interpolating it bare. It is exported from ``__init__``.
+    """
+
+    def test_a_hostile_name_is_refused(self):
+        from clustrix.utils import setup_environment
+
+        config = make_config(conda_env_name="ev'il; touch /tmp/pwn")
+        with pytest.raises(ValueError) as excinfo:
+            setup_environment("/work", {}, config)
+        assert "conda_env_name" in str(excinfo.value)
+
+    def test_an_option_flag_is_refused(self):
+        from clustrix.utils import setup_environment
+
+        config = make_config(conda_env_name="--no-capture-output")
+        with pytest.raises(ValueError):
+            setup_environment("/work", {}, config)
+
+    def test_an_ordinary_name_is_quoted(self):
+        from clustrix.utils import setup_environment
+
+        config = make_config(conda_env_name="prod")
+        assert setup_environment("/work", {}, config) == "conda run -n prod python"
+
+    def test_a_blank_name_is_not_an_environment_called_nothing(self):
+        from clustrix.utils import setup_environment
+
+        config = make_config(conda_env_name="   ")
+        assert "conda run -n" not in setup_environment("/work", {}, config)

@@ -91,6 +91,44 @@ _SHELL_SAFE_FRAGMENT = re.compile(r"^[A-Za-z0-9._:/=+,@%-]+$")
 #: name itself can only be validated.
 _ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
+#: Longest environment name clustrix will put in a job script. A conda
+#: environment is a directory, so the name is bounded by the filesystem's
+#: 255-byte component limit long before anything else bounds it; a
+#: five-thousand-character "name" is a typo or an attack, never an
+#: environment, and refusing it early beats pasting it into a command line.
+_MAX_ENV_NAME_LENGTH = 255
+
+#: Where clustrix looks for a conda installation, in the order it looks.
+#:
+#: Used in exactly two places, and deliberately defined once. The SSH probe in
+#: ``setup_two_venv_environment`` runs this search when it *prepares* a job,
+#: and ``conda_activation_lines`` writes the same search into the job script
+#: for the case where no probe ever ran -- a named environment with no
+#: environment replication. Two copies of this list is how one path gets
+#: fixed while the other keeps failing with "conda: command not found".
+#:
+#: The order is: whatever conda is already active in this shell; whatever
+#: conda says its own base is; then the four per-user install locations
+#: miniconda/anaconda/miniforge use by default; then the three system-wide
+#: ones. Each entry is a shell word, safe inside single quotes.
+_CONDA_SEARCH_LOCATIONS = (
+    '"$CONDA_PREFIX"',
+    '"$(conda info --base 2>/dev/null)"',
+    '"$HOME/miniconda3"',
+    '"$HOME/anaconda3"',
+    '"$HOME/miniforge3"',
+    "/opt/conda",
+    "/usr/local/miniconda3",
+    "/usr/local/anaconda3",
+)
+
+#: The same list as prose, for the message a job prints when none of them
+#: exists. Written with single quotes around it in the script, so the ``$``
+#: below is never expanded.
+_CONDA_SEARCH_LOCATIONS_HUMAN = ", ".join(
+    location.strip('"') for location in _CONDA_SEARCH_LOCATIONS
+)
+
 
 def validate_shell_fragment(config_key: str, value: Any) -> str:
     """Refuse a config value that cannot be safely pasted in unquoted.
@@ -119,6 +157,50 @@ def validate_shell_fragment(config_key: str, value: Any) -> str:
             "unquoted (a scheduler directive or a module-load line), so a "
             "shell metacharacter there would run as a command. Allowed "
             "characters are letters, digits and . _ : / = + , @ % -"
+        )
+    return text
+
+
+def validate_environment_name(config_key: str, value: Any) -> str:
+    """Refuse a cluster environment name that is not a name.
+
+    ``validate_shell_fragment`` is necessary here and not sufficient. The
+    value lands in ``conda run -n <name>``, which is an *argument* position,
+    and the shell-safe allowlist contains ``-`` because scheduler directives
+    need it. So ``environment="--no-capture-output"`` passes that check and
+    then parses as an option to ``conda run`` rather than as an environment:
+    the job runs, quietly, somewhere other than where the user asked. Same
+    for ``-n`` and ``-p``. An environment name is never an option flag, so a
+    leading ``-`` is refused outright rather than enumerated flag by flag.
+
+    The length bound is the filesystem's, since a conda environment is a
+    directory (see ``_MAX_ENV_NAME_LENGTH``).
+
+    Args:
+        config_key: The setting being checked, named in the error.
+        value: The name itself.
+
+    Returns:
+        The name as a string, when it is safe.
+
+    Raises:
+        ValueError: naming ``config_key`` and the offending value.
+    """
+    text = validate_shell_fragment(config_key, value)
+    if text.startswith("-"):
+        raise ValueError(
+            f"clustrix config {config_key}={text!r} cannot be used: it is "
+            "passed to `conda run -n <name>`, where a leading '-' is read as "
+            "an option rather than as an environment name, so the job would "
+            "run somewhere other than where you asked. Environment names do "
+            "not begin with '-'."
+        )
+    if len(text) > _MAX_ENV_NAME_LENGTH:
+        raise ValueError(
+            f"clustrix config {config_key} is {len(text)} characters long; "
+            f"the limit is {_MAX_ENV_NAME_LENGTH}. A conda environment is a "
+            "directory, and no filesystem clustrix runs on accepts a name "
+            "that long, so this cannot name an environment that exists."
         )
     return text
 
@@ -1165,9 +1247,17 @@ def setup_environment(
         Path to Python executable
     """
 
-    if config.conda_env_name:
-        # Use existing conda environment
-        return f"conda run -n {config.conda_env_name} python"
+    existing_env = str(config.conda_env_name or "").strip()
+    if existing_env:
+        # Use an environment that already exists on the cluster. The name is
+        # user input reaching a command line, so it gets the same validation
+        # and quoting as it does on the job-script path (#164); a blank
+        # setting is not a request for an environment called "".
+        return (
+            "conda run -n "
+            f"{shlex.quote(validate_environment_name('conda_env_name', existing_env))} "
+            "python"
+        )
 
     # Get package manager to determine environment type
     pkg_manager = get_package_manager_command(config)
@@ -1451,9 +1541,7 @@ def setup_two_venv_environment(
     conda_setup_prefix = ""
     conda_probe = (
         "bash -lc '"
-        'for p in "$CONDA_PREFIX" "$(conda info --base 2>/dev/null)" '
-        '"$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3" '
-        "/opt/conda /usr/local/miniconda3 /usr/local/anaconda3; do "
+        f"for p in {' '.join(_CONDA_SEARCH_LOCATIONS)}; do "
         'if [ -n "$p" ] && [ -f "$p/etc/profile.d/conda.sh" ]; then '
         'echo "$p/etc/profile.d/conda.sh"; exit 0; fi; done; '
         # An uninitialised conda wrapper names conda.sh in the very error it
@@ -2117,7 +2205,7 @@ def environment_setup_lines(config) -> list:
     return lines
 
 
-def conda_activation_lines(config) -> list:
+def conda_activation_lines(config, named_env: Optional[str] = None) -> list:
     """Lines a generated job script needs before it can run `conda`.
 
     A batch script runs under a non-login shell, on a compute node, so conda
@@ -2125,16 +2213,95 @@ def conda_activation_lines(config) -> list:
     script generator calls this; keeping it in one place is what stops one
     backend from being fixed while another silently keeps emitting bare
     `conda run` and failing with "conda: command not found".
+
+    There are two ways to know where conda is, and they are not equally good:
+
+    1. ``config.venv_info["conda_setup_prefix"]``. This is the *measured*
+       answer -- ``setup_two_venv_environment`` found that ``conda.sh`` over
+       SSH on this very cluster before the job was written. When it exists it
+       is used, and nothing else is attempted.
+    2. Nothing was measured, because environment replication never ran. That
+       is exactly the case a *named* environment creates: the user pointed at
+       an environment that already exists, so clustrix built nothing and
+       probed nothing, and it genuinely does not know where conda lives.
+
+    For (2) the search has to happen inside the job, on the node that will run
+    it, so it is emitted as shell. It looks in ``_CONDA_SEARCH_LOCATIONS`` --
+    the same list, in the same order, that the SSH probe uses -- and if conda
+    is already a working command (a site that puts it on PATH, or a
+    ``module load`` the user configured, which runs earlier in the script) it
+    leaves it alone. If none of that finds conda the job stops there with a
+    message naming the environment, the places searched and the two settings
+    that fix it, because "conda: command not found" three lines later names
+    none of those things.
+
+    What this cannot do: know a site-specific installation. A cluster that
+    keeps conda under ``/sw/apps/anaconda/2024.06`` behind ``module load
+    anaconda`` is unreachable by any search clustrix can write blind -- that
+    is what ``module_loads`` and ``pre_execution_commands`` are for, and both
+    are emitted by ``environment_setup_lines`` ahead of these lines. The
+    honest answer to "where is conda" on an arbitrary cluster is "ask the
+    cluster", so the failure is made loud and diagnosable instead of guessed.
+
+    Args:
+        config: Cluster configuration.
+        named_env: The existing environment this job was told to run in, if
+            any. Its only use here is the diagnostic; passing it is what
+            switches on the in-script search, since a job that never runs
+            ``conda run`` needs none of this.
     """
     venv_info = getattr(config, "venv_info", None) or {}
     prefix = venv_info.get("conda_setup_prefix", "")
-    return [prefix] if prefix else []
+    if prefix:
+        return [prefix]
+    if not named_env:
+        return []
+    return _conda_discovery_lines(named_env)
+
+
+def _conda_discovery_lines(named_env: str) -> list:
+    """Shell that finds conda on the execution node, or fails saying so.
+
+    Emitted only when clustrix has no measured conda location and the job
+    nonetheless has to run ``conda run`` -- see ``conda_activation_lines``.
+    ``named_env`` has been through ``validate_environment_name``, so it
+    contains no quote and no whitespace and is safe inside the single-quoted
+    diagnostics below; the search list is single-quoted for the same reason,
+    so the ``$CONDA_PREFIX`` named in the message is printed, not expanded.
+    """
+    locations = " ".join(_CONDA_SEARCH_LOCATIONS)
+    return [
+        "# clustrix: a batch shell does not initialise conda, and this job was",
+        "# not preceded by environment replication, so no conda installation",
+        "# was measured for this cluster. Find one now, or stop with a reason.",
+        "_clustrix_conda_sh=''",
+        f"for _clustrix_base in {locations}; do",
+        '  if [ -n "$_clustrix_base" ] && '
+        '[ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then',
+        '    _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"',
+        "    break",
+        "  fi",
+        "done",
+        'if [ -n "$_clustrix_conda_sh" ]; then',
+        '  . "$_clustrix_conda_sh"',
+        "elif ! command -v conda >/dev/null 2>&1; then",
+        f"  echo 'clustrix: cannot run this job in conda environment "
+        f"{named_env}: no conda installation was found on this node.' >&2",
+        "  echo 'clustrix: looked for etc/profile.d/conda.sh under "
+        f"{_CONDA_SEARCH_LOCATIONS_HUMAN}.' >&2",
+        "  echo 'clustrix: if this cluster initialises conda some other way, "
+        'put that in module_loads (e.g. module_loads=["anaconda"]) or '
+        "pre_execution_commands; both run before this point.' >&2",
+        "  exit 1",
+        "fi",
+    ]
 
 
 def generate_two_venv_execution_commands(
     remote_job_dir: str,
     conda_env1_name: Optional[str] = None,
     conda_env2_name: Optional[str] = None,
+    venv2_python: str = "python",
 ) -> list:
     """
     Generate the standardized two-venv execution commands.
@@ -2153,6 +2320,14 @@ def generate_two_venv_execution_commands(
         remote_job_dir: Remote working directory path
         conda_env1_name: Conda environment for serialization (VENV1), if any
         conda_env2_name: Conda environment for execution (VENV2), if any
+        venv2_python: The interpreter to invoke inside VENV2's conda
+            environment. Defaults to ``python``, which is the only right
+            answer for an environment clustrix built itself. The caller
+            passes ``config.python_executable`` instead when the user named
+            the execution environment, since then it is the user's
+            environment and the user's statement about its interpreter.
+            VENV1 is never affected: it is clustrix's serialization
+            machinery and has to stay on the version dill was pinned to.
 
     Returns:
         List of command strings for two-venv execution
@@ -2341,7 +2516,7 @@ def generate_two_venv_execution_commands(
                 else f"source {quoted_dir}/venv2_execution/bin/activate"
             ),
             (
-                f'conda run -n {env2} python -c "'
+                f'conda run -n {env2} {venv2_python} -c "'
                 if conda_env2_name
                 else f'{quoted_dir}/venv2_execution/bin/python -c "'
             ),
@@ -2599,6 +2774,39 @@ def result_signing_lines(indent: str = "    ", serializer: str = "pickle") -> li
     ] + payload_signing_lines("_payload_bytes", "result.pkl", indent)
 
 
+#: Environment names this process has already announced the change for. A
+#: migration notice repeated once per submitted job is noise, and noise is
+#: how a notice stops being read.
+_CONDA_ENV_NAME_MIGRATION_ANNOUNCED: Set[str] = set()
+
+
+def _warn_conda_env_name_is_now_honoured(name: str) -> None:
+    """Say once that a setting which never did anything now does (#164).
+
+    ``conda_env_name`` was inert for its entire life: it was accepted, stored,
+    documented, and read by nothing on the execution path. So a
+    ``~/.clustrix/clustrix.yml`` written long ago can still carry a value
+    nobody has thought about since -- and now every job that config submits
+    is rerouted through ``conda run -n <name>`` into an environment that may
+    not exist any more. Making that change without saying so is the same
+    silence the change was meant to fix, one level up, so it is announced.
+    """
+    if name in _CONDA_ENV_NAME_MIGRATION_ANNOUNCED:
+        return
+    _CONDA_ENV_NAME_MIGRATION_ANNOUNCED.add(name)
+    logger.warning(
+        "clustrix config conda_env_name=%r is now honoured: your jobs will "
+        "run in the existing cluster environment %r via `conda run`, instead "
+        "of in the environment clustrix replicates from your local one. This "
+        "setting was previously accepted and never used, so a value left in "
+        "an old configuration file changes behaviour today. If you did not "
+        "mean to select an existing environment, remove conda_env_name from "
+        "your clustrix configuration or set it to null.",
+        name,
+        name,
+    )
+
+
 def resolve_named_environment(
     job_config: Dict[str, Any], config: ClusterConfig
 ) -> Optional[str]:
@@ -2617,7 +2825,8 @@ def resolve_named_environment(
     lives in ``config.venv_info``, never in ``config.conda_env_name``, so it
     cannot be picked up here by accident.
     """
-    name = job_config.get("environment") or getattr(config, "conda_env_name", None)
+    from_config = str(getattr(config, "conda_env_name", None) or "").strip()
+    name = job_config.get("environment") or from_config
     if not name:
         return None
     stripped = str(name).strip()
@@ -2628,8 +2837,12 @@ def resolve_named_environment(
     # environment <name>`` comment, which a newline would escape. Until #164
     # that comment only ever held a synthetic ``clustrix_venv2_<key>``; it now
     # holds user input, so the value is validated like every other setting
-    # that lands unquoted.
-    return validate_shell_fragment("conda_env_name", stripped)
+    # that lands unquoted -- and, because ``conda run -n`` is an argument
+    # position, against being an option flag as well.
+    validated = validate_environment_name("conda_env_name", stripped)
+    if from_config and from_config == stripped:
+        _warn_conda_env_name_is_now_honoured(validated)
+    return validated
 
 
 def job_execution_lines(
@@ -2692,23 +2905,37 @@ def job_execution_lines(
             )
             conda_env2_name = named_env
         script_lines.append(result_key_export_line(remote_job_dir))
-        script_lines.extend(conda_activation_lines(config))
+        script_lines.extend(conda_activation_lines(config, named_env))
         script_lines.extend(
             generate_two_venv_execution_commands(
-                remote_job_dir, conda_env1_name, conda_env2_name
+                remote_job_dir,
+                conda_env1_name,
+                conda_env2_name,
+                # `python_executable` is the user's statement about which
+                # interpreter runs their code, so it applies to the execution
+                # environment when the user named that environment -- and only
+                # then. On the replication path VENV2 is an environment
+                # clustrix built at a pinned version, where `python` is the
+                # only correct answer and an override would break the
+                # bytecode-compatibility the two-venv split exists to keep.
+                venv2_python=python_cmd if named_env else "python",
             )
         )
     else:
         # Use the original single-venv approach. A named existing environment
-        # replaces the venv clustrix would otherwise have built and activated;
-        # `conda` itself has to be on PATH for that -- a batch script gets a
-        # non-login shell -- which is what module_loads and
-        # pre_execution_commands are for.
+        # replaces the venv clustrix would otherwise have built and activated,
+        # and `conda_activation_lines` makes `conda` itself usable first: a
+        # batch script gets a non-login shell, where conda is uninitialised.
         if named_env:
-            entry_lines = [
-                f"cd {quoted_dir}",
-                f'conda run -n {shlex.quote(named_env)} python -c "',
-            ]
+            entry_lines = (
+                [f"cd {quoted_dir}"]
+                # Without this the next line is a bare `conda run` in a
+                # non-login batch shell, which is "conda: command not found"
+                # on every SLURM cluster there is. This was the flagship path
+                # of #164 and it could not have worked as first written.
+                + conda_activation_lines(config, named_env)
+                + [f'conda run -n {shlex.quote(named_env)} {python_cmd} -c "']
+            )
         else:
             entry_lines = [
                 f"cd {quoted_dir}",

@@ -189,7 +189,10 @@ Paths
   but nothing in clustrix reads it -- setting it has no effect. It is listed
   here only so that a configuration file containing it is not mistaken for a
   file that does something.
-- ``conda_env_name``: Conda environment to activate on the cluster
+- ``conda_env_name``: An existing conda environment on the cluster to run
+  jobs in. It replaces the replicated execution environment and takes
+  precedence over it; see :doc:`../configuration` for how conda is
+  located inside the job.
 - ``venv_setup_timeout``: Seconds allowed for remote virtualenv creation
   (default: 300)
 
