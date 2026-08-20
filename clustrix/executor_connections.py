@@ -150,8 +150,10 @@ class ConnectionManager:
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         sftp = self.ssh_client.open_sftp()
-        sftp.put(local_path, remote_path)
-        sftp.close()
+        try:
+            sftp.put(local_path, remote_path)
+        finally:
+            sftp.close()
 
     def download_file(self, remote_path: str, local_path: str):
         """Download file from remote cluster."""
@@ -160,8 +162,10 @@ class ConnectionManager:
                 "SSH client not connected. Call setup_ssh_connection() first."
             )
         sftp = self.ssh_client.open_sftp()
-        sftp.get(remote_path, local_path)
-        sftp.close()
+        try:
+            sftp.get(remote_path, local_path)
+        finally:
+            sftp.close()
 
     def create_remote_file(
         self, remote_path: str, content: str, mode: Optional[int] = None
@@ -188,13 +192,24 @@ class ConnectionManager:
         """Check if file exists on remote cluster."""
         if self.ssh_client is None:
             return False
+        # The close has to be in a finally, and this method is the reason:
+        # a missing file is its *expected* answer, not an error, and
+        # sftp.stat raises for it. With the close inside the try, every
+        # "no, that file is not there" leaked an SFTP channel for the life
+        # of the connection, and the exception that caused it was swallowed
+        # -- so a submitter polling for a result file ran out of channels
+        # with nothing in the log to say why.
         try:
             sftp = self.ssh_client.open_sftp()
+        except Exception:
+            return False
+        try:
             sftp.stat(remote_path)
-            sftp.close()
             return True
         except Exception:
             return False
+        finally:
+            sftp.close()
 
     def connect(self):
         """Establish connection to cluster (for manual connection)."""
