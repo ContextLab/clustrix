@@ -5,6 +5,13 @@ import sys
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
+try:  # The interpreter may be built without Tk; see TestGetPasswordGui.
+    import tkinter  # noqa: F401
+
+    TKINTER_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on the interpreter build
+    TKINTER_AVAILABLE = False
+
 from clustrix.auth_fallbacks import (
     detect_environment,
     get_password_gui,
@@ -56,7 +63,32 @@ class TestDetectEnvironment:
 
 
 class TestGetPasswordGui:
-    """Test GUI password retrieval."""
+    """Test GUI password retrieval.
+
+    ``@patch("tkinter.Tk")`` has to *import* tkinter to patch it, so on a
+    Python built without Tk -- which is ordinary: the Homebrew and
+    python.org builds differ on it, and slim container images drop it --
+    these hard-failed with ``ModuleNotFoundError`` instead of skipping. The
+    code under test imports tkinter lazily inside the function and falls
+    back to the ipywidgets prompt on ``ImportError``, so it degrades
+    gracefully on exactly the interpreters where its tests did not. The
+    third test below covers that fallback and does not need Tk itself, but
+    it patches ``tkinter.Tk`` to *raise* ImportError, which still requires
+    the module to be importable.
+
+    ``pytest.importorskip`` in the class body would skip the whole *module*
+    -- 31 unrelated tests -- because the Skipped it raises escapes during
+    collection of the file. A class-scoped ``pytestmark`` skips these three
+    and nothing else. The probe is a real import rather than
+    ``find_spec("tkinter")``: the package directory is present on an
+    interpreter built without Tk, and it is the ``_tkinter`` extension
+    underneath it that is missing, so only actually importing it answers the
+    question -- which is the same thing the code under test does.
+    """
+
+    pytestmark = pytest.mark.skipif(
+        not TKINTER_AVAILABLE, reason="Python built without Tk (tkinter)"
+    )
 
     @patch("tkinter.Tk")
     @patch("tkinter.simpledialog.askstring")

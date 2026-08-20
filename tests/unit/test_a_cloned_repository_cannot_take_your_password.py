@@ -2034,3 +2034,167 @@ def test_the_clusterfy_widget_still_trusts_a_config_file_in_the_config_dir(
     assert authenticated, "the documented widget workflow stopped working"
     assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
     assert attacker_server.authentications == [("victim", "password")]
+
+
+# --------------------------------------------------------------------------
+# The other half of the widget's Apply: the false refusal.
+#
+# ``config_source_map`` is keyed by configuration *name*. ``_on_apply_config``
+# stamps ``_save_config_from_widgets()`` -- the **live** fields. Selecting the
+# repository's ``./config.yml`` and then typing your *own* hostname over the
+# host field left the name unchanged, so Apply stamped the working-directory
+# source onto a hostname that file never named, and
+# ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`` recorded the user's own cluster. That
+# record is deliberately proof against ``configure()`` -- Apply *is* a
+# ``configure()`` call -- so a single keystroke cost the user their cluster
+# for the life of the kernel.
+#
+# A hostname is only condemned by a source that actually named it.
+# --------------------------------------------------------------------------
+
+#: A name for the host the repository chose that is *not* loopback, so that
+#: "the file's host" and "the user's own host" are distinguishable. Nothing
+#: connects to it: the point of these two tests is which of two hostnames the
+#: provenance record ends up holding.
+UNRELATED_ATTACKER_HOST = "totally-unrelated.attacker.example"
+
+
+def _repository_config_naming(host, tmp_path, monkeypatch):
+    """chdir into a cloned repository that ships ``./config.yml``."""
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "config.yml").write_text(
+        "\n".join(
+            [
+                "cluster_type: ssh",
+                f"cluster_host: {host}",
+                "username: victim",
+                "ssh_host_key_policy: auto_add",
+                'name: ""',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(repo)
+    return repo
+
+
+def _clusterfy_widget():
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    assert "config" in widget.config_dropdown.options, (
+        f"the widget did not offer the repository's config.yml: "
+        f"{widget.config_dropdown.options}"
+    )
+    widget.config_dropdown.value = "config"
+    return widget
+
+
+def test_the_widget_still_condemns_the_host_the_found_file_named(tmp_path, monkeypatch):
+    """The control. Applying the file *unchanged* still refuses it.
+
+    Without this the fix below could be "stop stamping anything", which
+    would reopen the leak the widget's Apply was made to close.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget._on_apply_config(None)
+
+    assert get_config().cluster_host == UNRELATED_ATTACKER_HOST
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {
+        UNRELATED_ATTACKER_HOST: CONFIG_SOURCE_WORKING_DIRECTORY
+    }
+    assert stored_credential_is_for_config(get_config(), {}) is not None
+
+
+def test_typing_your_own_hostname_over_a_found_config_does_not_condemn_it(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """The false refusal, measured against a real server.
+
+    RED before the fix: ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES ==
+    {'127.0.0.1': 'working-directory'}``, ``trusted=False``, the connection
+    is refused and ``server.authentications == []`` -- the user's own cluster,
+    condemned for the life of the process by a file that named a different
+    host entirely.
+
+    ``attacker_server`` here plays the user's *own* cluster: it is a real SSH
+    server that accepts the sentinel and nothing else, so an entry in
+    ``authentications`` is a measurement that the credential really travelled
+    to the host the user typed.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    # The user's own documented setting, and the only friction the widget
+    # does not carry across by itself: ``_save_config_from_widgets`` never
+    # emits ``ssh_host_key_policy``, so it has to already be in force for the
+    # connection to get as far as offering a password. Setting it here is a
+    # plain ``configure()`` call naming no host, so it stamps nothing.
+    configure(ssh_host_key_policy="auto_add")
+
+    widget = _clusterfy_widget()
+    # The one edit that matters: the user types their own hostname.
+    widget.host_field.value = attacker_server.host
+    widget.port_field.value = attacker_server.port
+    widget._on_apply_config(None)
+
+    assert get_config().cluster_host == attacker_server.host
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}, (
+        "a file that named a different host condemned the hostname the user " "typed"
+    )
+    assert get_config_source(get_config()) == CONFIG_SOURCE_RUNTIME
+    assert stored_credential_is_for_config(get_config(), {}) is None
+
+    assert _attempt_connection(), "the user's own cluster was refused"
+    assert attacker_server.authentications == [("victim", "password")]
+
+
+def test_editing_a_field_other_than_the_host_leaves_the_refusal_in_place(
+    tmp_path, monkeypatch
+):
+    """It is the *host* that receives the credential, so only it counts.
+
+    Changing the core count on a configuration a repository shipped is not
+    the user choosing who gets their password.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.cores_field.value = 17
+    widget._on_apply_config(None)
+
+    assert get_config().default_cores == 17
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {
+        UNRELATED_ATTACKER_HOST: CONFIG_SOURCE_WORKING_DIRECTORY
+    }
+
+
+def test_case_and_a_trailing_dot_do_not_slip_past_the_host_comparison(
+    tmp_path, monkeypatch
+):
+    """The same hostname spelled differently is the same hostname.
+
+    Otherwise "type your own hostname" becomes "retype the attacker's with a
+    capital letter", which clears the refusal without changing who receives
+    the credential.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    widget.host_field.value = UNRELATED_ATTACKER_HOST.upper() + "."
+    widget._on_apply_config(None)
+
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {
+        UNRELATED_ATTACKER_HOST: CONFIG_SOURCE_WORKING_DIRECTORY
+    }

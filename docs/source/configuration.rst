@@ -111,6 +111,21 @@ automatically. Changing directory does not reload it.
    the way out: ``SSH_HOST`` is authorisation no round trip can manufacture,
    and a new process starts with an empty record.
 
+   **A saved profile remembers where it came from.** That record is
+   per-process, but the notebook widget's profile store is not. Seven of its
+   operations write ``<config dir>/profiles/profiles.yml`` as a side effect
+   -- creating, cloning, renaming, removing or saving a profile, importing
+   one, and merely *switching* which is active -- so a profile read out of a
+   bundle a repository shipped ends up inside your own configuration
+   directory, where re-deriving its provenance from the file's location
+   would call it yours. Clustrix therefore writes the source down beside
+   each profile and restores it with them: an untrusted profile stays
+   untrusted across restarts, and carries the same refusal. A recorded
+   source can only ever *lower* trust -- a bundle claiming ``runtime`` for
+   its own profiles is ignored -- so a project-local profile you deliberately
+   keep is kept, along with the reason it is not handed your credential.
+   Deleting the profile and starting a new process is what clears it.
+
    **What ``load_config(path)`` does and does not mean.** It is trusted:
    it is a call in your own Python naming a file, it is not reachable by
    handing a config back through a function, and distrusting *relative*

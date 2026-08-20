@@ -32,6 +32,7 @@ from .config import (
     configure,
     get_config,
     get_config_dir,
+    normalize_hostname,
     set_config_source,
     strip_secret_fields,
     write_text_securely,
@@ -102,6 +103,10 @@ class EnhancedClusterConfigWidget:
         # Where each file-derived config was found. Only written here: a
         # config the user builds or saves during the session is their own.
         self.config_source_map: Dict[str, str] = {}
+        # And *which hostname* that file named, normalised. The source alone
+        # is not enough to condemn what Apply is holding: see
+        # ``_discovered_source_for``.
+        self.config_source_host_map: Dict[str, str] = {}
         # Detect and load configuration files
         self.config_files = detect_config_files()
         for config_file in self.config_files:
@@ -115,6 +120,9 @@ class EnhancedClusterConfigWidget:
                     self.configs[config_name] = file_configs
                     self.config_file_map[config_name] = config_file
                     self.config_source_map[config_name] = source
+                    self.config_source_host_map[config_name] = normalize_hostname(
+                        file_configs.get("cluster_host")
+                    )
                 else:
                     # Multiple configs
                     for name, config in file_configs.items():
@@ -122,6 +130,9 @@ class EnhancedClusterConfigWidget:
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
                             self.config_source_map[name] = source
+                            self.config_source_host_map[name] = normalize_hostname(
+                                config.get("cluster_host")
+                            )
 
     def _create_widgets(self):
         """Create the enhanced widget interface."""
@@ -790,6 +801,41 @@ class EnhancedClusterConfigWidget:
                 self._update_config_dropdown()
                 print(f"✅ Deleted configuration: '{deleted_name}'")
 
+    def _discovered_source_for(self, config_data: Dict[str, Any]) -> Optional[str]:
+        """The provenance Apply may stamp on ``config_data``, or ``None``.
+
+        ``config_source_map`` is keyed by configuration *name*, but Apply
+        stamps ``_save_config_from_widgets()`` -- the **live** fields. Those
+        stop being the same thing the moment the user edits one, and the
+        difference is not cosmetic: with an attacker's ``./config.yml``
+        present, a user who selected it, typed *their own* hostname over the
+        host field and pressed Apply had their own cluster recorded in
+        ``clustrix.config._HOSTS_NAMED_BY_UNTRUSTED_SOURCES``. That record has
+        no way back -- it is deliberately proof against ``configure()``, since
+        Apply *is* a ``configure()`` call -- so one keystroke cost them their
+        cluster for the life of the kernel.
+
+        The rule the false-refusal work established is the fix: **a hostname
+        is only condemned by a source that actually named it.** So the
+        discovered source applies only while the host in the widget is still
+        the host that file gave, compared with the one normaliser
+        (:func:`clustrix.config.normalize_hostname`) so that case and a
+        trailing dot cannot be used to slip past it.
+
+        Editing any *other* field -- cores, memory, the working directory --
+        leaves the hostname untouched and so leaves the refusal in place,
+        which is right: it is the host that receives the credential.
+        """
+        name = self.current_config_name or ""
+        source = self.config_source_map.get(name)
+        if not source:
+            return None
+        if normalize_hostname(
+            config_data.get("cluster_host")
+        ) != self.config_source_host_map.get(name, ""):
+            return None
+        return source
+
     def _on_apply_config(self, button):
         """Apply the current configuration."""
         with self.status_output:
@@ -808,9 +854,7 @@ class EnhancedClusterConfigWidget:
                 # a round trip through a function call is not evidence that
                 # anybody chose it.
                 configure(**config_data)
-                discovered_source = self.config_source_map.get(
-                    self.current_config_name or ""
-                )
+                discovered_source = self._discovered_source_for(config_data)
                 if discovered_source:
                     set_config_source(get_config(), discovered_source)
                 print("✅ Configuration applied successfully!")

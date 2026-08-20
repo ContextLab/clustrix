@@ -10,10 +10,14 @@ from dataclasses import asdict, fields as dataclass_fields
 
 from .config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
+    CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
+    CONFIG_SOURCES,
+    UNTRUSTED_CONFIG_SOURCES,
     ClusterConfig,
     config_built_from_file,
     config_source_for_discovered_path,
     get_config_dir,
+    get_config_source,
     set_config_source,
     strip_secret_fields,
     write_config_file_securely,
@@ -159,6 +163,63 @@ def _clustrix_owned(directory: Path):
         yield parent
         if parent == config_dir:
             return
+
+
+#: Top-level key in the profile store recording, per profile, the
+#: configuration source the profile carried when it was written.
+#:
+#: Provenance used to stop at the process boundary. ``_persist()`` fires from
+#: seven mutators, and ``save_to_file`` wrote only the declared *fields* --
+#: which the source deliberately is not, because a field is something a
+#: hostile file could set. So a profile read out of a repository's
+#: ``profiles.yml`` (``redirected-config-dir``, refused, hostname tainted) was
+#: copied by the next mutator into ``<config_dir>/profiles/profiles.yml``, and
+#: the next process's ``_restore`` re-derived the source from where the file
+#: now *was* -- ``user-config-dir``, trusted -- and released the credential.
+#: The credential gate was not bypassed: it was asked a question whose answer
+#: had already been destroyed.
+PROFILE_SOURCES_KEY = "profile_sources"
+
+
+def _restored_profile_source(file_source: str, recorded: Any) -> str:
+    """The source a restored profile gets: ``file_source``, or worse.
+
+    A persisted source may only ever *downgrade*. That asymmetry is the whole
+    security property, and it is what makes writing the source down safe at
+    all: if a file could raise its own trust by saying so, this key would be
+    the laundering route it is meant to close -- exactly why
+    ``_clustrix_config_source`` is set with ``setattr`` rather than declared
+    as a dataclass field.
+
+    So:
+
+    * an untrusted recorded source is believed, whatever the file's own
+      provenance says. A profile that came from a working directory stays
+      from a working directory after it is copied into ``~/.clustrix``.
+    * a *trusted* recorded source is ignored, and the file's own provenance
+      stands. A bundle a repository ships cannot promote its profiles by
+      writing ``explicit-file`` next to them.
+    * anything clustrix does not recognise -- a truncated file, a hand-edited
+      one, an attacker's invention -- is treated as a redirect rather than
+      raised on. Refusing to restore would cost the user every profile they
+      have; refusing to *trust* costs one credential release the message
+      explains.
+
+    Persisting the source rather than refusing to persist an untrusted
+    profile at all is the deliberate choice. A user may legitimately want to
+    keep a project-local profile -- the hostname, the partition, the working
+    directory are all still useful -- and dropping it on save would delete
+    something they can see in the widget without their asking. Keeping it and
+    keeping *why it is refused* preserves the profile and the refusal
+    together, which is the honest pair.
+    """
+    if recorded is None:
+        return file_source
+    if not isinstance(recorded, str) or recorded not in CONFIG_SOURCES:
+        return CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    if recorded in UNTRUSTED_CONFIG_SOURCES:
+        return recorded
+    return file_source
 
 
 class ProfileManager:
@@ -498,10 +559,21 @@ class ProfileManager:
         something the user typed without telling them would be its own
         surprise.
         """
-        data: Dict[str, Any] = {"active_profile": self.active_profile, "profiles": {}}
+        data: Dict[str, Any] = {
+            "active_profile": self.active_profile,
+            "profiles": {},
+            PROFILE_SOURCES_KEY: {},
+        }
 
         for name, config in self.profiles.items():
             data["profiles"][name] = strip_secret_fields(asdict(config))
+            # Written *outside* the profile mapping, because everything
+            # inside it is a declared field and gets passed to
+            # ``ClusterConfig(**config_dict)``. See PROFILE_SOURCES_KEY for
+            # why this has to be written at all, and
+            # ``_restored_profile_source`` for why writing it cannot be used
+            # to claim trust.
+            data[PROFILE_SOURCES_KEY][name] = get_config_source(config)
 
         self._announce_dropped_secrets(data["profiles"])
 
@@ -537,6 +609,10 @@ class ProfileManager:
         if not isinstance(data, dict):
             raise ValueError(f"{filepath} does not contain a profile bundle")
 
+        recorded_sources = data.get(PROFILE_SOURCES_KEY)
+        if not isinstance(recorded_sources, dict):
+            recorded_sources = {}
+
         loaded: Dict[str, ClusterConfig] = {}
         with config_built_from_file(source):
             for name, config_dict in (data.get("profiles") or {}).items():
@@ -561,8 +637,17 @@ class ProfileManager:
         # so the hostname goes into the record and a later rebuild (Apply's
         # ``configure(**asdict(cfg))``, ``dataclasses.replace``) cannot
         # launder it back to ``runtime``.
-        for config in loaded.values():
-            set_config_source(config, source)
+        # ``source`` unless the store recorded something *less* trusted for
+        # this profile, in which case that stands -- see
+        # ``_restored_profile_source``. Without it, provenance died at the
+        # process boundary and a profile a repository shipped came back
+        # trusted merely because a mutator had since copied it into the
+        # user's own configuration directory.
+        for name, config in loaded.items():
+            set_config_source(
+                config,
+                _restored_profile_source(source, recorded_sources.get(name)),
+            )
 
         if not loaded:
             raise ValueError(f"{filepath} contains no profiles")
