@@ -20,13 +20,15 @@ which is neither a yes nor a no.
 
 import os
 import stat
+import tempfile
 from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
 from clustrix.config import ClusterConfig
 from clustrix.executor_connections import ConnectionManager
-from clustrix.utils import detect_gpu_capabilities
+from clustrix.utils import detect_gpu_capabilities, gpu_detection_summary
 from tests.ssh_server import LocalSSHServer
 
 PASSWORD = "hunter2"
@@ -49,7 +51,9 @@ def gpu_info(tmp_path, smi_stdout, smi_exit=0):
     from the response under test rather than from whatever hardware happens to
     be running the suite.
     """
-    bindir = tmp_path / "bin"
+    # A fresh directory per call, so one test can stand up several hosts.
+    base = Path(tempfile.mkdtemp(dir=str(tmp_path)))
+    bindir = base / "bin"
     bindir.mkdir()
     payload = bindir / "smi_payload"
     payload.write_text(smi_stdout)
@@ -60,7 +64,7 @@ def gpu_info(tmp_path, smi_stdout, smi_exit=0):
     _write_executable(bindir / "nvcc", "#!/bin/sh\nexit 1\n")
     _write_executable(bindir / "lspci", "#!/bin/sh\nexit 1\n")
 
-    root = tmp_path / "served"
+    root = base / "served"
     root.mkdir()
     path = f"{bindir}:{os.environ.get('PATH', '/usr/bin:/bin')}"
     with LocalSSHServer(root=str(root), password=PASSWORD, env={"PATH": path}) as srv:
@@ -171,3 +175,30 @@ def test_nvidia_smi_failing_is_a_definite_no(tmp_path):
         assert info["gpu_available"] is False
         assert info["gpu_detection_inconclusive"] is False
         assert info["gpu_count"] == 0
+
+
+def test_the_setup_message_distinguishes_no_from_could_not_tell(tmp_path):
+    """The sentence a user reads must not turn "could not tell" into "no".
+
+    ``enhanced_setup_two_venv_environment`` prints this line before choosing
+    between the GPU and the standard VENV2 path. It used to have two branches
+    for three outcomes, so an unreadable nvidia-smi response was announced as
+    "No GPUs detected".
+    """
+    with gpu_info(tmp_path, WELL_FORMED) as info:
+        assert gpu_detection_summary(info) == (
+            "GPU detected (2 devices), setting up GPU-enabled VENV2..."
+        )
+
+    with gpu_info(tmp_path, "") as info:
+        assert gpu_detection_summary(info) == (
+            "No GPUs detected, using standard VENV2 setup..."
+        )
+
+    unreadable = "0, NVIDIA A100-SXM4-40GB, 40536 MiB, 40122 MiB, 8.0"
+    with gpu_info(tmp_path, unreadable) as info:
+        message = gpu_detection_summary(info)
+        assert message.startswith("Could not determine whether this cluster has GPUs")
+        assert "No GPUs detected" not in message
+        # The response that could not be read is quoted, not summarised away.
+        assert "40536 MiB" in message

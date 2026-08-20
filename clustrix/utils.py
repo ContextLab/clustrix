@@ -2966,6 +2966,30 @@ def detect_gpu_capabilities(
     return gpu_info
 
 
+def gpu_detection_summary(gpu_info: Dict[str, Any]) -> str:
+    """Say what GPU detection established -- including "nothing".
+
+    Three outcomes, three sentences. "Could not determine" is not a wordier
+    way of saying "no GPUs detected": one means the cluster answered and the
+    answer was no, the other means clustrix could not read the answer, and a
+    user deciding whether to install a GPU build themselves needs to know
+    which one they have.
+    """
+    if gpu_info.get("gpu_available", False):
+        return (
+            f"GPU detected ({gpu_info.get('gpu_count', 0)} devices), "
+            "setting up GPU-enabled VENV2..."
+        )
+    if gpu_info.get("gpu_detection_inconclusive", False):
+        return (
+            "Could not determine whether this cluster has GPUs: "
+            + "; ".join(gpu_info.get("detection_errors", []))
+            + ". Using standard VENV2 setup; install GPU builds yourself if "
+            "the cluster does have GPUs."
+        )
+    return "No GPUs detected, using standard VENV2 setup..."
+
+
 def setup_gpu_enabled_venv2(
     ssh_client,
     work_dir: str,
@@ -3151,25 +3175,12 @@ def enhanced_setup_two_venv_environment(
     venv_info = setup_two_venv_environment(ssh_client, work_dir, requirements, config)
 
     # Step 3: Enhanced VENV2 with GPU support if GPUs are available
+    print(gpu_detection_summary(gpu_info))
     if gpu_info.get("gpu_available", False):
-        print(
-            f"GPU detected ({gpu_info['gpu_count']} devices), setting up GPU-enabled VENV2..."
-        )
         gpu_venv2_info = setup_gpu_enabled_venv2(
             ssh_client, work_dir, requirements, gpu_info, config
         )
         venv_info.update(gpu_venv2_info)
-    elif gpu_info.get("gpu_detection_inconclusive", False):
-        # Not the same sentence as "no GPUs detected", because it is not the
-        # same fact.
-        print(
-            "Could not determine whether this cluster has GPUs: "
-            + "; ".join(gpu_info.get("detection_errors", []))
-            + ". Using standard VENV2 setup; install GPU builds yourself if "
-            "the cluster does have GPUs."
-        )
-    else:
-        print("No GPUs detected, using standard VENV2 setup...")
 
     # Step 4: Add GPU detection results to venv_info
     venv_info["gpu_info"] = gpu_info
