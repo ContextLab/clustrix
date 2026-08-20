@@ -40,6 +40,10 @@ from .config import (
 # rather than copied so the widget and the profile store cannot drift.
 from .profile_manager import _mkdir_private
 
+# One implementation of "the saved configuration wins over a list baked into
+# the UI", shared with the modern widget.
+from .widget_controls import set_choice
+
 logger = logging.getLogger(__name__)
 
 #: Keys a saved profile carries that are not settings. ``name`` is the
@@ -630,29 +634,6 @@ class EnhancedClusterConfigWidget:
         # Mark as changed
         self._mark_unsaved_changes()
 
-    @staticmethod
-    def _set_choice(field, value):
-        """Select a value in a dropdown, widening the options if need be.
-
-        Every one of these assignments used to be bare `field.value = ...`, so
-        loading a configuration whose region or instance type was not in the
-        hardcoded ten-item list raised
-
-            TraitError: Invalid selection: value not found
-
-        and broke the widget outright. New hardware flavors appear faster than
-        the hardcoded list, so this was reachable with an ordinary config file.
-
-        The saved configuration is authoritative -- a list baked into the UI
-        should not be able to veto it -- so an unrecognised value is added to
-        the options rather than discarded.
-        """
-        if value in (None, ""):
-            return
-        if value not in field.options:
-            field.options = list(field.options) + [value]
-        field.value = value
-
     def _load_config_to_widgets(self, config_name: str):
         """Load a configuration into the widgets."""
         if config_name not in self.configs:
@@ -676,10 +657,13 @@ class EnhancedClusterConfigWidget:
 
         # HuggingFace Jobs fields
         self.hf_token_field.value = config.get("hf_token", "")
-        self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
+        set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
 
-        # Advanced options
-        self.package_manager.value = config.get("package_manager", "pip")
+        # Advanced options. set_choice for the same reason as the hardware
+        # field: this menu offers only pip and conda, while ClusterConfig
+        # accepts any string and the modern widget writes "auto" and "uv" --
+        # so a profile saved there made this widget raise on load.
+        set_choice(self.package_manager, config.get("package_manager", "pip"))
 
         # Environment variables
         env_vars = config.get("environment_variables", {})

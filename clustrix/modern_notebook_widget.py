@@ -35,6 +35,7 @@ from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
+from .widget_controls import set_choice
 
 #: Profile holding whatever clustrix was already configured to do when the
 #: widget opened, so the live state is visible instead of contradicted.
@@ -2135,22 +2136,34 @@ class ModernClustrixWidget:
     #: _choose_execution_mode routes on cluster_host, so a leftover host would
     #: send a "local" job to a cluster.
     #:
-    #: The line is drawn at *targets and credential material*: what names the
-    #: compute (host, port, work directory, HuggingFace namespace and flavor),
-    #: who it runs as there (username), and the secret that opens that
-    #: particular door (password, key_file, hf_token). None of those mean
-    #: anything under another backend, and some of them misbehave.
+    #: The line is drawn by asking *what the value names*. Every field here
+    #: names **this cluster**: the compute (cluster_host, cluster_port,
+    #: remote_work_dir, hf_namespace, hf_flavor), who the job runs as there
+    #: (username), the secret that opens that particular door (password,
+    #: key_file, hf_token), and what it is allowed to spend there
+    #: (hf_allow_gpu_flavors -- GPU flavors bill by the second, so the
+    #: permission has to fail safe the moment the target changes). Point the
+    #: widget at another backend and every one of them describes somewhere
+    #: the job is no longer going.
     #:
-    #: ``password_env_var``/``use_env_password`` are deliberately *not* here.
-    #: They hold no credential and name no target -- they say which
-    #: environment variable a password is read from, which is a property of
-    #: the machine clustrix runs on, not of the backend it talks to. And
-    #: ``save_to_file`` omits secret-bearing fields by default, so this pair
-    #: is the only supported way to supply a credential without writing it to
-    #: disk: clearing it on an unrelated backend switch silently destroys the
-    #: one setting the user cannot get back from their config file. The legacy
-    #: widget leaves both alone (neither is in its WIDGET_MANAGED_FIELDS), and
+    #: ``password_env_var``/``use_env_password`` name **this machine**: which
+    #: environment variable, on the computer clustrix is running on, a
+    #: password is read from. Switching backend says nothing about that
+    #: variable, so clearing it destroys a setting the switch had no opinion
+    #: about -- which is exactly what a modern-widget Apply on a ``local``
+    #: profile used to do. The legacy widget leaves both alone (neither is in
+    #: its WIDGET_MANAGED_FIELDS), and
     #: TestACredentialChannelIsNotABackendSetting holds the two together.
+    #:
+    #: Two tempting distinctions do *not* work, and neither may be used to
+    #: move this line again. "It holds no secret" separates nothing:
+    #: ``_NOT_ACTUALLY_SECRET`` deliberately keeps ``password_env_var`` and
+    #: ``use_env_password`` out of ``SECRET_FIELDS``, so ``save_to_file``
+    #: writes both in plaintext -- and ``key_file``, which stays backend-only,
+    #: is likewise a name rather than a credential and is likewise written.
+    #: "It cannot be recovered from disk" separates nothing either: no member
+    #: of this set is unrecoverable, because the reset only clears the
+    #: *setting* and every control still shows its value afterwards.
     BACKEND_ONLY_FIELDS = {
         ("ssh", "slurm"): (
             "cluster_host",
@@ -2170,7 +2183,13 @@ class ModernClustrixWidget:
 
     def _config_data_for_backend(self) -> Dict[str, Any]:
         """What is on screen, with fields the chosen backend does not use
-        reset to their defaults."""
+        reset to their defaults.
+
+        The field's *real* default, from ``ClusterConfig()`` -- not ``None``.
+        ``cluster_port`` is typed ``int`` and ``remote_work_dir`` is typed
+        ``str``; handing either a ``None`` reads as "cleared" while leaving a
+        configuration that fails at the first connection or path join.
+        """
         data = self._config_data_from_widgets()
         defaults = asdict(ClusterConfig())
         cluster_type = data["cluster_type"]
@@ -2296,12 +2315,15 @@ class ModernClustrixWidget:
 
         # HuggingFace
         self.widgets["hf_namespace"].value = config.hf_namespace or ""
-        self.widgets["hf_flavor"].value = config.hf_flavor or "cpu-basic"
+        # set_choice, not a bare assignment: ClusterConfig validates neither
+        # hf_flavor nor package_manager, so a config naming a flavor newer
+        # than this dropdown made the widget impossible to open.
+        set_choice(self.widgets["hf_flavor"], config.hf_flavor or "cpu-basic")
         self.widgets["hf_token"].value = config.hf_token or ""
         self.widgets["hf_allow_gpu"].value = bool(config.hf_allow_gpu_flavors)
 
         # Advanced
-        self.widgets["package_manager"].value = config.package_manager or "auto"
+        set_choice(self.widgets["package_manager"], config.package_manager or "auto")
         self.widgets["python_executable"].value = config.python_executable or "python"
         self.widgets["clone_env"].value = bool(
             getattr(config, "replicate_local_environment", True)

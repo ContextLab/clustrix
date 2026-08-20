@@ -23,6 +23,7 @@ from dataclasses import fields as dataclass_fields  # noqa: E402
 
 from clustrix.config import (  # noqa: E402
     ClusterConfig,
+    SECRET_FIELDS,
     config_field_names,
     configure,
     get_config,
@@ -57,7 +58,17 @@ SAVED_PROFILE = {
 @pytest.fixture(autouse=True)
 def isolated_profile_store(tmp_path, monkeypatch):
     """The widgets read and write a profile store on disk. Point it at a
-    throwaway: a previous run of these tests polluted a real ~/.clustrix."""
+    throwaway: a previous run of these tests polluted a real ~/.clustrix.
+
+    ``HOME`` and ``CLUSTRIX_CONFIG_DIR`` are set as well as the constructor
+    patched, because the two paths are reached by different code: the widget
+    builds a ProfileManager, while ``get_config_dir`` and every ``~``
+    expansion read the environment. Leaving either unset means the developer's
+    own home directory is one forgotten argument away.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(tmp_path / "clustrix-config"))
     original = ProfileManager.__init__
 
     def patched(self, config_dir=None):
@@ -518,6 +529,40 @@ class TestAStaleProfileKeyIsNamedOnTheRealPath:
         assert get_config().stage_warn_bytes == 4096
         assert widget.configs["Big Data (staging)"]["stage_warn_bytes"] == 4096
 
+    def test_the_carry_over_survives_clearing_the_name_box(self, capsys):
+        """The other way the box and the tracked name come apart, and the
+        cheaper one to reach: empty the name field.
+
+        ``_on_config_name_change`` returns early on a blank name -- deliberate,
+        since a half-typed rename must not destroy the key -- so the box holds
+        ``''`` while the widget is still tracking ``Big Data``. A lookup keyed
+        off ``self.config_name.value.strip()`` then finds nothing at all, and
+        the whole unmanaged carry-over disappears without a word: no stale key
+        named, no ``stage_warn_bytes``. Nothing raises, which is why only an
+        assertion on the carried values catches it.
+        """
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["Big Data"] = {
+            "name": "Big Data",
+            "cluster_type": "local",
+            "stage_warn_bytes": 4096,
+            "cluster_hostt": "typo.example.edu",
+        }
+        widget._load_config_to_widgets("Big Data")
+
+        widget.config_name.value = ""
+        assert widget.current_config_name == "Big Data"
+        assert widget.config_name.value != widget.current_config_name
+
+        told = _press(
+            lambda: widget._on_apply_config(None), widget.status_output, capsys
+        )
+
+        assert "❌" not in told, told
+        assert "cluster_hostt" in told
+        assert get_config().stage_warn_bytes == 4096
+        assert widget.configs["Big Data"]["stage_warn_bytes"] == 4096
+
 
 class TestProfilesWrittenBeforeTheKeysWereRenamed:
     """``queue`` and ``ssh_key_path`` are what this widget wrote until #165.
@@ -613,18 +658,76 @@ class TestACredentialChannelIsNotABackendSetting:
     ``BACKEND_ONLY_FIELDS`` exists so a value belonging to one backend cannot
     act on another: ``_choose_execution_mode`` routes on ``cluster_host``, so
     a leftover host would send a job the user configured as ``local`` to a
-    cluster. That reasoning reaches exactly as far as *targets and credential
-    material* -- what names the compute, who it runs as there, and the secret
-    that opens that particular door.
+    cluster. The line that follows from that is about *what the value names*.
+    Every backend-only field names **this cluster** -- the compute, who the
+    job runs as there, the secret that opens that particular door, and what it
+    may spend there. ``password_env_var`` and ``use_env_password`` name **this
+    machine**: which environment variable, on the computer clustrix is running
+    on, a password is read from. Switching backend says nothing about that
+    variable, and a modern-widget Apply on a ``local`` profile used to wipe it
+    anyway -- silently, and with nothing on screen to suggest it had.
 
-    ``password_env_var`` and ``use_env_password`` are neither. They hold no
-    secret and name no target; they name the environment variable a password
-    is read from, which is a property of the machine clustrix runs on.
-    ``save_to_file`` omits secret-bearing fields by default, so this pair is
-    the only supported way to supply a credential without writing it to disk,
-    and a modern-widget Apply on a ``local`` profile used to wipe it -- the
-    documented thing to do, undone by a button, without a word.
+    Two other distinctions were tried and are false, so they are recorded here
+    rather than left to be re-derived. "It holds no secret" separates nothing:
+    ``_NOT_ACTUALLY_SECRET`` keeps this pair out of ``SECRET_FIELDS`` on
+    purpose, so ``save_to_file`` writes both in plaintext -- and ``key_file``,
+    which stays backend-only, is equally a name rather than a credential and
+    is equally written. "It cannot be recovered from disk" separates nothing
+    either: no member of the set is unrecoverable, since the reset clears only
+    the setting and every control still shows its value afterwards. Both are
+    asserted below, so neither can be quoted as a justification again.
     """
+
+    def test_the_env_var_pair_is_written_to_disk_like_key_file(self, tmp_path):
+        """The "only unrecoverable setting" argument, refuted.
+
+        ``save_to_file`` omits ``SECRET_FIELDS``, and this pair is deliberately
+        not in it -- the flag and the variable *name* are not the password.
+        So the file keeps them, exactly as it keeps ``key_file``, which stays
+        on the backend-only side of the line. Secrecy and recoverability
+        therefore cannot be what separates the two groups.
+        """
+        assert "password_env_var" not in SECRET_FIELDS
+        assert "use_env_password" not in SECRET_FIELDS
+        assert "key_file" not in SECRET_FIELDS
+
+        destination = tmp_path / "written.yml"
+        ClusterConfig(
+            password_env_var="EXAMPLE_PW_VAR",
+            use_env_password=True,
+            key_file="~/.ssh/id_ed25519",
+        ).save_to_file(str(destination))
+        written = destination.read_text(encoding="utf-8")
+
+        assert "password_env_var" in written
+        assert "use_env_password" in written
+        assert "key_file" in written
+
+    def test_a_reset_backend_field_is_still_on_screen(self, capsys):
+        """The "unrecoverable" argument again, from the other side: the reset
+        clears the *setting*, not the control. Every backend-only field the
+        widget just dropped is still sitting in its box, so no member of the
+        set is any harder to get back than any other."""
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget.widgets["host"].value = "hpc.example.edu"
+        widget.widgets["username"].value = "researcher"
+        widget.widgets["ssh_key_file"].value = "~/.ssh/id_ed25519"
+        widget._update_ui_for_cluster_type()
+
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        assert get_config().cluster_host is None
+        assert widget.widgets["host"].value == "hpc.example.edu"
+        assert widget.widgets["username"].value == "researcher"
+        assert widget.widgets["ssh_key_file"].value == "~/.ssh/id_ed25519"
 
     def test_modern_widget_local_apply_keeps_the_password_env_var(self, capsys):
         configure(password_env_var="MY_CLUSTER_PW", use_env_password=True)
@@ -701,3 +804,147 @@ class TestACredentialChannelIsNotABackendSetting:
         assert live.hf_token is None
         assert "hf_SECRETTOKEN" not in told
         assert "hunter2-example" not in told
+
+    def test_a_local_apply_revokes_the_permission_to_spend_money(self, capsys):
+        """``hf_allow_gpu_flavors`` is not a preference, it is consent to be
+        billed by the second, and it is consent for *one* target.
+
+        ``hf_jobs._flavor`` refuses a GPU flavor unless this is True, so
+        leaving it standing across a backend switch carries a permission the
+        user granted for a HuggingFace namespace into whatever they point at
+        next -- and then back to HuggingFace, under a different namespace,
+        still granted. It has to fail safe, meaning it must land back on the
+        dataclass default rather than merely "not the previous value".
+        """
+        assert ClusterConfig().hf_allow_gpu_flavors is False
+        configure(
+            cluster_type="huggingface",
+            hf_namespace="contextlab",
+            hf_allow_gpu_flavors=True,
+        )
+        widget = ModernClustrixWidget()
+        assert widget.widgets["hf_allow_gpu"].value is True
+
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        assert get_config().hf_allow_gpu_flavors is False
+
+    def test_a_reset_backend_field_lands_on_its_real_default_not_none(self, capsys):
+        """The same defect D10 fixed one layer down, in
+        ``_config_data_for_backend``: the reset has to write
+        ``ClusterConfig()``'s value for the field, not ``None``.
+
+        Eight of the ten backend-only fields default to ``None`` anyway, so
+        ``None`` passes every assertion phrased as "the host is gone" while
+        leaving ``cluster_port`` -- typed ``int`` -- and ``remote_work_dir``
+        -- typed ``str`` -- holding a value their consumers cannot use. Said
+        the way the code that breaks says it.
+        """
+        configure(
+            cluster_type="ssh",
+            cluster_host="hpc.example.edu",
+            username="researcher",
+            cluster_port=2222,
+            remote_work_dir="/scratch/researcher/clustrix",
+        )
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        defaults = ClusterConfig()
+        assert live.cluster_port == defaults.cluster_port
+        assert live.remote_work_dir == defaults.remote_work_dir
+        # Said the way the code that breaks says it.
+        assert 1 <= int(live.cluster_port) <= 65535
+        assert live.remote_work_dir.rstrip("/").endswith("jobs")
+
+
+class TestASavedFlavorCanStillOpenTheWidget:
+    """A list baked into the UI must not be able to veto a saved
+    configuration.
+
+    ``ClusterConfig`` validates neither ``hf_flavor`` nor ``package_manager``
+    -- any string is accepted -- while the modern widget offers ten flavors
+    and four package managers in ``Dropdown``s. Assigning an unlisted value to
+    a ``Dropdown`` raises ``TraitError: Invalid selection``, and both
+    assignments happen in ``_load_config_to_widgets``, which the constructor
+    calls. So a user who configured a flavor this build has not heard of could
+    not open the widget at all -- not a degraded panel, an exception.
+
+    The legacy widget hit this first and fixed it by widening the options
+    instead of discarding the value; ``set_choice`` is now that one
+    implementation, used by both.
+    """
+
+    def test_a_flavor_the_dropdown_never_heard_of_opens_and_survives(self, capsys):
+        configure(cluster_type="huggingface", hf_namespace="contextlab")
+        configure(hf_flavor="a10g-large")
+
+        widget = ModernClustrixWidget()
+
+        assert widget.widgets["hf_flavor"].value == "a10g-large"
+        assert "a10g-large" in widget.widgets["hf_flavor"].options
+        # Still there afterwards: widening the options is only useful if the
+        # value then reaches the configuration rather than being replaced by
+        # the first entry in the list.
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+        assert "❌" not in told, told
+        assert get_config().hf_flavor == "a10g-large"
+
+    def test_a_package_manager_the_dropdown_never_heard_of_opens(self, capsys):
+        configure(cluster_type="local", package_manager="mamba")
+
+        widget = ModernClustrixWidget()
+
+        assert widget.widgets["package_manager"].value == "mamba"
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+        assert "❌" not in told, told
+        assert get_config().package_manager == "mamba"
+
+    def test_the_legacy_widget_loads_a_package_manager_it_does_not_offer(self):
+        """Found while fixing the modern widget, and reachable between the
+        two: the legacy menu offers only pip and conda, while the modern one
+        writes ``auto`` and ``uv``. Selecting such a profile here used to
+        raise ``TraitError`` out of the dropdown observer."""
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["From The Modern Widget"] = {
+            "name": "From The Modern Widget",
+            "cluster_type": "local",
+            "package_manager": "uv",
+        }
+
+        widget._load_config_to_widgets("From The Modern Widget")
+
+        assert widget.package_manager.value == "uv"
+        assert widget._save_config_from_widgets()["package_manager"] == "uv"
+
+    def test_the_listed_values_are_still_the_only_ones_offered(self):
+        """Widening happens for the value actually saved, not for everything:
+        a config that names nothing unusual must not grow the menu."""
+        configure(cluster_type="huggingface", hf_namespace="contextlab")
+        widget = ModernClustrixWidget()
+        assert "a10g-large" not in widget.widgets["hf_flavor"].options
+        assert "mamba" not in widget.widgets["package_manager"].options
