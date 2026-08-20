@@ -23,8 +23,10 @@ have none.
 Where configuration comes from
 ------------------------------
 
-**At import.** ``import clustrix`` calls ``_load_default_config()``, which
-tries these paths in order and stops at the first one that loads:
+**On first use.** ``import clustrix`` reads no files. The first call that
+actually needs the configuration -- ``get_config()``, ``configure()``,
+``save_config()``, or anything inside clustrix that reaches them -- triggers a
+one-time search of these paths, in order, stopping at the first that exists:
 
 1. ``<config dir>/config.yml``
 2. ``<config dir>/config.yaml``
@@ -34,11 +36,28 @@ tries these paths in order and stops at the first one that loads:
 6. ``./clustrix.json``
 
 ``<config dir>`` is ``~/.clustrix``, unless ``CLUSTRIX_CONFIG_DIR`` is set, in
-which case it is that (expanded). A file that raises while loading is skipped
-silently and the search continues.
+which case it is that (expanded).
+
+The search used to run at import, which meant importing the library read your
+home directory and your working directory before you had asked it for
+anything, and an unreadable ``~/.clustrix`` made ``import clustrix`` raise
+``PermissionError``. It is deferred so that neither happens. The singleton
+itself is still built at import; only the file read moved.
+
+A candidate that **cannot be examined at all** -- an unreadable directory, a
+dead automount -- is logged at ``WARNING`` and the search moves on to the next
+one.
+
+A candidate that **is found and then fails to load** -- malformed YAML, a
+misspelled setting -- raises ``clustrix.config.ConfigFileError``. It used to be
+skipped in silence, which left the process running on built-in defaults while
+you believed your file was in force; a ``cluster_host`` that never took effect
+means the job runs somewhere other than where you said. Fix the file, move it
+aside, or call ``clustrix.config.load_config(path)`` with a different one --
+an explicit load replaces the configuration and supersedes the search.
 
 Note item 4: a ``clustrix.yml`` in the current working directory is picked up
-automatically. Changing directory does not reload it.
+automatically, at first use. Changing directory afterwards does not reload it.
 
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not
@@ -77,7 +96,7 @@ exception of the pass-through extras listed under :ref:`decorator-extras`.
 
 1. ``@cluster(...)`` arguments (the six above, plus the extras).
 2. ``clustrix.configure()`` / direct attribute assignment.
-3. The configuration file found at import.
+3. The configuration file found by the first-use search.
 4. Dataclass defaults.
 
 There is **no** general environment-variable layer. Nothing reads a
@@ -90,7 +109,9 @@ Clustrix does read the environment for other purposes. Those uses group as
 follows, and not one of them writes to a configuration field.
 
 *Where configuration lives.* ``CLUSTRIX_CONFIG_DIR`` chooses the directory
-searched at import and written by ``save_config``.
+searched on first use and written by ``save_config``. It is read at the moment
+of the search, not at import, so setting it after ``import clustrix`` but
+before the first ``get_config()`` still takes effect.
 
 *What happens on import.* ``CLUSTRIX_AUTO_WIDGET`` displays the notebook
 widget when clustrix is imported.

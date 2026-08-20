@@ -329,7 +329,15 @@ class SafeRangeEvaluator(ast.NodeVisitor):
                 return left // right if right != 0 else None
             else:
                 return None
-        except Exception:
+        except (TypeError, ValueError, OverflowError) as exc:
+            # Narrowed from `except Exception`. These three are what constant
+            # folding on two operands can actually raise, and None -- "this
+            # bound is not statically known" -- is a correct answer to give
+            # the caller for them: it falls back to the generic iteration
+            # estimate and refuses to chunk the loop. Anything else raised in
+            # here would be a bug in this evaluator, and used to be reported
+            # as an unknown bound rather than as itself.
+            logger.debug("Could not fold a constant loop bound: %s", exc)
             return None
 
 
@@ -635,8 +643,22 @@ def detect_loops_in_function(
             bound_args = sig.bind_partial(*args, **kwargs)
             bound_args.apply_defaults()
             local_vars.update(bound_args.arguments)
-        except Exception:
-            pass
+        except (TypeError, ValueError) as exc:
+            # Narrowed from `except Exception`, and no longer silent. These
+            # are what signature()/bind_partial() raise. Losing the argument
+            # values is not fatal -- the loops are still detected, they just
+            # cannot have `range(n)` resolved from a parameter, so they are
+            # reported with unknown bounds and run sequentially. That is a
+            # correct answer, but it is also the difference between a
+            # parallelized submission and a serial one, so it is worth a line
+            # in the log rather than none.
+            logger.warning(
+                "Could not bind arguments of %s for loop analysis (%s); loop "
+                "bounds that depend on them will not be resolved and those "
+                "loops will not be parallelized.",
+                getattr(func, "__name__", func),
+                exc,
+            )
 
         detector = LoopDetector(local_vars)
 

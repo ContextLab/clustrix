@@ -346,6 +346,16 @@ class _SessionServer(paramiko.ServerInterface):
     def check_channel_exec_request(self, channel, command):
         text = command.decode()
         self.owner.commands.append(text)
+        if not self.owner.claim_exec_slot():
+            # A real SSH server refuses an exec request it will not honour --
+            # MaxSessions reached, a ForceCommand restriction, a session
+            # locked down by the account's authorized_keys entry. The client
+            # sees the channel close and paramiko raises SSHException. This is
+            # protocol-level refusal, not a stubbed-out method: SFTP
+            # subsystems on the same connection keep working, which is exactly
+            # the asymmetry that makes "the listing worked, the command did
+            # not" testable.
+            return False
         self.owner.spawn_command(channel, text, self.username)
         return True
 
@@ -361,6 +371,10 @@ class LocalSSHServer:
             environment, the way ``environment=`` in an ``authorized_keys``
             entry does on a real host. Nothing from the test process's own
             environment is passed through except ``PATH``.
+        max_execs: how many ``exec`` requests to honour before refusing the
+            rest, or ``None`` for no limit. Models a server that stops
+            granting command channels -- MaxSessions, a ForceCommand
+            restriction -- while SFTP on the same connection carries on.
     """
 
     host = "127.0.0.1"
@@ -371,10 +385,13 @@ class LocalSSHServer:
         password: Optional[str] = None,
         authorized_keys: Optional[List[Union[str, Path]]] = None,
         env: Optional[Dict[str, str]] = None,
+        max_execs: Optional[int] = None,
     ):
         self.root = str(root)
         self.password = password
         self.env = dict(env or {})
+        self.max_execs = max_execs
+        self._execs_granted = 0
         self.authorized_keys = [
             _load_public_key(path) for path in (authorized_keys or [])
         ]
@@ -472,6 +489,25 @@ class LocalSSHServer:
         ``ssh-keyscan`` would hand a real user.
         """
         return list(_host_keys())
+
+    def claim_exec_slot(self) -> bool:
+        """Take one of the remaining ``exec`` grants, if any are left."""
+        if self.max_execs is None:
+            return True
+        with self._lock:
+            if self._execs_granted >= self.max_execs:
+                return False
+            self._execs_granted += 1
+            return True
+
+    def refuse_further_execs(self) -> None:
+        """Grant no more ``exec`` requests from now on.
+
+        Lets a test set up over a working connection and then take command
+        channels away, without having to predict how many the setup used.
+        """
+        with self._lock:
+            self.max_execs = self._execs_granted
 
     def record_auth(self, username: str, method: str) -> None:
         with self._lock:

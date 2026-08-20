@@ -441,7 +441,21 @@ class FlexibleCredentialManager:
                     if source.is_available() and source.get_credentials(provider):
                         available[provider] = source.__class__.__name__
                         break
-                except Exception:
+                except Exception as e:
+                    # Log and continue: the remaining sources can still supply
+                    # a correct listing, and one broken source is not a reason
+                    # to refuse the whole report. But a source that *raised*
+                    # was reported identically to one that simply had no
+                    # credentials, so a broken keychain looked like an empty
+                    # one -- which is the wrong thing to go and fix.
+                    logger.warning(
+                        "Credential source %s failed while listing %s "
+                        "credentials (%s); it is not represented in this "
+                        "listing.",
+                        source.__class__.__name__,
+                        provider,
+                        e,
+                    )
                     continue
 
         return available
@@ -493,7 +507,20 @@ class FlexibleCredentialManager:
                         if source.is_available() and source.get_credentials(provider):
                             source_name = source.__class__.__name__
                             break
-                    except Exception:
+                    except Exception as e:
+                        # Log and continue: the credentials are already in
+                        # hand, so this loop only attributes them to a source
+                        # and "unknown" remains a correct answer. Saying which
+                        # source blew up on the way to that answer is the
+                        # difference between a diagnosable status report and a
+                        # shrug.
+                        logger.warning(
+                            "Credential source %s failed while attributing %s "
+                            "credentials (%s).",
+                            source.__class__.__name__,
+                            provider,
+                            e,
+                        )
                         continue
 
                 provider_status: Dict[str, Any] = {
