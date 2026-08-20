@@ -952,3 +952,47 @@ All four required strings (`pyproject.toml`, `setup.py`,
 branches. Checked with a parser rather than a shell one-liner, after a
 `bad substitution` produced silently empty fields for two of them — an empty
 field would have read as agreement.
+
+## CHANGELOG draft ready — and three merge actions fall out of it
+
+Draft: `<scratchpad>/changelog-draft-159-campaign-a1.md`. 92 entries plus a
+"Corrections to existing entries" section of 8. Written in the file's own voice
+and scanned clean by the repo's secret scanner. Branch tips it read are
+recorded at its head; later commits need folding in before it is applied.
+
+| Section | Entries |
+|-|-|
+| Fixed — security: credential (#167 + gate) | 14 |
+| Fixed — security: other (#111, host keys, #154) | 13 |
+| Fixed — correctness: #152 `cores` | 5 |
+| Fixed — correctness: #123 | 9 |
+| Fixed — correctness: #172 | 4 |
+| Fixed — correctness: other (#158 etc.) | 4 |
+| Fixed — the widget (#165) | 5 |
+| Fixed — the test suite could not be trusted (incl. #169) | 11 |
+| Added / Changed / Removed / Known limitations | 19 |
+
+### Merge action 1 — CHANGELOG will conflict
+`work/credential-gate` already carries a partial CHANGELOG section (blob
+`22860cc`). The draft is written to **supersede** it. Resolve that conflict by
+taking the draft, not by merging both.
+
+### Merge action 2 — the two #167 branches number things differently
+`work/fixes` numbers its commits **"Round 11..16"** while
+`work/credential-gate` numbers **"route 3/5/6/7/9/13"**, and both use "route N"
+in prose with different schemes. They also fix #167 by **different strategies**:
+`work/fixes` does per-route fixes plus write-path provenance;
+`work/credential-gate` does one choke point plus read-path derivation. After the
+merge these must read as one coherent story, so a pass over the merged
+comments and docs is required — this is documentation reconciliation, not code.
+
+### Merge action 3 — nothing is written for #168 or #171
+`git log --all --grep` finds no commit mentioning either, which is correct:
+both were dispatched after the draft was made. #168's two remaining sites are
+in flight on `work/fixes`; #171 is still queued. Fold both in before applying.
+
+### Already correct in the draft, do not re-litigate
+- #164, #169 and #172's `lspci` hole are labelled **fixed-but-unproven** or
+  **open**, each with the reason it cannot be closed locally.
+- The "#165 Apply is a no-op" report is explicitly **not** written up: it is
+  true on `work/fixes` alone and resolved by the merge.
