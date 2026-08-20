@@ -1372,3 +1372,45 @@ to `./clustrix.yml`.
 `work/silent-failures` removes it. **At the `config.py` reconciliation, take
 #123's error handling and the gate's provenance**; do not carry the gate's
 `except Exception: continue` forward.
+
+## #123 round four: `d1db83c` — 1890 passed / 0 failed
+
+**B1 — position no longer exempts a count.** Every count sentence anywhere in
+the file must now lie inside a family span, checked with the same span function
+the per-family test uses; combined with "exactly one per family" the arithmetic
+is total. Both of the reviewer's bypasses now fail (`line 1290` above family A,
+`line 1137` in the header narrative), and two legitimate occurrences in the
+module's own prose were **reworded rather than exempted** — the right direction.
+
+**The author caught a hole in their own first draft**, which is the discipline
+this campaign has been trying to instil: blanking `#` and `\n` character by
+character left the `:` of `#:`, so the check saw only 8 of the 12 counts —
+*precisely the four wrapped ones it exists for*. Fixed by blanking `#:` as a
+unit; the `#:`-wrapped bypass above family A now fails too. The symmetric hole
+(a family stating no count) was verified rather than assumed.
+
+**B2 — detected, not merely recorded.** The package does none of the four
+(grep empty), so this was a blind spot rather than a live defect — but it is
+now caught anyway: hook assignment matched by attribute name alone, so
+`import sys as s; s.excepthook = …` is seen, plus `logging.disable` /
+`warnings.simplefilter` / `filterwarnings` through aliases and from-imports.
+A live `sys.excepthook = lambda *a: None` planted in `clustrix/config.py` makes
+the package scan fail. Re-enabling spellings (`disable(NOTSET)`,
+`simplefilter("error")`, `sys.__excepthook__`) are exempt and tested.
+
+**B3 — the flaky test was deleted, with the measurement recorded.** Against a
+tree with `load_config`'s lock removed, the race test passed **3 of 8** runs
+while the scheduled test failed **8 of 8**. It asserted nothing the scheduled
+test does not, and the scheduled one also pins the mechanism. Rationale lives
+in the survivor's docstring.
+
+**Final arithmetic**: A6 B1 C1 D1 E1 F1 G1 H7 I1 J4 K1 **L3 = 28** entries,
+**twelve** root causes, families A..L contiguous. Guards-lost numbers unchanged
+at five — no guard was lost this round.
+
+Family L is the global suppression the name-based check cannot spell:
+`setattr(sys, "excepthook", …)`; `logging.getLogger().disabled = True` (the
+name `disabled` cannot be added because `modern_notebook_widget.py` assigns
+`button.disabled` six times); `warnings.filters.insert(…)`. The fourth
+red-team is asked whether that last justification is sound or whether the check
+could be qualified by receiver.
