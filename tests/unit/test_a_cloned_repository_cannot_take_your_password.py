@@ -36,6 +36,8 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 ``clustrix.auth_methods.stored_credential_is_for_config``.
 """
 
+import pathlib
+
 import pytest
 
 import clustrix.config as config_module
@@ -379,3 +381,348 @@ def test_the_provenance_is_never_written_to_disk(tmp_path):
     )
     with pytest.raises(ValueError, match="unknown setting"):
         load_config(str(hostile))
+
+
+# --------------------------------------------------------------------------
+# Provenance cannot be laundered from untrusted to trusted.
+#
+# The rule above is only worth anything if "untrusted" sticks. A second,
+# adversarial reading of it found several routes that turned a
+# working-directory host back into a trusted one, one of which needs no
+# adversary at all -- the notebook widget's Apply button does it in ordinary
+# use. What they have in common is that they rebuild a ``ClusterConfig``
+# from an existing one's *field values*: ``__post_init__`` runs again on the
+# new object and records ``runtime``, the trusted end of the scale, even
+# though the hostname is still the string the untrusted file supplied.
+# --------------------------------------------------------------------------
+
+
+def test_a_widget_apply_round_trip_does_not_launder_a_working_directory_host(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """``configure(**asdict(config))`` is not the user typing the host.
+
+    The reachable one. ``notebook_magic_widget`` auto-loads ``./clustrix.yml``
+    when it opens, ``_save_config_from_widgets`` puts ``cluster_host`` in the
+    dict it builds, and Apply calls ``configure(**config_data)``. So the
+    widget reads a hostname out of a file nobody chose and hands it straight
+    back to the function that means "this came from Python", and the config
+    ends up marked ``runtime``. Nobody has to do anything unusual: opening
+    the widget in a cloned repository and pressing Apply is the whole
+    sequence.
+
+    RED before the fix: source ``runtime``, and the sentinel reaches the
+    attacker's server.
+    """
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    cloned_repository = tmp_path / "cloned-repository"
+    cloned_repository.mkdir()
+    (cloned_repository / "clustrix.yml").write_text(
+        _config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(cloned_repository)
+    with pytest.warns(UserWarning, match="current working directory"):
+        config_module._load_default_config()
+
+    from dataclasses import asdict
+
+    configure(**asdict(get_config()))
+
+    assert get_config().cluster_host == attacker_server.host
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+    authenticated = _attempt_connection()
+
+    assert attacker_server.authentications == [], (
+        "a round trip through configure() re-marked a working-directory "
+        "host as trusted: " + repr(attacker_server.authentications)
+    )
+    assert not authenticated
+
+
+def test_dataclasses_replace_does_not_launder_a_working_directory_host(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """``replace`` copies a config; it does not re-choose the hostname.
+
+    ``dataclasses.replace(cfg, cores=8)`` calls ``cfg.__class__(**fields)``,
+    so ``__post_init__`` runs on the copy and the copy claims ``runtime``.
+    Changing an unrelated field is not consent to a hostname.
+
+    RED before the fix: source ``runtime``, and the sentinel reaches the
+    attacker's server.
+    """
+    import dataclasses
+
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    cloned_repository = tmp_path / "cloned-repository"
+    cloned_repository.mkdir()
+    (cloned_repository / "clustrix.yml").write_text(
+        _config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(cloned_repository)
+    with pytest.warns(UserWarning, match="current working directory"):
+        config_module._load_default_config()
+
+    copied = dataclasses.replace(get_config(), default_cores=2)
+
+    assert copied.cluster_host == attacker_server.host
+    assert get_config_source(copied) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert stored_credential_is_for_config(copied, {"password": SENTINEL_PASSWORD})
+
+    manager = ConnectionManager(copied)
+    try:
+        manager.setup_ssh_connection()
+    except Exception:
+        pass
+    finally:
+        manager.disconnect()
+
+    assert (
+        attacker_server.authentications == []
+    ), "dataclasses.replace re-marked a working-directory host as trusted: " + repr(
+        attacker_server.authentications
+    )
+
+
+def test_a_host_a_working_directory_file_named_stays_untrusted_in_a_fresh_object(
+    tmp_path, monkeypatch
+):
+    """The rule stated on its own, without a server.
+
+    Once an untrusted file has named a hostname in this process, building
+    any config around that hostname does not make it the user's choice --
+    because the two really are indistinguishable, and the safe answer to an
+    indistinguishable pair is the untrusted one.
+
+    The two spellings differ in case and in the trailing dot, which are the
+    two things DNS does not treat as significant. Comparing the strings
+    as-written would let ``Named.By.The.Repository.`` in the file and
+    ``named.by.the.repository`` in the code be two different hosts, which is
+    the same "a partial match is a different question" defect
+    ``_hostname_matches`` documents -- so both ends go through the one
+    normalisation.
+    """
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "clustrix.yml").write_text(
+        "cluster_type: ssh\ncluster_host: Named.By.The.Repository.\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(project)
+    with pytest.warns(UserWarning):
+        config_module._load_default_config()
+
+    fresh = ClusterConfig(cluster_type="ssh", cluster_host="named.by.the.repository")
+
+    assert get_config_source(fresh) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert stored_credential_is_for_config(fresh, {"password": SENTINEL_PASSWORD})
+
+    # A host it never named is unaffected: this is a record of hostnames, not
+    # a switch that turns trust off.
+    other = ClusterConfig(cluster_type="ssh", cluster_host="chosen.example.edu")
+    assert get_config_source(other) == CONFIG_SOURCE_RUNTIME
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    [
+        "_clustrix_config_source",
+        "_ClusterConfig__clustrix_config_source",
+    ],
+)
+def test_configure_refuses_to_set_the_provenance_itself(spelling):
+    """``configure()`` validated against ``hasattr``, which is not "a field".
+
+    Every attribute an instance happens to carry answers True to
+    ``hasattr``, and the provenance record is an instance attribute, so
+    ``configure(_clustrix_config_source="runtime")`` was accepted and set
+    the config trusted -- a caller asserting its own trustworthiness, which
+    is the one claim it must never be able to make. ``load_config`` and
+    ``ClusterConfig(**yaml)`` already rejected every spelling; this was the
+    remaining way in.
+    """
+    config_module.set_config_source(get_config(), CONFIG_SOURCE_WORKING_DIRECTORY)
+
+    with pytest.raises(ValueError, match="Unknown configuration parameter"):
+        configure(**{spelling: CONFIG_SOURCE_RUNTIME})
+
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_configure_still_accepts_every_declared_field():
+    """The validation is narrower, so prove it did not become too narrow."""
+    configure(cluster_type="ssh", cluster_host="typed.example.edu", default_cores=3)
+    assert get_config().default_cores == 3
+    assert get_config_source(get_config()) == CONFIG_SOURCE_RUNTIME
+
+
+# --------------------------------------------------------------------------
+# A configuration directory named by an environment variable.
+# --------------------------------------------------------------------------
+
+
+def test_a_redirected_config_dir_does_not_choose_who_gets_the_password(
+    attacker_server, tmp_path, monkeypatch
+):
+    """``CLUSTRIX_CONFIG_DIR`` is inherited state, not a deliberate act.
+
+    The whole argument for trusting ``<config dir>/config.yml`` is that
+    putting a file in ``~/.clustrix`` is something the user did. That does
+    not survive the *directory* being named by an environment variable: a
+    repository-shipped ``.envrc``, ``Makefile`` or devcontainer sets one for
+    every process run inside the checkout, and then ships the ``config.yml``
+    to go in it.
+
+    The credential here is an exported ``SSH_PASSWORD`` -- the environment
+    credential source -- because that is the case that leaks: a ``.env``
+    inside the redirected directory would be the attacker's own file, so its
+    contents are not the victim's secret. This is the victim's own shell
+    variable going to the repository's host.
+
+    RED before the fix: source ``user-config-dir``, and the sentinel reaches
+    the attacker's server.
+    """
+    monkeypatch.setenv("SSH_PASSWORD", SENTINEL_PASSWORD)
+    for name in ("SSH_HOST", "SSH_USERNAME", "SSH_PRIVATE_KEY_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    credential_manager_module._credential_manager = None
+
+    redirected = tmp_path / "cloned-repository" / "attacker-config"
+    redirected.mkdir(parents=True)
+    (redirected / "config.yml").write_text(
+        _config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(redirected))
+
+    with pytest.warns(UserWarning, match="CLUSTRIX_CONFIG_DIR"):
+        config_module._load_default_config()
+
+    assert get_config().cluster_host == attacker_server.host
+    assert (
+        get_config_source(get_config())
+        == config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    )
+
+    authenticated = _attempt_connection()
+
+    assert attacker_server.authentications == [], (
+        "an exported password went to a host named by a config directory "
+        "that an environment variable chose: " + repr(attacker_server.authentications)
+    )
+    assert not authenticated
+
+
+def test_the_variable_pointing_at_the_default_directory_is_not_a_redirect(
+    monkeypatch, tmp_path
+):
+    """Setting it *to* ``~/.clustrix`` names the same directory.
+
+    Containers and test harnesses do this routinely, and the comparison is
+    made after resolving symlinks so that a symlinked ``~/.clustrix`` is the
+    directory it points at rather than a redirect -- redirecting it that way
+    needs write access to the home directory, at which point provenance is
+    not the problem.
+    """
+    home = pathlib.Path.home()
+    monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(home / ".clustrix"))
+    assert config_module.config_dir_is_default()
+
+    monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(tmp_path / "elsewhere"))
+    assert not config_module.config_dir_is_default()
+
+    monkeypatch.delenv("CLUSTRIX_CONFIG_DIR", raising=False)
+    assert config_module.config_dir_is_default()
+
+
+# --------------------------------------------------------------------------
+# The environment-variable password method had no gate at all.
+# --------------------------------------------------------------------------
+
+
+def test_an_environment_password_is_not_offered_to_an_untrusted_host(
+    tmp_path, monkeypatch
+):
+    """``EnvironmentPasswordMethod`` checked nothing before handing it over.
+
+    It read ``os.environ[config.password_env_var]`` and returned it, with no
+    host check and no provenance check -- the only credential source here
+    without one. With a working-directory config the whole method is the
+    repository's: the file names ``password_env_var`` as well as
+    ``cluster_host``, so it chooses which of the victim's environment
+    variables to read *and* where to send it.
+
+    RED before the fix: ``success=True`` and the sentinel handed back.
+    """
+    from clustrix.auth_methods import EnvironmentPasswordMethod
+
+    monkeypatch.setenv("SSH_PASSWORD", SENTINEL_PASSWORD)
+
+    project = tmp_path / "cloned-repository"
+    project.mkdir()
+    (project / "clustrix.yml").write_text(
+        "cluster_type: ssh\n"
+        "cluster_host: named.by.the.repository\n"
+        "username: victim\n"
+        "use_env_password: true\n"
+        "password_env_var: SSH_PASSWORD\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    with pytest.warns(UserWarning):
+        config_module._load_default_config()
+
+    config = get_config()
+    method = EnvironmentPasswordMethod(config)
+    assert method.is_applicable({})
+
+    result = method.attempt_auth(
+        {"hostname": "named.by.the.repository", "username": "victim"}
+    )
+
+    assert not result.success
+    assert result.password != SENTINEL_PASSWORD
+    assert result.password is None
+
+
+def test_an_environment_password_still_works_for_a_host_the_user_chose(monkeypatch):
+    """And the gate does not break the feature it is gating."""
+    from clustrix.auth_methods import EnvironmentPasswordMethod
+
+    monkeypatch.setenv("SSH_PASSWORD", SENTINEL_PASSWORD)
+    configure(
+        cluster_type="ssh",
+        cluster_host="chosen.example.edu",
+        username="victim",
+        use_env_password=True,
+        password_env_var="SSH_PASSWORD",
+    )
+
+    result = EnvironmentPasswordMethod(get_config()).attempt_auth(
+        {"hostname": "chosen.example.edu", "username": "victim"}
+    )
+
+    assert result.success
+    assert result.password == SENTINEL_PASSWORD
+
+
+def test_an_environment_password_is_not_offered_to_some_other_host(monkeypatch):
+    """It belongs to ``config.cluster_host``, not to whoever asks."""
+    from clustrix.auth_methods import EnvironmentPasswordMethod
+
+    monkeypatch.setenv("SSH_PASSWORD", SENTINEL_PASSWORD)
+    configure(
+        cluster_type="ssh",
+        cluster_host="chosen.example.edu",
+        username="victim",
+        use_env_password=True,
+        password_env_var="SSH_PASSWORD",
+    )
+
+    result = EnvironmentPasswordMethod(get_config()).attempt_auth(
+        {"hostname": "somewhere.else.example", "username": "victim"}
+    )
+
+    assert not result.success
+    assert result.password is None

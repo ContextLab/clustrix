@@ -22,7 +22,10 @@ No mocks: every assertion is against the real declarations and, where it
 matters, against a real file written and read back.
 """
 
+import collections.abc
+import dataclasses
 from dataclasses import fields
+from typing import Any, Dict, List, Mapping, MutableMapping, Optional, Union
 
 import pytest
 
@@ -183,3 +186,92 @@ def test_the_credential_fields_are_still_classified_as_secret():
     """The exemptions must not have swallowed the thing they sit next to."""
     assert {"password", "api_key", "hf_token"} <= SECRET_FIELDS
     assert SECRET_FIELDS <= FIELD_NAMES
+
+
+# --------------------------------------------------------------------------
+# The mapping detector has to describe mappings, not enumerate ``dict``.
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        dict,
+        Dict[str, str],
+        Optional[Dict[str, str]],
+        Mapping[str, str],
+        Optional[Mapping[str, str]],
+        MutableMapping[str, str],
+        Optional[MutableMapping[str, str]],
+        collections.abc.Mapping,
+        Union[Dict[str, str], None],
+        List[Dict[str, str]],
+        Any,
+        Optional[Any],
+        object,
+        "Dict[str, str]",
+    ],
+)
+def test_every_spelling_of_a_mapping_is_opaque(annotation):
+    """The bug this replaces asked ``issubclass(origin, dict)``.
+
+    That caught ``Dict[str, str]`` and a bare ``dict`` and missed
+    ``Mapping``, ``MutableMapping`` and ``Any``. It was verified by really
+    adding a field: ``mapping_typed: Optional[Mapping[str, str]] =
+    {"api_key": ...}`` put the value on disk, which is precisely the failure
+    ``UNCLASSIFIABLE_FIELDS`` exists to prevent -- the same bug class, one
+    annotation away.
+
+    Enumerating spellings is what name-based secret classification did, and
+    it failed the same way. ``collections.abc.Mapping`` is the interface all
+    of these name; ``Any``, ``object`` and an unresolved string annotation
+    do not constrain the value at all, so a mapping cannot be ruled out and
+    the fail-closed answer is the only sound one.
+    """
+    assert _is_opaque_mapping(annotation)
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [
+        str,
+        Optional[str],
+        int,
+        bool,
+        Optional[int],
+        List[str],
+        Optional[List[str]],
+    ],
+)
+def test_a_field_that_cannot_hold_a_mapping_is_still_written(annotation):
+    """And prove the widening did not swallow everything.
+
+    A detector that answers True for every annotation would pass the test
+    above and withhold the entire configuration file.
+    """
+    assert not _is_opaque_mapping(annotation)
+
+
+def test_the_derivation_picks_up_a_mapping_field_added_later():
+    """The escape was found by really adding a field; this is that shape.
+
+    ``UNCLASSIFIABLE_FIELDS`` is ``{f.name for f in fields(ClusterConfig) if
+    _is_opaque_mapping(f.type)}``. Run the identical derivation over a
+    dataclass carrying the annotation that escaped -- ``Optional[Mapping[str,
+    str]]``, whose value went to disk verbatim -- and the field has to come
+    out withheld, without permanently adding one to the shipped
+    configuration.
+    """
+
+    @dataclasses.dataclass
+    class ConfigWithAMappingField:
+        cluster_type: str = "local"
+        remote_work_dir: str = "/tmp"
+        mapping_typed: Optional[Mapping[str, str]] = None
+        anything: Any = None
+
+    withheld = {
+        f.name for f in fields(ConfigWithAMappingField) if _is_opaque_mapping(f.type)
+    }
+
+    assert withheld == {"mapping_typed", "anything"}

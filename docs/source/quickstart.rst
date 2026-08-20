@@ -378,10 +378,10 @@ Write the settings once and load them, instead of calling
         default_cores=8,
     )
 
-    save_config("clustrix.yml")
+    save_config("my-cluster.yml")
 
     # ... in another session ...
-    load_config("clustrix.yml")
+    load_config("my-cluster.yml")
     print(get_config().cluster_type, get_config().cluster_host)
 
 Two things the saved file does for you:
@@ -397,8 +397,25 @@ Two things the saved file does for you:
 
 Clustrix also loads a configuration automatically at import time if it finds
 one, checking ``~/.clustrix/config.{yml,yaml,json}`` and then
-``./clustrix.{yml,yaml,json}``. Set ``CLUSTRIX_CONFIG_DIR`` to move the first
-of those. Full details in :doc:`configuration`.
+``./clustrix.{yml,yaml,json}``.
+
+.. warning::
+
+   The file above is deliberately **not** called ``clustrix.yml``. That name
+   in the current working directory is adopted automatically, by whatever
+   directory you happen to be in -- ``git clone`` and ``cd`` is enough for a
+   repository to supply one -- so a ``cluster_host`` it sets is **not**
+   trusted with a stored credential. Naming a file yourself in
+   ``load_config(path)`` is; that call is you vouching for that file, so
+   point it at one you wrote rather than at one that arrived with a
+   checkout.
+
+   For settings you want loaded automatically *and* trusted, put them in
+   ``~/.clustrix/config.yml``. Setting ``CLUSTRIX_CONFIG_DIR`` still moves
+   that search, but a directory named by an environment variable is not
+   trusted with credentials either -- an environment variable is inherited
+   from whatever started the process. :doc:`configuration` has the full
+   rule.
 
 The command line does the same thing:
 

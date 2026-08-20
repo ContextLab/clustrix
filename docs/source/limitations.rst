@@ -594,7 +594,11 @@ What to do about it on Windows:
       icacls "%USERPROFILE%\.clustrix" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"
 
   Set ``CLUSTRIX_CONFIG_DIR`` if you want that directory to be somewhere other
-  than ``%USERPROFILE%\.clustrix``.
+  than ``%USERPROFILE%\.clustrix``. Note that a config directory named by that
+  variable is not trusted to choose which host receives a *stored* credential
+  -- see :ref:`the search order <configuration>` -- so name the file in
+  ``load_config(path)`` or the host in ``configure(cluster_host=...)`` when you
+  move it.
 * Treat a saved clustrix config on Windows as you would any other unprotected
   file: do not put it on a shared drive, and do not commit it.
 

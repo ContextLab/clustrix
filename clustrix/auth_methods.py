@@ -6,7 +6,12 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from .config import ClusterConfig, config_source_is_trusted, get_config_source
+from .config import (
+    ClusterConfig,
+    config_source_is_trusted,
+    get_config_source,
+    normalize_hostname as _normalize_hostname,
+)
 from .credential_manager import get_credential_manager
 
 
@@ -104,7 +109,24 @@ class SSHKeyAuthMethod(AuthMethod):
 
 
 class EnvironmentPasswordMethod(AuthMethod):
-    """Environment variable-based password authentication."""
+    """Environment variable-based password authentication.
+
+    Gated by the same rule as every other credential source here, because
+    it was the one that had no gate at all: it read
+    ``os.environ[config.password_env_var]`` and handed it to whoever asked,
+    with no check on ``cluster_host`` and no check on where that host came
+    from. Nothing in-tree connects with its result today -- only
+    ``AuthenticationManager`` reaches it -- so this was a hole waiting for a
+    caller rather than a live leak, which is exactly the moment to close it:
+    verified by asking ``AuthenticationManager`` to authenticate against a
+    host from a ``./clustrix.yml``, which used to get the secret back.
+
+    Note that with a working-directory config the *whole* method is the
+    attacker's: the file names ``password_env_var`` as well as
+    ``cluster_host``, so an ungated version reads an environment variable of
+    the repository's choosing and sends it to a host of the repository's
+    choosing.
+    """
 
     def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
         """Check if environment variable password is configured."""
@@ -114,6 +136,39 @@ class EnvironmentPasswordMethod(AuthMethod):
         """Attempt to get password from environment variable."""
         if not self.config.password_env_var:
             return AuthResult(success=False, error="No environment variable specified")
+
+        # The variable names no host, so this is rule 2 of
+        # ``stored_credential_is_for_config``: the host has to come from
+        # somewhere the user chose. Reused rather than restated -- a second
+        # implementation of "may this credential go to this host" is a
+        # second thing to get wrong.
+        refusal = stored_credential_is_for_config(self.config, {})
+        if refusal:
+            return AuthResult(
+                success=False,
+                error=f"${self.config.password_env_var} was not offered: {refusal}",
+                guidance=(
+                    "The environment variable names no host, so it is only "
+                    "used for a cluster_host you chose."
+                ),
+            )
+
+        # And it belongs to *this* config's host, so a connection to some
+        # other host does not get it either.
+        hostname = connection_params.get("hostname", "")
+        if hostname and not _hostname_matches(hostname, self.config.cluster_host):
+            return AuthResult(
+                success=False,
+                error=(
+                    f"${self.config.password_env_var} is configured for "
+                    f"{self.config.cluster_host!r} and this connection is to "
+                    f"{hostname!r}"
+                ),
+                guidance=(
+                    "Set cluster_host to the host you are connecting to, or "
+                    "supply the password for this host another way."
+                ),
+            )
 
         password = os.environ.get(self.config.password_env_var)
 
@@ -125,20 +180,6 @@ class EnvironmentPasswordMethod(AuthMethod):
                 error=f"Environment variable ${self.config.password_env_var} not set",
                 guidance=f"Set password with: export {self.config.password_env_var}='your_password'",
             )
-
-
-def _normalize_hostname(hostname: object) -> str:
-    """The comparable form of a hostname, or ``""`` if there isn't one.
-
-    Case is not significant in DNS and a trailing dot only marks a name as
-    already absolute, so ``HPC.Example.Edu.`` and ``hpc.example.edu`` are
-    the same host and must compare equal. Anything that is not a non-empty
-    string -- ``None``, a stray ``0``, whitespace -- normalises to ``""``,
-    which :func:`_hostname_matches` then refuses outright.
-    """
-    if not isinstance(hostname, str):
-        return ""
-    return hostname.strip().rstrip(".").lower()
 
 
 def _hostname_matches(target: object, credential_host: object) -> bool:

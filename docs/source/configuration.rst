@@ -58,6 +58,31 @@ automatically. Changing directory does not reload it.
    somewhere you chose: ``<config dir>/config.yml``,
    ``load_config("path/to/clustrix.yml")``, or ``configure(cluster_host=...)``.
 
+   **Items 1-3 are trusted only while ``<config dir>`` is ``~/.clustrix``.**
+   The reason to trust them is that putting a file in your own
+   ``~/.clustrix`` is something you did; that reason does not survive the
+   *directory* being named by ``CLUSTRIX_CONFIG_DIR``, because an
+   environment variable is inherited from whatever started the process and a
+   repository-shipped ``.envrc``, ``Makefile`` or devcontainer definition
+   sets one for every command run inside the checkout. A redirected config
+   directory therefore behaves like items 4-6: the settings apply, a
+   ``UserWarning`` names the file, and a hostless stored credential is not
+   offered to a ``cluster_host`` it named. The redirect itself is unchanged
+   and still what you want in a container or on a shared machine -- to
+   authorise a host from one, name the file in ``load_config(path)`` or the
+   host in ``configure(cluster_host=...)``.
+
+   **Provenance follows the hostname, not the object.** Once an untrusted
+   file has named a ``cluster_host`` in a process, rebuilding a config
+   around that same hostname does not make it your choice --
+   ``dataclasses.replace(config, ...)``, ``configure(**asdict(config))``
+   (which is what the notebook widget's *Apply* button does) and any other
+   round trip all leave it untrusted. Handing a value back through a
+   function is not evidence that anyone chose it. The cost is that if a
+   ``./clustrix.yml`` names the host you were going to use anyway, you have
+   to authorise it explicitly by one of the routes above; the two cases are
+   genuinely indistinguishable, so the refusal is the safe answer.
+
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not
 re-exported at the package top level -- replaces the instance wholesale from a
@@ -108,7 +133,8 @@ Clustrix does read the environment for other purposes. Those uses group as
 follows, and not one of them writes to a configuration field.
 
 *Where configuration lives.* ``CLUSTRIX_CONFIG_DIR`` chooses the directory
-searched at import and written by ``save_config``.
+searched at import and written by ``save_config``. It moves where clustrix
+looks; it does not vouch for what it finds there (see the warning above).
 
 *What happens on import.* ``CLUSTRIX_AUTO_WIDGET`` displays the notebook
 widget when clustrix is imported.
@@ -603,8 +629,9 @@ A worked configuration
        return torch.load(dataset_path).mean().item()
 
 The same thing as a file, loadable with
-``from clustrix.config import load_config; load_config("clustrix.yml")``, or
-picked up automatically if it sits in the working directory:
+``from clustrix.config import load_config; load_config("my-cluster.yml")``.
+Named ``clustrix.yml`` it is also picked up automatically when it sits in the
+working directory -- along with the credential restriction described above:
 
 .. code-block:: yaml
 

@@ -1,3 +1,4 @@
+import collections.abc as collections_abc
 import json
 import re
 import secrets as _secrets
@@ -452,15 +453,40 @@ PERSISTABLE_KEYS = frozenset(
 def _is_opaque_mapping(field_type: object) -> bool:
     """Whether a declared field holds a mapping whose *keys* are not ours.
 
-    A ``Dict`` field on ``ClusterConfig`` is a hole in every name-based
+    A mapping field on ``ClusterConfig`` is a hole in every name-based
     classifier, because the names inside it are the user's rather than the
-    dataclass's. ``Optional[...]`` is unwrapped, and both the ``typing``
-    spelling (``Dict[str, str]``) and the bare builtin (``dict``) count.
+    dataclass's. ``Optional[...]`` and other unions are unwrapped.
+
+    **What counts is the abstract interface, not ``dict``.** The first
+    version of this asked ``issubclass(origin, dict)``, which is the same
+    mistake in miniature that name-matching was: it enumerated one spelling
+    of the thing rather than describing the thing. ``Dict[str, str]`` and a
+    bare ``dict`` were caught; ``Mapping[str, str]``,
+    ``MutableMapping[str, str]`` and ``Any`` were not, and a field annotated
+    ``Optional[Mapping[str, str]]`` holding ``{"api_key": ...}`` reached
+    disk verbatim -- exactly the failure this function exists to prevent.
+    ``collections.abc.Mapping`` is the interface all of those spellings
+    name, and ``dict`` is a subclass of it, so this is strictly wider.
+
+    ``Any`` and ``object`` are opaque for a different reason: they do not
+    constrain the value at all, so the value *may* be a mapping and nothing
+    here can rule it out. So is an annotation left as a string -- what
+    ``from __future__ import annotations`` does to every annotation in a
+    module -- which cannot be inspected without resolving it. Both are
+    withheld rather than guessed at, on the same fail-closed rule the rest
+    of this module follows: an unclassifiable field is not a safe field.
     """
     candidates = [field_type, *get_args(field_type)]
     for candidate in candidates:
+        if candidate is Any or candidate is object:
+            return True
+        if isinstance(candidate, str):
+            # An unresolved (stringised) annotation. Resolving it here would
+            # need the defining module's namespace; withholding the field is
+            # the answer that cannot leak.
+            return True
         origin = get_origin(candidate) or candidate
-        if isinstance(origin, type) and issubclass(origin, dict):
+        if isinstance(origin, type) and issubclass(origin, collections_abc.Mapping):
             return True
     return False
 
@@ -699,6 +725,26 @@ CONFIG_SOURCE_USER_CONFIG_DIR = "user-config-dir"
 #: this file by being in the directory; ``git clone && cd`` is enough.
 CONFIG_SOURCE_WORKING_DIRECTORY = "working-directory"
 
+#: Found in a configuration directory named by ``CLUSTRIX_CONFIG_DIR``
+#: rather than in the default ``~/.clustrix``. **Not trusted.** The whole
+#: argument for trusting the configuration directory is that putting a file
+#: in ``~/.clustrix`` is a deliberate act by the person whose home directory
+#: it is. That argument does not survive the directory itself being named by
+#: an environment variable: environment variables are ambient, inherited
+#: state, and a repository-shipped ``.envrc``, ``Makefile`` or devcontainer
+#: definition sets one for every process run inside the checkout. Redirected
+#: to a directory it ships, a repository chooses ``cluster_host`` again --
+#: the same defect as ``./clustrix.yml``, one level of indirection away, and
+#: reproduced end to end (a password exported as ``SSH_PASSWORD`` in the
+#: user's own shell reached a host of the repository's choosing).
+#:
+#: The redirect itself keeps working, because containers, CI images and
+#: shared machines need it; what it no longer does is *vouch* for a hostname.
+#: A user who genuinely keeps their configuration somewhere else says so in
+#: Python -- ``load_config(path)`` or ``configure(cluster_host=...)`` -- and
+#: the warning raised when a redirected file is adopted says exactly that.
+CONFIG_SOURCE_REDIRECTED_CONFIG_DIR = "redirected-config-dir"
+
 #: The sources that count as "the user configured this". Everything not
 #: listed is untrusted, so a source nobody has thought of yet fails closed.
 TRUSTED_CONFIG_SOURCES = frozenset(
@@ -709,30 +755,118 @@ TRUSTED_CONFIG_SOURCES = frozenset(
     }
 )
 
+#: The sources that do not. Named as a set of its own rather than left as
+#: "whatever is not trusted", because :func:`set_config_source` has to
+#: record *which* untrusted source named a hostname.
+UNTRUSTED_CONFIG_SOURCES = frozenset(
+    {
+        CONFIG_SOURCE_WORKING_DIRECTORY,
+        CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
+    }
+)
+
 #: Every source there is. A new one has to be added here *and* decided about
 #: above, so it cannot become trusted by being forgotten.
-CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | {CONFIG_SOURCE_WORKING_DIRECTORY}
+CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | UNTRUSTED_CONFIG_SOURCES
+
+
+def normalize_hostname(hostname: object) -> str:
+    """The comparable form of a hostname, or ``""`` if there isn't one.
+
+    Case is not significant in DNS and a trailing dot only marks a name as
+    already absolute, so ``HPC.Example.Edu.`` and ``hpc.example.edu`` are
+    the same host and must compare equal. Anything that is not a non-empty
+    string -- ``None``, a stray ``0``, whitespace -- normalises to ``""``,
+    which every caller then refuses outright.
+
+    Lives here rather than in ``auth_methods`` (which imported it from a
+    private name) because the provenance record below compares hostnames
+    too, and two normalisations would be two different answers to "is this
+    the same host".
+    """
+    if not isinstance(hostname, str):
+        return ""
+    return hostname.strip().rstrip(".").lower()
+
+
+#: Every hostname an untrusted source has named in this process, mapped to
+#: the source that named it.
+#:
+#: **Why a value-keyed record and not just the per-object attribute.** The
+#: attribute answers "where did *this object* come from", and every route
+#: that builds a *new* ``ClusterConfig`` from an old one's field values
+#: therefore resets it to ``runtime``, which is the trusted end of the
+#: scale. Two such routes were live:
+#:
+#: * ``dataclasses.replace(cfg, ...)`` -- it calls ``cls(**fields)``, so
+#:   ``__post_init__`` runs again on the copy and the copy is trusted.
+#: * The notebook widget's Apply button -- ``configure(**asdict(cfg))``
+#:   round-trips the config it auto-loaded from ``./clustrix.yml`` straight
+#:   back through the function that means "the user typed this".
+#:
+#: Neither is exotic and the second needs no adversary at all. What both
+#: have in common is that the *hostname is unchanged*: it is still the
+#: string an untrusted file supplied, and passing it through a function call
+#: is not evidence that anybody chose it. So the record is keyed by the
+#: hostname rather than by object identity, and it survives ``replace``,
+#: ``asdict`` round trips, copies, and any route nobody has thought of --
+#: because none of them change the one thing that matters, which is who
+#: gets the password.
+#:
+#: The cost is a false refusal: a user whose ``./clustrix.yml`` names the
+#: same host they then type themselves is refused, because those two are
+#: genuinely indistinguishable. That is a failure in the safe direction and
+#: the refusal message names the fix.
+#:
+#: Append-only within a process, and there is deliberately no public way to
+#: clear it -- a "forget that this was untrusted" API is just the laundering
+#: route again with a friendlier name.
+_HOSTS_NAMED_BY_UNTRUSTED_SOURCES: Dict[str, str] = {}
 
 
 def set_config_source(config: ClusterConfig, source: str) -> None:
-    """Record where ``config`` was read from."""
+    """Record where ``config`` was read from.
+
+    An untrusted source additionally taints the hostname it named, for the
+    reasons set out on :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES`.
+    """
     if source not in CONFIG_SOURCES:
         raise ValueError(
             f"Unknown configuration source: {source!r}. "
             f"Known sources are {sorted(CONFIG_SOURCES)}."
         )
     config._clustrix_config_source = source
+    if source in UNTRUSTED_CONFIG_SOURCES:
+        host = normalize_hostname(getattr(config, "cluster_host", None))
+        if host:
+            _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.setdefault(host, source)
 
 
 def get_config_source(config: ClusterConfig) -> str:
-    """Where ``config`` was read from.
+    """Where ``config``'s ``cluster_host`` came from.
 
     Falls back to the *untrusted* answer for an object that somehow has no
     record -- one restored by ``pickle``, say, which does not run
     ``__post_init__``. An absent value must never read as "trusted", which
     is the same rule ``_hostname_matches`` applies to an absent hostname.
+
+    A hostname an untrusted source named earlier in this process keeps that
+    source no matter what the object's own attribute says, so a config
+    rebuilt from one -- by ``dataclasses.replace``, by
+    ``configure(**asdict(cfg))`` -- reports where the *hostname* came from
+    rather than where the object did. That is the question the credential
+    layer is asking.
     """
-    return getattr(config, "_clustrix_config_source", CONFIG_SOURCE_WORKING_DIRECTORY)
+    recorded = getattr(
+        config, "_clustrix_config_source", CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+    if recorded in TRUSTED_CONFIG_SOURCES:
+        laundered = _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.get(
+            normalize_hostname(getattr(config, "cluster_host", None))
+        )
+        if laundered:
+            return laundered
+    return recorded
 
 
 def config_source_is_trusted(config: ClusterConfig) -> bool:
@@ -756,8 +890,19 @@ def configure(**kwargs) -> None:
     # Validate everything before applying anything: a rejected keyword used
     # to leave the earlier ones already written to the live config, so a
     # failed configure() call still changed the process's behaviour.
+    #
+    # Against the declared *fields*, not ``hasattr(_config, key)``. Every
+    # attribute a ClusterConfig happens to carry answered True to that,
+    # including the provenance record itself: ``configure(
+    # _clustrix_config_source="runtime")`` was accepted and marked the
+    # config trusted, which is the one thing a caller must never be able to
+    # assert about itself. ``load_config`` and ``ClusterConfig(**yaml)``
+    # already reject every spelling of it; this was the last way in.
+    # DECLARED_FIELD_NAMES is the existing derivation of "what a field is" --
+    # a fourth spelling of ``{f.name for f in fields(ClusterConfig)}`` is how
+    # these drift apart.
     for key in kwargs:
-        if hasattr(_config, key):
+        if key in DECLARED_FIELD_NAMES:
             continue
         removed = _removed_setting_reason(key)
         if removed:
@@ -778,6 +923,12 @@ def configure(**kwargs) -> None:
         # An explicit configure() call is the user's own Python, so it
         # replaces whatever a file had said -- including a ./clustrix.yml
         # that had been picked up from the working directory.
+        #
+        # It replaces it for *this object*. Whether the resulting host is
+        # then trusted is get_config_source's answer, not this one: a
+        # hostname an untrusted file already named in this process stays
+        # untrusted however many times it is handed back through here. See
+        # _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.
         set_config_source(_config, CONFIG_SOURCE_RUNTIME)
 
 
@@ -876,6 +1027,34 @@ def get_config_dir() -> Path:
     return Path.home() / ".clustrix"
 
 
+def default_config_dir() -> Path:
+    """``~/.clustrix`` -- the location no environment variable chose."""
+    return Path.home() / ".clustrix"
+
+
+def config_dir_is_default() -> bool:
+    """Whether :func:`get_config_dir` is still ``~/.clustrix``.
+
+    Compared after resolving symlinks on both sides, so a ``~/.clustrix``
+    that is itself a symlink is the *same* directory as the thing it points
+    at rather than a redirect -- redirecting it that way needs write access
+    to the home directory, at which point provenance is not the problem.
+
+    ``CLUSTRIX_CONFIG_DIR`` set to the default path is not a redirect
+    either: it names the same directory, and containers and test harnesses
+    set it that way routinely.
+    """
+    try:
+        return os.path.realpath(get_config_dir()) == os.path.realpath(
+            default_config_dir()
+        )
+    except (OSError, RuntimeError):
+        # Path.home() raises when there is no home directory to compare
+        # against. Unable to establish that the directory is the default
+        # one is not the same as having established that it is.
+        return False
+
+
 def get_config() -> ClusterConfig:
     """Get current configuration."""
     return _config
@@ -913,10 +1092,15 @@ def _load_default_config():
         # candidates below are still searched.
         pass
     else:
+        config_dir_source = (
+            CONFIG_SOURCE_USER_CONFIG_DIR
+            if config_dir_is_default()
+            else CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+        )
         candidates += [
-            (config_dir / "config.yml", CONFIG_SOURCE_USER_CONFIG_DIR),
-            (config_dir / "config.yaml", CONFIG_SOURCE_USER_CONFIG_DIR),
-            (config_dir / "config.json", CONFIG_SOURCE_USER_CONFIG_DIR),
+            (config_dir / "config.yml", config_dir_source),
+            (config_dir / "config.yaml", config_dir_source),
+            (config_dir / "config.json", config_dir_source),
         ]
     candidates += [
         (Path.cwd() / "clustrix.yml", CONFIG_SOURCE_WORKING_DIRECTORY),
@@ -939,6 +1123,18 @@ def _load_default_config():
                     f"to a cluster_host chosen this way; if this file is "
                     f"yours, put the host in the clustrix configuration "
                     f"directory (config.yml) or load it explicitly with "
+                    f"clustrix.config.load_config({str(path)!r}).",
+                    stacklevel=2,
+                )
+            elif source == CONFIG_SOURCE_REDIRECTED_CONFIG_DIR:
+                warnings.warn(
+                    f"clustrix adopted the configuration file {path} because "
+                    f"${CONFIG_DIR_ENV_VAR} points at {get_config_dir()}, not "
+                    f"because it is in your ~/.clustrix. An environment "
+                    f"variable is inherited from whatever started this "
+                    f"process, so stored credentials are NOT offered to a "
+                    f"cluster_host chosen this way; if this file is yours, "
+                    f"load it explicitly with "
                     f"clustrix.config.load_config({str(path)!r}).",
                     stacklevel=2,
                 )
