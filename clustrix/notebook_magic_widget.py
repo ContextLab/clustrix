@@ -32,6 +32,7 @@ from .config import (
     configure,
     get_config,
     get_config_dir,
+    record_discovered_hostname,
     set_config_source,
     strip_secret_fields,
     write_text_securely,
@@ -112,6 +113,7 @@ class EnhancedClusterConfigWidget:
                 if "cluster_type" in file_configs:
                     # Single config - use filename as config name
                     config_name = config_file.stem
+                    record_discovered_hostname(file_configs.get("cluster_host"), source)
                     self.configs[config_name] = file_configs
                     self.config_file_map[config_name] = config_file
                     self.config_source_map[config_name] = source
@@ -119,6 +121,9 @@ class EnhancedClusterConfigWidget:
                     # Multiple configs
                     for name, config in file_configs.items():
                         if isinstance(config, dict):
+                            record_discovered_hostname(
+                                config.get("cluster_host"), source
+                            )
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
                             self.config_source_map[name] = source

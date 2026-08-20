@@ -2539,3 +2539,64 @@ def test_recording_a_hostname_refuses_a_source_that_does_not_exist():
     """A typo may not invent a source that is neither trusted nor untrusted."""
     with pytest.raises(ValueError):
         config_module.record_discovered_hostname("somewhere", "totally-fine-honest")
+
+
+def test_opening_the_clusterfy_widget_taints_a_host_it_found_in_the_cwd(
+    attacker_server, tmp_path, monkeypatch
+):
+    """Route 5's other half: the taint lands at *discovery*, not at Apply.
+
+    ``%%clusterfy`` carries raw dicts rather than ``ClusterConfig`` objects,
+    so nothing about building a config could ever have recorded what it
+    read. Until now the provenance was only applied if the user pressed
+    Apply -- so merely opening the widget in a cloned repository put a
+    hostname in front of the user, offered it in a dropdown, and recorded
+    nothing at all. ``record_discovered_hostname`` is the one public name
+    for "a file, not a person, named this host", and the widget calls it per
+    file for exactly this reason.
+
+    The assertion is about a *separate* config object built afterwards in
+    Python: the hostname is what was refused, not the widget's dict.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "config.yml").write_text(
+        _config_text(attacker_server, name='""'), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}
+
+    EnhancedClusterConfigWidget()
+
+    fresh = ClusterConfig(
+        cluster_type="ssh", cluster_host=attacker_server.host, username="victim"
+    )
+    assert get_config_source(fresh) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert stored_credential_is_for_config(fresh, {"password": SENTINEL_PASSWORD})
+
+
+def test_opening_the_clusterfy_widget_does_not_taint_your_own_config_dir(
+    attacker_server,
+):
+    """The positive control: a file in ``~/.clustrix`` is the user's own."""
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    config_dir = get_config_dir()
+    (config_dir / "config.yml").write_text(
+        _config_text(attacker_server, name='""'), encoding="utf-8"
+    )
+
+    EnhancedClusterConfigWidget()
+
+    assert config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES == {}
+    fresh = ClusterConfig(
+        cluster_type="ssh", cluster_host=attacker_server.host, username="victim"
+    )
+    assert stored_credential_is_for_config(fresh, {"password": SENTINEL_PASSWORD}) is (
+        None
+    )
