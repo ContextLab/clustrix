@@ -29,6 +29,7 @@ import json
 import os
 import pathlib
 import re
+import signal
 import subprocess
 import sys
 import textwrap
@@ -770,13 +771,17 @@ def test_a_configure_is_not_torn_in_half_by_a_concurrent_load(
     released = threading.Event()
     loaded = threading.Event()
     arrivals = []
+    overlaps = []
 
     def watch_lines(frame, event, arg):
         if event == "line" and frame.f_lineno == setattr_line:
             arrivals.append(frame.f_lineno)
             if len(arrivals) == 2:  # the first attribute is now written
                 released.set()
-                loaded.wait(timeout=2)
+                # Recorded, not just waited on: whether the loader was able to
+                # *finish* while configure() was still inside its apply loop is
+                # the only thing that separates a held lock from an absent one.
+                overlaps.append(loaded.wait(timeout=2))
         return watch_lines
 
     def watch_calls(frame, event, arg):
@@ -815,6 +820,21 @@ def test_a_configure_is_not_torn_in_half_by_a_concurrent_load(
         f"test proved nothing: {arrivals}"
     )
 
+    # The two halves of the fix are independently reversible, and the
+    # all-or-nothing check at the bottom only sees them reverted together:
+    # drop configure()'s `with _DEFAULT_CONFIG_LOCK:` while keeping
+    # `target = _config` and every keyword still lands on one object, so the
+    # result is indistinguishable from the load simply winning. What is not
+    # indistinguishable is *when* the loader finished. Under the lock it
+    # cannot finish until configure() returns; without it, it finishes in the
+    # middle of the loop.
+    assert overlaps == [False], (
+        "a concurrent load_config() ran to completion while configure() was "
+        "still applying keywords, so the two writers are not mutually "
+        "exclusive and only the values they happened to write kept this "
+        "call from being observed half-applied"
+    )
+
     final = get_config()
     from_keywords = {
         name: getattr(final, name) == value
@@ -835,6 +855,191 @@ def test_a_configure_is_not_torn_in_half_by_a_concurrent_load(
         # wholesale too.
         assert final.cluster_host == "fromfile.example"
         assert final.username == "file-user"
+
+
+@pytest.mark.skipif(not hasattr(signal, "SIGUSR1"), reason="POSIX signals only")
+def test_configure_is_not_torn_in_half_by_a_reload_on_its_own_thread(
+    unloaded_config, tmp_path
+):
+    """The other half of the fix: the loop binds ``_config`` once.
+
+    The lock makes ``configure`` and ``load_config`` mutually exclusive
+    *across threads*. It cannot make them mutually exclusive on one thread,
+    because it is an ``RLock`` and has to be -- the lazy search re-enters it.
+    So a reload that happens on the configuring thread itself walks straight
+    through the lock and rebinds ``_config`` in the middle of the apply loop.
+    A loop that re-read the module global on every iteration would then write
+    the first keyword to the discarded object and the rest to the new one:
+    the same torn write the lock was added for, reported as success.
+
+    That is not a contrived path. Reloading configuration from a signal
+    handler -- the ``SIGHUP`` idiom -- is ordinary, and a Python handler runs
+    between bytecodes on the main thread, which is to say inside the loop.
+    Nothing here is patched: a real handler is installed with
+    ``signal.signal``, a real signal is raised, and the real ``load_config``
+    runs from it against a real file. The trace function only chooses *when*,
+    so the interleaving is scheduled rather than waited for.
+
+    Reverting ``target = _config`` to a re-read of the global fails this and
+    nothing else in the suite.
+    """
+    explicit = tmp_path / "explicit.yml"
+    explicit.write_text(
+        "cluster_type: ssh\ncluster_host: fromsignal.example\n"
+        "username: signal-user\n"
+    )
+    config_module._config = ClusterConfig()
+    config_module._default_config_loaded = True
+
+    setattr_line = _setattr_line()
+    config_file = config_module.__file__
+    observed = []  # the object itself, so its id cannot be recycled
+    handled = []
+
+    def reload_on_signal(signum, frame):
+        handled.append(signum)
+        load_config(str(explicit))
+
+    def watch_lines(frame, event, arg):
+        if event == "line" and frame.f_lineno == setattr_line:
+            observed.append(config_module._config)
+            if len(observed) == 2:  # the first attribute is now written
+                signal.raise_signal(signal.SIGUSR1)
+        return watch_lines
+
+    def watch_calls(frame, event, arg):
+        if (
+            frame.f_code.co_name == "configure"
+            and frame.f_code.co_filename == config_file
+        ):
+            return watch_lines
+        return None
+
+    previous_handler = signal.signal(signal.SIGUSR1, reload_on_signal)
+    try:
+        sys.settrace(watch_calls)
+        try:
+            configure(**_CONFIGURE_KEYWORDS)
+        finally:
+            sys.settrace(None)
+    finally:
+        signal.signal(signal.SIGUSR1, previous_handler)
+
+    assert handled == [
+        signal.SIGUSR1
+    ], f"the reload never ran, so this test proved nothing: {handled}"
+    assert len(observed) == len(_CONFIGURE_KEYWORDS), (
+        "the signal was not delivered inside the apply loop, so this test "
+        f"proved nothing: {len(observed)} arrivals"
+    )
+    assert len({id(config) for config in observed}) == 2, (
+        "_config was never rebound while the loop was running, so this test "
+        "proved nothing"
+    )
+
+    final = get_config()
+    from_keywords = {
+        name: getattr(final, name) == value
+        for name, value in _CONFIGURE_KEYWORDS.items()
+    }
+    landed = {name: getattr(final, name) for name in _CONFIGURE_KEYWORDS}
+    assert set(from_keywords.values()) in (
+        {True},
+        {False},
+    ), f"configure() was torn in half by a reload on its own thread: {landed}"
+    if not any(from_keywords.values()):
+        assert final.cluster_host == "fromsignal.example"
+        assert final.username == "signal-user"
+
+
+def test_a_load_config_queues_behind_a_search_instead_of_racing_it(
+    unloaded_config, tmp_path
+):
+    """``load_config``'s own lock, pinned deterministically.
+
+    The docstring on that lock calls it load-bearing, and the race test below
+    agrees -- but only sometimes: dropping ``load_config``'s
+    ``with _DEFAULT_CONFIG_LOCK:`` altogether failed that test in 2 runs out
+    of 5 and passed in the other 3, because it waits for the interleaving
+    rather than causing it. A guard that is a coin flip is not a guard.
+
+    So the interleaving is scheduled here. A trace function on the searching
+    thread stops it at the moment it enters the file load -- holding the lock
+    -- and an explicit ``load_config`` is started on another thread while it
+    is parked there. Two things then have to be true, and each is checked:
+    the explicit load must *not* be able to finish while the search is inside
+    the lock, and when everything has finished it must be the configuration
+    in force. Without the lock the loader lands in the gap, is reported as
+    loaded, and is then overwritten by the search that was already running --
+    an accepted instruction, discarded, reported as success.
+    """
+    (unloaded_config / "config.yml").write_text(
+        "cluster_type: ssh\ncluster_host: fromsearch.example\n"
+    )
+    explicit = tmp_path / "explicit.yml"
+    explicit.write_text("cluster_type: ssh\ncluster_host: explicit.example\n")
+
+    config_module._config = ClusterConfig()
+    config_module._default_config_loaded = False
+
+    config_file = config_module.__file__
+    paused = threading.Event()
+    resume = threading.Event()
+    loaded = threading.Event()
+    errors: list = []
+
+    def watch_calls(frame, event, arg):
+        if (
+            event == "call"
+            and frame.f_code.co_name == "_load_config_locked"
+            and frame.f_code.co_filename == config_file
+        ):
+            paused.set()
+            resume.wait(timeout=30)
+        return None
+
+    def searcher():
+        sys.settrace(watch_calls)
+        try:
+            get_config()
+        except BaseException as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+        finally:
+            sys.settrace(None)
+
+    def loader():
+        try:
+            load_config(str(explicit))
+        except BaseException as exc:  # pragma: no cover - reported below
+            errors.append(exc)
+        finally:
+            loaded.set()
+
+    search = threading.Thread(target=searcher)
+    search.start()
+    try:
+        assert paused.wait(timeout=30), "the search never reached the file load"
+
+        load = threading.Thread(target=loader)
+        load.start()
+        overlapped = loaded.wait(timeout=2)
+    finally:
+        resume.set()
+
+    for thread in (search, load):
+        thread.join(timeout=30)
+        assert not thread.is_alive(), "a writer never returned"
+    assert not errors, errors
+
+    assert not overlapped, (
+        "load_config() ran to completion while the lazy search was still "
+        "inside the file it found, so the two are not serialised and which "
+        "one survives is down to scheduling"
+    )
+    assert get_config().cluster_host == "explicit.example", (
+        "an explicit load_config() was accepted and then thrown away by the "
+        "search it interrupted"
+    )
 
 
 #: Trials for the race below. A race that reproduces one time in fifty is

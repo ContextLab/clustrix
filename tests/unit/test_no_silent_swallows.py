@@ -59,7 +59,11 @@ import pytest
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig
 from clustrix.executor_connections import ConnectionManager
 from clustrix.executor_scheduler_status import SchedulerStatusManager
-from clustrix.loop_analysis import find_parallelizable_loops, SafeRangeEvaluator
+from clustrix.loop_analysis import (
+    detect_loops_in_function,
+    find_parallelizable_loops,
+    SafeRangeEvaluator,
+)
 from clustrix.modern_notebook_widget import ModernClustrixWidget
 from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
 from clustrix.utils import (
@@ -425,7 +429,6 @@ def test_the_entry_point_still_analyzes_an_ordinary_function():
     raise, and must not stop it finding anything: an unfoldable bound is still
     an answer, not an error, and a plain function still yields its loop.
     """
-    from clustrix.loop_analysis import detect_loops_in_function
 
     def target(count):
         results = []
@@ -500,6 +503,143 @@ def test_a_bug_inside_the_while_loop_analyzer_reaches_the_caller(monkeypatch):
         find_parallelizable_loops(target, (), {})
 
 
+#: A deeply nested loop body is what really exhausts the interpreter's stack
+#: inside ``_analyze_for_loop``/``_analyze_while_loop``, and it cannot be
+#: reproduced by nesting the body in the fixture: ``LoopDetector`` walks the
+#: same statements one frame later, with its own ``ast.NodeVisitor``
+#: recursion, so a body deep enough to overflow the dependency analyzer
+#: overflows the detector too and the raise lands outside the handler under
+#: test. So the exhaustion is put exactly where the production one happens --
+#: inside the analyzer, as a real unbounded recursion raising a real
+#: ``RecursionError`` -- and nothing else is changed. A real subclass of the
+#: real class, on the same terms as ``BrokenDependencyAnalyzer`` above:
+#: production code cannot tell, and nothing is mocked.
+def _exhausting_analyzer(loop_analysis):
+    class ExhaustingDependencyAnalyzer(loop_analysis.DependencyAnalyzer):
+        def visit_Name(self, node):
+            return self.visit(node)  # unbounded, and really unbounded
+
+    return ExhaustingDependencyAnalyzer
+
+
+def test_giving_up_on_a_for_loop_is_audible(monkeypatch, caplog):
+    """The giveup log is the only thing that distinguishes it from an answer.
+
+    ``_analyze_for_loop`` answers ``None`` for a ``RecursionError``, and that
+    answer is correct -- the loop runs whole, sequentially, which is always
+    right. It is also *exactly* what an unparallelizable loop looks like, and
+    what a function with no loops at all looks like one frame further out. So
+    the warning is not decoration: delete it, or demote it below the level
+    anyone watches, and a loop the user expected to be chunked across a
+    cluster silently runs on one core with nothing anywhere saying why.
+
+    Measured before this test existed: deleting the ``logger.warning`` call
+    outright left the whole suite green, tally for tally. The handler had no
+    test at all.
+    """
+    from clustrix import loop_analysis
+
+    def target():
+        total = 0
+        for index in range(4):
+            total += index
+        return total
+
+    # The control first, undamaged, so the giveup below cannot be an artefact
+    # of the loop never having been reached.
+    control = detect_loops_in_function(target, (), {})
+    assert [loop.loop_type for loop in control] == ["for"]
+
+    monkeypatch.setattr(
+        loop_analysis, "DependencyAnalyzer", _exhausting_analyzer(loop_analysis)
+    )
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.loop_analysis"):
+        loops = detect_loops_in_function(target, (), {})
+
+    assert loops == []
+    giveups = [
+        record
+        for record in caplog.records
+        if "Gave up analyzing the for loop" in record.getMessage()
+    ]
+    assert giveups, [record.getMessage() for record in caplog.records]
+    # The level is part of the report. WARNING is what someone watches;
+    # demoting this to debug is the same silence as deleting it.
+    assert [record.levelno for record in giveups] == [logging.WARNING]
+    assert "will not be parallelized" in giveups[0].getMessage()
+    # And the reason travels with it, not just the fact.
+    assert "maximum recursion" in giveups[0].getMessage()
+
+
+def test_giving_up_on_a_while_loop_is_audible(monkeypatch, caplog):
+    """``_analyze_while_loop``'s giveup, on the same terms as its twin above.
+
+    Both handlers were written in the same edit and both were unreported-on:
+    deleting either ``logger.warning`` left the suite green. Pinned
+    separately, because the pattern this issue keeps paying for is fixing one
+    of a pair and missing the other.
+    """
+    from clustrix import loop_analysis
+
+    def target():
+        index = 0
+        while index < 10:
+            index += 1
+        return index
+
+    control = loop_analysis.detect_loops_in_function(target, (), {})
+    assert [loop.loop_type for loop in control] == ["while"]
+
+    monkeypatch.setattr(
+        loop_analysis, "DependencyAnalyzer", _exhausting_analyzer(loop_analysis)
+    )
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.loop_analysis"):
+        loops = loop_analysis.detect_loops_in_function(target, (), {})
+
+    assert loops == []
+    giveups = [
+        record
+        for record in caplog.records
+        if "Gave up analyzing the while loop" in record.getMessage()
+    ]
+    assert giveups, [record.getMessage() for record in caplog.records]
+    assert [record.levelno for record in giveups] == [logging.WARNING]
+    assert "will not be parallelized" in giveups[0].getMessage()
+
+
+def test_a_function_whose_source_is_gone_says_loop_detection_was_skipped(caplog):
+    """``[]`` is a correct answer and an indistinguishable one.
+
+    ``detect_loops_in_function`` returns ``[]`` for a function whose source
+    cannot be read, and that is right: the function ships as-is and runs
+    whole. But ``[]`` is also what an ordinary function with no loops returns,
+    and what a *loop-bearing* function returns when analysis gave up -- so
+    without the debug line there is nothing at all to tell a caller which of
+    the three happened. Deleting it left the suite green.
+
+    The trigger is a real function with no file behind it: ``exec`` compiles
+    it from a string, so ``inspect.getsource`` raises ``OSError`` for real.
+    """
+    namespace: dict = {}
+    exec("def made_by_exec():\n    for i in range(3):\n        pass\n", namespace)
+
+    with caplog.at_level(logging.DEBUG, logger="clustrix.loop_analysis"):
+        assert detect_loops_in_function(namespace["made_by_exec"], (), {}) == []
+
+    skipped = [
+        record
+        for record in caplog.records
+        if "Loop detection skipped" in record.getMessage()
+    ]
+    assert skipped, [record.getMessage() for record in caplog.records]
+    assert "made_by_exec" in skipped[0].getMessage()
+    # The reason, not just the fact: "could not read source" and "this is not
+    # a function" are different problems with different fixes.
+    assert "source" in skipped[0].getMessage()
+
+
 def test_a_defect_in_source_acquisition_is_not_reported_as_no_loops():
     """``detect_loops_in_function``'s outer tuple is a decision, not a shield.
 
@@ -565,13 +705,19 @@ def test_every_error_constant_folding_can_raise_is_answered_not_raised(error, ca
 @pytest.mark.parametrize(
     "error", [TypeError, ValueError, OverflowError, RecursionError]
 )
-def test_every_error_reading_a_range_argument_is_answered_not_raised(error):
-    """Pins the membership of ``visit_Call``'s narrowed tuple.
+def test_every_error_reading_a_range_argument_is_answered_not_raised(error, caplog):
+    """Pins the membership of ``visit_Call``'s narrowed tuple, and its report.
 
     ``range(-n)`` negates the bound in ``_evaluate_node``, which is *outside*
     ``_evaluate_binop``'s handler, so ``visit_Call``'s tuple is the only one
     that can answer -- drop a member from it and this raises instead of
     reporting an unknown bound.
+
+    ``safe = False`` is also indistinguishable from an ordinary non-constant
+    bound (``range(len(items))``), which is the overwhelmingly common case and
+    says nothing. The debug line is the only thing separating "this bound is
+    not a constant" from "folding this bound blew up", and deleting it left
+    the suite green -- so it is asserted here, once per member of the tuple.
     """
 
     class Bound(int):
@@ -579,9 +725,18 @@ def test_every_error_reading_a_range_argument_is_answered_not_raised(error):
             raise error("this bound cannot be read")
 
     evaluator = SafeRangeEvaluator({"n": Bound(5)})
-    evaluator.visit(ast.parse("range(-n)", mode="eval").body)
+    with caplog.at_level(logging.DEBUG, logger="clustrix.loop_analysis"):
+        evaluator.visit(ast.parse("range(-n)", mode="eval").body)
 
     assert (evaluator.safe, evaluator.result) == (False, None)
+    folds = [
+        record
+        for record in caplog.records
+        if "Could not fold the range()" in record.getMessage()
+    ]
+    assert folds, [record.getMessage() for record in caplog.records]
+    assert "this bound cannot be read" in folds[0].getMessage()
+    assert "treated as unknown" in folds[0].getMessage()
 
 
 # ---------------------------------------------------------------------------
@@ -822,6 +977,24 @@ def test_a_file_that_is_simply_not_a_profile_stays_quiet(tmp_path, caplog):
         assert ModernClustrixWidget._looks_like_a_profile_bundle(path) is False
 
     assert caplog.records == [], [r.getMessage() for r in caplog.records]
+
+    # Quiet is not silent. ``return False`` here is the same value the branch
+    # above returns for a file that could not be read at all, and the same one
+    # a perfectly good profile bundle would get if this parse ever broke; at
+    # debug, the reason has to be there for anyone who goes looking for a
+    # missing Load-menu entry. Deleting this line left the whole suite green.
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG, logger="clustrix.modern_notebook_widget"):
+        assert ModernClustrixWidget._looks_like_a_profile_bundle(path) is False
+
+    reasons = [
+        record
+        for record in caplog.records
+        if "Not offering" in record.getMessage()
+        and "not-a-profile.yml" in (record.getMessage())
+    ]
+    assert reasons, [record.getMessage() for record in caplog.records]
+    assert [record.levelno for record in reasons] == [logging.DEBUG]
 
 
 def _distribution_with(tmp_path, name, **files):
@@ -1076,7 +1249,7 @@ TRACKED_DEFECTS = {
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: They fall into ten root causes, and the first one is the big one:
+#: They fall into eleven root causes, and the first one is the big one:
 #:
 #: A. **Any call at all counts as reporting.** Six spellings are recorded
 #:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
@@ -1087,37 +1260,39 @@ TRACKED_DEFECTS = {
 #:    are the guarantee.
 #: B. **The exception stashed and dropped.** ``_ = exc`` is indistinguishable
 #:    from ``failure = exc``, which this package really does and which really
-#:    does hand the failure onward.
+#:    does hand the failure onward. One spelling is recorded below.
 #: C. **A log line that mentions a variable instead of the exception.**
 #:    ``logger.debug("failed for %s", host)`` passes, because requiring the
 #:    exception itself in every log call would flag handlers here that do
-#:    explain themselves in prose.
+#:    explain themselves in prose. One spelling is recorded below.
 #: D. **A narrower ``except`` that is broad in practice.** ``except OSError``
 #:    around a body that only ever raises ``OSError`` is a catch-all in
-#:    effect; the lint reads the name, not the body it guards.
+#:    effect; the lint reads the name, not the body it guards. One spelling
+#:    is recorded below.
 #: E. **An exception replaced by a worse one.** ``raise RuntimeError("failed")``
 #:    with no ``from exc`` re-raises, so it passes, while still throwing the
-#:    cause away.
+#:    cause away. One spelling is recorded below.
 #: F. **Code that is not in a ``.py`` file in this package.** The remote job
 #:    scripts assembled as strings in ``utils.py`` are never parsed here, and
-#:    neither is anything in a dependency.
+#:    neither is anything in a dependency. One spelling is recorded below.
 #: G. **Two swallows in one function.** Keys are per function, so a justified
 #:    site licenses a second, unjustified one beside it. Narrowing the key to
 #:    a line number would make every entry rot on the next edit above it.
+#:    One spelling is recorded below.
 #: H. **Dead code the pruner cannot model.** ``_live_statements`` folds
 #:    ``if <constant>`` and ``while <constant>`` and nothing else, so a
-#:    ``raise`` that can never run still reads as a re-raise. Eight spellings
+#:    ``raise`` that can never run still reads as a re-raise. Seven spellings
 #:    are recorded below: a loop over an empty tuple or list, a ``match`` case
 #:    that cannot be selected, a nested handler for an exception its body
-#:    cannot raise, a membership test in an empty container, an ``await`` and
-#:    a ``yield`` that are never reached or never driven, and an exception
-#:    accessor spelled on an unrelated object. Deciding a statement is
-#:    unreachable in general is the halting problem; each guard added here so
-#:    far has been defeated by the next spelling, and this family is recorded
-#:    rather than chased for that reason. None of the eight occurs in the
-#:    package -- ``test_the_lint_finds_no_unrecorded_silent_swallow`` scans
-#:    for real handlers, and the behavioural tests in the first half of this
-#:    module are what actually guarantee those.
+#:    cannot raise, a membership test in an empty container, and an ``await``
+#:    and a ``yield`` that are never reached or never driven. Deciding a
+#:    statement is unreachable in general is the halting problem; each guard
+#:    added here so far has been defeated by the next spelling, and this
+#:    family is recorded rather than chased for that reason. None of the
+#:    seven occurs in the package --
+#:    ``test_the_lint_finds_no_unrecorded_silent_swallow`` scans for real
+#:    handlers, and the behavioural tests in the first half of this module
+#:    are what actually guarantee those.
 #: I. **An alias bound by a call.** ``_catch_all_aliases`` resolves
 #:    ``_E = Exception``, ``_E = (Exception,)``, ``_A, _B = Exception,
 #:    ValueError`` and ``from builtins import Exception as _E``. It does not
@@ -1142,6 +1317,16 @@ TRACKED_DEFECTS = {
 #:    is how the five previous guards were lost; they are recorded rather
 #:    than chased, and the behavioural tests in the first half of this module
 #:    are what guarantee the handlers.
+#: K. **A name that only looks like a report.** ``EXCEPTION_ACCESSORS`` is
+#:    matched on the attribute name alone, so ``value = SOME.format_exc`` --
+#:    an attribute of some unrelated object that happens to share a name with
+#:    ``traceback.format_exc`` -- reads as reaching for the interpreter's
+#:    current exception. This was filed under family H for a while, which was
+#:    wrong in a way worth naming: it is not dead code, it is live code the
+#:    lint mis-identifies, and no amount of better dead-branch pruning would
+#:    ever catch it. Deciding what ``SOME`` is at that point is constant
+#:    propagation through arbitrary expressions, which is family A's
+#:    whole-program problem again. One spelling is recorded below.
 KNOWN_BLIND_SPOTS = 25
 
 
@@ -1320,12 +1505,16 @@ def _walk_own_scope(node):
     nothing calls -- reads as a re-raise to a plain walk, and did. So does a
     ``lambda: (_ for _ in ()).throw(exc)``. Neither runs.
 
-    A nested scope passed in as the root yields nothing at all, for the same
-    reason: ``except Exception:`` whose entire body is ``def retry(): raise``
-    has defined a function and done nothing else.
+    This used to open by returning nothing when ``node`` was itself a
+    ``FunctionDef``/``AsyncFunctionDef``/``Lambda``. That guard was dead: the
+    only caller is :func:`_accounts_for_the_failure`, which walks *statements*
+    and skips the two function-definition statement forms before calling here
+    (a ``Lambda`` is an expression and can never arrive as a statement), and
+    that skip is what keeps a nested ``def``'s body from counting -- removing
+    the guard changed no test, while removing the caller's ``continue`` breaks
+    two. Deleted rather than left standing as a second, untested spelling of
+    the same rule.
     """
-    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-        return
     todo = [node]
     while todo:
         current = todo.pop()
@@ -1694,6 +1883,14 @@ BYPASSES = {
                 if False:
                     raise
     """,
+    "a re-raise in a loop that never runs": """
+        def f():
+            try:
+                g()
+            except Exception:
+                while False:
+                    raise
+    """,
     "return in a finally": """
         def f():
             try:
@@ -1985,6 +2182,24 @@ ACCEPTED = {
             except Exception:
                 raise
     """,
+    "a re-raise in a loop that does run": """
+        def f():
+            try:
+                g()
+            except Exception:
+                while True:
+                    raise
+    """,
+    "a re-raise in the else of a loop that never runs": """
+        def f():
+            try:
+                g()
+            except Exception:
+                while False:
+                    pass
+                else:
+                    raise
+    """,
     "chained raise": """
         def f():
             try:
@@ -2049,7 +2264,9 @@ def test_the_lint_stays_quiet_on_handlers_that_do_report(accepted):
 #: KNOWN_BLIND_SPOTS so the two cannot drift apart.
 BLIND_SPOTS = {
     # A. any call at all reads as reporting
-    "a helper that shrugs on the handler's behalf": """
+    "a helper that shrugs on the handler's behalf": (
+        "A",
+        """
         def _record(exc):
             pass
 
@@ -2059,21 +2276,30 @@ BLIND_SPOTS = {
             except Exception as exc:
                 _record(exc)
     """,
-    "a bookkeeping call that reports nowhere": """
+    ),
+    "a bookkeeping call that reports nowhere": (
+        "A",
+        """
         def f(errors):
             try:
                 g()
             except Exception as exc:
                 errors.append(exc)
     """,
-    "a call with no arguments and no effect": """
+    ),
+    "a call with no arguments and no effect": (
+        "A",
+        """
         def f():
             try:
                 g()
             except Exception:
                 int()
     """,
-    "a reporter object that reports nowhere": """
+    ),
+    "a reporter object that reports nowhere": (
+        "A",
+        """
         class _Null:
             def report(self, exc):
                 pass
@@ -2086,7 +2312,10 @@ BLIND_SPOTS = {
             except Exception as exc:
                 NULL_REPORTER.report(exc)
     """,
-    "a call in a condition whose body is empty": """
+    ),
+    "a call in a condition whose body is empty": (
+        "A",
+        """
         def f():
             try:
                 g()
@@ -2094,44 +2323,65 @@ BLIND_SPOTS = {
                 if want_to_log():
                     pass
     """,
-    "a call that only formats the exception and drops it": """
+    ),
+    "a call that only formats the exception and drops it": (
+        "A",
+        """
         def f():
             try:
                 g()
             except Exception as exc:
                 message = str(exc)
     """,
+    ),
     # B. the exception stashed and then dropped
-    "the exception assigned to a throwaway": """
+    "the exception assigned to a throwaway": (
+        "B",
+        """
         def f():
             try:
                 g()
             except Exception as exc:
                 _ = exc
     """,
-    # C-G, one apiece
-    "a log line that names a variable instead of the exception": """
+    ),
+    # C. a log line that names something other than the exception
+    "a log line that names a variable instead of the exception": (
+        "C",
+        """
         def f(host):
             try:
                 g()
             except Exception:
                 logger.debug("failed for %s", host)
     """,
-    "a narrower except that is broad in practice": """
+    ),
+    # D. a narrower except that is broad in practice
+    "a narrower except that is broad in practice": (
+        "D",
+        """
         def f():
             try:
                 open("/etc/hosts")
             except OSError:
                 pass
     """,
-    "an exception replaced by a worse one": """
+    ),
+    # E. the exception replaced by a worse one
+    "an exception replaced by a worse one": (
+        "E",
+        """
         def f():
             try:
                 g()
             except Exception:
                 raise RuntimeError("failed")
     """,
-    "code assembled as a string and never parsed here": """
+    ),
+    # F. code that is not in a .py file in this package
+    "code assembled as a string and never parsed here": (
+        "F",
+        """
         REMOTE = '''
         try:
             main()
@@ -2139,7 +2389,11 @@ BLIND_SPOTS = {
             pass
         '''
     """,
-    "a second, unjustified swallow beside a justified one": """
+    ),
+    # G. two swallows in one function
+    "a second, unjustified swallow beside a justified one": (
+        "G",
+        """
         class ClusterExecutor:
             def __del__(self):
                 try:
@@ -2151,8 +2405,11 @@ BLIND_SPOTS = {
                 except Exception:
                     pass
     """,
+    ),
     # H. dead code the pruner cannot model
-    "a raise in a loop over an empty tuple": """
+    "a raise in a loop over an empty tuple": (
+        "H",
+        """
         def f():
             try:
                 g()
@@ -2160,7 +2417,10 @@ BLIND_SPOTS = {
                 for _ in ():
                     raise
     """,
-    "a raise in a match case that can never be selected": """
+    ),
+    "a raise in a match case that can never be selected": (
+        "H",
+        """
         def f():
             try:
                 g()
@@ -2169,7 +2429,10 @@ BLIND_SPOTS = {
                     case 1:
                         raise
     """,
-    "a raise in a nested handler that can never fire": """
+    ),
+    "a raise in a nested handler that can never fire": (
+        "H",
+        """
         def f():
             try:
                 g()
@@ -2179,7 +2442,10 @@ BLIND_SPOTS = {
                 except ZeroDivisionError:
                     raise
     """,
-    "a raise guarded by a membership test in an empty container": """
+    ),
+    "a raise guarded by a membership test in an empty container": (
+        "H",
+        """
         def f():
             try:
                 g()
@@ -2187,7 +2453,10 @@ BLIND_SPOTS = {
                 if 0 in ():
                     raise
     """,
-    "a raise under a with block in a loop over an empty list": """
+    ),
+    "a raise under a with block in a loop over an empty list": (
+        "H",
+        """
         def f(x):
             try:
                 g()
@@ -2196,7 +2465,10 @@ BLIND_SPOTS = {
                     with x:
                         raise
     """,
-    "an await the empty loop around it never reaches": """
+    ),
+    "an await the empty loop around it never reaches": (
+        "H",
+        """
         async def f():
             try:
                 g()
@@ -2204,14 +2476,21 @@ BLIND_SPOTS = {
                 for _ in ():
                     await h()
     """,
-    "a yield in a generator nobody drains": """
+    ),
+    "a yield in a generator nobody drains": (
+        "H",
+        """
         def f():
             try:
                 g()
             except Exception:
                 yield 1
     """,
-    "a name bound to a tuple built by a call": """
+    ),
+    # I. an alias bound by a call
+    "a name bound to a tuple built by a call": (
+        "I",
+        """
         _ERRORS = tuple([Exception])
 
         def f():
@@ -2220,15 +2499,11 @@ BLIND_SPOTS = {
             except _ERRORS:
                 pass
     """,
-    "an exception accessor named on an unrelated object": """
-        def f(SOME):
-            try:
-                g()
-            except Exception:
-                value = SOME.format_exc
-    """,
+    ),
     # J. a binding the alias resolver never walks
-    "a catch-all bound by an annotated assignment": """
+    "a catch-all bound by an annotated assignment": (
+        "J",
+        """
         _E: type = Exception
 
         def f():
@@ -2237,7 +2512,10 @@ BLIND_SPOTS = {
             except _E:
                 pass
     """,
-    "a catch-all tuple bound by an annotated assignment": """
+    ),
+    "a catch-all tuple bound by an annotated assignment": (
+        "J",
+        """
         _E: tuple = (Exception,)
 
         def f():
@@ -2246,7 +2524,10 @@ BLIND_SPOTS = {
             except _E:
                 pass
     """,
-    "an annotated binding chained through a builtins import": """
+    ),
+    "an annotated binding chained through a builtins import": (
+        "J",
+        """
         from builtins import Exception as _B
 
         _E: type = _B
@@ -2257,13 +2538,28 @@ BLIND_SPOTS = {
             except _E:
                 pass
     """,
-    "a catch-all bound by a walrus inside the except clause": """
+    ),
+    "a catch-all bound by a walrus inside the except clause": (
+        "J",
+        """
         def f():
             try:
                 g()
             except (_E := Exception):
                 pass
     """,
+    ),
+    # K. a name that only looks like a report
+    "an exception accessor named on an unrelated object": (
+        "K",
+        """
+        def f(SOME):
+            try:
+                g()
+            except Exception:
+                value = SOME.format_exc
+    """,
+    ),
 }
 
 
@@ -2277,7 +2573,7 @@ def test_the_lint_admits_what_it_cannot_see(spot):
     which is the signal to delete the entry and the prose together, not to
     relax the guard.
     """
-    source = textwrap.dedent(BLIND_SPOTS[spot])
+    source = textwrap.dedent(BLIND_SPOTS[spot][1])
     found = find_silent_swallows(source, "executor_core.py")
     unrecorded = [swallow for swallow in found if swallow.key not in JUSTIFIED_SWALLOWS]
 
@@ -2299,6 +2595,7 @@ _NUMBER_WORDS = {
     "eight": 8,
     "nine": 9,
     "ten": 10,
+    "eleven": 11,
 }
 
 
@@ -2310,6 +2607,77 @@ def _prose_count(pattern):
     assert len(matches) == 1, f"the prose states {matches} for {pattern!r}"
     token = matches.pop()
     return int(token) if token.isdigit() else _NUMBER_WORDS[token]
+
+
+def _family_counts():
+    """How many spellings each family really has, counted from the list."""
+    counts: dict = {}
+    for family, _ in BLIND_SPOTS.values():
+        counts[family] = counts.get(family, 0) + 1
+    return counts
+
+
+def _family_paragraphs():
+    """The prose paragraph belonging to each family letter.
+
+    Sliced out of this module's own text, so a count stated inside a family's
+    write-up is attributed to that family and to no other. Comparing a
+    number to the list it claims to describe is the whole point: the previous
+    version of the test below checked only the 25-entry total, so family A
+    could say "Seven" while holding six, and a family with no entries at all
+    could claim nine.
+    """
+    source = pathlib.Path(__file__).read_text(encoding="utf-8")
+    marker = re.compile(r"^#: ([A-Z])\. \*\*", re.MULTILINE)
+    hits = list(marker.finditer(source))
+    assert hits, "the lettered prose above KNOWN_BLIND_SPOTS is gone"
+    stop_at = source.index("KNOWN_BLIND_SPOTS = ", hits[-1].start())
+    paragraphs = {}
+    for index, hit in enumerate(hits):
+        stop = hits[index + 1].start() if index + 1 < len(hits) else stop_at
+        text = source[hit.start() : stop]
+        # The comment prefixes and the line wrapping are formatting, not
+        # content: "Six spellings are recorded\n#:    below" is one sentence.
+        unwrapped = re.sub(r"^#:\s*", " ", text, flags=re.MULTILINE)
+        paragraphs[hit.group(1)] = " ".join(unwrapped.split())
+    return paragraphs
+
+
+#: How a family states how many spellings it has. Every family must state it
+#: exactly once, so a fabricated count cannot be added beside a true one.
+_SPELLING_COUNT = re.compile(r"(\w+) spellings? (?:are|is) recorded below")
+
+
+@pytest.mark.parametrize(
+    "family", sorted(_family_paragraphs()), ids=sorted(_family_paragraphs())
+)
+def test_every_family_states_how_many_spellings_it_has(family):
+    """The per-family arithmetic, derived rather than asserted alongside.
+
+    Two mutations proved this was needed and neither was exotic. Changing
+    family A's "Six spellings" to "Seven" survived the whole suite. Adding a
+    wholly fabricated "Nine spellings are recorded below" to family E -- which
+    has one -- survived it too. Only the 25-entry total was ever checked, and
+    a total cannot see a number move between families or appear out of
+    nothing.
+
+    So the family letter now lives on the entry, in ``BLIND_SPOTS``, and the
+    number in the prose is compared against a count of the entries carrying
+    that letter. Exactly one count per family: two would let a false one sit
+    beside a true one.
+    """
+    counts = _family_counts()
+    paragraph = _family_paragraphs()[family]
+    stated = _SPELLING_COUNT.findall(paragraph)
+    assert len(stated) == 1, (
+        f"family {family} states {stated} spelling counts; it must state " "exactly one"
+    )
+    token = stated[0]
+    number = int(token) if token.isdigit() else _NUMBER_WORDS[token.lower()]
+    assert number == counts[family], (
+        f"family {family} says {token} spellings are recorded below and "
+        f"{counts[family]} entries in BLIND_SPOTS carry that letter"
+    )
 
 
 def test_the_blind_spot_list_matches_the_prose():
@@ -2349,3 +2717,11 @@ def test_the_blind_spot_list_matches_the_prose():
     assert _prose_count(r"had (\w+) AST guards written") == _prose_count(
         r"the (\w+) previous guards were lost"
     )
+
+    # Every letter with a paragraph has entries, and every letter on an entry
+    # has a paragraph. Without this, moving the last entry out of a family
+    # would leave its write-up standing with nothing to describe -- which is
+    # how "an exception accessor named on an unrelated object" came to be
+    # filed under H ("dead code the pruner cannot model") when it is nothing
+    # of the kind: it is live code the lint mis-identifies by name.
+    assert sorted(_family_paragraphs()) == sorted(_family_counts())
