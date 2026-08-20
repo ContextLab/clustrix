@@ -23,7 +23,8 @@ The tests come in three kinds:
 
 * the parallel path must *observably* leave this process, in exactly the number
   of workers ``cores`` asked for;
-* every other local route must say, out loud, that the request was discarded;
+* every other local route must say, out loud, that the request was discarded
+  -- once per decorated function per distinct request, not on every call;
 * a core count that cannot mean anything must be refused, not absorbed.
 
 Nothing here is mocked. Every test drives the real decorator, the real
@@ -196,19 +197,23 @@ def test_the_parallel_path_really_runs_outside_this_process():
     assert [chunk["marker"] for chunk in result] == [TOP_MARKER] * len(result)
 
 
-@pytest.mark.parametrize("cores", [2, 4])
-def test_cores_is_exactly_how_wide_the_pool_gets(cores):
-    """``cores`` workers can all be busy at once, and a third never appears.
+@pytest.mark.parametrize("cores", [2, 4, 8])
+def test_cores_is_exactly_how_wide_the_pool_gets(cores, machine_with_two_cpus):
+    """``cores`` workers can all be busy at once, and a further one never appears.
 
     Both halves matter and neither is a race. Each worker holds its chunk until
-    ``cores`` distinct pids have checked in, so if ``max_workers`` stopped
-    being wired through and the pool fell back to ``os.cpu_count()``, more than
-    ``cores`` processes would answer the first ``cores`` chunks and the count
-    would come out too high; if ``cores`` were dropped the other way and the
-    work ran here, the count would be one and it would be this process. The
-    earlier version of this test asserted only "more than two workers for
-    cores=8", which is satisfied or defeated by how fast the machine spawns
-    processes.
+    ``cores`` distinct pids have checked in, so a pool narrower than ``cores``
+    reports too few pids and a wider one reports too many.
+
+    The machine is pinned to two CPUs for the duration, which is what gives
+    ``cores=8`` its power: with ``max_workers`` not wired through to
+    ``_create_local_work_chunks`` the chunk count falls back to
+    ``os.cpu_count() * 2`` -- four chunks -- and only four of the eight sized
+    workers can ever be handed anything, so this reports four. Parametrising
+    over 2 and 4 alone could not see that, because on any machine with two or
+    more CPUs the ``cpu_count``-driven chunking still supplies enough chunks to
+    fill a pool that small. A test whose power depends on the reviewer's CPU
+    count is not a test.
     """
     with multiprocessing.Manager() as manager:
         arrivals = manager.dict()
@@ -226,6 +231,100 @@ def test_cores_is_exactly_how_wide_the_pool_gets(cores):
 
     indices = sorted(j for chunk in result for j, _ in chunk["pids"])
     assert indices == list(range(N)), "parallelism that loses work is not a win"
+
+
+@pytest.fixture
+def machine_with_two_cpus(monkeypatch):
+    """Pin ``os.cpu_count()`` to 2 for the duration of a test.
+
+    Not a mock of anything clustrix owns: it is the machine, and pinning it is
+    the only way to write a test about "the pool follows what you asked for,
+    not what you are running on" whose result does not depend on what the
+    reviewer is running on. Every count asserted under this fixture is
+    therefore a fact about the code.
+    """
+    monkeypatch.setattr(os, "cpu_count", lambda: 2)
+    return 2
+
+
+@pytest.mark.parametrize("cores", [2, 4, 8, 16])
+def test_the_call_site_hands_the_pool_size_to_the_chunker(cores, machine_with_two_cpus):
+    """The wiring itself, exercised through the decorator rather than by hand.
+
+    ``_execute_local_parallel`` passes ``local_executor.max_workers`` into
+    ``_create_local_work_chunks``. Delete that argument -- it reads like a
+    signature cleanup -- and the chunk count silently reverts to
+    ``os.cpu_count() * 2``, which is the #152 symptom itself: on this
+    two-CPU machine every pool size would be cut into four pieces, so
+    ``cores=16`` would size sixteen workers and offer them four chunks.
+    ``test_the_chunk_count_follows_the_pool_not_the_machine`` calls the chunker
+    directly and so cannot see the call site at all.
+
+    One result comes back per chunk, so the chunk count is readable from here
+    without reaching inside anything. Two contracts are asserted, and both are
+    machine-independent because the machine is pinned:
+
+    * every worker is offered at least two chunks (see
+      ``test_a_worker_is_offered_more_than_one_chunk`` for why two);
+    * the count moves when ``cores`` moves, while ``os.cpu_count()`` does not.
+    """
+    result = cluster(parallel=True, cores=cores)(pids_of_slice)(N)
+    assert isinstance(result, list), f"expected per-chunk results, got {result!r}"
+
+    assert len(result) >= 2 * cores, (
+        f"cores={cores} sized a {cores}-worker pool and the work was cut into "
+        f"{len(result)} chunk(s) on a machine reporting "
+        f"{os.cpu_count()} CPUs -- the pool size did not reach the chunker"
+    )
+
+    # Splitting further must not lose, duplicate or corrupt the work.
+    indices = sorted(j for chunk in result for j, _ in chunk["pids"])
+    assert indices == list(range(N)), "parallelism that loses work is not a win"
+    assert [chunk["marker"] for chunk in result] == [TOP_MARKER] * len(result)
+
+
+def test_the_chunk_count_moves_with_cores_on_a_fixed_machine(machine_with_two_cpus):
+    """Two pool sizes, one machine: the counts must differ, through the decorator.
+
+    The companion to the per-size contract above. If the chunk count came from
+    ``os.cpu_count()`` these two runs would be cut identically, whatever was
+    asked for.
+    """
+    narrow = cluster(parallel=True, cores=2)(pids_of_slice)(N)
+    wide = cluster(parallel=True, cores=8)(pids_of_slice)(N)
+
+    assert len(wide) > len(narrow), (
+        f"cores=8 and cores=2 were both cut into {len(narrow)} chunk(s): the "
+        "chunk count is being taken from the machine, not from the request"
+    )
+
+
+def test_a_worker_is_offered_more_than_one_chunk():
+    """The ``* 2`` in the chunk size is a load-balancing decision, and is tested.
+
+    ``chunk_size = len(loop_range) // (workers * 2)`` aims at two chunks per
+    worker. Dropping the factor -- ``// workers`` -- still fills the pool once
+    and survived the entire suite, which is why this test exists. It is not a
+    cosmetic constant: with exactly one chunk each, a worker that draws the
+    expensive chunk keeps it to the end while the others sit idle, because
+    there is nothing left in the queue for them to take. Slack in the queue is
+    the only rebalancing a ``ProcessPoolExecutor`` has.
+
+    Asserting the timing consequence would be asserting the weather. The
+    granularity is the part that is a fact, so that is what is checked, at
+    several pool sizes and with a range long enough for the division to have
+    room.
+    """
+    loops = find_parallelizable_loops(pids_of_slice, (N,), {})
+    assert loops, "pids_of_slice has a loop clustrix considers parallelizable"
+
+    for workers in (2, 4, 8, 16):
+        chunks = _create_local_work_chunks(pids_of_slice, (N,), {}, loops[0], workers)
+        assert len(chunks) >= 2 * workers, (
+            f"a {workers}-worker pool was offered {len(chunks)} chunk(s) of "
+            f"{N} iterations: with fewer than two each, a worker that draws a "
+            "slow chunk cannot be relieved by its idle siblings"
+        )
 
 
 def test_the_chunk_count_follows_the_pool_not_the_machine():
@@ -363,6 +462,80 @@ def test_nothing_is_reported_when_nothing_was_requested(caplog):
     assert not any(
         "has no effect here" in message for message in warnings_from(caplog)
     ), warnings_from(caplog)
+
+
+def test_the_same_request_is_reported_once_per_decorated_function(caplog):
+    """A warning repeated on every call is a warning the user learns to skip.
+
+    The message is worth saying: it tells the caller their eight workers are
+    not going to exist. It is not worth saying five times, and the local path
+    is precisely where a decorated function gets called in a loop. It is
+    throttled per decorated function and per ``(request, reason)`` pair, so a
+    second function -- a genuinely separate thing the user asked for -- still
+    gets told.
+    """
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        once = cluster(cores=8)(pid_of_whole_call)
+        for _ in range(5):
+            assert once(N)["pid"] == os.getpid()
+
+        said = [m for m in warnings_from(caplog) if "cores=8" in m]
+        assert len(said) == 1, f"five calls produced {len(said)} warnings: {said}"
+
+        again = cluster(cores=8)(pid_of_whole_call)
+        assert again(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "cores=8" in m]
+    assert len(said) == 2, (
+        "a separately decorated function has its own record and must be told "
+        f"too: {said}"
+    )
+
+
+def test_a_changed_request_is_reported_again(caplog):
+    """Throttling may not swallow a *different* configuration.
+
+    The same decorated function, called after ``configure(default_cores=...)``
+    changed underneath it, is a new request and has never been answered. A
+    throttle keyed on the function alone would report the first value and go
+    quiet on the second, which is the #152 silence again in a smaller box.
+    """
+    bare = cluster(pid_of_whole_call)
+
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        configure(default_cores=8)
+        assert bare(N)["pid"] == os.getpid()
+        assert bare(N)["pid"] == os.getpid()
+
+        configure(default_cores=16)
+        assert bare(N)["pid"] == os.getpid()
+        assert bare(N)["pid"] == os.getpid()
+
+    said = [m for m in warnings_from(caplog) if "has no effect here" in m]
+    assert len(said) == 2, f"expected one warning per distinct request: {said}"
+    assert sum("default_cores=8" in m for m in said) == 1, said
+    assert sum("default_cores=16" in m for m in said) == 1, said
+
+
+@pytest.mark.parametrize("cores", [True, False])
+def test_a_bool_is_not_a_core_count(cores):
+    """``bool`` subclasses ``int``, and that is not the caller's problem.
+
+    ``isinstance(True, int)`` is true, so ``@cluster(cores=True)`` passed the
+    "is it an integer" check and was read as a request for one worker, and
+    ``LocalExecutor(max_workers=True)`` stored ``True`` as its worker count --
+    while ``cores=False`` was refused with "must be a positive integer", a
+    message that says nothing useful about ``True``, which is not a positive
+    integer in any sense the caller means. Both are refused now, and the
+    message names the actual reason.
+    """
+    for construct in (
+        lambda: cluster(cores=cores)(pid_of_whole_call),
+        lambda: cluster(parallel=True, cores=cores)(pids_of_slice),
+        lambda: LocalExecutor(max_workers=cores),
+    ):
+        with pytest.raises(ValueError, match="bool is not one"):
+            construct()
 
 
 @pytest.mark.parametrize("cores", [0, -2])

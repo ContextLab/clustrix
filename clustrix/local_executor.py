@@ -16,6 +16,23 @@ import pickle
 logger = logging.getLogger(__name__)
 
 
+def is_worker_count(value: object) -> bool:
+    """Whether ``value`` can be a number of workers.
+
+    ``bool`` is excluded deliberately. It subclasses ``int``, so
+    ``isinstance(True, int)`` is true: ``@cluster(cores=True)`` and
+    ``LocalExecutor(max_workers=True)`` were accepted and quietly read as a
+    request for one worker, while ``False`` was rejected as "not a positive
+    integer" -- a message that is confusing for ``True``, which is not a
+    positive integer in any sense the caller means (#152).
+
+    ``None`` is not accepted here. It means "decide for me" at both call
+    sites, but it means two different things (the configured default vs. one
+    worker per core), so each caller checks for it itself.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 class LocalExecutor:
     """Execute functions locally using multiprocessing or threading."""
 
@@ -37,12 +54,16 @@ class LocalExecutor:
                 ran sequentially instead (#152). Neither told the caller their
                 number was nonsense.
         """
-        if max_workers is not None and (
-            not isinstance(max_workers, int) or max_workers < 1
-        ):
+        if max_workers is not None and not is_worker_count(max_workers):
+            detail = "it must be a positive integer, or None for one per core."
+            if isinstance(max_workers, bool):
+                detail = (
+                    "it must be a positive integer, and a bool is not one -- "
+                    "whatever Python's type hierarchy says."
+                )
             raise ValueError(
                 f"max_workers={max_workers!r} is not a usable worker count: "
-                "it must be a positive integer, or None for one per core."
+                f"{detail}"
             )
         self.max_workers = max_workers or os.cpu_count() or 4
         self.use_threads = use_threads

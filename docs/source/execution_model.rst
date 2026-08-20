@@ -104,8 +104,9 @@ Decorator arg    Config fallback
 
 The fallback is written as ``cores or config.default_cores``. ``cores`` is
 validated before that merge: anything other than a positive integer raises
-``ValueError`` at decoration time, so ``cores=0`` and ``cores=-2`` are rejected
-rather than absorbed. Any resource key still missing when a job script is
+``ValueError`` at decoration time, so ``cores=0``, ``cores=-2`` and
+``cores=True`` are rejected rather than absorbed -- the last of those because
+``bool`` subclasses ``int`` and would otherwise be read as one worker. Any resource key still missing when a job script is
 generated is filled in again by ``resolve_job_resources``.
 
 ``queue`` is not a decorator parameter. ``@cluster(queue=...)`` lands in

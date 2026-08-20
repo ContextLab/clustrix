@@ -4,12 +4,12 @@ import logging
 import os
 import threading
 from dataclasses import fields
-from typing import Any, Callable, NamedTuple, Optional, Dict, List
+from typing import Any, Callable, NamedTuple, Optional, Dict, List, Set
 
 from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
-from .local_executor import create_local_executor
+from .local_executor import create_local_executor, is_worker_count
 from .loop_analysis import find_parallelizable_loops
 from .utils import detect_loops, serialize_function
 
@@ -29,10 +29,15 @@ SHIPPED_DEFAULT_CORES = next(
 
 
 class _CoreRequest(NamedTuple):
-    """A worker count the caller asked for, and where they wrote it."""
+    """A worker count the caller asked for, and where they wrote it.
+
+    ``reported`` is the set of ``(where, because)`` pairs this decorated
+    function has already complained about; see ``_warn_cores_unused``.
+    """
 
     value: int
     where: str
+    reported: Set[tuple]
 
 
 def cluster(
@@ -76,14 +81,27 @@ def cluster(
     # ``cores or config.default_cores`` and silently became the default, while
     # ``cores=-2`` reached ``ProcessPoolExecutor``, whose "max_workers must be
     # greater than 0" was swallowed by the sequential fallback -- so the job
-    # ran on one core, and not even the cores warning fired (#152).
-    if cores is not None and (not isinstance(cores, int) or cores < 1):
+    # ran on one core, and not even the cores warning fired (#152). ``True``
+    # was a third silent absorption: ``bool`` subclasses ``int``, so it passed
+    # the type check and became a request for one worker while ``False`` was
+    # refused -- see ``is_worker_count``.
+    if cores is not None and not is_worker_count(cores):
+        detail = "cores must be a positive integer."
+        if isinstance(cores, bool):
+            detail = (
+                "cores must be a positive integer, and a bool is not one -- "
+                "whatever Python's type hierarchy says."
+            )
         raise ValueError(
-            f"@cluster(cores={cores!r}) is not a usable worker count: cores "
-            "must be a positive integer."
+            f"@cluster(cores={cores!r}) is not a usable worker count: {detail}"
         )
 
     def decorator(func: Callable) -> Callable:
+
+        # One record per decorated function of the (request, reason) pairs
+        # already reported, so a call in a loop does not repeat itself. See
+        # ``_warn_cores_unused``.
+        cores_reported: Set[tuple] = set()
 
         @functools.wraps(func)
         def wrapper(*args, **func_kwargs):
@@ -160,7 +178,7 @@ def cluster(
             # work to give a second worker, and the number was simply dropped:
             # the plain local path, the async local path (one job on a thread),
             # and ``cluster_type="local"``, which reaches LocalJobManager.
-            requested = _requested_cores(cores, config)
+            requested = _requested_cores(cores, config, cores_reported)
             if execution_mode == "local" and (use_async or not should_parallelize):
                 _warn_cores_unused(
                     requested,
@@ -483,7 +501,9 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     return "remote"
 
 
-def _requested_cores(cores: Optional[int], config) -> Optional[_CoreRequest]:
+def _requested_cores(
+    cores: Optional[int], config, reported: Set[tuple]
+) -> Optional[_CoreRequest]:
     """The worker count the caller asked for, and where they asked for it.
 
     Two places count as asking. ``@cluster(cores=N)`` is the obvious one. A
@@ -496,10 +516,10 @@ def _requested_cores(cores: Optional[int], config) -> Optional[_CoreRequest]:
     assumed: only a changed one is an instruction.
     """
     if cores is not None:
-        return _CoreRequest(cores, f"@cluster(cores={cores})")
+        return _CoreRequest(cores, f"@cluster(cores={cores})", reported)
     default = getattr(config, "default_cores", None)
     if default is not None and default != SHIPPED_DEFAULT_CORES:
-        return _CoreRequest(default, f"configure(default_cores={default})")
+        return _CoreRequest(default, f"configure(default_cores={default})", reported)
     return None
 
 
@@ -514,9 +534,22 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
 
     A request of 1 is not a request for a second worker, so nothing is said
     about it: one worker is what every one of these routes already provides.
+
+    Each ``(where, because)`` pair is reported **once per decorated function**.
+    The point of the message is to tell the caller something they did not know;
+    repeating it on every iteration of their loop is how a warning gets
+    filtered out mentally, and the local path is exactly where a decorated
+    function gets called in a tight loop. A different request -- a
+    ``configure(default_cores=...)`` changed between calls, say -- is a
+    different pair and speaks again, and every separately decorated function
+    starts with its own empty record.
     """
     if request is None or request.value <= 1:
         return
+    key = (request.where, because)
+    if key in request.reported:
+        return
+    request.reported.add(key)
     logger.warning(
         "%s has no effect here: %s. Locally, cores bounds the worker pool only "
         "when parallel=True finds a parallelizable loop and the function "

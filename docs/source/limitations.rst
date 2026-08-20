@@ -163,7 +163,24 @@ parallelizing path (on by default through ``auto_parallel``, and forced with
 ``parallel=True``) must find a supported loop, split it into chunks, and pass
 each chunk through a ``_parallel_<variable>`` keyword the function accepts.
 Most Python loops do not meet those rules. Even when they do, the pool size is
-an upper bound, not a promise that many workers will be busy.
+an upper bound, not a promise that many workers will be busy. On that path the
+work is cut into roughly two chunks per worker, so that a worker which draws a
+slow chunk can be relieved by an idle sibling taking the next one; the count
+follows the pool you asked for, not the machine's CPU count.
+
+Three details of the "has no effect" message itself:
+
+* It is logged **once per decorated function per distinct request**, not on
+  every call, because the local path is exactly where a decorated function
+  gets called in a tight loop. Change the request -- a different
+  ``default_cores``, a different reason for declining -- and it speaks again.
+* A request of one worker is not reported. Every one of these routes already
+  provides one.
+* ``configure(default_cores=4)`` -- the shipped default -- is not reported
+  either, deliberately. Clustrix cannot distinguish an explicit request that
+  happens to equal the default from no request at all, and warning on the
+  shipped value would fire on every local call anyone ever makes. Any *other*
+  ``default_cores`` you set is treated as an instruction and is reported.
 
 The parallel machinery underneath is real.
 :class:`clustrix.local_executor.LocalExecutor` builds a
@@ -625,7 +642,11 @@ Smaller sharp edges
   keys *are* validated and will refuse metacharacters.
 * **``cores`` must be a positive integer.** ``@cluster(cores=0)`` and
   ``@cluster(cores=-2)`` raise ``ValueError`` at decoration time rather than
-  falling through the ``cores or config.default_cores`` merge.
+  falling through the ``cores or config.default_cores`` merge. Booleans are
+  refused as well, at the decorator and at
+  :class:`~clustrix.local_executor.LocalExecutor`: ``bool`` subclasses
+  ``int``, so ``cores=True`` would otherwise pass the type check and be read
+  as a request for one worker.
 * **Unknown ``@cluster`` keywords are warned about, not rejected.** The
   warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
   a keyword name is easy to miss if nothing is watching that logger. This is
