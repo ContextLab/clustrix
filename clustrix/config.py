@@ -4,7 +4,7 @@ import secrets as _secrets
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 from dataclasses import dataclass, asdict, fields
 
 
@@ -585,6 +585,44 @@ def configure(**kwargs) -> None:
 
     for key, value in kwargs.items():
         setattr(_config, key, value)
+
+
+def config_field_names() -> FrozenSet[str]:
+    """Every name :func:`configure` will accept.
+
+    Derived from the dataclass rather than listed, because a list is only
+    correct until the next field is added and nothing makes it fail loudly
+    when it stops being.
+    """
+    return frozenset(field.name for field in fields(ClusterConfig))
+
+
+def split_config_kwargs(
+    data: Mapping[str, Any], bookkeeping: Iterable[str] = ()
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Split a saved configuration into what :func:`configure` accepts, and
+    the names it does not.
+
+    :func:`configure` rejects an unknown keyword on purpose -- a silently
+    ignored setting is worse than a rejected one -- so a caller holding a
+    dict that mixes settings with its own bookkeeping (a profile's ``name``,
+    say) has to do the separating itself. This is that separation, in one
+    place, so the widgets cannot drift apart on what a configuration key is.
+
+    ``bookkeeping`` names the keys the caller knows are not settings and
+    means to drop. Anything else that is not a field comes back in the
+    second return value instead of vanishing: a key nobody recognises is
+    either a stale profile written by an older clustrix or a control wired
+    to a name that no longer exists, and both deserve to be said out loud
+    rather than dropped on the floor.
+    """
+    accepted = config_field_names()
+    known_extras = set(bookkeeping)
+    kwargs = {key: value for key, value in data.items() if key in accepted}
+    unrecognised = sorted(
+        key for key in data if key not in accepted and key not in known_extras
+    )
+    return kwargs, unrecognised
 
 
 def load_config(config_path: str) -> None:

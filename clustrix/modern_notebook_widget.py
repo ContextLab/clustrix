@@ -29,6 +29,7 @@ from .config import (
     configure,
     get_config,
     get_config_dir,
+    split_config_kwargs,
 )
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
@@ -1712,9 +1713,16 @@ class ModernClustrixWidget:
                 # -- cluster_packages, excluded_packages, poll intervals and
                 # timeouts a user can only set from code.
                 defaults = asdict(ClusterConfig())
-                applied = {field: defaults[field] for field in WIDGET_MANAGED_FIELDS}
+                # ``.get``, not ``[]``: a name in WIDGET_MANAGED_FIELDS that is
+                # no longer a ClusterConfig field must reach the filter below
+                # and be named, rather than raising a bare KeyError here or --
+                # worse -- being dropped without a word (#165).
+                applied = {
+                    field: defaults.get(field) for field in WIDGET_MANAGED_FIELDS
+                }
                 applied.update(self._config_data_for_backend())
-                configure(**applied)
+                settings, unrecognised = split_config_kwargs(applied)
+                configure(**settings)
 
                 print("✅ Applied configuration")
                 print(f"   Cluster: {config.cluster_type}")
@@ -1725,6 +1733,11 @@ class ModernClustrixWidget:
                     f"{config.default_memory}, {config.default_time}"
                 )
                 print("   @cluster will use this configuration from now on.")
+                if unrecognised:
+                    print(
+                        "⚠️  Ignored, not a clustrix setting: "
+                        + ", ".join(unrecognised)
+                    )
                 self.set_status("ok", "applied")
 
                 # The button label used to change to "Applied!" and a

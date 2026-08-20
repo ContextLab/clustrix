@@ -30,6 +30,7 @@ except ImportError:
 from .config import (
     configure,
     get_config_dir,
+    split_config_kwargs,
     strip_secret_fields,
     write_text_securely,
 )
@@ -40,6 +41,12 @@ from .config import (
 from .profile_manager import _mkdir_private
 
 logger = logging.getLogger(__name__)
+
+#: Keys a saved profile carries that are not settings. ``name`` is the
+#: profile's own label in the dropdown, so dropping it before ``configure()``
+#: is not discarding an instruction -- there is no setting it could apply to.
+#: Everything else that is not a ``ClusterConfig`` field gets said out loud.
+PROFILE_BOOKKEEPING_KEYS = ("name",)
 
 
 def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
@@ -397,11 +404,15 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
-        # Job queue/partition
-        self.queue_field = widgets.Text(
-            description="Queue/Partition:",
+        # SLURM partition. Collected as ``queue`` until #165: that is not a
+        # ClusterConfig field and never was, so the value went into the saved
+        # profile and no further -- #158 removed the last consumer of ``queue``
+        # when PBS and SGE went. ``default_partition`` is the live spelling;
+        # the decorator resolves it into the ``--partition`` directive.
+        self.partition_field = widgets.Text(
+            description="Partition:",
             placeholder="e.g., gpu, compute, high-mem",
-            tooltip="Job queue or partition name (cluster-specific)",
+            tooltip="SLURM partition to submit to",
             style=style,
             layout=widgets.Layout(width="48%"),
         )
@@ -496,7 +507,7 @@ class EnhancedClusterConfigWidget:
             self.env_vars_field,
             self.module_loads_field,
             self.pre_exec_commands_field,
-            self.queue_field,
+            self.partition_field,
             self.ssh_key_field,
         ]
         for field in fields_to_track:
@@ -649,8 +660,15 @@ class EnhancedClusterConfigWidget:
             config.get("pre_execution_commands", []) or []
         )
 
-        self.queue_field.value = config.get("queue", "")
-        self.ssh_key_field.value = config.get("ssh_key_path", "")
+        # ``queue`` and ``ssh_key_path`` are what this widget wrote before
+        # #165. Profiles saved by an older clustrix are still on disk, so they
+        # are read as fallbacks rather than being silently blanked.
+        self.partition_field.value = (
+            config.get("default_partition") or config.get("queue") or ""
+        )
+        self.ssh_key_field.value = (
+            config.get("key_file") or config.get("ssh_key_path") or ""
+        )
 
         # Trigger cluster type change to show/hide relevant fields
         self._on_cluster_type_change({"new": self.cluster_type.value})
@@ -671,8 +689,8 @@ class EnhancedClusterConfigWidget:
             "username": self.username_field.value,
             "cluster_port": self.port_field.value,
             "package_manager": self.package_manager.value,
-            "queue": self.queue_field.value,
-            "ssh_key_path": self.ssh_key_field.value,
+            "default_partition": self.partition_field.value,
+            "key_file": self.ssh_key_field.value,
         }
 
         # Include password only if provided
@@ -781,9 +799,22 @@ class EnhancedClusterConfigWidget:
                 # Update the config in our dictionary
                 if self.current_config_name:
                     self.configs[self.current_config_name] = config_data
-                # Apply to Clustrix
-                configure(**config_data)
+                # Apply to Clustrix. ``configure()`` rejects any keyword
+                # that is not a ClusterConfig field, and a profile carries at
+                # least one that is not -- its own ``name`` -- so splatting the
+                # profile straight in made Apply fail every single time (#165).
+                settings, unrecognised = split_config_kwargs(
+                    config_data, PROFILE_BOOKKEEPING_KEYS
+                )
+                configure(**settings)
                 print("✅ Configuration applied successfully!")
+                if unrecognised:
+                    # Not dropped quietly: a key nobody recognises is a
+                    # setting the user asked for and will not get.
+                    print(
+                        "⚠️  Ignored, not a clustrix setting: "
+                        + ", ".join(unrecognised)
+                    )
 
                 # Show current config summary
                 print("\n📋 Active configuration:")
@@ -1038,8 +1069,8 @@ class EnhancedClusterConfigWidget:
             # Add authentication
             if config.get("password"):
                 connect_params["password"] = config["password"]
-            elif config.get("ssh_key_path"):
-                key_path = Path(config["ssh_key_path"]).expanduser()
+            elif config.get("key_file"):
+                key_path = Path(config["key_file"]).expanduser()
                 if key_path.exists():
                     connect_params["key_filename"] = str(key_path)
 
@@ -1264,7 +1295,7 @@ class EnhancedClusterConfigWidget:
                 self.env_vars_field,
                 self.module_loads_field,
                 self.pre_exec_commands_field,
-                widgets.HBox([self.queue_field, widgets.HTML("")]),
+                widgets.HBox([self.partition_field, widgets.HTML("")]),
             ]
         )
         advanced_accordion = widgets.Accordion([advanced_content])
