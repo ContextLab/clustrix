@@ -28,13 +28,13 @@ WHAT THIS GUARD CLAIMS, EXACTLY:
     document under ``.github/workflows`` that could publish it is arranged so
     that the job publishing it starts, and finishes, on every pull request
     against a protected branch -- as far as a YAML document can settle that.
-    Concretely: the workflow fires on ``pull_request`` for a protected branch
-    with no ``paths``/``paths-ignore`` filter and no ``types`` narrower than
-    the default; the job is not conditioned on anything that can be false,
-    not made advisory with ``continue-on-error``, not fanned out by a
-    ``strategy: matrix`` (which renames the context), and not delegated to a
-    reusable workflow (which also renames it); and no step of it can be
-    skipped or made advisory either.
+    Concretely: the workflow fires on ``pull_request`` for every protected
+    branch, with no ``paths``/``paths-ignore`` filter and no ``types``
+    narrower than the default; the job names a runner, is not conditioned on
+    anything that can be false, not made advisory with ``continue-on-error``,
+    not fanned out by a ``strategy: matrix`` (which renames the context), and
+    not delegated to a reusable workflow (which also renames it); and no step
+    of it can be skipped or made advisory either.
 
 WHAT IT DOES NOT CLAIM:
 
@@ -59,13 +59,22 @@ WHAT IT DOES NOT CLAIM:
     above. If somebody teaches the guard one of them, that test fails and
     forces this docstring and the two dictionaries to be updated together.
 
-One limitation is deliberately *not* in that list, because it fails closed
-rather than open: branch names are compared literally, so a glob in
-``branches:`` is not expanded and would be reported as a problem rather than
-waved through. A guard that complains too much gets fixed; one that stays
+Branch names are matched the way GitHub matches them -- ``*`` within a path
+segment, ``**`` across segments, ``?``, and ``!`` negation, evaluated in
+order -- because the literal comparison this module started with was not
+merely conservative. It was fail-closed on ``branches: [ma*]``, a working
+trigger reported as broken; but it was fail-*open* on ``branches-ignore:
+[ma*]`` and ``branches-ignore: ['**']``, which exclude the protected branch,
+silence the required context and were waved straight through (review RT6-3).
+
+Two constructs in that filter syntax are still not modelled -- ``+`` (one or
+more of the preceding character) and character ranges -- and a pattern using
+either is reported as a problem rather than guessed at. That direction is
+only conservative: a guard that complains too much gets fixed; one that stays
 quiet does not.
 """
 
+import re
 from pathlib import Path
 
 import pytest
@@ -75,7 +84,30 @@ WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
 REQUIRED_CONTEXTS = ("Tests Status", "CI Status")
 
-PROTECTED_BRANCHES = {"master", "main"}
+#: The branches whose protection actually requires those contexts. Derived
+#: from the same API as ``REQUIRED_CONTEXTS``, and from nothing else:
+#:
+#: .. code-block:: console
+#:
+#:    $ gh api repos/ContextLab/clustrix/branches \
+#:        --jq '[.[] | select(.protected) | .name]'
+#:    ["master"]
+#:
+#: ``main`` was in this set too, on the reasoning that it is the conventional
+#: name and costs nothing. It cost the guard its point. A trigger reading
+#: ``branches: [main]`` names a branch this repository does not have, so it
+#: never fires on a pull request against ``master`` and never reports the
+#: context -- and membership of this set waved it through (review RT6-4).
+#: What the guard checks is that *every* protected branch is covered, so a
+#: name that is not protected cannot stand in for one that is. If ``main``
+#: is ever protected here, re-run the command above and add it back.
+PROTECTED_BRANCHES = {"master"}
+
+#: Constructs in GitHub's branch filter syntax that this module does not
+#: model: ``+`` matches one or more of the preceding character and ``[]``
+#: introduces a character range. A pattern containing either is reported as a
+#: problem in both directions rather than evaluated wrongly in one.
+UNMODELLED_PATTERN_CHARS = frozenset("+[]")
 
 #: The ``types`` GitHub uses for ``pull_request`` when none are named. A
 #: workflow that names a narrower set stops firing on the events that matter:
@@ -95,15 +127,69 @@ ALWAYS_RUNS = frozenset(
 
 
 def _triggers(document):
-    """The ``on:`` mapping.
+    """The events the workflow fires on, keyed by event name.
 
     YAML 1.1 reads a bare ``on`` as the boolean ``True``, so the key is not
     the string most readers expect.
+
+    The *value* has three spellings, and only one of them is a mapping.
+    ``on: pull_request`` and ``on: [pull_request, push]`` are both valid, and
+    both mean the event with no ``branches``, ``paths`` or ``types`` filter
+    at all -- which is the most permissive form there is, strictly better
+    than the mapping form for the purpose of this module. Reading only the
+    mapping form reported both of them as having no pull_request trigger
+    (review RT6-6), which is a guard rejecting a correct configuration: the
+    fix for that is always to weaken or delete the guard, and everything in
+    ``BYPASSES`` goes with it.
     """
     if not isinstance(document, dict):
         return {}
     triggers = document[True] if True in document else document.get("on")
+    if isinstance(triggers, str):
+        return {triggers: {}}
+    if isinstance(triggers, list):
+        return {event: {} for event in triggers if isinstance(event, str)}
     return triggers if isinstance(triggers, dict) else {}
+
+
+def _pattern_matches(pattern, branch):
+    """Does one GitHub branch filter pattern match this branch name?
+
+    ``*`` matches within a path segment, ``**`` across segments, ``?`` one
+    character, and everything else is literal. Callers must reject patterns
+    containing ``UNMODELLED_PATTERN_CHARS`` before getting here.
+    """
+    regex = []
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "*":
+            if pattern[index + 1 : index + 2] == "*":
+                regex.append(".*")
+                index += 2
+            else:
+                regex.append("[^/]*")
+                index += 1
+            continue
+        regex.append("[^/]" if char == "?" else re.escape(char))
+        index += 1
+    return re.fullmatch("".join(regex), branch) is not None
+
+
+def _filter_matches(patterns, branch):
+    """Whether a ``branches``/``branches-ignore`` list selects ``branch``.
+
+    ``!`` negates, and a later pattern overrides an earlier one, which is how
+    GitHub evaluates these lists.
+    """
+    selected = False
+    for pattern in patterns:
+        if pattern.startswith("!"):
+            if _pattern_matches(pattern[1:], branch):
+                selected = False
+        elif _pattern_matches(pattern, branch):
+            selected = True
+    return selected
 
 
 def real_workflows():
@@ -145,18 +231,47 @@ def _trigger_problems(context, name, document, job_id):
         ]
     pull_request = pull_request or {}
 
-    branches = set(pull_request.get("branches") or [])
-    if branches and not branches & PROTECTED_BRANCHES:
-        problems.append(
-            where + f"its pull_request trigger names branches {sorted(branches)}, "
-            "none of them protected. See #169."
+    for filter_key in ("branches", "branches-ignore"):
+        patterns = [str(pattern) for pattern in (pull_request.get(filter_key) or [])]
+        if not patterns:
+            continue
+        unmodelled = sorted(
+            {p for p in patterns if UNMODELLED_PATTERN_CHARS & set(p.lstrip("!"))}
         )
-    ignored = set(pull_request.get("branches-ignore") or [])
-    if ignored & PROTECTED_BRANCHES:
-        problems.append(
-            where + f"its pull_request trigger excludes branches {sorted(ignored)}, "
-            "which are protected. See #169."
-        )
+        if unmodelled:
+            problems.append(
+                where + f"its pull_request trigger's {filter_key}: uses the "
+                f"patterns {unmodelled}, which contain filter syntax this "
+                "guard does not model. Whether they cover the protected "
+                f"branches {sorted(PROTECTED_BRANCHES)} is therefore reported "
+                "rather than guessed at. See #169."
+            )
+            continue
+        if filter_key == "branches":
+            missed = sorted(
+                branch
+                for branch in PROTECTED_BRANCHES
+                if not _filter_matches(patterns, branch)
+            )
+            if missed:
+                problems.append(
+                    where + f"its pull_request trigger names branches {patterns}, "
+                    f"which do not select the protected branch(es) {missed}. A "
+                    "pull request against one of those never triggers the "
+                    "workflow, so the context is never reported and GitHub "
+                    "blocks the merge forever waiting for it. See #169."
+                )
+        else:
+            excluded = sorted(
+                branch
+                for branch in PROTECTED_BRANCHES
+                if _filter_matches(patterns, branch)
+            )
+            if excluded:
+                problems.append(
+                    where + f"its pull_request trigger excludes {patterns}, which "
+                    f"covers the protected branch(es) {excluded}. See #169."
+                )
 
     for filter_key in ("paths", "paths-ignore"):
         if filter_key in pull_request:
@@ -212,6 +327,15 @@ def _job_problems(context, name, document, job_id):
             "advisory: it reports success whatever its steps did, so the "
             "required context turns green on a pull request that broke the "
             "build. See #169."
+        )
+
+    if "uses" not in job and not job.get("runs-on"):
+        problems.append(
+            where + "names no `runs-on`. That is not a valid workflow: GitHub "
+            "rejects the document, so the job never starts, no check run is "
+            "ever created under that name, and the pull request sits on "
+            "'Expected -- Waiting for status to be reported' -- #169's symptom "
+            "exactly, arrived at by a typo rather than a filter. See #169."
         )
 
     matrix = (job.get("strategy") or {}).get("matrix")
@@ -291,10 +415,12 @@ def test_required_context_will_be_reported_on_every_pull_request(context):
     assert problems == [], "\n\n".join(problems)
 
 
-# Bypasses. Every one of these defeated the guard as it stood before this
-# commit -- verified by applying each to a copy of the tree and watching all
-# eight tests pass -- and every one silences the required context or makes it
-# report green without checking anything.
+# Bypasses. Every one of these silences the required status context, or makes
+# it report green without checking anything, and all but one defeated the
+# guard as it stood before the commit that added it -- verified by running the
+# guard from before that commit over each document and watching it return no
+# problems. (The exception is noted where it appears: it was already caught,
+# for a reason that no longer applies.)
 
 COMPLIANT = """
 name: Gate
@@ -491,6 +617,89 @@ jobs:
       - name: Check status
         run: ./verify.sh
 """},
+    # RT6-3: the glob the docstring used to claim was reported as a problem.
+    # `ma*` and `**` both cover master, and neither is a literal match, so
+    # the required context is silenced and nothing says so.
+    "protected_branch_excluded_by_a_glob": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches-ignore: ['ma*']
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    "every_branch_excluded": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches-ignore: ['**']
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    # The same exclusion by negation: `**` selects master, `!master` takes it
+    # back out, and the workflow never fires on the branch that needs it. This
+    # is the one entry here the literal comparison already rejected -- because
+    # neither string is the word "master", not because anything understood the
+    # negation. It is kept so that reading `!` correctly does not quietly turn
+    # a caught case into an accepted one.
+    "protected_branch_negated_out_of_the_selection": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches: ['**', '!master']
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    # RT6-4: `main` is not a branch of this repository, let alone a
+    # protected one. This fires on nothing and reports nothing.
+    "only_an_unprotected_branch": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches: [main]
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    # RT6-5: an invalid workflow. The job cannot start, so the check run is
+    # never created -- indistinguishable, from branch protection's side,
+    # from the path filter this module was written for.
+    "publisher_with_no_runs_on": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches: [master]
+jobs:
+  gate:
+    name: CI Status
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
     "nothing_publishes_it": {"gate.yml": """
 name: Gate
 on:
@@ -615,6 +824,83 @@ jobs:
 }
 
 
+#: Configurations that are correct, and that the guard must NOT flag. A
+#: guard that rejects a working setup is its own defect: the fix somebody
+#: reaches for is to weaken or delete it, and every bypass above goes with
+#: it. ``on: [pull_request]`` and ``on: pull_request`` are both valid and
+#: both *more* permissive than the mapping form -- no branch, path or type
+#: filter at all -- and both were reported as "has no pull_request trigger"
+#: (review RT6-6). The two glob cases are the other half of RT6-3: matching
+#: branch patterns properly has to accept a pattern that covers the
+#: protected branch as readily as it rejects one that excludes it.
+ACCEPTED = {
+    "trigger_as_a_list": {"gate.yml": """
+name: Gate
+on: [pull_request]
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    "trigger_as_a_bare_string": {"gate.yml": """
+name: Gate
+on: pull_request
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    "trigger_as_a_list_of_several_events": {"gate.yml": """
+name: Gate
+on: [push, pull_request]
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    "a_branch_glob_that_covers_master": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches: ['ma*']
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+    "a_branches_ignore_that_misses_master": {"gate.yml": """
+name: Gate
+on:
+  pull_request:
+    branches-ignore: ['dependabot/**', 'gh-pages']
+jobs:
+  gate:
+    name: CI Status
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Check status
+        run: ./verify.sh
+"""},
+}
+
+
 def _parse(documents):
     return [(name, yaml.safe_load(text)) for name, text in documents.items()]
 
@@ -625,6 +911,19 @@ def test_guard_catches_every_known_bypass(name):
     assert context_problems("CI Status", _parse(BYPASSES[name])) != [], (
         f"the bypass {name!r} passed every check, so a required status "
         "context can be turned off without this module noticing. See #169."
+    )
+
+
+@pytest.mark.parametrize("name", sorted(ACCEPTED))
+def test_guard_accepts_a_correct_configuration(name):
+    """A guard that fails a working setup gets deleted, and takes the rest.
+
+    Every document here reports the required context on every pull request
+    against every protected branch. None of them may produce a problem.
+    """
+    assert context_problems("CI Status", _parse(ACCEPTED[name])) == [], (
+        f"the guard rejects {name!r}, which is a correct configuration. See "
+        "#169, review RT6-6."
     )
 
 
