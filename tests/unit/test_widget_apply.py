@@ -223,6 +223,37 @@ class TestTheForwardedKeySetIsDerived:
         assert settings == {"stage_warn_bytes": 4096}
         assert unrecognised == []
 
+    def test_a_reset_field_is_seeded_with_its_real_default(self):
+        """``reset_fields`` means "put this back to the ClusterConfig
+        default", not "blank it". The container-valued fields are where the
+        difference bites: ``None`` is not an empty list."""
+        settings, unrecognised = split_config_kwargs(
+            {},
+            (),
+            reset_fields=(
+                "module_loads",
+                "environment_variables",
+                "pre_execution_commands",
+                "cluster_port",
+                "package_manager",
+            ),
+        )
+        assert unrecognised == []
+        defaults = ClusterConfig()
+        assert settings == {
+            "module_loads": defaults.module_loads,
+            "environment_variables": defaults.environment_variables,
+            "pre_execution_commands": defaults.pre_execution_commands,
+            "cluster_port": defaults.cluster_port,
+            "package_manager": defaults.package_manager,
+        }
+        # Spelled out, because "equals the default" would still hold if every
+        # default were None.
+        assert settings["module_loads"] == []
+        assert settings["environment_variables"] == {}
+        assert settings["pre_execution_commands"] == []
+        assert settings["cluster_port"] == 22
+
     def test_bookkeeping_is_dropped_and_everything_else_is_reported(self):
         settings, unrecognised = split_config_kwargs(
             {"cluster_type": "local", "name": "mine", "queue": "batch"},
@@ -320,6 +351,49 @@ class TestClearingAControlClearsTheSetting:
 
         assert get_config().stage_warn_bytes == 4096
 
+    def test_a_cleared_list_box_clears_to_an_empty_list_not_to_none(self, capsys):
+        """The seed has to be the field's real default, not ``None``.
+
+        ``module_loads``, ``environment_variables`` and
+        ``pre_execution_commands`` are the three controls whose empty state is
+        dropped rather than sent, so they are the ones the reset actually has
+        to supply a value for -- and every consumer iterates them. Seeding
+        ``None`` looks like a clear and passes every assertion phrased as "not
+        the old value", while leaving a configuration that raises
+        ``TypeError: 'NoneType' object is not iterable`` the first time a job
+        script is built.
+        """
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["Modules"] = {
+            "name": "Modules",
+            "cluster_type": "slurm",
+            "cluster_host": "hpc.example.edu",
+            "username": "researcher",
+            "module_loads": ["python/3.11", "cuda/12.1"],
+            "environment_variables": {"OMP_NUM_THREADS": "4"},
+            "pre_execution_commands": ["source activate env"],
+        }
+        widget._load_config_to_widgets("Modules")
+        _press(lambda: widget._on_apply_config(None), widget.status_output, capsys)
+        assert get_config().module_loads == ["python/3.11", "cuda/12.1"]
+
+        widget.module_loads_field.value = ""
+        widget.env_vars_field.value = ""
+        widget.pre_exec_commands_field.value = ""
+        told = _press(
+            lambda: widget._on_apply_config(None), widget.status_output, capsys
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        assert live.module_loads == []
+        assert live.environment_variables == {}
+        assert live.pre_execution_commands == []
+        # Said the way the code that breaks says it.
+        assert [f"module load {name}" for name in live.module_loads] == []
+        assert sorted(live.environment_variables.items()) == []
+        assert list(live.pre_execution_commands) == []
+
     def test_managed_fields_are_exactly_what_the_widget_writes(self):
         """The seeded set is the widget's own key list, so a control added
         without updating it -- or a key left in it after its control went --
@@ -409,6 +483,41 @@ class TestAStaleProfileKeyIsNamedOnTheRealPath:
         assert get_config().stage_warn_bytes == 4096
         assert widget.configs["Big Data"]["stage_warn_bytes"] == 4096
 
+    def test_the_carry_over_survives_renaming_the_profile_in_the_box(self, capsys):
+        """The stored profile is found by the name the widget is *tracking*,
+        not by whatever the name box happens to hold.
+
+        ``_on_config_name_change`` strips the typed value before it becomes
+        the key, so the moment a user types a name with a space at either end
+        the box and the dictionary key stop matching. Keying the lookup off
+        the box then misses silently: the stale key stops being named, the
+        field with no control stops being carried, and the entire carry-over
+        is gone with no error anywhere.
+        """
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["Big Data"] = {
+            "name": "Big Data",
+            "cluster_type": "local",
+            "stage_warn_bytes": 4096,
+            "cluster_hostt": "typo.example.edu",
+        }
+        widget._load_config_to_widgets("Big Data")
+
+        # Renaming it, the way the box is actually typed into.
+        widget.config_name.value = "Big Data (staging) "
+        assert widget.current_config_name == "Big Data (staging)"
+        assert widget.config_name.value != widget.current_config_name
+
+        told = _press(
+            lambda: widget._on_apply_config(None), widget.status_output, capsys
+        )
+
+        assert "❌" not in told, told
+        assert "Ignored, not a clustrix setting" in told
+        assert "cluster_hostt" in told
+        assert get_config().stage_warn_bytes == 4096
+        assert widget.configs["Big Data (staging)"]["stage_warn_bytes"] == 4096
+
 
 class TestProfilesWrittenBeforeTheKeysWereRenamed:
     """``queue`` and ``ssh_key_path`` are what this widget wrote until #165.
@@ -496,3 +605,99 @@ class TestTheSummarySaysWhatWasApplied:
         assert get_config().cluster_host is None
         assert "hpc.example.edu" not in told
         assert "Host:" not in told
+
+
+class TestACredentialChannelIsNotABackendSetting:
+    """Where the backend-only line is drawn, and why it is drawn there.
+
+    ``BACKEND_ONLY_FIELDS`` exists so a value belonging to one backend cannot
+    act on another: ``_choose_execution_mode`` routes on ``cluster_host``, so
+    a leftover host would send a job the user configured as ``local`` to a
+    cluster. That reasoning reaches exactly as far as *targets and credential
+    material* -- what names the compute, who it runs as there, and the secret
+    that opens that particular door.
+
+    ``password_env_var`` and ``use_env_password`` are neither. They hold no
+    secret and name no target; they name the environment variable a password
+    is read from, which is a property of the machine clustrix runs on.
+    ``save_to_file`` omits secret-bearing fields by default, so this pair is
+    the only supported way to supply a credential without writing it to disk,
+    and a modern-widget Apply on a ``local`` profile used to wipe it -- the
+    documented thing to do, undone by a button, without a word.
+    """
+
+    def test_modern_widget_local_apply_keeps_the_password_env_var(self, capsys):
+        configure(password_env_var="MY_CLUSTER_PW", use_env_password=True)
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        assert live.cluster_type == "local"
+        assert live.password_env_var == "MY_CLUSTER_PW"
+        assert live.use_env_password is True
+        # The name of the variable is not a secret, but nothing about this
+        # change may start printing values either.
+        assert "MY_CLUSTER_PW" not in told
+
+    def test_legacy_widget_agrees(self, capsys):
+        """The two widgets must not disagree about which settings a backend
+        switch owns. The legacy one manages neither field, so it already
+        leaves both alone -- asserted here so a later edit that adds them to
+        its managed set is caught rather than shipped."""
+        configure(password_env_var="MY_CLUSTER_PW", use_env_password=True)
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["Just Local"] = {"name": "Just Local", "cluster_type": "local"}
+        widget._load_config_to_widgets("Just Local")
+
+        told = _press(
+            lambda: widget._on_apply_config(None), widget.status_output, capsys
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        assert live.cluster_type == "local"
+        assert live.password_env_var == "MY_CLUSTER_PW"
+        assert live.use_env_password is True
+        assert "MY_CLUSTER_PW" not in told
+
+    def test_a_local_apply_still_drops_the_target_and_its_credentials(self, capsys):
+        """The other half of the line: everything that does name a target,
+        or unlock one, is still cleared. Without this the fix above could be
+        "delete BACKEND_ONLY_FIELDS" and nothing would complain."""
+        configure(
+            cluster_type="huggingface",
+            hf_namespace="contextlab",
+            hf_flavor="a10g-small",
+            hf_token="hf_SECRETTOKEN",
+            cluster_host="hpc.example.edu",
+            username="researcher",
+            password="hunter2-example",
+        )
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "local"
+        widget._update_ui_for_cluster_type()
+
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        assert live.cluster_host is None
+        assert live.username is None
+        assert live.password is None
+        assert live.hf_namespace is None
+        assert live.hf_flavor is None
+        assert live.hf_token is None
+        assert "hf_SECRETTOKEN" not in told
+        assert "hunter2-example" not in told

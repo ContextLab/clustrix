@@ -2134,6 +2134,23 @@ class ModernClustrixWidget:
     #: configuration must not carry them into a backend that ignores them --
     #: _choose_execution_mode routes on cluster_host, so a leftover host would
     #: send a "local" job to a cluster.
+    #:
+    #: The line is drawn at *targets and credential material*: what names the
+    #: compute (host, port, work directory, HuggingFace namespace and flavor),
+    #: who it runs as there (username), and the secret that opens that
+    #: particular door (password, key_file, hf_token). None of those mean
+    #: anything under another backend, and some of them misbehave.
+    #:
+    #: ``password_env_var``/``use_env_password`` are deliberately *not* here.
+    #: They hold no credential and name no target -- they say which
+    #: environment variable a password is read from, which is a property of
+    #: the machine clustrix runs on, not of the backend it talks to. And
+    #: ``save_to_file`` omits secret-bearing fields by default, so this pair
+    #: is the only supported way to supply a credential without writing it to
+    #: disk: clearing it on an unrelated backend switch silently destroys the
+    #: one setting the user cannot get back from their config file. The legacy
+    #: widget leaves both alone (neither is in its WIDGET_MANAGED_FIELDS), and
+    #: TestACredentialChannelIsNotABackendSetting holds the two together.
     BACKEND_ONLY_FIELDS = {
         ("ssh", "slurm"): (
             "cluster_host",
@@ -2141,8 +2158,6 @@ class ModernClustrixWidget:
             "username",
             "password",
             "key_file",
-            "password_env_var",
-            "use_env_password",
             "remote_work_dir",
         ),
         ("huggingface",): (
