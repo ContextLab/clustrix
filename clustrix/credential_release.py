@@ -149,6 +149,14 @@ SECRET_SURFACES = (
     ("clustrix.config", "ClusterConfig.password"),
     ("clustrix.config", "ClusterConfig.key_file"),
     ("clustrix.config", "ClusterConfig.password_env_var"),
+    # Not behind the gate, and listed because a surface nobody has written
+    # down is the one that gets closed eighth. ``get_cluster_password``
+    # scans CLUSTRIX_DEFAULT_PASSWORD and CLUSTER_PASSWORD -- variables that
+    # name **no host** -- and hands what it finds to whatever hostname it
+    # was passed, which on the ``setup_auth_with_fallback`` path is
+    # ``config.cluster_host``. Same shape as routes 2 and 6. Open finding,
+    # not an approved exception.
+    ("clustrix.auth_fallbacks", "get_cluster_password"),
 )
 
 
