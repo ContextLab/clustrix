@@ -1044,3 +1044,46 @@ base `0cbce38` + silent-failures `fcd922a` + widget-apply `feb1fd9` + named-env
 `f2a152d` = `376701f`: **2175 passed, 17 skipped, 0 failed**, black/flake8/mypy
 clean. Same three conflicts, same resolutions, executed twice independently
 with identical results — the recorded plan is proven rather than predicted.
+
+## #168 fully closed (`4e76040` on `work/fixes`) — and it creates a merge that WILL FAIL
+
+2002 passed / 0 failed (baseline 1985, +17); black 26.3.1, flake8, mypy clean;
+`sphinx -W` clean.
+
+**Site 1** — `notebook_magic_config.load_config_from_file`. Contract: the one
+`clustrix/config.py` already draws, no third policy invented. A file the caller
+**named** (the default) raises the real error — `FileNotFoundError`,
+`PermissionError`, `yaml.YAMLError`, `JSONDecodeError` — exactly as
+`load_config` does. A file the widget **discovered** by globbing
+(`discovered=True`, now passed by the widget's scan) stays non-fatal but logs
+the absolute path and the reason at WARNING. Parsing split into
+`_read_config_document` so both share one reader.
+
+**Site 3** — `utils.deserialize_function`. The fallback fires routinely, so the
+success path stays silent; a double failure raises `RuntimeError` naming both
+loaders and both reasons, `from cloudpickle_error`, with dill's exception
+surviving as `__context__` so all three tracebacks print.
+
+**One detail worth carrying forward:** dill and cloudpickle emit *identical*
+text for synthesizable bad payloads, so the both-reasons test counts
+occurrences rather than trusting distinct strings — "otherwise it would have
+passed against the defect". That is the arming discipline working as intended.
+
+### ⚠️ MERGE ACTION — this merge fails unless handled
+
+`TRACKED_DEFECTS` does **not** exist on `work/fixes`; it lives in
+`tests/unit/test_no_silent_swallows.py` on `work/silent-failures`, and its
+entry `("notebook_magic_config.py", "load_config_from_file")` records exactly
+the defect that `4e76040` has now fixed.
+
+`test_the_allowlists_have_no_stale_entries` fails when a dict names a site that
+no longer exists. **So when `work/fixes` meets `work/silent-failures`, that
+entry must be deleted in the merge commit**, and the swallow audit re-counted.
+Neither branch's suite can see this — the same class of cross-branch
+interaction that produced the `named-env` assertion failure earlier, and the
+second instance of it in this campaign.
+
+**#168 is now fully fixed** (site 2 on `work/silent-failures`, sites 1 and 3
+here) and can be closed with evidence after the merge — which also means it
+must be removed from `TRACKED_DEFECTS` rather than left pointing at a closed
+issue.
