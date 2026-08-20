@@ -187,7 +187,6 @@ class TestInfrastructureSetup:
         print("\n✨ Test infrastructure setup complete!")
         print("\nServices available:")
         print("  • SSH Server: ssh -p 2222 testuser@localhost")
-        print("  • SLURM controller: slurm-mock (ports 6817/6818)")
 
         return True
 

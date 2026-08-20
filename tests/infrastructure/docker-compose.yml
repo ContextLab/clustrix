@@ -4,10 +4,15 @@
 version: '3.8'
 
 # Only services something actually connects to belong here. MinIO,
-# PostgreSQL and Redis were started on every `setup` and no test ever
-# opened a socket to any of them -- three images pulled, three containers
-# run and three volumes kept for nothing (issue #150). Before adding a
-# service, have the test that needs it.
+# PostgreSQL, Redis and a mock SLURM controller were started on every
+# `setup` and no test ever opened a socket to any of them -- images
+# pulled, containers run and volumes kept for nothing (issue #150).
+#
+# The SLURM one was worse than dead weight. clustrix is tested against a
+# real SLURM scheduler, and a stand-in that answers on 6817 without being
+# one is exactly the substitute this project has spent months removing: a
+# test that passes against it says nothing about the thing it stands for.
+# Before adding a service, have the test that needs it.
 services:
   # SSH server for testing SSH-based clusters
   ssh-server:
@@ -26,26 +31,8 @@ services:
     networks:
       - clustrix-test
 
-  # Mock SLURM controller (simplified)
-  slurm-mock:
-    build:
-      context: .
-      dockerfile: Dockerfile.slurm
-    container_name: clustrix-test-slurm
-    ports:
-      - "6817:6817"  # Slurm default port
-      - "6818:6818"  # Slurmctld port
-    volumes:
-      - slurm-data:/var/spool/slurm
-    environment:
-      - SLURM_CLUSTER_NAME=test-cluster
-      - SLURM_CONTROL_MACHINE=slurm-mock
-    networks:
-      - clustrix-test
-
 volumes:
   ssh-data:
-  slurm-data:
 
 networks:
   clustrix-test:
