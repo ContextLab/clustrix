@@ -28,10 +28,12 @@ except ImportError:
     from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import (
+    SUPPORTED_CLUSTER_TYPES,
     configure,
     get_config_dir,
     split_config_kwargs,
     strip_secret_fields,
+    validate_cluster_type,
     write_text_securely,
 )
 
@@ -172,13 +174,14 @@ class EnhancedClusterConfigWidget:
         )
         self.add_config_btn.on_click(self._on_add_config)
         # Cluster type dropdown
+        # Read from SUPPORTED_CLUSTER_TYPES rather than repeating it. This
+        # menu spelled the four values out until #165, so adding a backend
+        # meant remembering to edit a list nothing pointed at -- and the
+        # comment on SUPPORTED_CLUSTER_TYPES already claimed "the notebook
+        # widget's dropdown" read it, which was true of the modern widget
+        # only.
         self.cluster_type = widgets.Dropdown(
-            options=[
-                "local",
-                "ssh",
-                "slurm",
-                "huggingface",
-            ],
+            options=list(SUPPORTED_CLUSTER_TYPES),
             description="Cluster Type:",
             tooltip=(
                 "Choose where to run your jobs: local machine, remote servers "
@@ -635,15 +638,51 @@ class EnhancedClusterConfigWidget:
         self._mark_unsaved_changes()
 
     def _load_config_to_widgets(self, config_name: str):
-        """Load a configuration into the widgets."""
+        """Load a configuration into the widgets.
+
+        ``cluster_type`` is the one field here that is *not* loaded through
+        ``set_choice``, and the reason is the opposite of the one that applies
+        to every other dropdown. ``set_choice`` widens a menu because the
+        saved configuration is authoritative -- ``ClusterConfig`` accepts any
+        string for ``hf_flavor`` or ``package_manager``, so a list baked into
+        the UI has no standing to veto one. ``cluster_type`` is the single
+        field with an enforced domain: ``ClusterConfig(cluster_type="pbs")``
+        and ``load_config()`` both raise ``ValueError`` naming issue #140.
+        Here the *menu* is authoritative and the saved value is the thing that
+        can be wrong, so widening would offer a backend clustrix cannot run
+        and defer the failure to submission time.
+
+        A profile can still name one, because ``load_config_from_file`` is
+        deliberately tolerant -- it collects what is on disk rather than
+        validating it, so ``~/.clustrix/clustrix.yml`` with ``cluster_type:
+        pbs`` lands in ``self.configs`` intact. Selecting it used to assign
+        that string to the ``Dropdown`` and raise a bare ``TraitError:
+        Invalid selection`` out of the observer, which says nothing about
+        which backend or why. It is refused here instead, with the backend and
+        its tracking issue named, and nothing is loaded: a half-loaded profile
+        wearing some other profile's cluster type is worse than none.
+        """
         if config_name not in self.configs:
             return
         config = self.configs[config_name]
+
+        cluster_type = config.get("cluster_type", "local")
+        try:
+            validate_cluster_type(
+                str(cluster_type),
+                source=f"configuration {config_name!r}: cluster_type",
+            )
+        except ValueError as exc:
+            with self.status_output:
+                self.status_output.clear_output()
+                print(f"❌ {exc}")
+            return
+
         self.current_config_name = config_name
 
         # Basic fields
         self.config_name.value = config.get("name", config_name)
-        self.cluster_type.value = config.get("cluster_type", "local")
+        self.cluster_type.value = cluster_type
         self.cores_field.value = config.get("default_cores", 1)
         self.memory_field.value = config.get("default_memory", "16GB")
         self.time_field.value = config.get("default_time", "01:00:00")

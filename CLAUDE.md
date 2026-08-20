@@ -147,7 +147,7 @@ VENV1 holds clustrix's own serialization dependencies; VENV2 holds the user's re
 
 There is **no `ClusterType` enum** — `ClusterConfig.cluster_type` is a plain `str`. The supported values are `local`, `ssh`, `slurm`, `huggingface`, declared once in `clustrix.config.SUPPORTED_CLUSTER_TYPES`.
 
-1. Add the value to `SUPPORTED_CLUSTER_TYPES`; the CLI's `click.Choice` and the widget's dropdown both read that tuple, so they cannot drift apart
+1. Add the value to `SUPPORTED_CLUSTER_TYPES`; the CLI's `click.Choice` and **both** notebook widgets' dropdowns read that tuple, so they cannot drift apart. Verify rather than trust this sentence — `grep -rn 'list(SUPPORTED_CLUSTER_TYPES)' clustrix/` must show three call sites (`cli.py`, `modern_notebook_widget.py`, `notebook_magic_widget.py`). Until #165 it showed two: `notebook_magic_widget.py` spelled the four values out, so that menu *could* drift, and this line claimed otherwise.
 2. Implement submission in the appropriate `executor_*.py` module and dispatch from `ClusterExecutor` in `executor_core.py`
 3. Add status checking to `get_job_status` / `executor_scheduler_status.py`
 4. Update job script generation in `utils.py` if needed — reuse `job_execution_lines()` rather than writing another variant

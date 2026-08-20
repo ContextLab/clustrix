@@ -2146,14 +2146,30 @@ class ModernClustrixWidget:
     #: widget at another backend and every one of them describes somewhere
     #: the job is no longer going.
     #:
-    #: ``password_env_var``/``use_env_password`` name **this machine**: which
-    #: environment variable, on the computer clustrix is running on, a
-    #: password is read from. Switching backend says nothing about that
-    #: variable, so clearing it destroys a setting the switch had no opinion
-    #: about -- which is exactly what a modern-widget Apply on a ``local``
-    #: profile used to do. The legacy widget leaves both alone (neither is in
-    #: its WIDGET_MANAGED_FIELDS), and
+    #: ``password_env_var``/``use_env_password`` name a *channel*: which
+    #: environment variable a password is read from. Switching backend says
+    #: nothing about that variable, so clearing it destroys a setting the
+    #: switch had no opinion about -- which is exactly what a modern-widget
+    #: Apply on a ``local`` profile used to do. The legacy widget leaves both
+    #: alone (neither is in its WIDGET_MANAGED_FIELDS), and
     #: TestACredentialChannelIsNotABackendSetting holds the two together.
+    #:
+    #: Stated as a rule that can be applied to the next field: **does the
+    #: value stop being correct when the target changes?** Not "where does it
+    #: live" -- ``key_file`` is a path on the machine clustrix runs on
+    #: exactly as ``password_env_var`` is a variable name on it, so locality
+    #: separates nothing and this comment must not be read as claiming it
+    #: does. What separates them is what each is *bound* to, and that is a
+    #: convention worth naming rather than assuming: one key per host. An SSH
+    #: key authenticates you to one particular host -- ``~/.ssh/config`` binds
+    #: ``IdentityFile`` inside a ``Host`` stanza for that reason -- so the key
+    #: that opens one cluster is the wrong key for the next, and carrying it
+    #: over is carrying a credential that cannot work. ``password_env_var`` is
+    #: per *install*, not per host: clustrix reads exactly one variable name,
+    #: it is the only way to supply a password without writing it to disk, and
+    #: it is the variable's *contents* that differ per target, not its name.
+    #: Change the target and the key file is wrong; change the target and the
+    #: variable name is still right.
     #:
     #: Two tempting distinctions do *not* work, and neither may be used to
     #: move this line again. "It holds no secret" separates nothing:
@@ -2289,6 +2305,13 @@ class ModernClustrixWidget:
         meant clicking through the profile dropdown overwrote each profile with
         whatever the previous one happened to leave on screen.
         """
+        # A bare assignment, not set_choice, and deliberately: cluster_type is
+        # the one field with an enforced domain, so this menu is authoritative
+        # and the value is what can be wrong. It cannot be wrong here -- the
+        # argument is a ClusterConfig, whose __post_init__ already rejected
+        # anything outside SUPPORTED_CLUSTER_TYPES. The legacy widget loads
+        # raw dicts instead and so has to check; see its
+        # _load_config_to_widgets.
         self.widgets["cluster_type"].value = config.cluster_type
         # Section visibility keys off this, and the capture on the way out
         # reads it to decide which fields belong to the profile.

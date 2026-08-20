@@ -259,8 +259,10 @@ class ClusterConfig:
 # instead of silently leaking in plaintext until someone remembers to add it
 # here. Same approach as scripts/verify_cluster_usecases.py's redaction.
 #: Every backend ``ClusterExecutor`` can actually dispatch. This is the one
-#: place the set is written down; the CLI's ``click.Choice`` and the notebook
-#: widget's dropdown both read it. Offering a type the executor cannot run is
+#: place the set is written down; the CLI's ``click.Choice`` and *both*
+#: notebook widgets' dropdowns read it -- ``notebook_magic_widget`` spelled
+#: the four values out until #165, which is exactly the drift this comment
+#: claimed was impossible. Offering a type the executor cannot run is
 #: worse than not offering it, and omitting one it can run hides a feature.
 SUPPORTED_CLUSTER_TYPES = (
     "local",

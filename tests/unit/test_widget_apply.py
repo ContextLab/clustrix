@@ -24,6 +24,7 @@ from dataclasses import fields as dataclass_fields  # noqa: E402
 from clustrix.config import (  # noqa: E402
     ClusterConfig,
     SECRET_FIELDS,
+    SUPPORTED_CLUSTER_TYPES,
     config_field_names,
     configure,
     get_config,
@@ -36,6 +37,7 @@ from clustrix.notebook_magic_widget import (  # noqa: E402
     WIDGET_MANAGED_FIELDS,
 )
 from clustrix.profile_manager import ProfileManager  # noqa: E402
+from clustrix.widget_controls import set_choice  # noqa: E402
 
 #: What the widget's own Save button writes: settings plus the profile's
 #: label. Nothing here is contrived -- ``name`` is what _on_add_config puts in.
@@ -66,8 +68,13 @@ def isolated_profile_store(tmp_path, monkeypatch):
     expansion read the environment. Leaving either unset means the developer's
     own home directory is one forgotten argument away.
     """
-    monkeypatch.setenv("HOME", str(tmp_path / "home"))
-    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    home = tmp_path / "home"
+    # Created, not just named: HOME pointing at a non-existent directory is a
+    # different environment from the one a user has, and hides any code that
+    # reads ~ rather than writing to it.
+    home.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setenv("CLUSTRIX_CONFIG_DIR", str(tmp_path / "clustrix-config"))
     original = ProfileManager.__init__
 
@@ -661,11 +668,28 @@ class TestACredentialChannelIsNotABackendSetting:
     cluster. The line that follows from that is about *what the value names*.
     Every backend-only field names **this cluster** -- the compute, who the
     job runs as there, the secret that opens that particular door, and what it
-    may spend there. ``password_env_var`` and ``use_env_password`` name **this
-    machine**: which environment variable, on the computer clustrix is running
-    on, a password is read from. Switching backend says nothing about that
-    variable, and a modern-widget Apply on a ``local`` profile used to wipe it
-    anyway -- silently, and with nothing on screen to suggest it had.
+    may spend there. ``password_env_var`` and ``use_env_password`` name a
+    *channel*: which environment variable a password is read from. Switching
+    backend says nothing about that variable, and a modern-widget Apply on a
+    ``local`` profile used to wipe it anyway -- silently, and with nothing on
+    screen to suggest it had.
+
+    Put as a rule the next field can be tested against: **does the value stop
+    being correct when the target changes?** Deliberately *not* "is it local
+    to this machine", because that separates nothing -- ``key_file`` is a path
+    on the machine clustrix runs on exactly as ``password_env_var`` is a
+    variable name on it, and both are machine-local pointers to a credential.
+    What separates them is a convention, and it is the convention rather than
+    the value's location that keeps ``key_file`` on the backend-only side: one
+    key per host. An SSH key authenticates you to one particular host --
+    ``~/.ssh/config`` binds ``IdentityFile`` inside a ``Host`` stanza for that
+    reason -- so the key that opens one cluster is the wrong key for the next.
+    ``password_env_var`` is per *install*: clustrix reads exactly one variable
+    name, it is the only channel for supplying a password without writing it
+    to disk, and what differs per target is the variable's contents, not its
+    name. Change the target and the key file is wrong; change the target and
+    the variable name is still right. ``test_a_key_file_is_bound_to_a_host``
+    is that rule executed.
 
     Two other distinctions were tried and are false, so they are recorded here
     rather than left to be re-derived. "It holds no secret" separates nothing:
@@ -702,6 +726,43 @@ class TestACredentialChannelIsNotABackendSetting:
         assert "password_env_var" in written
         assert "use_env_password" in written
         assert "key_file" in written
+
+    def test_a_key_file_is_bound_to_a_host_and_the_env_var_is_not(self, capsys):
+        """The rule above, executed on the one pair a careful reader will
+        push on: both values are machine-local pointers to a credential, so
+        locality cannot be why one is dropped and the other kept.
+
+        Switch from a cluster reached with an SSH key to HuggingFace Jobs.
+        The key file names a key that authenticates to *that* host, so it is
+        wrong for the new target and goes; the environment variable names the
+        channel a password is read from on this install, is equally right for
+        the new target, and stays. Moving ``key_file`` out of
+        ``BACKEND_ONLY_FIELDS`` on the strength of "but it is local too" turns
+        the first assertion red.
+        """
+        configure(password_env_var="EXAMPLE_PW_VAR", use_env_password=True)
+        widget = ModernClustrixWidget()
+        widget.widgets["cluster_type"].value = "ssh"
+        widget.widgets["host"].value = "hpc.example.edu"
+        widget.widgets["username"].value = "researcher"
+        widget.widgets["ssh_key_file"].value = "~/.ssh/id_ed25519"
+        widget._update_ui_for_cluster_type()
+
+        widget.widgets["cluster_type"].value = "huggingface"
+        widget.widgets["hf_namespace"].value = "contextlab"
+        widget._update_ui_for_cluster_type()
+        told = _press(
+            lambda: widget._on_apply_config(widget.widgets["apply_btn"]),
+            widget.widgets["output"],
+            capsys,
+        )
+
+        assert "❌" not in told, told
+        live = get_config()
+        assert live.key_file == ClusterConfig().key_file
+        assert live.cluster_host is None
+        assert live.password_env_var == "EXAMPLE_PW_VAR"
+        assert live.use_env_password is True
 
     def test_a_reset_backend_field_is_still_on_screen(self, capsys):
         """The "unrecoverable" argument again, from the other side: the reset
@@ -948,3 +1009,276 @@ class TestASavedFlavorCanStillOpenTheWidget:
         widget = ModernClustrixWidget()
         assert "a10g-large" not in widget.widgets["hf_flavor"].options
         assert "mamba" not in widget.widgets["package_manager"].options
+
+
+class TestHowTheMenuIsWidened:
+    """Widening is not just "the value ends up selected".
+
+    ``set_choice`` exists because a list baked into the UI must not veto a
+    saved configuration. *How* it adds the value is separately load-bearing,
+    and each property below survived round three with nothing pinning it --
+    every one of these tests was written by mutating the shipped function and
+    watching the suite stay green.
+    """
+
+    def _menu(self, options, value="pip"):
+        import ipywidgets as widgets
+
+        return widgets.Dropdown(options=list(options), value=value)
+
+    def test_loading_one_profile_three_times_adds_one_entry(self):
+        """R3, the dedupe guard. The config dropdown's observer reloads a
+        profile every time it is selected, so this is the ordinary path, not
+        an edge case. Without the guard the menu grew a fresh copy on every
+        load -- and every *listed* value grew one too, because the widened
+        list was rebuilt from itself."""
+        widget = EnhancedClusterConfigWidget()
+        baseline = list(widget.package_manager.options)
+        widget.configs["Mamba Box"] = {
+            "name": "Mamba Box",
+            "cluster_type": "local",
+            "package_manager": "mamba",
+        }
+
+        for _ in range(3):
+            widget._load_config_to_widgets("Mamba Box")
+
+        offered = list(widget.package_manager.options)
+        assert offered.count("mamba") == 1, offered
+        assert offered == baseline + ["mamba"], offered
+        assert widget.package_manager.value == "mamba"
+
+    def test_the_widened_value_is_appended_not_prepended(self):
+        """R4. Order is the menu's design -- the modern flavor list runs
+        cheapest first -- and entry zero is what a fresh widget shows, so
+        putting the saved value at the front both scrambles the design and
+        changes the default for every configuration afterwards."""
+        field = self._menu(["pip", "conda"])
+
+        set_choice(field, "mamba")
+
+        assert list(field.options) == ["pip", "conda", "mamba"]
+        assert list(field.options)[0] == "pip"
+        assert list(field.options)[-1] == "mamba"
+
+    def test_a_blank_value_adds_no_blank_entry(self):
+        """R5. Guarding on ``is None`` alone leaves ``package_manager: ""``
+        -- which a widget that wrote an empty box produces -- putting an
+        entry with nothing in it at the end of the menu and *selecting* it,
+        so the user is looking at a chosen setting they cannot read."""
+        field = self._menu(["pip", "conda"])
+
+        set_choice(field, "")
+
+        assert list(field.options) == ["pip", "conda"]
+        assert field.value == "pip"
+        assert "" not in field.options
+
+    def test_a_blank_package_manager_reaches_this_through_a_profile(self):
+        """The same defect where a user meets it: a saved profile whose
+        package manager was cleared."""
+        widget = EnhancedClusterConfigWidget()
+        baseline = list(widget.package_manager.options)
+        widget.configs["Cleared"] = {
+            "name": "Cleared",
+            "cluster_type": "local",
+            "package_manager": "",
+        }
+
+        widget._load_config_to_widgets("Cleared")
+
+        assert list(widget.package_manager.options) == baseline
+        assert widget.package_manager.value in baseline
+
+    def test_whitespace_only_is_blank_and_padding_is_stripped(self):
+        """``(None, "")`` was guarded and ``" "`` was not, so a hand-edited
+        YAML with a trailing space produced a menu entry that looks empty and
+        a setting that is not the one it names. Stripping rather than merely
+        rejecting matches what the widget does with every other text it
+        reads."""
+        blank = self._menu(["pip", "conda"])
+        set_choice(blank, "   ")
+        assert list(blank.options) == ["pip", "conda"]
+        assert blank.value == "pip"
+
+        padded = self._menu(["pip", "conda"])
+        set_choice(padded, "  mamba  ")
+        assert list(padded.options) == ["pip", "conda", "mamba"]
+        assert padded.value == "mamba"
+
+        # And a padded value that is already offered selects it rather than
+        # growing a near-duplicate beside it.
+        listed = self._menu(["pip", "conda"])
+        set_choice(listed, " conda ")
+        assert list(listed.options) == ["pip", "conda"]
+        assert listed.value == "conda"
+
+    def test_a_paired_options_menu_is_refused_rather_than_corrupted(self):
+        """ipywidgets also accepts ``(label, value)`` pairs. Appending a bare
+        string to those adds a second entry for a value that is already there
+        *and* relabels every existing one, since ipywidgets then reads each
+        pair's members as separate labels. No caller does this today, so this
+        fails loudly for whoever does it first instead of silently producing a
+        menu that lies."""
+        import ipywidgets as widgets
+
+        field = widgets.Dropdown(options=[("Pip", "pip"), ("Conda", "conda")])
+        before = list(field.options)
+
+        with pytest.raises(TypeError) as raised:
+            set_choice(field, "mamba")
+
+        assert "flat list of strings" in str(raised.value)
+        assert list(field.options) == before
+        assert field.value == "pip"
+
+    def test_a_non_string_becomes_a_label_rather_than_a_locked_widget(self):
+        """A ``Dropdown``'s options are labels. A hand-edited
+        ``package_manager: 3`` is nonsense either way, but refusing it would
+        be the widget failing to open -- which is the defect this function
+        exists to fix -- and putting a bare ``int`` in the list makes the menu
+        heterogeneous."""
+        field = self._menu(["pip", "conda"])
+
+        set_choice(field, 3)
+
+        assert list(field.options) == ["pip", "conda", "3"]
+        assert field.value == "3"
+
+    def test_widening_accumulates_across_profile_switches_on_purpose(self):
+        """Recorded as a decision, not left to be rediscovered.
+
+        Loading three profiles with three unlisted package managers leaves all
+        three in the menu for the rest of the session. That is wanted: the
+        alternative -- rebuilding the menu from the hardcoded list on each
+        load -- means switching back to the first profile raises the very
+        ``TraitError`` ``set_choice`` exists to prevent. The accumulation is
+        per widget instance and is never written anywhere, which
+        ``test_the_widened_options_are_not_persisted`` already holds.
+        """
+        widget = EnhancedClusterConfigWidget()
+        baseline = list(widget.package_manager.options)
+        for name, manager in (("A", "mamba"), ("B", "uv"), ("C", "poetry")):
+            widget.configs[name] = {
+                "name": name,
+                "cluster_type": "local",
+                "package_manager": manager,
+            }
+            widget._load_config_to_widgets(name)
+
+        assert list(widget.package_manager.options) == baseline + [
+            "mamba",
+            "uv",
+            "poetry",
+        ]
+
+        # Going back is the point of keeping them.
+        widget._load_config_to_widgets("A")
+        assert widget.package_manager.value == "mamba"
+        assert widget._save_config_from_widgets()["package_manager"] == "mamba"
+
+    def test_the_widened_options_are_not_persisted(self):
+        """The accumulation above is only acceptable because it dies with the
+        widget. What Save writes is the *value*; the widened list is not a
+        setting and must not become one, or every session would inherit the
+        last one's typos."""
+        widget = EnhancedClusterConfigWidget()
+        baseline = list(widget.package_manager.options)
+        widget.configs["Mamba Box"] = {
+            "name": "Mamba Box",
+            "cluster_type": "local",
+            "package_manager": "mamba",
+        }
+        widget._load_config_to_widgets("Mamba Box")
+        assert "mamba" in widget.package_manager.options
+
+        saved = widget._save_config_from_widgets()
+        assert saved["package_manager"] == "mamba"
+        assert not any(
+            isinstance(value, (list, tuple)) and "mamba" in value
+            for value in saved.values()
+        ), saved
+
+        # A fresh widget offers the hardcoded list again.
+        assert list(EnhancedClusterConfigWidget().package_manager.options) == baseline
+
+
+class TestAProfileNamingARemovedBackend:
+    """``cluster_type`` is exempt from ``set_choice``, and the reason is the
+    inverse of the one that applies to every other dropdown.
+
+    ``set_choice`` widens a menu because the saved configuration is
+    authoritative: ``ClusterConfig`` accepts any string for ``hf_flavor`` or
+    ``package_manager``, so a list baked into the UI has no standing to veto
+    one. ``cluster_type`` is the single field with an *enforced domain* --
+    ``ClusterConfig(cluster_type="pbs")`` and ``load_config()`` both raise
+    ``ValueError`` naming issue #140 -- so here the menu is authoritative and
+    the saved value is the thing that can be wrong. Widening would offer a
+    backend the executor cannot dispatch and defer the failure to submission.
+
+    The value can still reach the widget: ``load_config_from_file`` collects
+    what is on disk rather than validating it, so ``cluster_type: pbs`` lands
+    in ``self.configs`` intact. Selecting it raised a bare ``TraitError:
+    Invalid selection`` out of the dropdown observer, naming neither the
+    backend nor why it is gone.
+    """
+
+    def _widget_with_a_pbs_profile(self):
+        widget = EnhancedClusterConfigWidget()
+        widget.configs["Old PBS Cluster"] = {
+            "name": "Old PBS Cluster",
+            "cluster_type": "pbs",
+            "cluster_host": "hpc.example.edu",
+        }
+        return widget
+
+    def test_selecting_it_names_the_backend_and_its_tracking_issue(self, capsys):
+        widget = self._widget_with_a_pbs_profile()
+
+        told = _press(
+            lambda: widget._on_config_select(
+                {"new": "Old PBS Cluster", "old": None, "name": "value"}
+            ),
+            widget.status_output,
+            capsys,
+        )
+
+        assert "pbs" in told
+        assert "#140" in told
+        assert "Old PBS Cluster" in told
+        assert "local, ssh, slurm, huggingface" in told
+
+    def test_it_does_not_widen_the_menu_or_half_load_the_profile(self, capsys):
+        widget = self._widget_with_a_pbs_profile()
+        was_selected = widget.cluster_type.value
+        was_named = widget.current_config_name
+
+        _press(
+            lambda: widget._on_config_select(
+                {"new": "Old PBS Cluster", "old": None, "name": "value"}
+            ),
+            widget.status_output,
+            capsys,
+        )
+
+        assert "pbs" not in widget.cluster_type.options
+        assert list(widget.cluster_type.options) == list(SUPPORTED_CLUSTER_TYPES)
+        assert widget.cluster_type.value == was_selected
+        # Nothing else from the refused profile got in either, and the widget
+        # still believes it is showing what it was showing.
+        assert widget.host_field.value != "hpc.example.edu"
+        assert widget.current_config_name == was_named
+
+    def test_both_menus_are_the_supported_tuple_itself(self):
+        """Two tests already asserted these options and both compared against
+        a hardcoded copy of the four names, so the drift they were meant to
+        catch was pinned in place: ``notebook_magic_widget`` spelled the list
+        out rather than reading ``SUPPORTED_CLUSTER_TYPES``, and no test could
+        tell."""
+        legacy = EnhancedClusterConfigWidget()
+        modern = ModernClustrixWidget()
+
+        assert list(legacy.cluster_type.options) == list(SUPPORTED_CLUSTER_TYPES)
+        assert list(modern.widgets["cluster_type"].options) == list(
+            SUPPORTED_CLUSTER_TYPES
+        )
