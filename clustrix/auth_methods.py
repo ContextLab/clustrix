@@ -265,6 +265,19 @@ def stored_credential_is_for_config(
        directory the process is in. See
        :func:`clustrix.config.config_source_is_trusted`.
 
+    **The refusal names only remedies that work.** It used to offer
+    ``configure(cluster_host=...)``, and that is a lie: an untrusted source
+    taints the *hostname* for the life of the process
+    (``clustrix.config._HOSTS_NAMED_BY_UNTRUSTED_SOURCES``), so handing the
+    same string back through ``configure`` or ``load_config`` leaves it
+    refused. It has to: the notebook widget's Apply button *is*
+    ``configure(cluster_host=<the file's host>, ...)``, so a rule that let an
+    explicit ``configure`` clear the taint would reopen the laundering route
+    round two closed, and nothing distinguishes the two calls. The two things
+    that do work are ``SSH_HOST`` in the credential file -- authorisation
+    that no round trip can manufacture -- and removing the offending file and
+    starting again, since the record is per-process.
+
     Returns the reason it may not be used, so the caller can say so; ``None``
     means it may.
     """
@@ -282,11 +295,17 @@ def stored_credential_is_for_config(
 
     return (
         f"the stored credential names no host, and cluster_host="
-        f"{config.cluster_host!r} came from {get_config_source(config)} "
-        f"(a ./clustrix.yml is chosen by the directory the process runs in, "
-        f"not by you). Set SSH_HOST in the credential file, or put the host "
-        f"somewhere you chose: the clustrix configuration directory, "
-        f"load_config(path), or configure(cluster_host=...)"
+        f"{config.cluster_host!r} came from {get_config_source(config)} -- "
+        f"a file chosen by where the process runs or by an inherited "
+        f"environment variable, not by you. That is settled for the life of "
+        f"this process: passing "
+        f"the same hostname to configure(cluster_host=...) or "
+        f"load_config(path) does not clear it, because a value handed back "
+        f"through a function call is not evidence that anyone chose it. "
+        f"Either set SSH_HOST={config.cluster_host!r} in the credential file, "
+        f"which is you naming the host that may receive the secret, or move "
+        f"the host into the clustrix configuration directory (config.yml), "
+        f"remove the file it came from, and start a new process"
     )
 
 

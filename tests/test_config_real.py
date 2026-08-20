@@ -7,6 +7,7 @@ demonstrating real user workflows without mocks.
 
 import pytest
 import os
+from dataclasses import asdict
 import yaml
 import json
 import tempfile
@@ -194,9 +195,12 @@ class TestClusterConfigReal:
 
         # Save as JSON
         config = get_config()
+        # asdict(), not __dict__: __dict__ carries the provenance record as
+        # well as the declared fields, and writing that into a config file
+        # produces one load_config() then rejects as an unknown setting.
         config_dict = {
             k: v
-            for k, v in config.__dict__.items()
+            for k, v in asdict(config).items()
             if v is not None and v != [] and v != {}
         }
 

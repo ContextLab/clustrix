@@ -52,11 +52,18 @@ automatically. Changing directory does not reload it.
    its own is **not** offered to a ``cluster_host`` that came from one.
 
    Nothing else changes: every non-credential setting in a project-local
-   ``clustrix.yml`` takes effect as before. To use a stored credential with
-   such a host, either set ``SSH_HOST`` in the credential file -- which is
-   you naming the host that may receive the secret -- or put the host
-   somewhere you chose: ``<config dir>/config.yml``,
-   ``load_config("path/to/clustrix.yml")``, or ``configure(cluster_host=...)``.
+   ``clustrix.yml`` takes effect as before. Two things make the credential
+   available again, and they are the only two:
+
+   - Set ``SSH_HOST`` in the credential file (``<config dir>/.env``) to the
+     host that may receive the secret. That is you naming the recipient, in
+     a file only you can write, and it is checked before provenance is --
+     so it works whatever the hostname's provenance turns out to be.
+   - Move the settings into ``<config dir>/config.yml``, delete the
+     working-directory file, and start a new process.
+
+   ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
+   that list, however obvious they look. See the next paragraph.
 
    **Items 1-3 are trusted only while ``<config dir>`` is ``~/.clustrix``.**
    The reason to trust them is that putting a file in your own
@@ -68,20 +75,46 @@ automatically. Changing directory does not reload it.
    directory therefore behaves like items 4-6: the settings apply, a
    ``UserWarning`` names the file, and a hostless stored credential is not
    offered to a ``cluster_host`` it named. The redirect itself is unchanged
-   and still what you want in a container or on a shared machine -- to
-   authorise a host from one, name the file in ``load_config(path)`` or the
-   host in ``configure(cluster_host=...)``.
+   and still what you want in a container or on a shared machine; to
+   authorise a host from one, use either of the two remedies above.
 
-   **Provenance follows the hostname, not the object.** Once an untrusted
-   file has named a ``cluster_host`` in a process, rebuilding a config
-   around that same hostname does not make it your choice --
-   ``dataclasses.replace(config, ...)``, ``configure(**asdict(config))``
-   (which is what the notebook widget's *Apply* button does) and any other
-   round trip all leave it untrusted. Handing a value back through a
-   function is not evidence that anyone chose it. The cost is that if a
-   ``./clustrix.yml`` names the host you were going to use anyway, you have
-   to authorise it explicitly by one of the routes above; the two cases are
-   genuinely indistinguishable, so the refusal is the safe answer.
+   **Provenance follows the hostname, not the object, and it is permanent
+   within the process.** Once an untrusted file has named a ``cluster_host``,
+   rebuilding a config around that same hostname does not make it your
+   choice -- ``dataclasses.replace(config, ...)``,
+   ``configure(**asdict(config))`` (which is what the notebook widget's
+   *Apply* button does) and any other round trip all leave it untrusted.
+   Handing a value back through a function is not evidence that anyone chose
+   it.
+
+   That is why typing ``configure(cluster_host="the-same-host")`` yourself
+   does not lift the refusal either, even though you really did type it:
+   the widget's *Apply* button makes that exact call, with that exact
+   hostname, on a config it read out of the file. The two are the same call.
+   Clearing the record for one would clear it for the other, which is the
+   laundering route this rule exists to close, so the record is never
+   cleared and there is no API to clear it. ``load_config(path)`` on the
+   offending file is the same story: naming a path you did not write is not
+   choosing a host.
+
+   The cost is a refusal when a ``./clustrix.yml`` names the host you were
+   going to use anyway. Those two cases are genuinely indistinguishable, so
+   the refusal is the safe half of the pair, and the two remedies above are
+   the way out: ``SSH_HOST`` is authorisation no round trip can manufacture,
+   and a new process starts with an empty record.
+
+   **What ``load_config(path)`` does and does not mean.** It is trusted:
+   it is a call in your own Python naming a file, it is not reachable by
+   handing a config back through a function, and distrusting *relative*
+   paths would be theatre, since
+   ``load_config(os.path.abspath("clustrix.yml"))`` is the same act. What
+   it is not is a check on the file's contents. Clustrix cannot tell a
+   configuration file you wrote from one that arrived with a checkout, so
+   ``load_config`` on a repository-shipped file trusts that repository's
+   ``cluster_host`` -- and it does so whether or not the automatic search
+   would also have found it, which it does not when the file is named
+   anything but ``clustrix.{yml,yaml,json}`` or you are running from
+   another directory. Point ``load_config`` at files you wrote.
 
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not

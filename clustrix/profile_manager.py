@@ -9,7 +9,10 @@ from typing import Dict, List, Optional, Any
 from dataclasses import asdict, fields as dataclass_fields
 
 from .config import (
+    CONFIG_SOURCE_EXPLICIT_FILE,
     ClusterConfig,
+    config_built_from_file,
+    config_source_for_discovered_path,
     get_config_dir,
     strip_secret_fields,
     write_config_file_securely,
@@ -270,11 +273,25 @@ class ProfileManager:
         was gone, which made the whole profile row feel like scratch space.
         A store that cannot be read must not stop the widget from opening, so
         the built-ins stand and the problem is reported rather than raised.
+
+        **Nobody named this file.** It is discovered from ``config_dir``, so
+        it carries the provenance of where it was found rather than
+        ``explicit-file``: inside ``~/.clustrix`` the user put it there, and
+        anywhere else -- a directory ``CLUSTRIX_CONFIG_DIR`` named, a
+        directory a caller passed to ``ProfileManager`` -- it is ambient. A
+        repository shipping an ``.envrc`` that sets ``CLUSTRIX_CONFIG_DIR``
+        plus a ``profiles/profiles.yml`` under it needed no ``config.yml`` at
+        all to choose ``cluster_host``, and until this said so the config came
+        back marked ``runtime`` and the victim's exported ``SSH_PASSWORD``
+        reached the repository's host.
         """
         if not self.store_path.exists():
             return
         try:
-            self.load_from_file(str(self.store_path))
+            self.load_from_file(
+                str(self.store_path),
+                source=config_source_for_discovered_path(self.store_path),
+            )
         except Exception as e:  # noqa: BLE001
             import warnings
 
@@ -489,13 +506,22 @@ class ProfileManager:
 
         write_config_file_securely(Path(filepath), data)
 
-    def load_from_file(self, filepath: str) -> None:
+    def load_from_file(
+        self, filepath: str, source: str = CONFIG_SOURCE_EXPLICIT_FILE
+    ) -> None:
         """Replace the current profiles with those in `filepath`.
 
         Built either way or not at all. This used to clear self.profiles and
         then populate it entry by entry, so a single unreadable profile left
         the manager holding a partial set with the built-in templates gone and
         active_profile naming something that no longer existed.
+
+        ``source`` is where the file came from, for the credential layer's
+        benefit: ``explicit-file`` by default, because a caller passing a
+        path has named it, and every profile in the bundle is stamped with it
+        rather than with ``__post_init__``'s ``runtime``. ``_restore`` passes
+        the provenance of the directory it found the store in, since nobody
+        named that one.
         """
         filepath_obj = Path(filepath)
         if not filepath_obj.exists():
@@ -511,17 +537,18 @@ class ProfileManager:
             raise ValueError(f"{filepath} does not contain a profile bundle")
 
         loaded: Dict[str, ClusterConfig] = {}
-        for name, config_dict in (data.get("profiles") or {}).items():
-            if not isinstance(config_dict, dict):
-                raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
-            known = {f.name for f in dataclass_fields(ClusterConfig)}
-            unknown = set(config_dict) - known
-            if unknown:
-                raise ValueError(
-                    f"Profile {name!r} in {filepath} has unknown setting(s): "
-                    f"{', '.join(sorted(unknown))}"
-                )
-            loaded[name] = ClusterConfig(**config_dict)
+        with config_built_from_file(source):
+            for name, config_dict in (data.get("profiles") or {}).items():
+                if not isinstance(config_dict, dict):
+                    raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
+                known = {f.name for f in dataclass_fields(ClusterConfig)}
+                unknown = set(config_dict) - known
+                if unknown:
+                    raise ValueError(
+                        f"Profile {name!r} in {filepath} has unknown setting(s): "
+                        f"{', '.join(sorted(unknown))}"
+                    )
+                loaded[name] = ClusterConfig(**config_dict)
 
         if not loaded:
             raise ValueError(f"{filepath} contains no profiles")
@@ -566,8 +593,11 @@ class ProfileManager:
             with open(filepath_obj, "r", encoding="utf-8") as f:
                 config_dict = yaml.safe_load(f)
 
-        # Create config object
-        config = ClusterConfig(**config_dict)
+        # Create config object. The caller named this path, so it is
+        # ``explicit-file`` -- but it is still a file, so it is declared as
+        # one rather than left to ``__post_init__``'s ``runtime`` default.
+        with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
+            config = ClusterConfig(**config_dict)
 
         # Generate profile name if not provided
         if profile_name is None:
