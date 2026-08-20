@@ -461,3 +461,56 @@ that actually merges.
 #171 touches `notebook_magic_widget.py` and #168's site 1 touches
 `notebook_magic_config.py`; both collide with `work/fixes`, so they wait for
 the route-12 agent to land rather than being dispatched in parallel.
+
+## Round results, 2026-08-20 (later)
+
+**Route-12 follow-ups: `9973d82` on `work/fixes`.** 1985 passed / 0 failed.
+The agent rejected my suggested `sorted(names, key=repr)` as patching one call
+site while leaving `_rebuild_config_dropdown`'s two sorts and the paste door
+broken; it fixed at the boundary where document keys become names
+(`config_name_from_document`) instead. It also found the same laundering hole
+in **`ProfileManager.export_profile`** — export untrusted, import, trusted — a
+third writer nobody had named, and made the record a property of the write
+path (`config_document()`) inherited by `save_to_file`, `save_config`, the CLI
+and export/import alike. M9 now dies.
+
+**#165 is NOT broken.** That agent flagged `_on_apply_config` passing `name=`
+to `configure()` as a live no-op. True on `work/fixes` alone; **resolved by the
+merge** — at the merged state the handler calls
+`split_config_kwargs(config_data, PROFILE_BOOKKEEPING_KEYS, reset_fields=...)`
+and then `configure(**settings)`, so `name` is stripped. Do not reopen #165 on
+that report.
+
+**#123 red-team at `f5cd22b`: real breaks, fix round dispatched.**
+- **S1**: five error reports can be deleted *simultaneously* and the suite is
+  byte-identically green (1850 passed either way). For four of them the report
+  is the only thing separating a real failure from a normal answer. The lint
+  cannot backstop them — all are narrow `except` clauses (family D), so
+  `except RecursionError: return None` with no log at all reaches master green.
+- **S2**: the prose test does not read the per-family spelling counts. A
+  fabricated "Nine spellings are recorded below" added to family E SURVIVED.
+- **F1 is armed only as a pair.** My own verification reverted both halves at
+  once, so it proved the fix real but not the test granular. M14 (drop
+  `configure`'s lock, keep `target`), M15 (revert `target`, keep the lock) and
+  M16 (drop `load_config`'s lock) each survive alone — and `load_config`'s
+  lock, whose docstring calls it load-bearing, **has no test at all**.
+- `except*` **is** correctly seen: `ast.TryStar` is in `TRY_NODES`, probed
+  directly and CAUGHT. The blind-spot arithmetic is honest
+  (6+1+1+1+1+1+1+8+1+4 = 25, families A..J = 10); one entry is mis-filed.
+
+## Stray `clustrix.yml` in checkout roots — test pollution, and it hides
+
+`.gitignore:35` lists `clustrix.yml`, so a config written into a checkout root
+**never appears in `git status`**. It persists silently, and a config in the
+working directory is exactly the untrusted-provenance path the credential work
+is about, so leftover state can change later runs.
+
+| Worktree | File | Verdict |
+|-|-|-|
+| `clustrix` | 403 bytes, **Jun 29 2025**, holds `Ndoli Cluster` | **the user's own file — do not touch** |
+| `clustrix-fixes` | 286 bytes, Aug 20 2026 11:10, holds `Integration Test Config` | agent/test pollution — quarantined to `<scratchpad>/quarantine/`, not deleted |
+
+Neither contains a secret-bearing key (checked by key name, values never read).
+The autouse `isolate_home` fixture isolates `HOME`, not the working directory —
+that is the gap. Finding the test that writes it is the lowest-priority item on
+the #123 fix round.
