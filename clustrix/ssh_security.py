@@ -17,7 +17,10 @@ default): host keys are checked against the system and user
 :class:`HostKeyVerificationError` with the exact ``ssh-keyscan`` command
 needed to add it. Opting into the old, insecure "trust everything"
 behavior requires setting ``ssh_host_key_policy="auto_add"`` on
-``ClusterConfig`` explicitly -- it is never the default.
+``ClusterConfig`` explicitly -- it is never the default. Even then, the key
+is *appended* to ``known_hosts`` by :class:`AppendUnknownHostKeyPolicy`
+rather than persisted the way ``paramiko.AutoAddPolicy`` does it, which is
+by rewriting the whole file (issue #157).
 """
 
 import base64
@@ -29,6 +32,9 @@ from pathlib import Path
 from typing import Optional
 
 import paramiko
+from paramiko.hostkeys import HostKeyEntry
+
+from .config import write_text_securely
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +92,83 @@ class RejectUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
         )
 
 
+class AppendUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    """Trust an unknown host key and *append* it to ``known_hosts``.
+
+    Installed by ``ssh_host_key_policy="auto_add"`` in place of paramiko's
+    own ``AutoAddPolicy``, which cannot be used here: its
+    ``missing_host_key`` calls ``client.save_host_keys(filename)``, and
+    that method reloads the file and then opens it ``"w"`` -- truncate --
+    and re-emits every entry from paramiko's in-memory model. Accepting one
+    key therefore rewrites the user's entire file. Three things follow, all
+    of them measured rather than argued (issue #157):
+
+    * **Content paramiko cannot round-trip is destroyed.** Comments, blank
+      lines, one line naming several hosts, and any key type paramiko has
+      no parser for (``sk-ssh-ed25519@openssh.com``, which OpenSSH itself
+      reads) do not come back out. Nothing fails at the time.
+    * **Concurrent writers interleave.** Twelve threads adding at once
+      corrupted the file in 10 runs out of 10, leaving NUL runs and
+      half-written base64 in the middle of unrelated entries.
+    * **An interrupted rewrite truncates**, losing everything past the cut.
+
+    Once one line is cut mid-base64, ``paramiko.HostKeys.load`` raises
+    ``InvalidHostKey`` on it, so *every later* connection fails -- the
+    user's own ``ssh`` included, to hosts that had nothing to do with
+    clustrix.
+
+    A new host key is one new line, so this appends that line and touches
+    nothing else. It is what ``ssh-keyscan host >> ~/.ssh/known_hosts``
+    does, and what the ``reject`` policy's own error message tells the user
+    to run.
+
+    **What this does not protect against.** A single ``O_APPEND`` write of
+    one short line is atomic against other appenders on a local
+    filesystem, which is why concurrent adds cannot interleave and a crash
+    cannot leave half a line. It is *not* a lock, and it makes no claim
+    about NFS, where ``O_APPEND`` is not honoured. It cannot defend the
+    file against another tool that rewrites it wholesale -- ``ssh-keygen
+    -R`` does exactly that -- it only guarantees clustrix is not one of
+    them. And appending never removes anything, so a host whose key
+    genuinely changed keeps its stale line; that is not a regression,
+    because paramiko raises ``BadHostKeyException`` for a known host with a
+    changed key without ever consulting this policy, and ``auto_add`` never
+    had a say in it.
+    """
+
+    def missing_host_key(
+        self, client: paramiko.SSHClient, hostname: str, key: paramiko.PKey
+    ) -> None:
+        line = HostKeyEntry([hostname], key).to_line()
+        if line is None:  # pragma: no cover - paramiko sets valid=True in __init__
+            raise paramiko.SSHException(
+                f"Cannot record the host key offered by '{hostname}': paramiko "
+                f"produced no known_hosts line for a {key.get_name()} key."
+            )
+
+        # In-memory first, so the rest of *this* process recognises the host
+        # even if the file write fails and raises.
+        client.get_host_keys().add(hostname, key.get_name(), key)
+
+        known_hosts = user_known_hosts_path()
+        # OpenSSH's own modes for a directory it creates before first
+        # contact. write_text_securely creates the file itself at 0600.
+        known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # append=True is the mode write_text_securely documents for exactly
+        # this file: it appends with a single O_APPEND write, does not
+        # follow-and-chmod (known_hosts is commonly a symlink into a
+        # dotfiles repo), and leaves the mode of a file it did not create
+        # alone.
+        write_text_securely(known_hosts, line, append=True)
+        logger.warning(
+            "Trusted the unverified host key %s offered by %s and appended it "
+            "to %s.",
+            _fingerprint(key),
+            hostname,
+            known_hosts,
+        )
+
+
 def user_known_hosts_path() -> Path:
     """The known_hosts file clustrix reads and writes.
 
@@ -113,16 +196,18 @@ def _load_known_hosts(client: paramiko.SSHClient) -> None:
 
     * ``load_system_host_keys`` fills ``_system_host_keys``, which is consulted
       when verifying and **never written back**.
-    * ``load_host_keys`` fills ``_host_keys`` *and* sets
-      ``_host_keys_filename``.
+    * ``load_host_keys`` fills ``_host_keys``, which is what
+      ``client.get_host_keys()`` returns and what
+      :class:`AppendUnknownHostKeyPolicy` adds to, so that a host accepted
+      earlier in this process is recognised later in it.
 
-    ``AutoAddPolicy.missing_host_key`` saves only ``if
-    client._host_keys_filename is not None``. So dropping the second call
-    would leave verification working while silently stopping
-    ``ssh_host_key_policy="auto_add"`` from ever persisting a key -- every
-    connection would re-accept the same host forever, and nothing would fail
-    to say so. Covered by
-    ``tests/unit/test_host_key_policy.py::test_auto_add_persists_the_key_it_accepted``.
+    It also sets paramiko's ``_host_keys_filename``, which used to be the
+    load-bearing part: ``paramiko.AutoAddPolicy`` persists a key only when
+    that attribute is set, and it persists it by rewriting the whole file.
+    Nothing calls ``save_host_keys`` any more (issue #157), so the attribute
+    is now incidental -- but the call still is not redundant, because
+    ``get_host_keys()`` would otherwise be empty. Covered by
+    ``tests/unit/test_host_key_policy.py::test_user_known_hosts_file_is_actually_loaded``.
     """
     client.load_system_host_keys()
     user_known_hosts = user_known_hosts_path()
@@ -177,22 +262,14 @@ def configure_host_key_policy(
             "deliberate first contact with a host you already trust "
             "out-of-band."
         )
-        # AutoAddPolicy writes the key it accepted back to
-        # ``client._host_keys_filename``, and paramiko only sets that
-        # attribute inside ``load_host_keys``. _load_known_hosts skips that
-        # call when the file does not exist yet -- it would raise -- so on a
-        # machine with no ~/.ssh/known_hosts, auto_add accepted every host and
-        # persisted nothing, re-accepting the same host on every connection
-        # forever. That is trust-on-first-use with the "first" removed.
-        #
-        # Create it the way OpenSSH does before first contact: 0700 directory,
-        # 0600 file. Only on this branch -- the reject policy must never write
-        # to the user's filesystem as a side effect of verifying.
-        known_hosts = user_known_hosts_path()
-        if not known_hosts.exists():
-            known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            known_hosts.touch(mode=0o600)
-            client.load_host_keys(str(known_hosts))
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Not paramiko.AutoAddPolicy: that one persists the key it accepted
+        # by rewriting the user's entire known_hosts, which loses content it
+        # cannot round-trip and corrupts the file outright under a concurrent
+        # writer or an interrupted write. AppendUnknownHostKeyPolicy adds the
+        # one new line instead, and creates the file and its 0700 directory
+        # itself if they do not exist yet -- so, unlike the paramiko policy,
+        # it does not silently persist nothing on a machine that has never
+        # had a ~/.ssh/known_hosts. See issue #157 and the class docstring.
+        client.set_missing_host_key_policy(AppendUnknownHostKeyPolicy())
     else:
         client.set_missing_host_key_policy(RejectUnknownHostKeyPolicy())

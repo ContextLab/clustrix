@@ -138,14 +138,30 @@ A secure default means the first connection to any cluster needs one of:
    this for a host you already trust through some other channel (e.g. you set
    it up yourself and typed the hostname).
 
-``auto_add`` writes what it accepts. Clustrix creates ``~/.ssh/known_hosts``
-if it does not exist yet -- the directory at mode ``0700`` and the file at
-``0600``, which is what OpenSSH itself does before first contact -- and hands
-the path to paramiko so the accepted key is appended to it. Without that file
-in place, paramiko has nowhere to save to and quietly saves nothing, so every
-connection re-accepts the same host forever: trust on first use with the
-"first" removed. The ``reject`` policy never writes to your filesystem, since
-verifying is not a reason to create anything.
+``auto_add`` writes what it accepts, and writes it by **appending one line**.
+Clustrix creates ``~/.ssh/known_hosts`` if it does not exist yet -- the
+directory at mode ``0700`` and the file at ``0600``, which is what OpenSSH
+itself does before first contact -- and then appends the accepted key to it,
+exactly as ``ssh-keyscan host >> ~/.ssh/known_hosts`` would. Nothing already
+in the file is read back and re-emitted.
+
+That distinction matters more than it sounds. Clustrix does *not* use
+paramiko's own ``AutoAddPolicy``, which persists a key by rewriting the entire
+file: it drops comments, splits a line naming several hosts, silently discards
+any key type it cannot parse (``sk-ssh-ed25519@openssh.com``, which OpenSSH
+reads fine), and -- if two processes do it at once, or one is interrupted --
+leaves entries cut mid-key. One corrupt line is enough to make *every*
+subsequent SSH connection fail, clustrix's and your own, to hosts that had
+nothing to do with clustrix. Appending cannot do any of that.
+
+What appending does not do: it is not a lock, it makes no promise on NFS, and
+it cannot stop some other tool from rewriting the file. It also never removes
+anything, so a host whose key genuinely changed keeps its old line -- which
+changes nothing in practice, because a known host offering a changed key
+raises ``BadHostKeyException`` without consulting the policy at all.
+
+The ``reject`` policy never writes to your filesystem, since verifying is not
+a reason to create anything.
 
 The automated key setup described above writes to that same file, and says so
 explicitly: ``ssh-keyscan`` output is appended to it, and ``ssh-copy-id`` is
