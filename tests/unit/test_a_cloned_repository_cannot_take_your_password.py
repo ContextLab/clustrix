@@ -44,6 +44,7 @@ import pytest
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
 from clustrix.auth_methods import stored_credential_is_for_config
+from clustrix.credential_release import CredentialRelease, CredentialTarget
 from clustrix.config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
     CONFIG_SOURCE_RUNTIME,
@@ -2034,3 +2035,119 @@ def test_the_clusterfy_widget_still_trusts_a_config_file_in_the_config_dir(
     assert authenticated, "the documented widget workflow stopped working"
     assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
     assert attacker_server.authentications == [("victim", "password")]
+
+
+# ---------------------------------------------------------------------------
+# The choke point itself (issue #167, round thirteen).
+#
+# Seven routes were closed one at a time. Seven call sites for one decision
+# is not a bug with instances, it is a decision with no home, so the decision
+# now has one: ``clustrix.credential_release.release_credential(target)``,
+# whose first positional parameter is the recipient. These tests are about
+# the two objects that make the unsafe call hard to *write* rather than
+# merely wrong.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "nobody",
+    ["", "   ", ".", "\t", None, 0, 2130706433, object()],
+    ids=["empty", "spaces", "dot", "tab", "none", "zero", "yaml-hex-int", "object"],
+)
+def test_a_target_cannot_name_nobody(nobody):
+    """Route 1 stops being a comparison that can go wrong.
+
+    The original leak was ``credential_host in target`` with an empty
+    ``credential_host``. Under the gate the recipient is a *constructor
+    argument*, and one that does not normalise to a hostname raises: there
+    is no object to pass, so there is no release to get wrong. ``0`` and
+    ``2130706433`` are the shapes PyYAML produces from an unquoted ``0`` or
+    ``0x7f000001`` in a configuration file.
+    """
+    with pytest.raises(ValueError):
+        CredentialTarget(
+            hostname=nobody,
+            username="victim",
+            provenance=CONFIG_SOURCE_RUNTIME,
+            described_as="a test",
+        )
+
+
+def test_a_target_must_name_a_provenance_that_exists():
+    """A typo may not invent a source that is neither trusted nor untrusted."""
+    with pytest.raises(ValueError):
+        CredentialTarget(
+            hostname="hpc.example.edu",
+            username="victim",
+            provenance="totally-fine-honest",
+            described_as="a test",
+        )
+
+
+def test_a_target_may_name_no_username():
+    """Not every provider has one, and the documented ``.env`` names none."""
+    target = CredentialTarget(
+        hostname="hpc.example.edu",
+        username="",
+        provenance=CONFIG_SOURCE_RUNTIME,
+        described_as="a test",
+    )
+    assert target.username == ""
+
+
+def _a_target():
+    return CredentialTarget(
+        hostname="hpc.example.edu",
+        username="victim",
+        provenance=CONFIG_SOURCE_RUNTIME,
+        described_as="a test",
+    )
+
+
+def test_a_release_is_either_a_secret_or_a_reason():
+    """Both, or neither, raises.
+
+    "Neither" is the ``{"port": "22"}`` defect in a new costume: an object
+    that is not a secret and not a reason, which each caller then reads as
+    whichever suits it. "Both" is worse -- a caller that checks only
+    ``password`` uses a credential this gate refused.
+    """
+    with pytest.raises(ValueError):
+        CredentialRelease(target=_a_target())
+
+    with pytest.raises(ValueError):
+        CredentialRelease(
+            target=_a_target(),
+            method="stored-credential",
+            password=SENTINEL_PASSWORD,
+            refusal="not for you",
+        )
+
+    with pytest.raises(ValueError):
+        CredentialRelease(
+            target=_a_target(), key_path="/tmp/nowhere", refusal="not for you"
+        )
+
+
+def test_a_released_secret_has_to_say_where_it_came_from():
+    """So that a log line can name the source of a secret it just used."""
+    with pytest.raises(ValueError):
+        CredentialRelease(target=_a_target(), password=SENTINEL_PASSWORD)
+
+
+def test_a_release_is_truthy_exactly_when_it_carries_a_secret():
+    assert CredentialRelease(
+        target=_a_target(), method="stored-credential", password=SENTINEL_PASSWORD
+    )
+    assert not CredentialRelease(target=_a_target(), refusal="not for you")
+
+
+def test_a_target_built_from_a_config_carries_that_config_s_provenance(tmp_path):
+    """Provenance is a fact about the hostname, and the target records it."""
+    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    target = CredentialTarget.for_config(config)
+
+    assert target.hostname == "hpc.example.edu"
+    assert target.username == "victim"
+    assert target.provenance == CONFIG_SOURCE_RUNTIME
+    assert "hpc.example.edu" in target.described_as

@@ -6,11 +6,18 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
-from .config import (
-    ClusterConfig,
-    config_source_is_trusted,
-    get_config_source,
-    normalize_hostname as _normalize_hostname,
+from .config import ClusterConfig
+
+# ``_hostname_matches`` and ``stored_credential_is_for_config`` moved to
+# ``clustrix.credential_release`` unchanged -- same names, same docstrings,
+# same behaviour -- because the decision they encode now has one home rather
+# than four call sites. Re-exported here so that every importer of the names
+# keeps working and there is still exactly one definition of each.
+from .credential_release import (  # noqa: F401
+    CredentialTarget,
+    _hostname_matches,
+    release_credential,
+    stored_credential_is_for_config,
 )
 from .credential_manager import get_credential_manager
 
@@ -180,133 +187,6 @@ class EnvironmentPasswordMethod(AuthMethod):
                 error=f"Environment variable ${self.config.password_env_var} not set",
                 guidance=f"Set password with: export {self.config.password_env_var}='your_password'",
             )
-
-
-def _hostname_matches(target: object, credential_host: object) -> bool:
-    """Whether a credential stored for ``credential_host`` is for ``target``.
-
-    **Exact, after normalisation.** Nothing else is safe, and the three
-    relaxations this replaces were each exploitable:
-
-    * ``credential_host in target`` -- substring containment. A ``.env``
-      holding only ``SSH_PASSWORD`` yields ``credential_host == ""``, and
-      the empty string is a substring of every hostname there is, so the
-      cluster password was offered to *any* host that was asked for. Even
-      with a real value it means a credential for ``hpc.example.edu`` is
-      handed to ``hpc.example.edu.attacker.test``, a name anybody can
-      register under a domain they control.
-    * ``target in credential_host`` -- the same thing backwards.
-    * ``target.split(".")[0] == credential_host.split(".")[0]`` -- first
-      label only, so ``hpc.evil.test`` collects the password stored for
-      ``hpc.example.edu``.
-
-    A hostname is the identity of the party about to receive the secret, so
-    a *partial* match is not a weaker check, it is a different check that
-    answers a question nobody asked. Nor is suffix-on-a-dot-boundary right
-    here: ``hpc.example.edu`` has no authority over ``node1.hpc.example.edu``
-    and a credential for the parent is not a credential for the child.
-
-    The cost of being strict is a credential that is simply not offered
-    when the user spelled the host differently in ``.env`` than in their
-    config -- at which point the fallback chain moves on and prompts, and
-    the guidance in :meth:`FlexibleCredentialAuthMethod.attempt_auth` names
-    the fix. That is a safe failure. Every relaxation above is an unsafe
-    success.
-    """
-    normalized_target = _normalize_hostname(target)
-    normalized_credential = _normalize_hostname(credential_host)
-    if not normalized_target or not normalized_credential:
-        # A credential that does not say which host it is for cannot be
-        # checked against one, and "unchecked" may not read as "matches".
-        # This is the same class of defect as the ``{"port": "22"}`` default
-        # that made every unconfigured machine look like it had SSH
-        # credentials: an absent value must never satisfy a test.
-        return False
-    return normalized_target == normalized_credential
-
-
-def stored_credential_is_for_config(
-    config: ClusterConfig, credentials: Dict[str, Any]
-) -> Optional[str]:
-    """Why a stored SSH credential may not be used for ``config``, or ``None``.
-
-    ``FlexibleCredentialAuthMethod`` answers this question for a connection
-    the auth chain is driving. ``ConnectionManager.setup_ssh_connection``
-    reads ``ensure_credential("ssh")`` directly and used to answer it not at
-    all: whatever came out of ``~/.clustrix/.env`` was applied to whatever
-    ``config.cluster_host`` said, so the *file* decided who received the
-    user's cluster password.
-
-    That is a live exfiltration path rather than a theoretical one, because
-    ``config.cluster_host`` is not necessarily the user's. The search of the
-    standard locations includes ``./clustrix.yml``, so a repository that
-    ships one names the host, and the working-directory candidates normally
-    win outright (``~/.clustrix/clustrix.yml`` is not searched -- only
-    ``config.yml`` is). ``git clone && cd && python -c "import clustrix..."``
-    was enough to have the password sent to a host of the repository's
-    choosing.
-
-    Two rules, and the second is the one that keeps the documented setup
-    working:
-
-    1. **If the credential names a host, it must be that host.** Exactly,
-       after normalisation -- :func:`_hostname_matches`, the same comparison
-       and the same reasoning as the auth-chain path. Substring, suffix and
-       first-label matches were each exploitable there and are no better
-       here.
-    2. **If the credential names no host, the host must come from a source
-       the user chose.** A bare ``SSH_PASSWORD=...`` in ``.env`` with the
-       host in a config file is the documented, supported setup and has to
-       keep working, so requiring an ``SSH_HOST`` outright is not available.
-       What separates it from the attack is not the credential at all --
-       both look identical -- it is *who chose the hostname*. A host from
-       ``~/.clustrix/config.yml``, from ``load_config(path)``, or from
-       Python is the user's. A host from ``./clustrix.yml`` is whatever
-       directory the process is in. See
-       :func:`clustrix.config.config_source_is_trusted`.
-
-    **The refusal names only remedies that work.** It used to offer
-    ``configure(cluster_host=...)``, and that is a lie: an untrusted source
-    taints the *hostname* for the life of the process
-    (``clustrix.config._HOSTS_NAMED_BY_UNTRUSTED_SOURCES``), so handing the
-    same string back through ``configure`` or ``load_config`` leaves it
-    refused. It has to: the notebook widget's Apply button *is*
-    ``configure(cluster_host=<the file's host>, ...)``, so a rule that let an
-    explicit ``configure`` clear the taint would reopen the laundering route
-    round two closed, and nothing distinguishes the two calls. The two things
-    that do work are ``SSH_HOST`` in the credential file -- authorisation
-    that no round trip can manufacture -- and removing the offending file and
-    starting again, since the record is per-process.
-
-    Returns the reason it may not be used, so the caller can say so; ``None``
-    means it may.
-    """
-    credential_host = credentials.get("host", "")
-    if _normalize_hostname(credential_host):
-        if _hostname_matches(config.cluster_host, credential_host):
-            return None
-        return (
-            f"the stored credential is for {credential_host!r} and this "
-            f"connection is to {config.cluster_host!r}"
-        )
-
-    if config_source_is_trusted(config):
-        return None
-
-    return (
-        f"the stored credential names no host, and cluster_host="
-        f"{config.cluster_host!r} came from {get_config_source(config)} -- "
-        f"a file chosen by where the process runs or by an inherited "
-        f"environment variable, not by you. That is settled for the life of "
-        f"this process: passing "
-        f"the same hostname to configure(cluster_host=...) or "
-        f"load_config(path) does not clear it, because a value handed back "
-        f"through a function call is not evidence that anyone chose it. "
-        f"Either set SSH_HOST={config.cluster_host!r} in the credential file, "
-        f"which is you naming the host that may receive the secret, or move "
-        f"the host into the clustrix configuration directory (config.yml), "
-        f"remove the file it came from, and start a new process"
-    )
 
 
 class FlexibleCredentialAuthMethod(AuthMethod):
