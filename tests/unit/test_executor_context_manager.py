@@ -13,6 +13,8 @@ the exception path there was no guarantee at all.
 """
 
 import pathlib
+import threading
+import time
 
 import pytest
 
@@ -303,3 +305,127 @@ def test_disconnect_closes_an_sftp_channel_the_caller_left_open(server):
 
     assert channel.closed
     assert _socket_fd(transport) == -1
+
+
+# ---------------------------------------------------------------------------
+# Reconnecting, and racing for the first channel
+# ---------------------------------------------------------------------------
+
+
+def test_reconnecting_hands_back_a_channel_that_actually_works(server):
+    """``setup_ssh_connection`` twice must not leave a dead channel cached.
+
+    It is the method every "SSH client not connected" error tells the caller
+    to run, so it is the reconnect path whether or not it was designed as one.
+    Before the fix the lazy cache survived it: the manager reported itself
+    connected and handed back the channel from the *previous*, dead transport,
+    which answered ``OSError: Socket is closed``. The proof here is a round
+    trip to the real server, not object identity.
+    """
+    manager = ConnectionManager(_config(server))
+    manager.setup_ssh_connection()
+    (_root(server) / "before.txt").write_text("x")
+    assert "before.txt" in manager.sftp_client.listdir(".")
+
+    # The connection drops the way a real one does: from underneath the
+    # caller, with no chance to call disconnect().
+    manager.ssh_client.get_transport().close()
+
+    manager.setup_ssh_connection()
+    try:
+        (_root(server) / "after.txt").write_text("y")
+        assert "after.txt" in manager.sftp_client.listdir(
+            "."
+        ), "reconnecting handed back the channel from the dead transport"
+    finally:
+        manager.disconnect()
+
+
+def test_reconnecting_closes_the_previous_channel_rather_than_dropping_it(server):
+    """The stale channel is released, not merely forgotten."""
+    manager = ConnectionManager(_config(server))
+    manager.setup_ssh_connection()
+    stale = manager.sftp_client
+    old_transport = manager.ssh_client.get_transport()
+    assert not stale.get_channel().closed
+
+    manager.setup_ssh_connection()
+    try:
+        assert (
+            stale.get_channel().closed
+        ), "the channel from the previous transport was dropped, not closed"
+        assert _socket_fd(old_transport) == -1, "the previous transport was leaked"
+
+        fresh = manager.sftp_client
+        assert fresh is not stale
+        assert _open_channels(manager.ssh_client.get_transport()) == 1
+        assert isinstance(fresh.listdir("."), list)
+    finally:
+        manager.disconnect()
+
+
+def test_concurrent_first_access_opens_exactly_one_channel(server):
+    """Four threads reaching the unopened property together open one channel.
+
+    Deterministic by construction rather than by luck: the first thread into
+    ``open_sftp`` is held there until the others have had every opportunity to
+    enter it too, so the check-then-set window is forced wide open instead of
+    being hoped for. Against the unguarded property this produced four
+    channels every time, three of them orphaned and still open.
+
+    The wrapper delays the real ``open_sftp`` and then calls it -- the channels
+    counted below are real channels on the real server.
+    """
+    manager = ConnectionManager(_config(server))
+    manager.setup_ssh_connection()
+    try:
+        transport = manager.ssh_client.get_transport()
+        real_open_sftp = manager.ssh_client.open_sftp
+        entered = []
+        entered_lock = threading.Lock()
+        release = threading.Event()
+
+        def open_sftp_held_open():
+            with entered_lock:
+                entered.append(threading.current_thread().name)
+            release.wait(30)
+            return real_open_sftp()
+
+        manager.ssh_client.open_sftp = open_sftp_held_open
+
+        start = threading.Barrier(4)
+        results = []
+
+        def read_the_property():
+            start.wait(30)
+            results.append(manager.sftp_client)
+
+        threads = [threading.Thread(target=read_the_property) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+
+        # Give the unguarded behaviour every chance to show itself: with no
+        # lock all four threads reach open_sftp, because the first one cannot
+        # return until `release` is set. Break as soon as that happens so the
+        # failing case is fast; the passing case waits out the window.
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline:
+            with entered_lock:
+                if len(entered) == 4:
+                    break
+            time.sleep(0.01)
+        release.set()
+        for thread in threads:
+            thread.join(30)
+
+        assert (
+            len(entered) == 1
+        ), f"{len(entered)} threads opened a channel; the property raced"
+        assert len(results) == 4
+        assert all(result is results[0] for result in results)
+        assert (
+            _open_channels(transport) == 1
+        ), "concurrent first access left orphaned channels open on the transport"
+        assert isinstance(results[0].listdir("."), list)
+    finally:
+        manager.disconnect()

@@ -7,6 +7,7 @@ connection and ``huggingface`` talks to an HTTP API.)
 
 import os
 import logging
+import threading
 from typing import Optional
 
 import paramiko
@@ -30,6 +31,10 @@ class ConnectionManager:
         # Opened on first read of the `sftp_client` property, not at connect
         # time -- see that property for why.
         self._sftp_client: Optional[paramiko.SFTPClient] = None
+        # Guards the cached channel and the client it is opened against, so
+        # that "is it cached yet?" and "open one" cannot be interleaved by a
+        # second thread across the network round trip in between.
+        self._sftp_lock = threading.Lock()
         self._remote_home = None  # cache for resolve_remote_path()
 
     @property
@@ -53,14 +58,25 @@ class ConnectionManager:
 
         Returns ``None`` when there is no SSH connection, rather than opening
         one: reading an attribute must not dial out.
+
+        The check and the assignment are held under ``_sftp_lock``. Without it
+        this is a check-then-set around a network round trip: four threads
+        reaching an unopened property together each saw ``None``, each called
+        ``open_sftp()``, and three of the four channels were then dropped on
+        the floor still open -- a leak of exactly the kind the rest of this
+        class exists to prevent. The lock only serialises *opening* the
+        convenience channel; it does not make ``SFTPClient`` shareable, which
+        is why the per-call sites above still open their own.
         """
-        if self._sftp_client is None and self.ssh_client is not None:
-            self._sftp_client = self.ssh_client.open_sftp()
-        return self._sftp_client
+        with self._sftp_lock:
+            if self._sftp_client is None and self.ssh_client is not None:
+                self._sftp_client = self.ssh_client.open_sftp()
+            return self._sftp_client
 
     @sftp_client.setter
     def sftp_client(self, value: Optional[paramiko.SFTPClient]) -> None:
-        self._sftp_client = value
+        with self._sftp_lock:
+            self._sftp_client = value
 
     def __enter__(self) -> "ConnectionManager":
         """Connect, and guarantee the transport is closed on the way out.
@@ -75,9 +91,22 @@ class ConnectionManager:
         self.disconnect()
 
     def setup_ssh_connection(self):
-        """Setup SSH connection to cluster."""
+        """Setup SSH connection to cluster.
+
+        Anything cached against the *previous* transport is released first.
+        This method is what the "SSH client not connected" errors tell a caller
+        to run, so it has to be usable as a reconnect -- and while it used to
+        reassign ``sftp_client`` unconditionally, making the cache lazy turned
+        that into a stale-cache bug: the second call left the property bound to
+        a channel on the old, dead transport, so a manager that reported itself
+        connected handed out a channel that answered "Socket is closed".
+        ``disconnect()`` clears the channel, the cached remote home and the old
+        transport, and closes each of them rather than dropping it.
+        """
         if not self.config.cluster_host:
             raise ValueError("cluster_host must be specified for SSH-based clusters")
+
+        self.disconnect()
 
         self.ssh_client = paramiko.SSHClient()
         configure_host_key_policy(self.ssh_client, self.config)
@@ -305,8 +334,13 @@ class ConnectionManager:
         # A later connect() may use a different username, and a home directory
         # cached from the previous account would be silently wrong.
         self._remote_home = None
-        sftp, self._sftp_client = self._sftp_client, None
-        ssh, self.ssh_client = self.ssh_client, None
+        # Under the lock, and clearing the client with it: a thread part-way
+        # through the lazy property must not open a channel against a
+        # transport this call is about to close, and then cache it where
+        # nothing will ever close it.
+        with self._sftp_lock:
+            sftp, self._sftp_client = self._sftp_client, None
+            ssh, self.ssh_client = self.ssh_client, None
         try:
             if sftp is not None:
                 sftp.close()
