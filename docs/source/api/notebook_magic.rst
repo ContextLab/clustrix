@@ -101,6 +101,16 @@ A second widget class
    :data:`clustrix.config.SUPPORTED_CLUSTER_TYPES` cannot be dispatched by the
    executor; see :ref:`removed-backends`.
 
+   **Renaming onto a name that is taken is refused.** Typing a name another
+   configuration in the dropdown already has leaves both of them exactly as
+   they were and reports which one holds the name, in the Status & Output
+   area. It used to overwrite that configuration in silence, which was
+   unrecoverable: ``password`` and ``hf_token`` are omitted from every saved
+   file, so a configuration holding either exists only in the session. To
+   reuse a name, delete the configuration that has it first. The name box
+   keeps what you typed and the selection does not move, so carrying on
+   typing to a free name renames the configuration you were editing.
+
 .. Documented from the module that defines it, not from the one that
    re-exports it: autodoc only picks up the ``#:`` comment at the definition
    site, so pointing at ``clustrix.notebook_magic`` made it fall back to

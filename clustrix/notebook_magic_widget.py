@@ -413,7 +413,30 @@ class EnhancedClusterConfigWidget:
             getattr(self, attr).pop(name, None)
 
     def _on_config_name_change(self, change):
-        """Handle changes to the config name field."""
+        """Handle changes to the config name field.
+
+        **A rename onto a name another configuration holds is refused.** That
+        is decided, not defaulted -- issue #171 offered refuse, ask and
+        auto-suffix, and the two rejected options lose to how this handler is
+        actually reached. It is a ``Text`` observer, so it fires on the
+        keystream: a modal question has nowhere to appear and would arrive
+        once per character, and auto-suffixing would silently name a
+        configuration something the user never typed, which is the same
+        "accepted the instruction, did something else, reported success"
+        shape as the overwrite it replaces. Refusing invents nothing and
+        destroys nothing.
+
+        The refusal deliberately leaves the box holding what was typed and
+        ``current_config_name`` where it was, rather than resetting the
+        field. Resetting it would fight the keystream -- a user typing
+        "SSH Remote Server 2" passes through the taken name on the way -- and
+        because the selection does not move, the next keystroke that reaches a
+        free name still renames the configuration they were editing.
+
+        Nothing keyed by the name moves on the refused path either: the
+        sidecars ``_rename_config_metadata`` maintains describe
+        ``self.configs``, which is exactly what a refusal leaves alone.
+        """
         new_name = change["new"].strip()
         if not new_name:
             return
@@ -423,6 +446,20 @@ class EnhancedClusterConfigWidget:
             and self.current_config_name in self.configs
             and new_name != self.current_config_name
         ):
+            if new_name in self.configs:
+                # Overwriting here destroyed the occupant in silence, and a
+                # profile is the only place its ``password`` and ``hf_token``
+                # live -- ``save_to_file`` omits both -- so there was no way
+                # back from it.
+                with self.status_output:
+                    self.status_output.clear_output()
+                    print(
+                        f"❌ Cannot rename '{self.current_config_name}' to "
+                        f"'{new_name}': another configuration already has "
+                        "that name. Choose a different name, or delete "
+                        f"'{new_name}' first."
+                    )
+                return
             # Rename the configuration, and everything else keyed by its
             # name along with it -- see ``_rename_config_metadata``.
             old_config = self.configs.pop(self.current_config_name)

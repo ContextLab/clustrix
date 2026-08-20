@@ -2303,31 +2303,78 @@ def test_renaming_a_found_configuration_does_not_launder_it(tmp_path, monkeypatc
 def test_renaming_onto_a_name_that_came_off_a_disk_does_not_inherit_it(
     tmp_path, monkeypatch
 ):
-    """The other direction: a stale entry must not attach to someone else.
+    """The other direction: a disk's provenance must not attach to someone else.
 
-    ``self.configs`` is re-keyed unconditionally, so renaming a configuration
-    the user built onto the name of one that was found on disk leaves that
-    disk's provenance sitting on a configuration it was never about. The
-    sidecars track ``self.configs`` in both directions.
+    **Rewritten deliberately for issue #171, not relaxed.** This test used to
+    assert ``current_config_name == "config"`` and empty sidecars -- that is,
+    it asserted that the rename *went through*, destroying the configuration
+    the repository shipped, and only checked that its provenance did not ride
+    along. Its own docstring recorded the destruction as "left alone here".
+    The rename is now refused, so the property is asserted on the path that
+    actually happens: nothing moves, in either map, in either direction.
 
-    (That the rename destroys the other configuration at all is issue #171,
-    filed separately and left alone here.)
+    The security property is unchanged and is still the point -- the live
+    fields are the built-in configuration's, and ``_discovered_source_for``
+    must not find the repository's provenance under them.
     """
     pytest.importorskip("ipywidgets")
     _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
 
     widget = _clusterfy_widget()
     assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    found_on_disk = copy.deepcopy(widget.configs["config"])
 
     # Select a configuration the widget built in, not one off a disk, and
-    # rename it onto the found one's name.
+    # try to rename it onto the found one's name.
     widget.config_dropdown.value = "Local Single-core"
     widget.config_name.value = "config"
 
-    assert widget.current_config_name == "config"
-    assert widget.config_source_map == {}
-    assert widget.config_source_host_map == {}
+    # Refused: the repository's configuration is still there, unaltered, and
+    # so is the one the user was editing.
+    assert widget.configs["config"] == found_on_disk
+    assert widget.configs["Local Single-core"]["cluster_type"] == "local"
+    assert widget.current_config_name == "Local Single-core"
+
+    # No provenance moved, because no configuration moved.
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert widget.config_source_host_map == {"config": UNRELATED_ATTACKER_HOST}
+    assert set(widget.config_file_map) == {"config"}
+
+    # And the built-in configuration the user is holding is still their own.
     assert widget._discovered_source_for(_live_widget_fields(widget)) is None
+
+
+def test_a_refused_rename_does_not_leave_a_found_config_half_renamed(
+    tmp_path, monkeypatch
+):
+    """The mirror: the *found* configuration is the one being renamed.
+
+    A half-completed refusal here is the worse direction -- provenance moved
+    onto a built-in name while the configuration it describes stayed put
+    would both condemn a host no file ever named and clear the refusal on the
+    host one did. Nothing moves, so neither happens.
+    """
+    pytest.importorskip("ipywidgets")
+    _repository_config_naming(UNRELATED_ATTACKER_HOST, tmp_path, monkeypatch)
+
+    widget = _clusterfy_widget()
+    built_in = copy.deepcopy(widget.configs["Local Single-core"])
+
+    # "config" is selected by ``_clusterfy_widget``; rename it onto a name a
+    # built-in template already holds.
+    widget.config_name.value = "Local Single-core"
+
+    assert widget.configs["Local Single-core"] == built_in
+    assert widget.current_config_name == "config"
+    assert widget.config_source_map == {"config": CONFIG_SOURCE_WORKING_DIRECTORY}
+    assert widget.config_source_host_map == {"config": UNRELATED_ATTACKER_HOST}
+    assert set(widget.config_file_map) == {"config"}
+
+    # The repository's configuration is still what it was, so it is still
+    # refused -- the rename attempt neither laundered it nor moved it.
+    assert widget._discovered_source_for(_live_widget_fields(widget)) == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
 
 
 def test_deleting_a_configuration_forgets_where_it_came_from(tmp_path, monkeypatch):
