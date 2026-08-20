@@ -19,8 +19,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clustrix.config import ClusterConfig
 from clustrix.ssh_utils import setup_ssh_keys, detect_working_ssh_key, validate_ssh_key
-from clustrix.secure_credentials import SecureCredentialManager
 from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
     require_test_host,
     require_test_username,
 )
@@ -31,7 +32,7 @@ def test_ssh_automation(cluster_configs: list) -> dict:
     """
     Test SSH key automation on real clusters:
     1. Clean existing keys (if requested)
-    2. Get password from 1Password
+    2. Get the password from ~/.clustrix/.env or the environment
     3. Run setup_ssh_keys()
     4. Verify passwordless access
     5. Test with clustrix job submission
@@ -53,16 +54,16 @@ def test_ssh_automation(cluster_configs: list) -> dict:
                 cluster_port=cluster_info.get("port", 22),
             )
 
-            # Get credentials from 1Password
-            print(f"🔐 Retrieving credentials from 1Password...")
-            cred_manager = SecureCredentialManager()
-            ssh_creds = cred_manager.get_structured_credential(
-                cluster_info["credential_name"]
-            )
-            if not ssh_creds or "password" not in ssh_creds:
+            # Credentials come from ~/.clustrix/.env or the environment.
+            print("🔐 Reading credentials from ~/.clustrix/.env...")
+            ssh_creds = get_cluster_credentials(cluster_info["role"])
+            if not ssh_creds or not ssh_creds.get("password"):
                 results[cluster_name] = {
                     "success": False,
-                    "error": "Failed to retrieve password from 1Password",
+                    "error": (
+                        "No password for the "
+                        f"{cluster_info['role']} cluster. {CREDENTIAL_SETUP_HINT}"
+                    ),
                     "timestamp": datetime.now().isoformat(),
                 }
                 continue
@@ -194,7 +195,7 @@ def main():
             "host": require_test_host("slurm"),
             "username": username,
             "port": 22,
-            "credential_name": "clustrix-ssh-slurm",
+            "role": "slurm",
         },
         {
             "name": "gpu_cluster",
@@ -202,7 +203,7 @@ def main():
             "host": require_test_host("ssh"),
             "username": username,
             "port": 22,
-            "credential_name": "clustrix-ssh-gpu",  # Separate GPU credentials
+            "role": "ssh",  # the plain SSH box, which is the GPU machine here
         },
     ]
 

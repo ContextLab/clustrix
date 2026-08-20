@@ -8,10 +8,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
-from tests.real_world.credential_manager import require_test_remote_work_dir
+from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
+    require_test_remote_work_dir,
+)
 from clustrix.ssh_security import configure_host_key_policy
 
 
@@ -20,16 +23,15 @@ def check_slurm_logs():
     print("📋 Checking SLURM Logs")
     print("=" * 30)
 
-    # Get credentials
-    creds = ValidationCredentials()
-    slurm_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
+    # Credentials come from ~/.clustrix/.env or the environment.
+    slurm_creds = get_cluster_credentials("slurm")
 
     if not slurm_creds:
-        print("❌ No credentials found")
+        print(f"❌ No SLURM cluster credentials found. {CREDENTIAL_SETUP_HINT}")
         return
 
-    hostname = slurm_creds.get("hostname")
-    username = slurm_creds.get("username")
+    hostname = slurm_creds["host"]
+    username = slurm_creds["username"]
     password = slurm_creds.get("password")
 
     # Connect via SSH

@@ -61,7 +61,7 @@ class RealWorldTestManager:
 
 
 class TestCredentials:
-    """Manage test credentials from environment variables and 1Password."""
+    """Manage test credentials from ~/.clustrix/.env and the environment."""
 
     def __init__(self):
         """Initialize with credential manager."""

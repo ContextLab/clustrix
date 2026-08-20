@@ -2,8 +2,8 @@
 """
 Test script to verify real-world credential integration.
 
-This script tests the integration between 1Password (local development)
-and GitHub Actions secrets for real-world testing.
+This script tests credential resolution from ~/.clustrix/.env, exported
+environment variables, and GitHub Actions secrets.
 """
 
 import os
@@ -32,8 +32,6 @@ def test_credential_integration():
     print(
         f"Environment: {'GitHub Actions' if manager.is_github_actions else 'Local Development'}"
     )
-    print(f"1Password Available: {'✅' if manager.is_1password_available() else '❌'}")
-
     # Print credential status
     print_credential_status()
 
@@ -156,36 +154,6 @@ def test_github_actions_simulation():
                 os.environ.pop(key, None)
 
 
-def test_1password_integration():
-    """Test 1Password integration if available."""
-    print("\n🔑 Testing 1Password Integration")
-    print("=" * 35)
-
-    manager = get_credential_manager()
-
-    if manager.is_1password_available():
-        print("✅ 1Password CLI is available")
-
-        # Test retrieving a credential
-        try:
-            if manager._op_manager:
-                # Try to get a test credential
-                test_cred = manager._op_manager.get_credential(
-                    "clustrix-huggingface-validation", "token"
-                )
-                if test_cred:
-                    print(f"✅ Retrieved HuggingFace token (length: {len(test_cred)})")
-                else:
-                    print("⚠️  HuggingFace credential not found in 1Password")
-                    print("   Make sure 'clustrix-huggingface-validation' item exists")
-        except Exception as e:
-            print(f"❌ Error accessing 1Password: {e}")
-    else:
-        print("❌ 1Password CLI not available")
-        print("   Install with: brew install --cask 1password-cli")
-        print("   Then run: op signin")
-
-
 def main():
     """Main test function."""
     print("🔐 Real-World Credential Integration Test Suite")
@@ -200,9 +168,6 @@ def main():
 
         # Test GitHub Actions simulation
         test_github_actions_simulation()
-
-        # Test 1Password integration
-        test_1password_integration()
 
         print("\n🎉 All credential integration tests completed!")
         print("\n📋 Summary:")

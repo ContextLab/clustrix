@@ -20,8 +20,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
-from clustrix.secure_credentials import ValidationCredentials
 from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
     require_test_host,
     require_test_remote_work_dir,
     require_test_username,
@@ -34,7 +35,6 @@ class SlurmPackagingValidator:
     """Validates packaging system with real SLURM job submissions."""
 
     def __init__(self):
-        self.val_creds = ValidationCredentials()
         remote_work_dir = require_test_remote_work_dir()
         self.slurm_config = ClusterConfig(
             cluster_type="slurm",
@@ -52,14 +52,11 @@ class SlurmPackagingValidator:
     def setup_ssh_connection(self):
         """Set up SSH connection to SLURM cluster."""
         try:
-            print("🔐 Retrieving SSH credentials from 1Password...")
+            print("🔐 Reading SSH credentials from ~/.clustrix/.env...")
 
-            # Get SSH credentials from 1Password
-            ssh_creds = self.val_creds.cred_manager.get_structured_credential(
-                "clustrix-ssh-slurm"
-            )
+            ssh_creds = get_cluster_credentials("slurm")
             if not ssh_creds:
-                print("❌ Could not retrieve SSH credentials from 1Password")
+                print(f"❌ No SLURM cluster credentials. {CREDENTIAL_SETUP_HINT}")
                 return False
 
             print("✅ SSH credentials retrieved successfully")
@@ -67,23 +64,24 @@ class SlurmPackagingValidator:
             self.ssh_client = paramiko.SSHClient()
             configure_host_key_policy(self.ssh_client, self.slurm_config)
 
-            hostname = ssh_creds.get("hostname", self.slurm_config.cluster_host)
-            username = ssh_creds.get("username", self.slurm_config.username)
+            hostname = ssh_creds["host"]
+            username = ssh_creds["username"]
             password = ssh_creds.get("password")
-            private_key = ssh_creds.get("private_key")
+            private_key_path = ssh_creds.get("private_key_path")
 
             print(f"🔌 Connecting to {username}@{hostname}...")
 
-            # Try key-based authentication first if private key is available
-            if private_key:
+            # Try key-based authentication first if a key file is configured.
+            # SSH_PRIVATE_KEY_PATH names a file, so paramiko loads it itself
+            # and picks the key type; the previous code assumed the credential
+            # store handed back Ed25519 PEM text, which nothing does now.
+            if private_key_path:
                 try:
-                    from io import StringIO
-
-                    key_file = StringIO(private_key)
-                    pkey = paramiko.Ed25519Key.from_private_key(key_file)
-
                     self.ssh_client.connect(
-                        hostname=hostname, username=username, pkey=pkey, timeout=30
+                        hostname=hostname,
+                        username=username,
+                        key_filename=private_key_path,
+                        timeout=30,
                     )
                     print("✅ SSH connection established with private key")
                     return True

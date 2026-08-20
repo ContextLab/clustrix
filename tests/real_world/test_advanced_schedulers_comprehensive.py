@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_scheduler_credentials(scheduler_type: str) -> Optional[Dict[str, str]]:
-    """Get scheduler-specific credentials from 1Password or environment."""
+    """Get scheduler-specific credentials from ~/.clustrix/.env or the environment."""
     manager = get_credential_manager()
 
     # Try to get scheduler credentials

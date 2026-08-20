@@ -13,11 +13,10 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from clustrix.config import ClusterConfig
 from clustrix.file_packaging import package_function_for_execution
-from clustrix.secure_credentials import ValidationCredentials
 from tests.real_world.credential_manager import (
-    require_test_host,
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
     require_test_remote_work_dir,
-    require_test_username,
 )
 import tempfile
 import zipfile
@@ -158,19 +157,18 @@ def main():
     print("🚀 Testing Shared Filesystem Fix on SLURM Cluster")
     print("=" * 60)
 
-    # Get SSH credentials
-    val_creds = ValidationCredentials()
-    ssh_creds = val_creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
+    # Credentials come from ~/.clustrix/.env or the environment.
+    ssh_creds = get_cluster_credentials("slurm")
 
     if not ssh_creds:
-        print("❌ Could not get SSH credentials")
+        print(f"❌ No SLURM cluster credentials. {CREDENTIAL_SETUP_HINT}")
         return
 
     # Create cluster config
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host=ssh_creds.get("hostname") or require_test_host("slurm"),
-        username=ssh_creds.get("username") or require_test_username(),
+        cluster_host=ssh_creds["host"],
+        username=ssh_creds["username"],
         password=ssh_creds.get("password"),
         remote_work_dir=(f"{require_test_remote_work_dir()}/clustrix/shared_fs_tests"),
     )

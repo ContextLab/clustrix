@@ -3,7 +3,7 @@ Test core ClustriX functionality on slurm_cluster using proper configuration fil
 
 This test validates that the ClustriX toolbox can:
 1. Load configuration from slurm_cluster_config.yml
-2. Authenticate using 1Password or environment variables
+2. Authenticate using ~/.clustrix/.env or environment variables
 3. Submit SLURM jobs with module loads
 4. Execute functions on remote cluster
 5. Retrieve results properly
@@ -30,7 +30,9 @@ def test_slurm_cluster_core_functionality():
 
     if not slurm_cluster_creds:
         pytest.skip(
-            "No slurm_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No slurm_cluster credentials: set CLUSTRIX_TEST_SLURM_HOST and put "
+            "SSH_USERNAME/SSH_PASSWORD in ~/.clustrix/.env (or export "
+            "CLUSTRIX_USERNAME/CLUSTRIX_PASSWORD)"
         )
 
     # Override configuration with actual credentials

@@ -1,8 +1,17 @@
 """
 Credential management for real-world tests.
 
-This module provides secure access to credentials for real-world testing,
-supporting both 1Password (local development) and GitHub Actions secrets.
+Credentials come from exactly two places, in this order:
+
+1. ``~/.clustrix/.env`` and the process environment, read through
+   :mod:`clustrix.credential_manager` (``SSH_HOST``, ``SSH_USERNAME``,
+   ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``, ``SSH_PORT``).
+2. Exported variables, including GitHub Actions secrets
+   (``CLUSTRIX_USERNAME``, ``CLUSTRIX_PASSWORD``, ``HF_TOKEN``).
+
+1Password was removed in issue #97. Nothing here reads it, and no test may
+grow a third credential path: add sources to
+:class:`clustrix.credential_manager.FlexibleCredentialManager` instead.
 """
 
 import os
@@ -15,15 +24,16 @@ from pathlib import Path
 # installed alongside it.
 import pytest
 
-# Try to import SecureCredentialManager
+# The supported credential path. Guarded so that this module still imports
+# when clustrix itself cannot be; HAS_SECURE_CREDENTIALS gates every use.
 try:
-    from clustrix.secure_credentials import (
-        SecureCredentialManager,
-        ValidationCredentials,
+    from clustrix.credential_manager import (
+        ensure_credential as _clustrix_ensure_credential,
     )
+    from clustrix.secure_credentials import ValidationCredentials
 
     HAS_SECURE_CREDENTIALS = True
-except ImportError:
+except ImportError:  # pragma: no cover - clustrix is a hard dependency of tests
     HAS_SECURE_CREDENTIALS = False
 
 logger = logging.getLogger(__name__)
@@ -142,6 +152,112 @@ def require_test_remote_work_dir() -> str:
     return work_dir
 
 
+#: What to do when no credentials are found. One string, so the pytest skip
+#: reasons and the messages printed by the standalone debug scripts cannot
+#: drift apart -- and so nobody has to guess, as they did while these messages
+#: still said "add credentials to 1Password" (removed in #97, issue #153).
+CREDENTIAL_SETUP_HINT = (
+    "Put SSH_USERNAME and SSH_PASSWORD (or SSH_PRIVATE_KEY_PATH) in "
+    "~/.clustrix/.env -- `clustrix credentials setup` creates that file -- or "
+    "export them, and set the CLUSTRIX_TEST_*_HOST variable for the cluster "
+    "you want to reach"
+)
+
+
+def _clustrix_ssh_credentials() -> Dict[str, str]:
+    """SSH credentials from ~/.clustrix/.env or the environment.
+
+    This is the only supported source; an empty dict means "none configured",
+    never "substitute something plausible".
+
+    The environment is snapshotted and restored around the lookup. Reading the
+    .env file goes through `load_dotenv`, which *exports* every variable in it
+    -- so without this, importing this module (conftest does, for the whole
+    `pytest tests/` run) published the developer's real AWS, GCP and HF
+    credentials into every unrelated test's environment. Two credential-source
+    tests failed because of it, which is how it was caught; the values we
+    actually need come back in the return value, not in os.environ.
+    """
+    if not HAS_SECURE_CREDENTIALS:
+        return {}
+    environment = dict(os.environ)
+    try:
+        return _clustrix_ensure_credential("ssh") or {}
+    except Exception as e:  # a broken .env must not abort collection
+        logger.debug(f"clustrix ssh credential lookup failed: {e}")
+        return {}
+    finally:
+        os.environ.clear()
+        os.environ.update(environment)
+
+
+def _nonempty(value: Optional[str]) -> Optional[str]:
+    """`value` stripped, or None if it is empty or unset."""
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
+    """Login details for the cluster playing `role`, or None if unconfigured.
+
+    `role` is one of the keys of :data:`HOST_ENV_VARS` ("ssh", "slurm", ...).
+    The returned dictionary has the same shape everything else in this package
+    expects::
+
+        {"host", "username", "password", "private_key_path", "port"}
+
+    The host comes from CLUSTRIX_TEST_<ROLE>_HOST (falling back to SSH_HOST),
+    the account from CLUSTRIX_TEST_USERNAME / SSH_USERNAME / CLUSTRIX_USERNAME,
+    and the secret from SSH_PASSWORD / SSH_PRIVATE_KEY_PATH / CLUSTRIX_PASSWORD.
+
+    None is returned unless a host, an account **and** a secret are all
+    present: connecting with two of the three only produces an authentication
+    failure several seconds later, which reads like a broken cluster rather
+    than an unconfigured laptop.
+    """
+    ssh = _clustrix_ssh_credentials()
+
+    host = get_test_host(role) or _nonempty(ssh.get("host"))
+    username = (
+        get_test_username()
+        or _nonempty(ssh.get("username"))
+        or _nonempty(os.environ.get("CLUSTRIX_USERNAME"))
+    )
+    password = _nonempty(ssh.get("password")) or _nonempty(
+        os.environ.get("CLUSTRIX_PASSWORD")
+    )
+    private_key_path = _nonempty(ssh.get("private_key_path"))
+
+    if not host or not username or not (password or private_key_path):
+        return None
+
+    credentials = {
+        "host": host,
+        "username": username,
+        # Present even when unset: existing callers, including several under
+        # tests/integration, index this key directly, and a KeyError on a
+        # key-only setup would be a worse signal than the None they used to
+        # get from the old credential shape.
+        "password": password,
+        "port": str(ssh.get("port") or "22"),
+    }
+    if private_key_path:
+        credentials["private_key_path"] = private_key_path
+    return credentials
+
+
+def require_cluster_credentials(role: str) -> Dict[str, str]:
+    """Credentials for `role`, or skip the test saying exactly what is missing."""
+    credentials = get_cluster_credentials(role)
+    if not credentials:
+        pytest.skip(
+            f"No credentials for the {role} test cluster. {CREDENTIAL_SETUP_HINT}"
+        )
+    return credentials
+
+
 class RealWorldCredentialManager:
     """Manages credentials for real-world testing with multiple fallback options."""
 
@@ -150,50 +266,31 @@ class RealWorldCredentialManager:
         self.is_github_actions = os.getenv("GITHUB_ACTIONS") == "true"
         self.is_local_development = not self.is_github_actions
 
-        # Initialize 1Password manager if available
-        self._op_manager = None
         self._validation_creds = None
-
-        if HAS_SECURE_CREDENTIALS and self.is_local_development:
+        if HAS_SECURE_CREDENTIALS:
             try:
-                self._op_manager = SecureCredentialManager()
                 self._validation_creds = ValidationCredentials()
             except Exception as e:
-                logger.debug(f"Failed to initialize 1Password manager: {e}")
+                logger.debug(f"Failed to initialize validation credentials: {e}")
 
     def is_1password_available(self) -> bool:
-        """Check if 1Password CLI is available."""
-        if not self._op_manager:
-            return False
-        return self._op_manager.is_op_available()
+        """Always False: 1Password was removed from clustrix in issue #97.
+
+        Retained only because `scripts/run_real_world_tests.py` still prints
+        it, and that file is outside this package; delete both together.
+        """
+        return False
 
     def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
         """Get SSH credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._op_manager:
-            try:
-                # Try the SSH-GPU cluster first
-                gpu_notes = self._op_manager.get_credential(
-                    "clustrix-ssh-gpu", "notesPlain"
-                )
-                if gpu_notes:
-                    return self._parse_notes_credentials(gpu_notes)
-            except Exception as e:
-                logger.debug(f"Failed to get SSH-GPU credentials from 1Password: {e}")
+        # ~/.clustrix/.env and the environment, via clustrix itself.
+        configured = get_cluster_credentials("ssh")
+        if configured:
+            return configured
 
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            username = os.getenv("CLUSTRIX_USERNAME")
-            password = os.getenv("CLUSTRIX_PASSWORD")
-            host = get_test_host("ssh")
-
-            if username and password and host:
-                return {
-                    "host": host,
-                    "username": username,
-                    "password": password,
-                    "port": "22",
-                }
+        # No separate GitHub Actions branch: get_cluster_credentials already
+        # reads CLUSTRIX_USERNAME / CLUSTRIX_PASSWORD alongside the .env file,
+        # so a branch here could never be reached.
 
         # Fall back to environment variables
         host = os.getenv("TEST_SSH_HOST", "localhost")
@@ -211,122 +308,20 @@ class RealWorldCredentialManager:
         }
 
     def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH-GPU cluster credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._op_manager:
-            try:
-                gpu_notes = self._op_manager.get_credential(
-                    "clustrix-ssh-gpu", "notesPlain"
-                )
-                if gpu_notes:
-                    return self._parse_notes_credentials(gpu_notes)
-            except Exception as e:
-                logger.debug(f"Failed to get SSH-GPU credentials from 1Password: {e}")
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            username = os.getenv("CLUSTRIX_USERNAME")
-            password = os.getenv("CLUSTRIX_PASSWORD")
-            host = get_test_host("ssh")
-
-            if username and password and host:
-                return {
-                    "host": host,
-                    "username": username,
-                    "password": password,
-                    "port": "22",
-                }
-
-        return None
+        """Get plain-SSH ("ssh" role, the GPU box here) cluster credentials."""
+        return get_cluster_credentials("ssh")
 
     def get_slurm_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH-SLURM cluster credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._op_manager:
-            try:
-                slurm_notes = self._op_manager.get_credential(
-                    "clustrix-ssh-slurm", "notesPlain"
-                )
-                if slurm_notes:
-                    return self._parse_notes_credentials(slurm_notes)
-            except Exception as e:
-                logger.debug(f"Failed to get SSH-SLURM credentials from 1Password: {e}")
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            username = os.getenv("CLUSTRIX_USERNAME")
-            password = os.getenv("CLUSTRIX_PASSWORD")
-            host = get_test_host("slurm")
-
-            if username and password and host:
-                return {
-                    "host": host,
-                    "username": username,
-                    "password": password,
-                    "port": "22",
-                }
-
-        return None
-
-    def _parse_notes_credentials(self, notes: str) -> Dict[str, str]:
-        """Parse credentials from 1Password notes field."""
-        credentials = {}
-
-        # Remove wrapping quotes if present
-        if notes.startswith('"') and notes.endswith('"'):
-            notes = notes[1:-1]
-
-        for line in notes.split("\n"):
-            line = line.strip()
-            if line.startswith("- ") and ":" in line:
-                key, value = line[2:].split(":", 1)
-                credentials[key.strip()] = value.strip()
-
-        return {
-            "host": credentials.get("hostname"),
-            "username": credentials.get("username"),
-            "password": credentials.get("password"),
-            "port": "22",
-        }
+        """Get SLURM head-node ("slurm" role) cluster credentials."""
+        return get_cluster_credentials("slurm")
 
     def get_slurm_credentials(self) -> Optional[Dict[str, str]]:
         """Get SLURM credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._op_manager:
-            try:
-                username = self._op_manager.get_credential(
-                    "clustrix-slurm-validation", "username"
-                )
-                password = self._op_manager.get_credential(
-                    "clustrix-slurm-validation", "password"
-                )
-                hostname = self._op_manager.get_credential(
-                    "clustrix-slurm-validation", "hostname"
-                )
+        configured = get_cluster_credentials("slurm")
+        if configured:
+            return configured
 
-                if username and password and hostname:
-                    return {
-                        "host": hostname,
-                        "username": username,
-                        "password": password,
-                        "port": "22",
-                    }
-            except Exception as e:
-                logger.debug(f"Failed to get SLURM credentials from 1Password: {e}")
-
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            username = os.getenv("CLUSTRIX_USERNAME")
-            password = os.getenv("CLUSTRIX_PASSWORD")
-
-            host = get_test_host("slurm")
-            if username and password and host:
-                return {
-                    "host": host,
-                    "username": username,
-                    "password": password,
-                    "port": "22",
-                }
+        # No separate GitHub Actions branch; see get_ssh_credentials.
 
         # Fall back to environment variables
         host = os.getenv("TEST_SLURM_HOST", "localhost")
@@ -345,26 +340,21 @@ class RealWorldCredentialManager:
 
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
         """Get HuggingFace credentials from available sources."""
-        # Try 1Password first (local development)
-        if self.is_local_development and self._validation_creds:
+        # Exported variables only, deliberately. Reading the token out of
+        # ~/.clustrix/.env here would be resolved at import time by
+        # setup_environment_variables() below, which exports what it finds --
+        # publishing a real HF token into every unrelated test's environment
+        # for the whole `pytest tests/` run. Tests that need the .env token
+        # ask clustrix for it directly instead.
+        if self._validation_creds:
             try:
-                hf_creds = self._validation_creds.get_huggingface_credentials()
-                if hf_creds:
-                    return hf_creds
+                validation_creds = self._validation_creds.get_huggingface_credentials()
+                if validation_creds:
+                    return validation_creds
             except Exception as e:
-                logger.debug(
-                    f"Failed to get HuggingFace credentials from 1Password: {e}"
-                )
+                logger.debug(f"Failed to read HuggingFace credentials: {e}")
 
-        # GitHub Actions: Use repository secrets
-        if self.is_github_actions:
-            username = os.getenv("HF_USERNAME")
-            token = os.getenv("HF_TOKEN")
-
-            if token:
-                return {"token": token, "username": username}
-
-        # Fall back to environment variables
+        # Exported environment variables (including GitHub Actions secrets)
         token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
         username = os.getenv("HUGGINGFACE_USERNAME") or os.getenv("HF_USERNAME")
 
@@ -379,7 +369,6 @@ class RealWorldCredentialManager:
             "ssh": self.get_ssh_credentials() is not None,
             "slurm": self.get_slurm_credentials() is not None,
             "huggingface": self.get_huggingface_credentials() is not None,
-            "1password": self.is_1password_available(),
         }
 
     def print_credential_status(self) -> None:
@@ -388,14 +377,15 @@ class RealWorldCredentialManager:
         print(
             f"  Environment: {'GitHub Actions' if self.is_github_actions else 'Local Development'}"
         )
-        print(f"  1Password CLI: {'✅' if self.is_1password_available() else '❌'}")
+        print(f"  Source: ~/.clustrix/.env and the environment")
 
         status = self.get_credential_status()
         for service, available in status.items():
-            if service == "1password":
-                continue
             icon = "✅" if available else "❌"
             print(f"  {service.upper()}: {icon}")
+
+        if not all(status.values()):
+            print(f"  ℹ️  {CREDENTIAL_SETUP_HINT}")
 
     def setup_environment_variables(self) -> None:
         """Set up environment variables from available credentials."""
