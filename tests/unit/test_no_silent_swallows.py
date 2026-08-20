@@ -34,7 +34,11 @@ same reason.
 AST of the whole package -- subpackages included -- and refuses any handler
 that catches everything and then does nothing about it, unless the site is
 recorded: as a decision in ``JUSTIFIED_SWALLOWS`` or as a defect with an issue
-number in ``TRACKED_DEFECTS``. It is fast, it reaches handlers no test can
+number in ``TRACKED_DEFECTS``. It also refuses suppression that has no handler
+at all -- a replaced ``sys``/``threading`` exception hook, ``logging.disable``,
+a blanket ``warnings`` filter -- which is a swallow none of the lettered
+families below can describe, and which the guard could not see until
+2026-08-20. It is fast, it reaches handlers no test can
 drive, and it is worth having for that. It is also porous, and this module
 says how porous rather than implying otherwise: five successive AST guards in
 this repository have now been defeated 12, 30, 14-and-16, 22 and 8 ways
@@ -1157,7 +1161,7 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #
 #   * everything BELOW is a lint. It is fast, it runs over the whole package
 #     including handlers no test can reach, and it is worth having for
-#     exactly that. It is *not* evidence that a handler reports, and the 25
+#     exactly that. It is *not* evidence that a handler reports, and the 28
 #     entries in KNOWN_BLIND_SPOTS are the executable statement of how much
 #     it misses -- each asserted to be missed, so the list cannot quietly
 #     become optimistic.
@@ -1202,6 +1206,38 @@ EXCEPTION_ACCESSORS = frozenset(
 
 #: Keywords that attach the failure to a log record.
 EXCEPTION_KEYWORDS = frozenset({"exc_info", "stack_info"})
+
+#: Attributes whose assignment replaces the interpreter's last-resort report.
+#:
+#: ``sys.excepthook = lambda *a: None`` discards every exception nobody
+#: caught, in the whole process, for the rest of its life. So does
+#: ``threading.excepthook``, for every thread. Neither is an ``except``
+#: handler nor a ``contextlib.suppress`` call, so every family A..L below
+#: presupposes something that is simply not present here: this is a swallow
+#: with no handler at all, and the guard could not see one until 2026-08-20.
+#: Matched on the attribute name alone, exactly as
+#: :func:`_is_catch_all_expression` matches ``builtins.Exception`` -- which
+#: means ``import sys as s; s.excepthook = ...`` is caught too, and which is
+#: the same trade recorded as family K: erring toward reporting.
+SILENCING_HOOKS = frozenset({"excepthook", "unraisablehook"})
+
+#: Values that put a replaced hook back, so assigning them is not silencing.
+HOOK_RESTORERS = frozenset({"__excepthook__", "__unraisablehook__"})
+
+#: ``(module, function)`` calls that turn reporting off for the whole process.
+#:
+#: ``logging.disable(logging.CRITICAL)`` makes every ``logger.error`` in this
+#: package a no-op, which silences the very reports the behavioural tests
+#: above assert; ``warnings.simplefilter("ignore")`` and
+#: ``warnings.filterwarnings("ignore")`` do it for the four
+#: ``profile_manager`` sites that report through ``warnings.warn``.
+GLOBAL_SILENCERS = frozenset(
+    {
+        ("logging", "disable"),
+        ("warnings", "simplefilter"),
+        ("warnings", "filterwarnings"),
+    }
+)
 
 #: ``(module, qualified enclosing name)`` -> why this handler may discard the
 #: reason.
@@ -1249,7 +1285,7 @@ TRACKED_DEFECTS = {
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: They fall into eleven root causes, and the first one is the big one:
+#: They fall into twelve root causes, and the first one is the big one:
 #:
 #: A. **Any call at all counts as reporting.** Six spellings are recorded
 #:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
@@ -1327,7 +1363,27 @@ TRACKED_DEFECTS = {
 #:    ever catch it. Deciding what ``SOME`` is at that point is constant
 #:    propagation through arbitrary expressions, which is family A's
 #:    whole-program problem again. One spelling is recorded below.
-KNOWN_BLIND_SPOTS = 25
+#: L. **Global suppression reached by a route the names cannot spell.**
+#:    ``sys.excepthook = lambda *a: None`` is a swallow with no handler
+#:    anywhere in it -- every family above presupposes an ``except`` clause or
+#:    a ``contextlib.suppress`` call -- and until 2026-08-20 this lint
+#:    returned nothing at all for it. It is caught now, along with
+#:    ``threading.excepthook``, ``sys.unraisablehook``, ``logging.disable``
+#:    and the two ``warnings`` filters, under aliases and from-imports (see
+#:    ``SILENCING_HOOKS`` and ``GLOBAL_SILENCERS``). What is caught is the
+#:    *name*, and three spellings are recorded below that never write it.
+#:    ``setattr(sys, "excepthook", _quiet)`` hands the name over as a string,
+#:    so there is no attribute to match -- family A's whole-program problem
+#:    once more. ``logging.getLogger().disabled = True`` switches the root
+#:    logger off, and ``disabled`` cannot be added to ``SILENCING_HOOKS``:
+#:    ``clustrix/modern_notebook_widget.py`` assigns ``button.disabled`` six
+#:    times, and matching that name alone would flag every one of them --
+#:    family K's trade, made in the direction a lint may not err in. And
+#:    ``warnings.filters.insert(...)`` mutates the filter list without calling
+#:    any of the functions named above. Recorded rather than chased, on the
+#:    same grounds as J: teaching the check these three closes exactly these
+#:    three.
+KNOWN_BLIND_SPOTS = 28
 
 
 class Swallow(NamedTuple):
@@ -1629,6 +1685,91 @@ def _suppresses_everything(call, aliases, suppress_names):
     return any(_is_catch_all_expression(argument, aliases) for argument in arguments)
 
 
+def _silencer_aliases(tree):
+    """Names the process-wide silencers are reachable under in this module.
+
+    The same move :func:`_suppress_aliases` makes for ``contextlib.suppress``,
+    and for the same reason: ``import logging as lg`` or ``from warnings
+    import simplefilter as quiet`` is the identical call written differently,
+    and a check that reads only the canonical spelling is one import
+    statement away from being decorative.
+
+    Returns the receiver names each module may be spelled with, and the bare
+    names a silencer may have been imported under.
+    """
+    modules = {module for module, _ in GLOBAL_SILENCERS}
+    receivers = {module: {module} for module in modules}
+    bare = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name in modules:
+                    receivers[alias.name].add(alias.asname or alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module in modules:
+            for alias in node.names:
+                if (node.module, alias.name) in GLOBAL_SILENCERS:
+                    bare[alias.asname or alias.name] = (node.module, alias.name)
+    return receivers, bare
+
+
+def _turns_reporting_back_on(target, call):
+    """The re-enabling spellings, which must not be flagged.
+
+    ``logging.disable(logging.NOTSET)`` is how a process undoes a previous
+    ``logging.disable``, and ``warnings.simplefilter("error")`` is the
+    opposite of silencing. Flagging those would be wrong rather than merely
+    noisy. An argument this cannot read is *not* treated as a re-enable: the
+    only direction a lint may err in is toward reporting.
+    """
+    argument = call.args[0] if call.args else None
+    if target == ("logging", "disable"):
+        if isinstance(argument, ast.Attribute):
+            return argument.attr == "NOTSET"
+        if isinstance(argument, ast.Constant):
+            return argument.value == 0
+        return False  # no argument at all defaults to CRITICAL
+    if isinstance(argument, ast.Constant):
+        return argument.value != "ignore"
+    return False
+
+
+def _silences_the_process(call, receivers, bare):
+    """``logging.disable(...)`` and the ``warnings`` filters, however spelled."""
+    function = call.func
+    if isinstance(function, ast.Attribute):
+        holder = function.value
+        holder_name = (
+            holder.id if isinstance(holder, ast.Name) else getattr(holder, "attr", None)
+        )
+        target = next(
+            (
+                (module, function.attr)
+                for module, names in receivers.items()
+                if holder_name in names and (module, function.attr) in GLOBAL_SILENCERS
+            ),
+            None,
+        )
+    elif isinstance(function, ast.Name):
+        target = bare.get(function.id)
+    else:
+        target = None
+    if target is None:
+        return False
+    return not _turns_reporting_back_on(target, call)
+
+
+def _assigns_a_silencing_hook(node):
+    """``sys.excepthook = _quiet`` and every object that spelling reaches."""
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    if not any(
+        isinstance(target, ast.Attribute) and target.attr in SILENCING_HOOKS
+        for target in targets
+    ):
+        return False
+    value = node.value
+    return not (isinstance(value, ast.Attribute) and value.attr in HOOK_RESTORERS)
+
+
 def find_silent_swallows(source, module):
     """Every place in ``source`` where a failure disappears without a word.
 
@@ -1639,6 +1780,7 @@ def find_silent_swallows(source, module):
     tree = ast.parse(source, filename=module)
     aliases = _catch_all_aliases(tree)
     suppress_names = _suppress_aliases(tree)
+    receivers, bare_silencers = _silencer_aliases(tree)
     qualnames = _qualified_names(tree)
     found = []
 
@@ -1679,6 +1821,29 @@ def find_silent_swallows(source, module):
                     _enclosing_qualname(qualnames, node),
                     node.lineno,
                     "contextlib.suppress over a catch-all",
+                )
+            )
+        elif isinstance(node, ast.Call) and _silences_the_process(
+            node, receivers, bare_silencers
+        ):
+            found.append(
+                Swallow(
+                    module,
+                    _enclosing_qualname(qualnames, node),
+                    node.lineno,
+                    "a call that turns reporting off for the whole process",
+                )
+            )
+        elif isinstance(
+            node, (ast.Assign, ast.AnnAssign)
+        ) and _assigns_a_silencing_hook(node):
+            found.append(
+                Swallow(
+                    module,
+                    _enclosing_qualname(qualnames, node),
+                    node.lineno,
+                    "an assignment to a process-wide exception hook, which "
+                    "discards every failure nobody caught",
                 )
             )
 
@@ -2107,6 +2272,75 @@ BYPASSES = {
             with contextlib.suppress(builtins.Exception):
                 g()
     """,
+    # Global suppression: a swallow that belongs to no family below, because
+    # every one of them presupposes an `except` handler or a `suppress` call
+    # and none of these has either. `sys.excepthook = lambda *a: None`
+    # discarded every uncaught exception in the process and this lint returned
+    # nothing at all; `excepthook` appeared nowhere in it.
+    "sys.excepthook replaced with a no-op": """
+        import sys
+
+        sys.excepthook = lambda *args: None
+    """,
+    "threading.excepthook replaced with a no-op": """
+        import threading
+
+        def _quiet(args):
+            pass
+
+        threading.excepthook = _quiet
+    """,
+    "an exception hook silenced under an import alias": """
+        import sys as _s
+
+        _s.excepthook = lambda *args: None
+    """,
+    "sys.unraisablehook replaced with a no-op": """
+        import sys
+
+        sys.unraisablehook = lambda unraisable: None
+    """,
+    "the hook assigned inside a function rather than at module level": """
+        import sys
+
+        def quieten():
+            sys.excepthook = lambda *args: None
+    """,
+    "logging.disable over everything": """
+        import logging
+
+        logging.disable(logging.CRITICAL)
+    """,
+    "logging.disable with no argument at all": """
+        import logging
+
+        logging.disable()
+    """,
+    "logging.disable reached through a from-import": """
+        from logging import disable
+
+        disable(50)
+    """,
+    "logging.disable reached through a module alias": """
+        import logging as _lg
+
+        _lg.disable(_lg.CRITICAL)
+    """,
+    "warnings.simplefilter over everything": """
+        import warnings
+
+        warnings.simplefilter("ignore")
+    """,
+    "warnings.filterwarnings over everything": """
+        import warnings
+
+        warnings.filterwarnings("ignore")
+    """,
+    "a warnings filter whose action cannot be read": """
+        import warnings
+
+        warnings.simplefilter(ACTION)
+    """,
 }
 
 if hasattr(ast, "TryStar"):  # PEP 654; the syntax does not parse before 3.11
@@ -2172,8 +2406,9 @@ def test_the_renamed_nested_function_is_not_licensed_by_the_allowlist():
     assert found[0].key not in JUSTIFIED_SWALLOWS
 
 
-#: Bodies that genuinely do report the failure. A guard that flags these is
-#: a guard people will delete, so the false-positive side is tested too.
+#: Code that genuinely does report the failure, or that turns reporting back
+#: on. A guard that flags these is a guard people will delete, so the
+#: false-positive side is tested too.
 ACCEPTED = {
     "re-raise": """
         def f():
@@ -2249,6 +2484,35 @@ ACCEPTED = {
                 g()
             except KeyError:
                 pass
+    """,
+    # The re-enabling half of the global-suppression check above. Flagging
+    # these would be wrong rather than merely noisy: each one turns reporting
+    # back *on*, and a lint that cannot tell the two apart is a lint people
+    # switch off.
+    "logging.disable(logging.NOTSET) turns reporting back on": """
+        import logging
+
+        logging.disable(logging.NOTSET)
+    """,
+    "logging.disable(0) turns reporting back on": """
+        import logging
+
+        logging.disable(0)
+    """,
+    "a warnings filter that makes warnings louder": """
+        import warnings
+
+        warnings.simplefilter("error")
+    """,
+    "putting the interpreter's own excepthook back": """
+        import sys
+
+        sys.excepthook = sys.__excepthook__
+    """,
+    "an unrelated function that happens to be called disable": """
+        import mymodule
+
+        mymodule.disable(everything)
     """,
 }
 
@@ -2560,6 +2824,31 @@ BLIND_SPOTS = {
                 value = SOME.format_exc
     """,
     ),
+    # L. global suppression reached by a route the names cannot spell
+    "an exception hook replaced through setattr": (
+        "L",
+        """
+        import sys
+
+        setattr(sys, "excepthook", lambda *args: None)
+    """,
+    ),
+    "the root logger switched off wholesale": (
+        "L",
+        """
+        import logging
+
+        logging.getLogger().disabled = True
+    """,
+    ),
+    "the warnings filter list mutated in place": (
+        "L",
+        """
+        import warnings
+
+        warnings.filters.insert(0, ("ignore", None, Warning, "", 0))
+    """,
+    ),
 }
 
 
@@ -2596,12 +2885,38 @@ _NUMBER_WORDS = {
     "nine": 9,
     "ten": 10,
     "eleven": 11,
+    "twelve": 12,
 }
+
+
+def _module_source():
+    """This module's own text, which is the thing under test below."""
+    return pathlib.Path(__file__).read_text(encoding="utf-8")
+
+
+def _flattened_source():
+    """The same text with newlines and comment markers blanked out.
+
+    Character for character the same length as the source, so an offset into
+    this is an offset into the file and a match can be reported by line
+    number. Flattening is what makes a count sentence findable *wherever* it
+    is written: the prose wraps across ``#:`` lines and docstrings wrap across
+    plain ones, so "Six spellings are recorded" followed by "below" on the
+    next line is one sentence, and a scan that reads a line at a time cannot
+    see it. That is not a hypothetical -- four of the twelve families state
+    their count across a line break.
+
+    ``#:`` is blanked as a unit, not one character at a time: leaving the
+    colon behind splits the sentence just as effectively as the newline did,
+    and an earlier draft of this function did exactly that -- it found 8 of
+    the 12 counts, and the four it missed were the wrapped ones it exists for.
+    """
+    return re.sub(r"#:|[#\n]", lambda hit: " " * len(hit.group(0)), _module_source())
 
 
 def _prose_count(pattern):
     """The number the module's own text states at ``pattern``."""
-    source = pathlib.Path(__file__).read_text(encoding="utf-8")
+    source = _module_source()
     matches = set(re.findall(pattern, source))
     assert matches, f"the prose no longer states a count matching {pattern!r}"
     assert len(matches) == 1, f"the prose states {matches} for {pattern!r}"
@@ -2617,35 +2932,57 @@ def _family_counts():
     return counts
 
 
+def _family_paragraph_spans():
+    """Where each family letter's write-up starts and stops in this file.
+
+    Offsets rather than text, because two different questions are asked of
+    them: what a family says about itself, and whether anything *outside*
+    every family says the same kind of thing. The second question is the one
+    the previous round got wrong.
+    """
+    source = _module_source()
+    marker = re.compile(r"^#: ([A-Z])\. \*\*", re.MULTILINE)
+    hits = list(marker.finditer(source))
+    assert hits, "the lettered prose above KNOWN_BLIND_SPOTS is gone"
+    stop_at = source.index("KNOWN_BLIND_SPOTS = ", hits[-1].start())
+    spans = {}
+    for index, hit in enumerate(hits):
+        stop = hits[index + 1].start() if index + 1 < len(hits) else stop_at
+        spans[hit.group(1)] = (hit.start(), stop)
+    return spans
+
+
 def _family_paragraphs():
     """The prose paragraph belonging to each family letter.
 
     Sliced out of this module's own text, so a count stated inside a family's
     write-up is attributed to that family and to no other. Comparing a
-    number to the list it claims to describe is the whole point: the previous
-    version of the test below checked only the 25-entry total, so family A
+    number to the list it claims to describe is the whole point: the first
+    version of the test below checked only the entry total, so family A
     could say "Seven" while holding six, and a family with no entries at all
     could claim nine.
     """
-    source = pathlib.Path(__file__).read_text(encoding="utf-8")
-    marker = re.compile(r"^#: ([A-Z])\. \*\*", re.MULTILINE)
-    hits = list(marker.finditer(source))
-    assert hits, "the lettered prose above KNOWN_BLIND_SPOTS is gone"
-    stop_at = source.index("KNOWN_BLIND_SPOTS = ", hits[-1].start())
+    source = _module_source()
     paragraphs = {}
-    for index, hit in enumerate(hits):
-        stop = hits[index + 1].start() if index + 1 < len(hits) else stop_at
-        text = source[hit.start() : stop]
+    for family, (start, stop) in _family_paragraph_spans().items():
+        text = source[start:stop]
         # The comment prefixes and the line wrapping are formatting, not
-        # content: "Six spellings are recorded\n#:    below" is one sentence.
+        # content: "Six spellings are recorded" then "#:    below" on the next
+        # line is one sentence.
         unwrapped = re.sub(r"^#:\s*", " ", text, flags=re.MULTILINE)
-        paragraphs[hit.group(1)] = " ".join(unwrapped.split())
+        paragraphs[family] = " ".join(unwrapped.split())
     return paragraphs
 
 
 #: How a family states how many spellings it has. Every family must state it
-#: exactly once, so a fabricated count cannot be added beside a true one.
-_SPELLING_COUNT = re.compile(r"(\w+) spellings? (?:are|is) recorded below")
+#: exactly once, so a fabricated count cannot be added beside a true one --
+#: and, by ``test_no_spelling_count_is_stated_outside_a_family_paragraph``,
+#: nowhere else in this file may state one at all.
+#:
+#: ``\s+`` rather than a literal space because this is run against
+#: :func:`_flattened_source`, where a line break inside the sentence has
+#: become a run of spaces.
+_SPELLING_COUNT = re.compile(r"(\w+)\s+spellings?\s+(?:are|is)\s+recorded\s+below")
 
 
 @pytest.mark.parametrize(
@@ -2655,11 +2992,10 @@ def test_every_family_states_how_many_spellings_it_has(family):
     """The per-family arithmetic, derived rather than asserted alongside.
 
     Two mutations proved this was needed and neither was exotic. Changing
-    family A's "Six spellings" to "Seven" survived the whole suite. Adding a
-    wholly fabricated "Nine spellings are recorded below" to family E -- which
-    has one -- survived it too. Only the 25-entry total was ever checked, and
-    a total cannot see a number move between families or appear out of
-    nothing.
+    family A's "Six spellings" to "Seven" survived the whole suite. Adding to
+    family E -- which has one -- a wholly fabricated sentence claiming nine
+    survived it too. Only the entry total was ever checked, and a total cannot
+    see a number move between families or appear out of nothing.
 
     So the family letter now lives on the entry, in ``BLIND_SPOTS``, and the
     number in the prose is compared against a count of the entries carrying
@@ -2675,8 +3011,63 @@ def test_every_family_states_how_many_spellings_it_has(family):
     token = stated[0]
     number = int(token) if token.isdigit() else _NUMBER_WORDS[token.lower()]
     assert number == counts[family], (
-        f"family {family} says {token} spellings are recorded below and "
-        f"{counts[family]} entries in BLIND_SPOTS carry that letter"
+        f"family {family} claims {token}, and {counts[family]} entries in "
+        "BLIND_SPOTS carry that letter"
+    )
+
+
+def test_no_spelling_count_is_stated_outside_a_family_paragraph():
+    """A count the family paragraphs do not contain is a count nobody checks.
+
+    This is the third round on the same claim, and the previous two fixes each
+    moved the hole rather than closing it. The second round made
+    ``test_every_family_states_how_many_spellings_it_has`` read the prose --
+    but it reads only what :func:`_family_paragraph_spans` hands it, which
+    starts at the first ``#: A. **`` marker. So a reviewer inserted
+
+        #: <N> spellings are recorded below for the resolver family.
+
+    one line *above* that marker -- inside the lettered block the test is
+    named for -- and the whole suite came back byte-identical to baseline.
+    (The number is elided as ``<N>`` above only because this test now forbids
+    writing that sentence anywhere but inside a family's own paragraph, this
+    docstring included -- which is the fix demonstrating itself.)
+    The same held for a count invented in the narrative two hundred lines
+    higher up. Position, not content, was doing the exempting.
+
+    So position is taken out of it here: every sentence anywhere in this file
+    that states a spelling count must lie inside some family's paragraph, and
+    :func:`_family_paragraph_spans` is the same function the per-family test
+    uses, so the two cannot disagree about where a paragraph ends. Together
+    with that test's "exactly one per family", the arithmetic is total --
+    there are as many such sentences in the module as there are families, each
+    one inside its own family, each one equal to the entries carrying that
+    letter. Neither test can be satisfied by putting a number somewhere the
+    other does not look.
+
+    Stated limitation, because this module does not get to have an unstated
+    one: what is checked is the sentence *form* in ``_SPELLING_COUNT``. A
+    count phrased some other way -- "family E has nine of them" -- is prose
+    nothing reads, exactly as a family whose description is wrong rather than
+    whose arithmetic is wrong is caught only indirectly. Recognising more
+    phrasings would be enumerating spellings, which is the failure this whole
+    module is a monument to.
+    """
+    source = _module_source()
+    flat = _flattened_source()
+    assert len(flat) == len(source), "flattening moved the offsets"
+    spans = _family_paragraph_spans().values()
+
+    strays = []
+    for match in _SPELLING_COUNT.finditer(flat):
+        if any(start <= match.start() < stop for start, stop in spans):
+            continue
+        line = source.count("\n", 0, match.start()) + 1
+        strays.append(f"line {line}: {' '.join(match.group(0).split())}")
+
+    assert not strays, (
+        "these state a spelling count outside every family paragraph, where "
+        "no test compares it with the entries in BLIND_SPOTS:\n  " + "\n  ".join(strays)
     )
 
 

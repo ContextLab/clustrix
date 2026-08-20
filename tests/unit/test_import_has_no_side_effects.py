@@ -957,13 +957,21 @@ def test_a_load_config_queues_behind_a_search_instead_of_racing_it(
 ):
     """``load_config``'s own lock, pinned deterministically.
 
-    The docstring on that lock calls it load-bearing, and the race test below
-    agrees -- but only sometimes: dropping ``load_config``'s
-    ``with _DEFAULT_CONFIG_LOCK:`` altogether failed that test in 2 runs out
-    of 5 and passed in the other 3, because it waits for the interleaving
-    rather than causing it. A guard that is a coin flip is not a guard.
+    The docstring on that lock calls it load-bearing, and a timing-based
+    version of this test used to agree -- but only sometimes. It widened the
+    window with a half-megabyte configuration file, slept, and hoped; dropping
+    ``load_config``'s ``with _DEFAULT_CONFIG_LOCK:`` altogether left it
+    *passing* in 3 runs out of 8 (measured 2026-08-20, eight consecutive
+    single-test runs against a tree with that line removed), while this test
+    failed 8 out of 8 against the same tree. A guard that lets the defect it
+    exists for walk past it three times in eight is not a guard: it teaches
+    whoever broke the lock to re-run until green, which is the failure mode
+    this branch documents everywhere else. It has been deleted rather than
+    left standing, because it asserted nothing this test does not -- the same
+    final `cluster_host` -- and this test also pins the mechanism, that the
+    two calls are serialised at all.
 
-    So the interleaving is scheduled here. A trace function on the searching
+    So the interleaving is scheduled rather than awaited. A trace function on the searching
     thread stops it at the moment it enters the file load -- holding the lock
     -- and an explicit ``load_config`` is started on another thread while it
     is parked there. Two things then have to be true, and each is checked:
@@ -1039,73 +1047,4 @@ def test_a_load_config_queues_behind_a_search_instead_of_racing_it(
     assert get_config().cluster_host == "explicit.example", (
         "an explicit load_config() was accepted and then thrown away by the "
         "search it interrupted"
-    )
-
-
-#: Trials for the race below. A race that reproduces one time in fifty is
-#: still a race, so one pass proves nothing; this is sized so the whole test
-#: stays inside a few seconds while giving the interleaving many chances.
-_RACE_TRIALS = 15
-
-
-def test_an_explicit_load_supersedes_a_search_that_is_already_running(
-    unloaded_config, tmp_path
-):
-    """The single-threaded version of this test cannot see the real defect.
-
-    Moving the search from import time to first use moved it onto whichever
-    thread touches the configuration first, and that thread rebinds ``_config``
-    when it finishes. So an explicit ``load_config`` no longer merely has to
-    beat a search that has *not started*; it has to survive one that is
-    *already in flight*. Before ``load_config`` took the lock, it did not: the
-    caller was told the file had loaded, ``_config`` briefly held it, and then
-    the search landed on top and the process ran against ``~/.clustrix``
-    instead. An accepted instruction, discarded, reported as success -- which
-    is the entire subject of this issue, reintroduced by its own fix.
-
-    Nothing is patched. The window is widened with a real half-megabyte
-    configuration file, whose YAML parse genuinely takes a couple of hundred
-    milliseconds, so the main thread's ``load_config`` reliably lands while the
-    search is still inside it. The padding is comments, so the file is
-    otherwise an ordinary valid config.
-    """
-    padding = "\n".join(f"# pad {index} {'x' * 80}" for index in range(4000))
-    (unloaded_config / "config.yml").write_text(
-        "cluster_type: ssh\ncluster_host: fromsearch.example\n" + padding + "\n"
-    )
-    explicit = tmp_path / "explicit.yml"
-    explicit.write_text("cluster_type: ssh\ncluster_host: explicit.example\n")
-
-    discarded = []
-    errors: list = []
-
-    def searcher():
-        try:
-            get_config()
-        except BaseException as exc:  # pragma: no cover - reported below
-            errors.append(exc)
-
-    for trial in range(_RACE_TRIALS):
-        config_module._config = ClusterConfig()
-        config_module._default_config_loaded = False
-
-        thread = threading.Thread(target=searcher)
-        thread.start()
-        # The search is now inside the parse of the large file.
-        time.sleep(0.05)
-        config_module.load_config(str(explicit))
-        assert (
-            get_config().cluster_host == "explicit.example"
-        ), f"load_config did not take effect at all (trial {trial})"
-
-        thread.join(timeout=30)
-        assert not thread.is_alive(), f"the search never finished (trial {trial})"
-        if get_config().cluster_host != "explicit.example":
-            discarded.append((trial, get_config().cluster_host))
-
-    assert not errors, errors
-    assert not discarded, (
-        "an explicit load_config() was accepted and then thrown away by the "
-        f"lazy search finishing after it, in {len(discarded)} of "
-        f"{_RACE_TRIALS} trials: {discarded}"
     )
