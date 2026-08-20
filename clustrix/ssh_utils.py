@@ -19,6 +19,7 @@ from clustrix.ssh_security import (
     configure_host_key_policy,
     user_known_hosts_path as _user_known_hosts_path,
 )
+from clustrix.credential_manager import write_text_securely
 
 logger = logging.getLogger(__name__)
 
@@ -283,7 +284,13 @@ def generate_ssh_key(
         subprocess.run(cmd, capture_output=True, text=True, check=True)
         logger.info(f"Generated SSH key pair: {key_path}")
 
-        # Set proper permissions
+        # Belt and braces, not a fix for a window: ssh-keygen creates
+        # the private key itself with O_CREAT|O_EXCL at 0600 and the public
+        # key at 0644, independently of umask (verified against OpenSSH
+        # under umask 000 by tests/unit/test_credential_file_permissions.py
+        # ::test_generated_private_key_is_never_world_readable). The key
+        # therefore never exists wider than 0600, and nothing between
+        # ssh-keygen and here widens it.
         os.chmod(key_path, 0o600)  # Private key: read/write for owner only
         os.chmod(f"{key_path}.pub", 0o644)  # Public key: readable by all
 
@@ -316,8 +323,11 @@ def add_host_key(hostname: str, port: int = 22) -> bool:
             known_hosts_path = _user_known_hosts_path()
             known_hosts_path.parent.mkdir(mode=0o700, exist_ok=True)
 
-            with open(known_hosts_path, "a") as f:
-                f.write(result.stdout)
+            # Appended through the one sanctioned writer: if the file
+            # does not exist yet it is created 0600 rather than at the
+            # umask default. known_hosts holds no secret, so an existing
+            # file keeps whatever mode and symlink the user gave it.
+            write_text_securely(known_hosts_path, result.stdout, append=True)
 
             logger.info(f"Added host key for {hostname} to known_hosts")
             return True
@@ -527,12 +537,17 @@ Host {alias}
             logger.info(f"SSH config entry for {alias} already exists, skipping update")
             return
 
-    # Append new entry
-    with open(ssh_config_path, "a") as f:
-        f.write(config_entry)
-
-    # Set proper permissions
-    os.chmod(ssh_config_path, 0o600)
+    # Append new entry.
+    #
+    # This used to be open(..., "a") followed by os.chmod(..., 0o600): a
+    # config this function *created* existed at the umask default (0644)
+    # until the chmod landed, and the chmod itself silently rewrote the
+    # mode of a file the user owns -- following a symlink into a dotfiles
+    # repository and chmodding the target there. write_text_securely()
+    # creates the file 0600 from the instant it exists and leaves an
+    # existing one exactly as the user set it up. ~/.ssh/config holds no
+    # secret; ssh only requires that it not be group- or world-writable.
+    write_text_securely(ssh_config_path, config_entry, append=True)
     logger.info(f"Added SSH config entry for {alias}")
 
 

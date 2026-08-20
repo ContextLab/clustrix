@@ -67,6 +67,10 @@ docs/build/
 .env.*
 # ...except a checked-in, secret-free example, if one is ever added.
 !.env.example
+# direnv's file. `.env.*` above does not match it -- no dot after "env" --
+# and it routinely holds exported credentials.
+.envrc
+.envrc.*
 **/validation-secrets.json
 **/.op/
 **/op-session-*

@@ -1,45 +1,73 @@
 #!/usr/bin/env python3
-"""Shipped code must not know it is being tested.
+"""Shipped code must not consult test machinery.
 
 Regression guard for issue #116.
 
-``grep -rn "unittest.mock\\|MagicMock\\|isinstance(.*Mock" clustrix/`` is
-empty today, and that emptiness *is* the resolution of the issue. Nothing
-enforced it, though: the next person to reach for a test-only branch in
-production code would have found no obstacle, and the property would have
-been quietly lost between one release and the next.
+THE RULE THIS TEST ENFORCES -- this docstring is the specification, and
+nothing outside it is claimed:
 
-The rule, from ``CLAUDE.md``: "Production code must never know it is being
-tested. No ``isinstance(x, Mock)``, no test-only branches, no importable
-module of fake widgets." A mock reaching shipped code is worse than a bad
-test -- it means real users execute a branch that exists only to make a
-test pass, and the tested path is not the shipped path.
+1. ``clustrix/`` must not import a mocking library or a test framework
+   (``mock``, ``unittest.mock``, ``pytest``, ``_pytest``), by any import
+   statement, however aliased.
+2. It must not reach the same modules through ``__import__`` or
+   ``importlib.import_module`` when the module name can be worked out by
+   reading the source -- a string literal, an implicit or ``+``
+   concatenation of literals, or a variable assigned one of those.
+3. It must not ask the interpreter whether a test framework is loaded.
+   ``sys.modules`` may not be subscripted at all, and a membership test or
+   ``.get()`` against it whose key is knowable must not name a test
+   framework or a mocking library.
+4. It must not read ``sys.argv``. A library does not inspect the process
+   command line; the CLI receives its arguments from click.
+5. It must read only the environment variables in ``ALLOWED_ENV`` below.
+   That list is a positive allowlist: adding to it is a deliberate,
+   reviewable act, which is exactly what ``CLUSTRIX_TEST_MODE`` or
+   ``PYTEST_CURRENT_TEST`` would need.
 
-This is deliberately shaped like ``tests/unit/test_no_autoadd_policy.py``,
-including its lesson: a substring search checks a *spelling*, and spellings
-are infinite. ``clustrix/notebook_magic.py`` has the word "mocks" in a
-comment and ``clustrix/file_packaging.py`` lists ``"unittest"`` in a table
-of standard-library module names -- a grep-based guard flags both, gets an
-allowlist entry for each, and stops guarding anything. So the scan parses
-each file and looks at what the code *does*:
+WHAT IT DELIBERATELY DOES NOT CLAIM. Every rule above stops at what the
+parser can work out from the source, and three of them have doors that
+must stay open because real code in this package needs them:
 
-* importing ``mock`` or ``unittest.mock``, however it is spelled -- plain
-  import, aliased import, ``from`` import, or ``__import__``/
-  ``importlib.import_module`` with the name as a string;
-* naming any of the mock classes or factories, whether reached as
-  ``MagicMock``, ``mock.MagicMock`` or ``unittest.mock.MagicMock`` -- which
-  is what ``isinstance(x, Mock)`` reduces to;
-* importing ``pytest``, or mentioning ``pytest``/``PYTEST_CURRENT_TEST`` in
-  a string, which is how code sniffs at runtime whether a test is driving
-  it.
+* ``__import__(module_name)`` with a name computed at runtime is
+  *permitted*: ``dependency_analysis.py``, ``file_packaging.py`` and
+  ``utils.py`` import the user's own modules by name to replicate their
+  environment. Flagging every dynamic import, as one review suggested,
+  false-positives on all three.
+* ``sys.modules.get(module_name)`` with a computed name is likewise
+  permitted -- ``utils.py`` and ``file_packaging.py`` do it four times for
+  the same reason. Only *subscripting* is banned, which nothing does.
+* ``os.environ.get(self.config.password_env_var)`` reads a variable the
+  user names in their config, so the allowlist cannot see it. That is the
+  documented credential channel (see ``CLAUDE.md``), not a leak in the
+  rule.
 
-``test_guard_catches_every_known_bypass`` plants each of those on disk and
-requires the guard to report it, so the failure path is exercised rather
-than assumed.
+Anything that hides a name from the parser -- ``"".join([...])``,
+``chr(112) + "ytest"``, a name arriving as a function argument -- is
+outside all five rules. No AST guard can close that, and pretending
+otherwise is worse than saying so.
+
+WHY IT IS NOT A SEARCH FOR THE WORD "MOCK". The previous version of this
+file flagged any of ``Mock``/``MagicMock``/``create_autospec`` appearing
+as an identifier, and any string equal to ``"pytest"``. Both are spelling
+checks, and spellings are infinite in one direction and shared with
+innocent code in the other: ``DEV_EXTRAS = ["pytest", ...]``, a pip-freeze
+filter ``SKIP = {"pytest", "_pytest"}`` in environment replication, and
+``raise RuntimeError("pytest")`` are all legitimate and all would have
+been flagged. The first allowlist entry added to quiet one of those kills
+the guard. Naming the mock classes is also unnecessary: ``import
+unittest`` alone does not expose ``unittest.mock`` (verified -- it raises
+``AttributeError``), so a mock object cannot be obtained without an import
+that rule 1 or rule 2 already sees.
+
+``test_guard_catches_every_known_bypass`` plants each bypass into a copy
+of the *real* package on disk and requires the guard to report it, so the
+failure path is exercised against real modules rather than against a list
+this file also reads.
 """
 
 import ast
 import pathlib
+import shutil
 
 import pytest
 
@@ -49,39 +77,44 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 #: this guard is about what users install.
 SHIPPED_PACKAGE = "clustrix"
 
-#: Modules that exist only to fake things out. Reaching any of them from
-#: shipped code is the violation, regardless of how the import is written.
-MOCK_MODULES = frozenset({"mock", "unittest.mock"})
+#: Modules that exist only to fake things out, and the test frameworks
+#: whose presence shipped code must never react to.
+FORBIDDEN_MODULES = frozenset({"mock", "unittest.mock", "pytest", "_pytest"})
 
-#: Names from those modules. ``isinstance(x, Mock)`` and
-#: ``MagicMock(spec=...)`` both reduce to one of these, and so does the
-#: dotted form, because only the last component is compared.
-MOCK_NAMES = frozenset(
+#: Functions that turn a module name in a string into a module object.
+DYNAMIC_IMPORTERS = frozenset({"__import__", "import_module"})
+
+#: Every environment variable ``clustrix/`` is allowed to read by name.
+#: Two of these are the config channels documented in ``CLAUDE.md``
+#: (``CLUSTRIX_CONFIG_DIR`` and whatever ``password_env_var`` points at);
+#: the rest are credentials and cluster coordinates. A new entry here is a
+#: deliberate decision, which is the point: ``CLUSTRIX_TEST_MODE`` cannot
+#: arrive by accident.
+ALLOWED_ENV = frozenset(
     {
-        "Mock",
-        "MagicMock",
-        "NonCallableMock",
-        "NonCallableMagicMock",
-        "AsyncMock",
-        "PropertyMock",
-        "create_autospec",
-        "mock_open",
+        "CLUSTER_PASSWORD",
+        "CLUSTRIX_AUTO_WIDGET",
+        "CLUSTRIX_CONFIG_DIR",
+        "CLUSTRIX_DEFAULT_PASSWORD",
+        "CLUSTRIX_VALIDATION_SLURM_HOST",
+        "CLUSTRIX_VALIDATION_SLURM_NAME",
+        "CLUSTRIX_VALIDATION_SSH_HOST",
+        "CLUSTRIX_VALIDATION_SSH_NAME",
+        "EDITOR",
+        "GITHUB_ACTIONS",
+        "HF_HOME",
+        "HF_TOKEN",
+        "HF_USERNAME",
+        "HUGGINGFACE_TOKEN",
+        "HUGGINGFACE_USERNAME",
+        "SSH_HOST",
+        "SSH_PASSWORD",
+        "SSH_PORT",
+        "SSH_PRIVATE_KEY_PATH",
+        "SSH_USERNAME",
+        "USER",
     }
 )
-
-#: Test frameworks. Shipped code importing one means a code path exists for
-#: the benefit of the suite rather than the user.
-TEST_FRAMEWORK_MODULES = frozenset({"pytest", "_pytest"})
-
-#: Strings that only appear in code sniffing for a test run. ``clustrix/``
-#: contains none of them today, so this needs no allowlist -- unlike the
-#: word "unittest", which is a legitimate standard-library module name and
-#: is therefore deliberately *not* listed here.
-TEST_SNIFF_STRINGS = frozenset({"pytest", "_pytest", "PYTEST_CURRENT_TEST"})
-
-#: Functions that turn a module name in a string into a module object --
-#: the way an import guard gets sidestepped.
-DYNAMIC_IMPORTERS = frozenset({"__import__", "import_module"})
 
 _SKIP_DIR_PARTS = frozenset({".git", "__pycache__", ".mypy_cache", ".pytest_cache"})
 
@@ -93,71 +126,217 @@ def _python_files(root):
         yield path
 
 
-def _last_component(node):
-    """The final component of a possibly-dotted name, or ``None``.
+def _fold(node, names):
+    """The string ``node`` evaluates to, or ``None`` if it is not knowable.
 
-    ``unittest.mock.MagicMock``, ``mock.MagicMock`` and a bare ``MagicMock``
-    all reduce to ``"MagicMock"``, so the guard cannot be sidestepped by
-    changing how the module is imported.
+    Constant folding is what makes the rules resistant to spelling games
+    without being a substring search: ``"unittest" ".mock"``,
+    ``"py" + "test"`` and ``_M = "unittest.mock"`` all reduce to the name
+    they denote. ``names`` maps identifiers to the strings assigned to them
+    anywhere in the file, which is deliberately scope-blind: over-reading
+    an assignment can only make the guard notice more, never less.
     """
-    if isinstance(node, ast.Attribute):
-        return node.attr
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _fold(node.left, names)
+        right = _fold(node.right, names)
+        return None if left is None or right is None else left + right
     if isinstance(node, ast.Name):
-        return node.id
+        bound = names.get(node.id)
+        return bound[0] if bound and len(bound) == 1 else None
     return None
 
 
-def _module_root(dotted):
-    """``"unittest.mock.patch"`` -> checked as both itself and ``unittest``."""
-    return dotted.split(".")[0]
+def _fold_all(node, names):
+    """Every string ``node`` might be, for a name bound to several."""
+    if isinstance(node, ast.Name) and node.id in names:
+        return names[node.id]
+    folded = _fold(node, names)
+    return [folded] if folded is not None else []
 
 
-def _violations_in(rel, text):
+def _string_bindings(tree):
+    """``{identifier: [strings assigned to it]}`` for the whole file.
+
+    Handles both ``NAME = "literal"`` and the list-of-names-then-loop shape
+    ``env_vars = ["A", "B"]`` / ``for var in env_vars: os.getenv(var)``,
+    which is how ``auth_fallbacks.py`` really reads its variables.
+    """
+    names: dict = {}
+
+    def record(target, value):
+        if not isinstance(target, ast.Name):
+            return
+        if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            found = [_fold(elt, {}) for elt in value.elts]
+        else:
+            found = [_fold(value, {})]
+        kept = [f for f in found if f is not None]
+        if kept:
+            names.setdefault(target.id, []).extend(kept)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                record(target, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            record(node.target, node.value)
+        elif isinstance(node, ast.For):
+            # ``for var in env_vars:`` -- var takes each of env_vars' values.
+            if isinstance(node.target, ast.Name):
+                for value in _fold_all(node.iter, names):
+                    names.setdefault(node.target.id, []).append(value)
+                if isinstance(node.iter, (ast.List, ast.Tuple, ast.Set)):
+                    record(node.target, node.iter)
+    return names
+
+
+def _is_sys_modules(node):
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "modules"
+        and (isinstance(node.value, ast.Name) and node.value.id == "sys")
+    )
+
+
+def _is_sys_argv(node):
+    return (
+        isinstance(node, ast.Attribute)
+        and node.attr == "argv"
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "sys"
+    )
+
+
+def _is_environ(node):
+    """``os.environ`` however it was imported."""
+    if isinstance(node, ast.Attribute):
+        return node.attr == "environ"
+    return isinstance(node, ast.Name) and node.id == "environ"
+
+
+def _env_read_argument(call):
+    """The node naming the environment variable ``call`` reads, if any.
+
+    Covers ``os.getenv(...)``, a bare ``getenv(...)`` imported from ``os``,
+    and ``.get``/``.setdefault`` on ``os.environ`` or a bare ``environ``.
+    """
+    func = call.func
+    if not call.args:
+        return None
+    if isinstance(func, ast.Name) and func.id == "getenv":
+        return call.args[0]
+    if not isinstance(func, ast.Attribute):
+        return None
+    if func.attr == "getenv":
+        return call.args[0]
+    if func.attr in {"get", "setdefault"} and _is_environ(func.value):
+        return call.args[0]
+    return None
+
+
+def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
     hits = []
     try:
         tree = ast.parse(text, filename=rel)
     except SyntaxError as exc:  # pragma: no cover - a broken file is a bug
         return [f"{rel}:{exc.lineno}: could not be parsed: {exc.msg}"]
 
+    names = _string_bindings(tree)
+
+    def forbidden(dotted):
+        return dotted in FORBIDDEN_MODULES or dotted.split(".")[0] in {
+            m for m in FORBIDDEN_MODULES if "." not in m
+        }
+
     for node in ast.walk(tree):
+        # Rule 1: static imports.
         if isinstance(node, ast.Import):
             for alias in node.names:
-                if alias.name in MOCK_MODULES:
+                if forbidden(alias.name):
                     hits.append(f"{rel}:{node.lineno}: imports {alias.name}")
-                elif _module_root(alias.name) in TEST_FRAMEWORK_MODULES:
-                    hits.append(f"{rel}:{node.lineno}: imports {alias.name}")
-
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            imported = {f"{module}.{a.name}" if module else a.name for a in node.names}
-            if module in MOCK_MODULES or imported & MOCK_MODULES:
+            candidates = {module} | {
+                f"{module}.{a.name}" if module else a.name for a in node.names
+            }
+            if any(forbidden(c) for c in candidates if c):
                 hits.append(f"{rel}:{node.lineno}: imports from {module or '.'}")
-            elif _module_root(module) in TEST_FRAMEWORK_MODULES:
-                hits.append(f"{rel}:{node.lineno}: imports from {module}")
 
         elif isinstance(node, ast.Call):
-            name = _last_component(node.func)
-            if name in DYNAMIC_IMPORTERS:
-                for arg in node.args:
-                    if isinstance(arg, ast.Constant) and arg.value in MOCK_MODULES:
+            func = node.func
+            called = (
+                func.attr
+                if isinstance(func, ast.Attribute)
+                else func.id if isinstance(func, ast.Name) else None
+            )
+
+            # Rule 2: dynamic import of a knowable name.
+            if called in DYNAMIC_IMPORTERS and node.args:
+                for value in _fold_all(node.args[0], names):
+                    if forbidden(value):
+                        hits.append(f"{rel}:{node.lineno}: imports {value} dynamically")
+
+            # Rule 3: sys.modules.get("pytest")
+            if (
+                called in {"get", "__contains__"}
+                and isinstance(func, ast.Attribute)
+                and _is_sys_modules(func.value)
+                and node.args
+            ):
+                for value in _fold_all(node.args[0], names):
+                    if forbidden(value):
                         hits.append(
-                            f"{rel}:{node.lineno}: imports {arg.value} dynamically"
+                            f"{rel}:{node.lineno}: asks sys.modules whether "
+                            f"{value} is loaded"
                         )
 
-        elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-            if node.value in TEST_SNIFF_STRINGS:
-                hits.append(
-                    f"{rel}:{node.lineno}: mentions {node.value!r}, which only "
-                    "appears in code detecting a test run"
-                )
+            # Rule 5: environment variables.
+            argument = _env_read_argument(node)
+            if argument is not None:
+                for value in _fold_all(argument, names):
+                    if value not in ALLOWED_ENV:
+                        hits.append(
+                            f"{rel}:{node.lineno}: reads environment variable "
+                            f"{value!r}, which is not in ALLOWED_ENV"
+                        )
 
-        name = (
-            _last_component(node)
-            if isinstance(node, (ast.Name, ast.Attribute))
-            else None
-        )
-        if name in MOCK_NAMES:
-            hits.append(f"{rel}:{node.lineno}: names {name}")
+        # Rule 3: sys.modules[...] -- never legitimate here.
+        elif isinstance(node, ast.Subscript):
+            if _is_sys_modules(node.value):
+                hits.append(f"{rel}:{node.lineno}: subscripts sys.modules")
+            elif _is_environ(node.value):
+                for value in _fold_all(node.slice, names):
+                    if value not in ALLOWED_ENV:
+                        hits.append(
+                            f"{rel}:{node.lineno}: reads environment variable "
+                            f"{value!r}, which is not in ALLOWED_ENV"
+                        )
+
+        # Rule 3: "pytest" in sys.modules
+        elif isinstance(node, ast.Compare):
+            for op, comparator in zip(node.ops, node.comparators):
+                if not isinstance(op, (ast.In, ast.NotIn)):
+                    continue
+                if not _is_sys_modules(comparator):
+                    continue
+                candidates = _fold_all(node.left, names)
+                if not candidates:
+                    hits.append(
+                        f"{rel}:{node.lineno}: tests sys.modules for a name "
+                        "the source does not reveal"
+                    )
+                for value in candidates:
+                    if forbidden(value):
+                        hits.append(
+                            f"{rel}:{node.lineno}: asks sys.modules whether "
+                            f"{value} is loaded"
+                        )
+
+        # Rule 4: sys.argv, however it is reached.
+        if _is_sys_argv(node):
+            hits.append(f"{rel}:{node.lineno}: reads sys.argv")
 
     return sorted(set(hits))
 
@@ -185,20 +364,23 @@ def test_the_scan_actually_reads_the_package():
     assert {"config.py", "utils.py", "executor_core.py"} <= seen
 
 
-def test_no_mock_or_test_framework_use_in_shipped_code():
+def test_shipped_code_does_not_consult_test_machinery():
     hits = _violations(REPO_ROOT / SHIPPED_PACKAGE)
     assert not hits, (
         f"{SHIPPED_PACKAGE}/ is what users install, and it must not know it "
         "is being tested (issue #116). A mock or test-only branch here means "
         "real users execute a path that exists only to make a test pass, so "
         "the tested path is not the shipped path. Move the fake into the "
-        "test, or make the real thing injectable. Offending lines:\n  "
-        + "\n  ".join(hits)
+        "test, or make the real thing injectable. If an environment variable "
+        "is genuinely new and genuinely user-facing, add it to ALLOWED_ENV "
+        "and say why. Offending lines:\n  " + "\n  ".join(hits)
     )
 
 
-#: Each of these is a real way to get a mock into shipped code. Several
-#: defeat a plain grep for ``unittest.mock`` or ``MagicMock``.
+#: Every bypass below is a real way to get a mock, or a test-only branch,
+#: into shipped code. The first ten defeat a grep for ``unittest.mock`` or
+#: ``MagicMock``; the last five defeated the previous version of this
+#: guard, which returned ``[]`` for all of them.
 BYPASSES = {
     "from_import": (
         "from unittest.mock import MagicMock\n"
@@ -265,39 +447,112 @@ BYPASSES = {
         "        return 'fake-job-id'\n"
         "    return _really_submit()\n"
     ),
+    # --- the five that defeated the previous guard ---
+    "split_name_dynamic_import": (
+        "import importlib\n"
+        "\n"
+        "\n"
+        "def client():\n"
+        "    module = importlib.import_module('unittest' + '.mock')\n"
+        "    return getattr(module, 'Magic' + 'Mock')()\n"
+    ),
+    "implicit_concatenation_in_sys_modules": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def client():\n"
+        "    return sys.modules['unittest' '.mock'].MagicMock()\n"
+    ),
+    "concatenated_membership_test": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if 'py' + 'test' in sys.modules:\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "custom_env_flag": (
+        "import os\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if os.environ.get('CLUSTRIX_TEST_MODE'):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "argv_sniff": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if sys.argv[0].endswith('py.test'):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    # Naming the flag through a constant does not hide it either.
+    "env_flag_behind_a_constant": (
+        "import os\n"
+        "\n"
+        "_FLAG = 'CLUSTRIX_TEST_MODE'\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if os.environ.get(_FLAG):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
 }
 
 
-@pytest.mark.parametrize("name", sorted(BYPASSES))
-def test_guard_catches_every_known_bypass(name, tmp_path):
-    """Plant each bypass as a real file and prove the guard reports it."""
-    package = tmp_path / SHIPPED_PACKAGE
-    package.mkdir()
-    (package / "sneaky_new_backend.py").write_text(BYPASSES[name], encoding="utf-8")
+@pytest.fixture(scope="module")
+def real_package_copy(tmp_path_factory):
+    """A copy of the real ``clustrix/`` package, for planting bypasses in.
 
-    hits = _violations(package)
+    Planting into a copy of the real package rather than into a lone
+    snippet is deliberate: it proves the guard still finds the violation
+    among two hundred files of legitimate code, and that the surrounding
+    real modules do not drown it in false positives.
+    """
+    destination = tmp_path_factory.mktemp("planted") / SHIPPED_PACKAGE
+    shutil.copytree(
+        REPO_ROOT / SHIPPED_PACKAGE,
+        destination,
+        ignore=shutil.ignore_patterns(*_SKIP_DIR_PARTS),
+    )
+    return destination
+
+
+@pytest.mark.parametrize("name", sorted(BYPASSES))
+def test_guard_catches_every_known_bypass(name, real_package_copy):
+    """Plant each bypass in the real package and prove the guard reports it."""
+    planted = real_package_copy / "sneaky_new_backend.py"
+    planted.write_text(BYPASSES[name], encoding="utf-8")
+    try:
+        hits = _violations(real_package_copy)
+    finally:
+        planted.unlink()
+
     assert hits, f"bypass {name!r} was not caught"
-    assert all(h.startswith(f"{SHIPPED_PACKAGE}/sneaky_new_backend.py:") for h in hits)
+    assert all(
+        h.startswith(f"{SHIPPED_PACKAGE}/sneaky_new_backend.py:") for h in hits
+    ), f"the surrounding real package produced noise as well: {hits}"
 
     with pytest.raises(AssertionError):
         assert not hits, "planted violation must trip the same assertion"
 
 
-#: Things that look like violations to a grep and are not. Every one of
-#: these is drawn from code that really is in ``clustrix/``.
+#: Things that look like violations to a grep, or to the previous version
+#: of this guard, and are not. The first four are drawn from code that
+#: really is in ``clustrix/``; the rest are plausible code that the
+#: previous guard would have flagged, each of which would have earned an
+#: allowlist entry and killed it.
 INNOCENT = {
     # clustrix/notebook_magic.py:83 -- a comment, not a mock.
     "comment_mentions_mocks": (
         "def render(widgets):\n"
         "    # IPython components (may be mocks)\n"
         "    return widgets\n"
-    ),
-    # clustrix/notebook_magic_fallback.py:126 -- a docstring saying the
-    # opposite of a violation.
-    "docstring_disclaims_mocks": (
-        "def stub():\n"
-        '    """Unlike a mock, it does not pretend the call succeeded."""\n'
-        "    raise RuntimeError('ipywidgets is not installed')\n"
     ),
     # clustrix/file_packaging.py:606 -- "unittest" as a stdlib module name
     # in a data table. Listing it is not importing it.
@@ -313,11 +568,43 @@ INNOCENT = {
         "def in_colab():\n"
         "    return 'google.colab' in sys.modules\n"
     ),
-    # A user-facing attribute that merely ends in a mock-ish word.
+    # clustrix/utils.py:486 -- environment replication looks the user's own
+    # modules up by a name only known at runtime.
+    "sys_modules_get_by_computed_name": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def module_of(module_name):\n"
+        "    return sys.modules.get(module_name)\n"
+    ),
+    # A dependency list that happens to name the test framework.
+    "dev_extras_list": ('DEV_EXTRAS = ["pytest", "pytest-cov", "black"]\n'),
+    # A pip-freeze filter, entirely plausible in environment replication.
+    "pip_freeze_skip_set": (
+        'SKIP = {"pytest", "_pytest"}\n'
+        "\n"
+        "\n"
+        "def replicate(packages):\n"
+        "    return [p for p in packages if p not in SKIP]\n"
+    ),
+    # An error message that mentions the framework.
+    "error_message_mentions_pytest": (
+        "def require_cluster():\n" "    raise RuntimeError('pytest')\n"
+    ),
+    # Identifiers that merely end in a mock-ish word.
     "unrelated_identifier": (
         "class JobMocker:\n"
         "    def mock_up_a_plan(self):\n"
         "        return {'cores': 4}\n"
+    ),
+    # Dynamic import of the user's own package, which is why rule 2 stops
+    # at names the source reveals.
+    "dynamic_import_of_user_module": (
+        "import importlib\n"
+        "\n"
+        "\n"
+        "def load(module_name):\n"
+        "    return importlib.import_module(module_name)\n"
     ),
 }
 
