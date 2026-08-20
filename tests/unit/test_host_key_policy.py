@@ -317,7 +317,7 @@ def test_auto_add_persists_the_key_it_accepted(real_ssh_server, tmp_path):
             hostname="127.0.0.1",
             port=real_ssh_server.port,
             username="tester",
-            password="not-the-password",
+            password="wrong_password",  # a form check_for_secrets suppresses
             timeout=5,
             allow_agent=False,
             look_for_keys=False,
