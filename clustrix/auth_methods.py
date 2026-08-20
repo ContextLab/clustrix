@@ -8,14 +8,14 @@ from dataclasses import dataclass
 
 from .config import ClusterConfig
 
-# ``_hostname_matches`` and ``stored_credential_is_for_config`` moved to
+# ``hostname_matches`` and ``stored_credential_is_for_config`` moved to
 # ``clustrix.credential_release`` unchanged -- same names, same docstrings,
 # same behaviour -- because the decision they encode now has one home rather
 # than four call sites. Re-exported here so that every importer of the names
 # keeps working and there is still exactly one definition of each.
 from .credential_release import (  # noqa: F401
     CredentialTarget,
-    _hostname_matches,
+    hostname_matches,
     describe_stored_credential,
     release_credential,
     stored_credential_is_for_config,
@@ -216,7 +216,7 @@ class FlexibleCredentialAuthMethod(AuthMethod):
         This filter can only *refuse* something the gate allowed; it can
         never release something the gate refused, so it is not a second
         trust decision with a second way to be wrong. The comparison it uses
-        is the gate's own :func:`_hostname_matches`.
+        is the gate's own :func:`hostname_matches`.
         """
         hostname = connection_params.get("hostname", "")
         username = connection_params.get("username", "")
@@ -234,7 +234,7 @@ class FlexibleCredentialAuthMethod(AuthMethod):
         )
         if release.refusal is None:
             stored = describe_stored_credential("ssh")
-            host_match = _hostname_matches(hostname, stored.get("host", ""))
+            host_match = hostname_matches(hostname, stored.get("host", ""))
             username_match = bool(username) and username == stored.get("username", "")
             if host_match and username_match:
                 if release.password:

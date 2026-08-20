@@ -698,7 +698,7 @@ def test_a_host_a_working_directory_file_named_stays_untrusted_in_a_fresh_object
     as-written would let ``Named.By.The.Repository.`` in the file and
     ``named.by.the.repository`` in the code be two different hosts, which is
     the same "a partial match is a different question" defect
-    ``_hostname_matches`` documents -- so both ends go through the one
+    ``hostname_matches`` documents -- so both ends go through the one
     normalisation.
     """
     project = tmp_path / "project"

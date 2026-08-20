@@ -26,7 +26,7 @@ import os
 import pytest
 
 import clustrix.credential_manager as credential_manager_module
-from clustrix.auth_methods import FlexibleCredentialAuthMethod, _hostname_matches
+from clustrix.auth_methods import FlexibleCredentialAuthMethod, hostname_matches
 from clustrix.config import ClusterConfig, get_config_dir
 
 #: Distinctive, so that a leak is unambiguous wherever it turns up. Built at
@@ -221,7 +221,7 @@ class TestTheMatchingRuleItself:
         ],
     )
     def test_the_same_host_spelled_differently_matches(self, target, stored):
-        assert _hostname_matches(target, stored)
+        assert hostname_matches(target, stored)
 
     @pytest.mark.parametrize(
         "target, stored",
@@ -241,4 +241,4 @@ class TestTheMatchingRuleItself:
         ],
     )
     def test_anything_else_does_not_match(self, target, stored):
-        assert not _hostname_matches(target, stored)
+        assert not hostname_matches(target, stored)

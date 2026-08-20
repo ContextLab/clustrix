@@ -124,7 +124,7 @@ connection. That is not a second trust decision -- it cannot release anything
 this module refused, only refuse something this module allowed -- it is the
 auth chain's applicability test, deciding *which* stored credential is the
 one for a connection whose hostname need not be ``config.cluster_host`` at
-all. The comparison it uses is :func:`_hostname_matches` from this module, so
+all. The comparison it uses is :func:`hostname_matches` from this module, so
 there is still exactly one definition of "same host".
 """
 
@@ -238,8 +238,13 @@ SECRET_SURFACES = (
 )
 
 
-def _hostname_matches(target: object, credential_host: object) -> bool:
+def hostname_matches(target: object, credential_host: object) -> bool:
     """Whether a credential stored for ``credential_host`` is for ``target``.
+
+    Public, and deliberately so: ``auth_methods`` needs the *same* answer to
+    "is this the same host" and importing a private name across modules is
+    a contradiction in terms. It carries no secret -- it compares two
+    hostnames -- so nothing about the store's privacy depends on it.
 
     **Exact, after normalisation.** Nothing else is safe, and the three
     relaxations this replaces were each exploitable:
@@ -351,7 +356,7 @@ def stored_credential_is_for_config(
     working:
 
     1. **If the credential names a host, it must be that host.** Exactly,
-       after normalisation -- :func:`_hostname_matches`, the same comparison
+       after normalisation -- :func:`hostname_matches`, the same comparison
        and the same reasoning as the auth-chain path. Substring, suffix and
        first-label matches were each exploitable there and are no better
        here.
@@ -392,7 +397,7 @@ def stored_credential_is_for_config(
     host = hostname
     credential_host = credentials.get("host", "")
     if normalize_hostname(credential_host):
-        if _hostname_matches(host, credential_host):
+        if hostname_matches(host, credential_host):
             return None
         return (
             f"the stored credential is for {credential_host!r} and this "
@@ -433,7 +438,7 @@ class CredentialTarget:
     recipient, and it fails loudly when there is nobody to name: an
     unnormalisable hostname is exactly the state
     :data:`clustrix.config._HOSTS_NAMED_BY_UNTRUSTED_SOURCES` cannot key on
-    and :func:`_hostname_matches` can never satisfy, so it must not be
+    and :func:`hostname_matches` can never satisfy, so it must not be
     possible to ask for a release to one.
     """
 
@@ -738,7 +743,7 @@ def _release_environment(
 
     # And it belongs to *this* config's host, so a connection to some other
     # host does not get it either.
-    if not _hostname_matches(target.hostname, config.cluster_host):
+    if not hostname_matches(target.hostname, config.cluster_host):
         return CredentialRelease(
             target=target,
             refusal=(

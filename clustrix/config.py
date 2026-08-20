@@ -1178,7 +1178,7 @@ def get_config_source(config: ClusterConfig) -> str:
     Falls back to the *untrusted* answer for an object that somehow has no
     record -- one restored by ``pickle``, say, which does not run
     ``__post_init__``. An absent value must never read as "trusted", which
-    is the same rule ``_hostname_matches`` applies to an absent hostname.
+    is the same rule ``hostname_matches`` applies to an absent hostname.
 
     A hostname an untrusted source named earlier in this process keeps that
     source no matter what the object's own attribute says, so a config
