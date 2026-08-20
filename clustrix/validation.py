@@ -7,7 +7,11 @@ from typing import Dict, Optional
 import paramiko
 
 from .config import ClusterConfig
-from .credential_release import CredentialTarget, release_credential
+from .credential_release import (
+    CredentialTarget,
+    hostless_secret_refusal,
+    release_credential,
+)
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -76,6 +80,24 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
     """
     Validate SSH key authentication works.
 
+    **Route 13, and the user-reachable one.** This asked paramiko to search
+    ``~/.ssh`` and the ssh-agent -- ``look_for_keys=True, allow_agent=True``
+    -- for whatever ``config.cluster_host`` said, with no gate anywhere in
+    the path. ``run_comprehensive_validation`` does consult the gate, but in
+    a *different function*, and the notebook widget's "Test connection"
+    button calls this one directly
+    (``modern_notebook_widget.ModernClustrixWidget``), so a ``clustrix.yml``
+    in the directory the notebook was started from was enough to have the
+    victim's own key offered to the host that file named. Measured:
+    ``('victim', 'publickey')``.
+
+    Those identities name no host, so they are rule 2 like every other
+    hostless secret, and the answer is
+    :func:`clustrix.credential_release.hostless_secret_refusal` -- the same
+    rule the two connection paths read off
+    :attr:`~clustrix.credential_release.CredentialRelease.local_identities`,
+    rather than a third copy of it.
+
     Args:
         config: Cluster configuration
 
@@ -90,6 +112,18 @@ def validate_ssh_key_auth(config: ClusterConfig) -> bool:
 
         # Try SSH key auth
         if config.cluster_host:
+            try:
+                target = CredentialTarget.for_config(config)
+            except ValueError as exc:
+                print(f"❌ No SSH key can be offered: {exc}")
+                return False
+            refusal = hostless_secret_refusal(target, config)
+            if refusal:
+                print(
+                    f"❌ Not offering your SSH keys or agent to "
+                    f"{config.cluster_host}: {refusal}"
+                )
+                return False
             client.connect(
                 hostname=config.cluster_host,
                 username=config.username,

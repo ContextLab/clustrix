@@ -221,7 +221,17 @@ class ClusterFilesystem:
             # ``cluster_host`` names these too, and reading them here
             # without a decision offered the victim's private key to a host
             # the repository chose. A filesystem call is a connection.
-            connect_kwargs["look_for_keys"] = True
+            #
+            # Paramiko's own credential discovery is part of that decision,
+            # not a default to leave alone: this set ``look_for_keys=True``
+            # and left ``allow_agent`` at paramiko's default, so a refusal
+            # was logged and then ``connect()`` authenticated anyway out of
+            # ``~/.ssh/id_rsa`` or the running agent -- route 13, measured
+            # as ``('victim', 'publickey')`` for a ``./clustrix.yml`` that
+            # named nothing but ``cluster_host``. The gate answers it, so
+            # this call site does not.
+            connect_kwargs["look_for_keys"] = False
+            connect_kwargs["allow_agent"] = False
             try:
                 target = CredentialTarget.for_config(self.config)
             except ValueError as exc:
@@ -233,6 +243,8 @@ class ClusterFilesystem:
                     config=self.config,
                     sources=("config-field", "stored-credential", "environment"),
                 )
+                connect_kwargs["look_for_keys"] = release.local_identities
+                connect_kwargs["allow_agent"] = release.local_identities
                 if release.refusal is not None:
                     logger.warning(
                         "Not using a stored SSH credential for %s: %s.",

@@ -36,6 +36,7 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 ``clustrix.auth_methods.stored_credential_is_for_config``.
 """
 
+import os
 import pathlib
 import warnings
 
@@ -224,14 +225,27 @@ def test_the_documented_setup_still_authenticates(
 
 
 def _victim_keypair(tmp_path):
-    """A private key the victim already has, and its public half."""
+    """A private key the victim already has, and its public half.
+
+    **In ``~/.ssh/id_rsa``, which is where it actually lives**, not in a
+    throwaway directory. This wrote it to ``tmp_path`` and named it only in
+    ``key_file``, and that is why route 10's test below passed while route
+    13 was open: with the key somewhere paramiko's own search would never
+    look, refusing the ``key_file`` branch looked like refusing the key.
+    Put the key where every user keeps it and a connection that "refuses"
+    while leaving ``look_for_keys`` on authenticates anyway.
+
+    ``$HOME`` is a throwaway per test (``tests/conftest.py::isolate_home``),
+    so this never goes near the developer's own key.
+    """
     import paramiko
 
-    private = tmp_path / "id_victim"
+    private = pathlib.Path.home() / ".ssh" / "id_rsa"
+    private.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     key = paramiko.RSAKey.generate(2048)
     key.write_private_key_file(str(private))
     private.chmod(0o600)
-    public = private.with_suffix(".pub")
+    public = tmp_path / "id_victim.pub"
     public.write_text(f"ssh-rsa {key.get_base64()} victim\n", encoding="utf-8")
     return private, public
 
@@ -2902,4 +2916,433 @@ def test_opening_the_clusterfy_widget_does_not_taint_your_own_config_dir(
     )
     assert stored_credential_is_for_config(fresh, {"password": SENTINEL_PASSWORD}) is (
         None
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route 13: a refusal that still authenticates is not a refusal.
+#
+# Every connection path logged the gate's refusal and then called
+# ``paramiko.connect()`` anyway with ``look_for_keys``/``allow_agent`` left
+# at paramiko's defaults, so paramiko ran its own search of ``~/.ssh`` and
+# the agent and authenticated. Strictly stronger than route 10: the hostile
+# file need name nothing but ``cluster_host``.
+# ---------------------------------------------------------------------------
+
+
+def _repository_naming_only_the_host(server, tmp_path, monkeypatch):
+    """A ``./clustrix.yml`` with no credential field of any kind in it."""
+    cloned_repository = tmp_path / "cloned-repository"
+    cloned_repository.mkdir()
+    (cloned_repository / "clustrix.yml").write_text(
+        _config_text(server), encoding="utf-8"
+    )
+    monkeypatch.chdir(cloned_repository)
+    with pytest.warns(UserWarning, match="current working directory"):
+        config_module._load_default_config()
+    assert get_config().key_file is None
+    assert get_config().password is None
+    assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+@pytest.fixture
+def key_only_server(tmp_path):
+    """A server that accepts the victim's ``~/.ssh`` key and no password."""
+    private, public = _victim_keypair(tmp_path)
+    root = tmp_path / "attacker-root"
+    root.mkdir()
+    with LocalSSHServer(
+        root=str(root), password=None, authorized_keys=[str(public)]
+    ) as server:
+        yield server
+
+
+def test_the_execution_path_does_not_let_paramiko_find_the_key_itself(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """Route 13 on ``ConnectionManager.setup_ssh_connection``.
+
+    RED before the fix: ``server.authentications == [('victim',
+    'publickey')]`` while the log line above it says the credential was
+    refused. Nothing in the repository's file names a key -- paramiko found
+    ``~/.ssh/id_rsa`` on its own.
+    """
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+
+    authenticated = _attempt_connection()
+
+    assert key_only_server.authentications == [], (
+        "paramiko's own key search authenticated to a host named by a file "
+        "in the working directory: " + repr(key_only_server.authentications)
+    )
+    assert not authenticated
+
+
+def test_the_filesystem_path_does_not_let_paramiko_find_the_key_itself(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """Route 13 on ``ClusterFilesystem``. A filesystem call is a connection."""
+    from clustrix.filesystem import ClusterFilesystem
+
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+
+    with pytest.raises(Exception):
+        ClusterFilesystem(get_config()).ls(".")
+
+    assert key_only_server.authentications == [], (
+        "a filesystem call authenticated with the victim's own key to a "
+        "host named by a working-directory file: "
+        + repr(key_only_server.authentications)
+    )
+
+
+def test_the_validation_path_does_not_let_paramiko_find_the_key_itself(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """Route 13 on ``validate_ssh_key_auth`` -- the widget's Test button.
+
+    This one asked no gate at all: ``run_comprehensive_validation`` consults
+    it, but in a *different function*, and
+    ``ModernClustrixWidget`` calls this one directly. Opening a notebook in
+    the cloned directory and clicking "Test connection" was enough.
+    """
+    from clustrix.validation import validate_ssh_key_auth
+
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+    config = get_config()
+    config.ssh_port = config.cluster_port
+
+    assert validate_ssh_key_auth(config) is False
+    assert key_only_server.authentications == [], (
+        "the widget's connection test offered the victim's key to a host "
+        "named by a working-directory file: " + repr(key_only_server.authentications)
+    )
+
+
+def test_the_local_identities_still_reach_a_host_the_user_chose(
+    key_only_server, env_file, tmp_path
+):
+    """The fix must not turn ``~/.ssh/id_rsa`` off for everybody.
+
+    The ordinary setup -- a key in ``~/.ssh`` and a host in the clustrix
+    configuration directory -- is the case that has to keep working, on all
+    three paths, or this is not a gate but an outage.
+    """
+    from clustrix.filesystem import ClusterFilesystem
+    from clustrix.validation import validate_ssh_key_auth
+
+    env_file()
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+    config = get_config()
+    config.ssh_port = config.cluster_port
+
+    assert _attempt_connection() is True
+    assert ClusterFilesystem(config).ls(".") is not None
+    assert validate_ssh_key_auth(config) is True
+    assert set(key_only_server.authentications) == {("victim", "publickey")}
+    assert len(key_only_server.authentications) == 3
+
+
+def test_the_gate_decides_the_local_identity_search_not_the_call_site():
+    """It is a field of the release, so a call site cannot forget it.
+
+    Three call sites each deciding for themselves is how there came to be
+    three of them wrong, and a ``CredentialRelease`` built anywhere else
+    must not open the search by omission.
+    """
+    trusted = ClusterConfig(cluster_host="chosen.example.edu", username="victim")
+    untrusted = ClusterConfig(cluster_host="named-by-a-file.example")
+    record_discovered_hostname(untrusted.cluster_host, CONFIG_SOURCE_WORKING_DIRECTORY)
+
+    allowed = release_credential(CredentialTarget.for_config(trusted), config=trusted)
+    refused = release_credential(
+        CredentialTarget.for_config(untrusted), config=untrusted
+    )
+
+    assert allowed.local_identities is True
+    assert refused.local_identities is False
+    assert (
+        CredentialRelease(target=_a_target(), refusal="none").local_identities is False
+    )
+
+
+# ---------------------------------------------------------------------------
+# Route 13b: $HF_ENDPOINT chose where the released token was sent.
+# ---------------------------------------------------------------------------
+
+
+def test_the_huggingface_client_is_pinned_to_the_host_the_gate_decided_about():
+    """``fixed_service`` names a recipient; the client has to go there.
+
+    ``HfApi(token=...)`` with no ``endpoint=`` takes ``$HF_ENDPOINT``, so
+    the gate released the token for ``huggingface.co`` while the object
+    carrying it pointed wherever an inherited environment variable said. On
+    the wire, with a loopback listener standing in for the attacker's Hub,
+    that listener received the token in an ``Authorization`` header.
+
+    In a **subprocess**, because ``huggingface_hub`` reads ``$HF_ENDPOINT``
+    once at import: the same reason the defect is invisible to in-process
+    reasoning is the reason this test has to cross a process boundary. The
+    unpinned half is asserted too -- a pinning test that would pass without
+    the pinning is not a test.
+    """
+    import json
+    import subprocess
+    import sys
+
+    from clustrix.credential_release import (
+        FIXED_SERVICE_HOSTS,
+        HUGGINGFACE_ENDPOINT,
+    )
+
+    program = (
+        "import json;"
+        "from huggingface_hub import HfApi;"
+        "from clustrix.credential_release import huggingface_client_kwargs as k;"
+        "print(json.dumps(["
+        "HfApi().endpoint, HfApi(**k()).endpoint]))"
+    )
+    environment = dict(os.environ, HF_ENDPOINT="https://attacker.invalid")
+    completed = subprocess.run(
+        [sys.executable, "-c", program],
+        capture_output=True,
+        text=True,
+        cwd=str(pathlib.Path(__file__).resolve().parents[2]),
+        env=environment,
+        timeout=120,
+    )
+    assert completed.returncode == 0, completed.stderr
+    unpinned, pinned = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert HUGGINGFACE_ENDPOINT == f"https://{FIXED_SERVICE_HOSTS[0]}"
+    assert unpinned == "https://attacker.invalid"
+    assert pinned == HUGGINGFACE_ENDPOINT
+
+
+# ---------------------------------------------------------------------------
+# derived_provenance answers about the host it was asked about.
+# ---------------------------------------------------------------------------
+
+
+def test_a_trusted_config_does_not_vouch_for_some_other_host():
+    """The fall-through was ``get_config_source(config)``, which is a fact
+    about ``config.cluster_host`` and about nothing else.
+
+    So a config the user really did choose vouched for every host in the
+    world that no file had happened to name, and the hostless
+    ``SSH_PASSWORD`` went to it.
+    """
+    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+
+    assert get_config_source(trusted) in TRUSTED_CONFIG_SOURCES
+    assert derived_provenance(trusted, "myhpc.example.edu") in TRUSTED_CONFIG_SOURCES
+    assert derived_provenance(trusted, "totally-unrelated.attacker.example") is None
+    assert derived_provenance(trusted, "127.0.0.1") is None
+
+
+def test_a_hostless_credential_is_not_released_to_an_unrelated_host():
+    """The consequence of the above, at the gate rather than below it."""
+    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+    target = CredentialTarget(
+        hostname="totally-unrelated.attacker.example",
+        username="victim",
+        described_as="a host nobody named",
+    )
+
+    refusal = stored_credential_is_for_config(
+        trusted, {"password": "x"}, hostname=target.hostname
+    )
+
+    assert refusal is not None
+    assert "totally-unrelated.attacker.example" in refusal
+
+
+@pytest.mark.parametrize("hostname", [0, None, False, [], "", "   ", 123], ids=repr)
+def test_a_hostname_that_cannot_be_normalised_has_no_provenance(hostname):
+    """``if hostname and not normalize_hostname(hostname)`` skipped the falsy
+    half, so ``0``, ``None``, ``False``, ``[]`` and ``""`` inherited the
+    config's trust while ``"   "`` and ``123`` were correctly refused.
+
+    Falsy or truthy is not a distinction anything downstream can act on:
+    neither can be keyed in the taint map and neither can be compared by
+    ``hostname_matches``.
+    """
+    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+
+    assert derived_provenance(trusted, hostname) is None
+
+
+# ---------------------------------------------------------------------------
+# Mutants that survived the full suite. A surviving mutant means untested.
+# ---------------------------------------------------------------------------
+
+
+def _calling_from(module_name, function_name):
+    """Run ``_stored_credential`` from a frame with a chosen module and name.
+
+    ``exec`` into a namespace whose ``__name__`` is the one being tested is
+    the only way to produce a caller with a *chosen* module -- and it is the
+    documented limit of the guard when the module chosen is the gate's own.
+    What it lets this test do is separate the guard's two halves, which is
+    what the mutants below turn out to hinge on.
+    """
+    namespace = {
+        "__name__": module_name,
+        "_stored_credential": credential_release_module._stored_credential,
+    }
+    exec(
+        f"def {function_name}():\n" f"    return _stored_credential('ssh')\n",
+        namespace,
+    )
+    return namespace[function_name]()
+
+
+def test_the_gates_module_alone_does_not_make_you_one_of_its_obtainers():
+    """M6: the per-function half of the caller check.
+
+    ``assert_called_from`` takes *function* names, and the reason is that a
+    module check alone passes **by construction** for anything reached from
+    inside the file. Every existing test satisfied the module half by
+    failing it -- they call from a test module -- so a mutant that dropped
+    the ``allowed`` half survived the whole suite.
+
+    This is a caller that has already satisfied the module half. Only the
+    function half can refuse it.
+    """
+    with pytest.raises(RuntimeError) as raised:
+        _calling_from(credential_release_module.__name__, "not_an_obtainer")
+
+    assert "not_an_obtainer" in str(raised.value)
+
+
+def test_being_called_the_right_thing_from_the_wrong_module_is_not_enough():
+    """M8: the two halves are ``or``, not ``and``.
+
+    With ``and``, a caller that fails the module check but happens to be
+    *named* ``describe_credential`` -- which anybody can name a function --
+    passes. Both halves must hold, so failing either is a refusal.
+    """
+    with pytest.raises(RuntimeError) as raised:
+        _calling_from("attacker.module", "describe_credential")
+
+    assert "attacker.module" in str(raised.value)
+
+
+def test_the_default_release_sources_do_not_include_the_config_fields():
+    """M10: adding ``"config-field"`` to the default.
+
+    The two connection paths opt into it by naming it first. The auth
+    chain's credential-store method must not start answering with
+    ``config.password``: the branch exists so those two paths stop reading
+    the fields *before* the gate, not so every caller gets them.
+    """
+    from clustrix.credential_release import DEFAULT_RELEASE_SOURCES
+
+    trusted = ClusterConfig(
+        cluster_host="chosen.example.edu",
+        username="victim",
+        password=SENTINEL_PASSWORD,
+        key_file="/does/not/matter",
+    )
+
+    released = release_credential(CredentialTarget.for_config(trusted), config=trusted)
+
+    assert "config-field" not in DEFAULT_RELEASE_SOURCES
+    assert released.password != SENTINEL_PASSWORD
+    assert released.key_path is None
+    assert released.refusal is not None
+
+
+def test_a_rebuild_keeps_the_taint_that_was_recorded_and_drops_the_guess():
+    """The two kinds of untrust are not the same claim, and must not be.
+
+    A config a loader *read* has its hostname written into the process-wide
+    record, so no rebuild can launder it -- that is the route the widget's
+    Apply button and ``dataclasses.replace`` both took, and it is closed.
+
+    A config merely *guessed* untrusted -- built somewhere else in the
+    process while an unrelated untrusted read happened to be open -- is
+    marked per object and nothing is written about the hostname, so a
+    rebuild re-runs the guess and comes back ``runtime``. Making that mark
+    survive would mean recording a hostname permanently on a guess, which is
+    the thing measured over-tainting 96,739 of 96,740 constructions with no
+    API able to clear it. The attacker's own config is never in this case:
+    every loader records the hostname itself.
+    """
+    import dataclasses
+
+    read_by_a_loader = ClusterConfig(cluster_host="named-by-a-file.example")
+    config_module.set_config_source(read_by_a_loader, CONFIG_SOURCE_WORKING_DIRECTORY)
+
+    with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
+        guessed = ClusterConfig(cluster_host="built-elsewhere.example")
+
+    assert get_config_source(read_by_a_loader) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert (
+        get_config_source(dataclasses.replace(read_by_a_loader))
+        == CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+    assert get_config_source(guessed) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert config_module.source_that_named_hostname("built-elsewhere.example") is None
+    assert get_config_source(dataclasses.replace(guessed)) == CONFIG_SOURCE_RUNTIME
+
+
+def test_ssh_key_setup_does_not_offer_your_key_collection_to_a_repo_host(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """A fourth route-13 site, found while fixing the first three.
+
+    ``setup_ssh_keys`` begins by *trying every key in ``~/.ssh``* against
+    ``config.cluster_host`` (``detect_existing_ssh_key``), one
+    ``key_filename=`` at a time -- so turning paramiko's own search off says
+    nothing about it. It is public API, ``clustrix ssh-setup`` calls it,
+    both widgets have a button for it, and ``setup_auth_with_fallback``
+    reaches it too. A ``./clustrix.yml`` naming ``cluster_host`` was enough
+    to have the victim's whole key collection presented to the host that
+    file named, and the attacker learns which of them the victim holds even
+    when none is authorised.
+
+    Deploying a key to a host is the same decision as letting paramiko find
+    one, so it is the same rule, asked in the same words.
+    """
+    from clustrix.ssh_utils import setup_ssh_keys
+
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+    config = get_config()
+
+    result = setup_ssh_keys(config, password="")
+
+    assert result["success"] is False
+    assert "not offering your SSH keys" in result["error"]
+    assert key_only_server.authentications == [], (
+        "the key setup path offered the victim's keys to a host named by a "
+        "working-directory file: " + repr(key_only_server.authentications)
+    )
+
+
+def test_ssh_key_setup_still_runs_for_a_host_the_user_chose(key_only_server, env_file):
+    """The refusal above must not be "key setup no longer works"."""
+    from clustrix.ssh_utils import setup_ssh_keys
+
+    env_file()
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    result = setup_ssh_keys(get_config(), password="")
+
+    assert result["error"] is None or "not offering your SSH keys" not in (
+        result["error"] or ""
+    )
+    assert key_only_server.authentications, (
+        "key setup did not even try the existing keys for a host the user "
+        "chose, so the gate has become an outage"
     )

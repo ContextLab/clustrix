@@ -25,6 +25,7 @@ from .credential_manager import (
 from .credential_release import (
     CredentialTarget,
     describe_credential,
+    huggingface_client_kwargs,
     release_credential,
 )
 from .ssh_security import configure_host_key_policy
@@ -180,7 +181,15 @@ def _validate_ssh_credentials_real(credentials: Dict[str, str]) -> bool:
         port = int(credentials.get("SSH_PORT", 22))
         timeout = 10
 
-        # Make real SSH connection with proper parameter types
+        # Make real SSH connection with proper parameter types.
+        #
+        # ``look_for_keys`` and ``allow_agent`` off, both branches: this
+        # validates the credential it was handed, and with paramiko's own
+        # search left on it reported "credentials validated" whenever the
+        # agent happened to hold a key for the host -- a green tick for a
+        # password that does not work. The route 13 setting, here for
+        # honesty rather than for containment (the host is the one the
+        # credential file names, which is the user authorising it).
         if "SSH_PASSWORD" in credentials:
             password = credentials["SSH_PASSWORD"]
             ssh.connect(
@@ -189,6 +198,8 @@ def _validate_ssh_credentials_real(credentials: Dict[str, str]) -> bool:
                 port=port,
                 password=password,
                 timeout=timeout,
+                look_for_keys=False,
+                allow_agent=False,
             )
         elif "SSH_PRIVATE_KEY_PATH" in credentials:
             key_filename = credentials["SSH_PRIVATE_KEY_PATH"]
@@ -198,6 +209,8 @@ def _validate_ssh_credentials_real(credentials: Dict[str, str]) -> bool:
                 port=port,
                 key_filename=key_filename,
                 timeout=timeout,
+                look_for_keys=False,
+                allow_agent=False,
             )
         else:
             return False
@@ -230,7 +243,7 @@ def _validate_huggingface_credentials_real(credentials: Dict[str, str]) -> bool:
         # from huggingface_hub.utils import RepositoryNotFoundError  # Currently unused
 
         # Create HF API client
-        api = HfApi(token=credentials["HF_TOKEN"])
+        api = HfApi(token=credentials["HF_TOKEN"], **huggingface_client_kwargs())
 
         # Make real API call to get user info
         user_info = api.whoami()

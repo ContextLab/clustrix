@@ -109,6 +109,15 @@ class ValidationCredentials:
         :meth:`~clustrix.credential_release.CredentialTarget.fixed_service`
         because no configuration file can move it: unlike ``cluster_host``,
         nothing untrusted can have chosen who receives this token.
+
+        That was not true while it was written here, and route 13b is why:
+        the *decision* named ``huggingface.co``, but every client built
+        around the released token was ``HfApi(token=...)`` with no
+        ``endpoint=``, which ``huggingface_hub`` fills in from
+        ``$HF_ENDPOINT``. An inherited environment variable chose where the
+        token actually went. It is true now because
+        :func:`clustrix.credential_release.huggingface_client_kwargs` pins
+        the client to the host the gate decided about.
         """
         from .credential_release import (
             CredentialTarget,

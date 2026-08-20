@@ -44,6 +44,8 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional
 
+from .credential_release import huggingface_client_kwargs
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -254,7 +256,10 @@ class HFJobsManager:
                     "No HuggingFace token configured. Set hf_token in your "
                     "clustrix config, export HF_TOKEN, or run `hf auth login`."
                 )
-            self._api = HfApi(token=token)
+            # ``endpoint`` explicitly: without it ``huggingface_hub``
+            # takes $HF_ENDPOINT, so an inherited environment variable
+            # chose where the released token was sent. Route 13b.
+            self._api = HfApi(token=token, **huggingface_client_kwargs())
             # Held so a staged job can be handed a token as a secret. Only
             # staged jobs get one; see submit_job.
             self._token = token

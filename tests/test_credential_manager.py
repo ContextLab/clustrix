@@ -258,7 +258,20 @@ class TestFlexibleCredentialManager:
             # integration -- use only .env, environment vars, and GitHub
             # secrets"); this assertion is stale from before that removal
             # (Issue #114).
-            assert len(manager._sources) == 3
+            #
+            # Asked through ``get_credential_status`` rather than by reading
+            # ``manager._sources``, which is now behind a frame check --
+            # reaching the manager's own sources is reaching
+            # ``~/.clustrix/.env`` without having to know where it is, and
+            # that was the last ungated way to the password. The status
+            # report names them, so this asserts *more* than the count it
+            # replaces and none of it is a secret.
+            named = manager.get_credential_status()["sources"]
+            assert set(named) == {
+                "DotEnvCredentialSource",
+                "EnvironmentCredentialSource",
+                "GitHubActionsCredentialSource",
+            }
 
     def test_env_file_creation(self):
         """Test that .env file is created automatically."""
@@ -343,6 +356,42 @@ class TestFlexibleCredentialManager:
             manager = FlexibleCredentialManager(Path(temp_dir))
 
             assert not hasattr(manager, "sources")
+
+    def test_the_managers_own_sources_are_behind_the_same_frame_check(self):
+        """And an underscore alone is not that check.
+
+        ``_stored_credential`` was judged a public store with an underscore
+        on it, because importing it and calling it worked. The same standard
+        applied here: ``get_credential_manager()._sources[0].get_credentials("ssh")``
+        returned the password with no target named and no frame judged.
+
+        The frame check is always on and makes no reference to tests -- this
+        module is simply not one of
+        ``clustrix.credential_release.SOURCE_READERS``, which is the same
+        reason ``_ensure_credential_unchecked`` refuses it above.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            with pytest.raises(RuntimeError) as raised:
+                manager._sources[0].get_credentials("ssh")
+
+            assert "release_credential" in str(raised.value)
+            assert __name__ in str(raised.value)
+
+    def test_the_store_can_still_read_its_own_sources(self):
+        """The lock above is not simply "nothing works".
+
+        ``get_credential_status`` and ``list_available_providers`` walk the
+        same list from inside the store, and must keep doing so: a guard
+        that also blocked the legitimate readers would be indistinguishable
+        from a broken attribute.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert manager.get_credential_status()["sources"]
+            assert manager.list_available_providers() is not None
 
     def test_there_is_no_public_bulk_credential_loader(self):
         """``load_credentials_optional`` returned the password, to anyone.

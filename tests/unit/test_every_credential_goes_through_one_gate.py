@@ -14,8 +14,8 @@ no types, and attempting to match ``.password`` textually is precisely the
 mistake that made an earlier guard in this project fire on ``def
 joblib(self)``.
 
-**Four things it used to miss, and one it could never fire on.** A
-red-teaming round found them, and each was the same shape as a real leak:
+**Seven things it used to miss, and one it could never fire on.** Two
+red-teaming rounds found them, and each was the same shape as a real leak:
 
 * A blanket *module-level* exemption for the gate and for the store meant
   the two files most able to leak were the two least checked. A new
@@ -34,10 +34,38 @@ red-teaming round found them, and each was the same shape as a real leak:
   forbade raises ``ImportError`` and the check could never fire, while the
   import that does work, ``from clustrix.credential_release import
   _stored_credential``, was not looked for at all.
+* **Nothing watched the credential file.** Every rule guarded a *function*
+  of the store or the gate, so the shortest way past all of them was to not
+  call the store: ``(get_config_dir() / ".env").read_text()`` and split on
+  ``=``. Planted as a leaker and proven on the wire -- ``('victim',
+  'password')`` to a working-directory host -- while this suite stayed
+  green. Rule 6.
+* **A bulk read of the environment was invisible.** ``dict(os.environ)`` and
+  ``{**os.environ}`` hand over every variable including the secret one, and
+  rule 4 matched ``os.environ`` only as a bare ``Attribute`` under a
+  subscript or a ``.get``. Rule 5, and a copy is watched *more* closely
+  than a computed key rather than less, because there is no key to judge.
+* **The recipient of the HuggingFace token was not the one the gate decided
+  about.** ``HfApi(token=...)`` takes its host from ``$HF_ENDPOINT``. Rule 7.
 
-Because a rule that cannot fire reads as coverage, three of the rules below
-are paired with a test that parses the offending shape and asserts the walk
-finds it.
+Because a rule that cannot fire reads as coverage, every rule below is
+paired with a test that parses the offending shape and asserts the walk
+finds it, and -- where the rule could plausibly fire on everything -- one
+that asserts it does not.
+
+**What still walks past all of this**, stated so that the list is not
+silently shorter than the truth:
+
+* A name assembled at run time. ``vars(mgr)["_sour" + "ces"]``,
+  ``getattr(x, computed)``, ``importlib``, ``eval``, a rebound name. Rules 2
+  and 6 both see only constants.
+* A path to the credential file assembled at run time, for the same reason:
+  rule 6 knows the literal ``".env"`` and the attributes that hold the path,
+  not ``os.path.join(d, ".e" + "nv")``.
+* Anything outside ``clustrix/``: a plugin, a notebook, a downstream
+  package. The runtime frame checks are what answer those, not this file.
+* Types. ``x.password`` where ``x`` is a dictionary of the user's own is
+  indistinguishable here from ``config.password``.
 
 What makes a bypass *fail* rather than leak is the runtime check in
 ``FlexibleCredentialManager._ensure_credential_unchecked`` and in
@@ -109,6 +137,69 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
 }
 
 
+#: Places that hand over the **whole** environment rather than reading one
+#: variable out of it, as ``(module, enclosing definitions)``.
+#:
+#: Leaker L2 was ``dict(os.environ).get(var)``: the copy is a bulk read that
+#: rule 4 could not see, and the ``.get`` on it is a method call on a plain
+#: ``Call`` node. Both of the entries below are the credential store reading
+#: the ambient environment *as a credential source*, which is what those
+#: classes are for; a new one is a candidate route until somebody says
+#: otherwise here.
+ENVIRONMENT_BULK_READ_ALLOWLIST = {
+    # The .env file layered *under* the ambient environment, resolved in a
+    # local dictionary so nothing in the file becomes process-visible.
+    ("credential_manager.py", "DotEnvCredentialSource.get_credentials"),
+    # The environment *is* this source.
+    ("credential_manager.py", "EnvironmentCredentialSource.get_credentials"),
+    # The environment a remote job is given. Not a credential read: it is
+    # the local environment being described, and #153 removed the export
+    # that used to put credentials into it.
+    ("file_packaging.py", "create_execution_context"),
+}
+
+#: Everything that names the credential **file**, as ``(module, enclosing
+#: definitions)``. Either spelling counts: the literal ``".env"``, and the
+#: attributes that hold the path (``env_file``, ``env_file_path``).
+#:
+#: Leaker L1 was ``(get_config_dir() / ".env").read_text()`` followed by a
+#: split on ``=``. Every rule in this file watched the store's *functions*,
+#: and none of them watched the store's *file* -- so the shortest route to
+#: the password was to skip the store entirely and open what it opens. It
+#: was proven on the wire: ``('victim', 'password')`` to a
+#: working-directory host.
+#:
+#: This cannot see ``".e" + "nv"`` or a path assembled at run time, which is
+#: the same computed-name limit rule 2 has and is stated with the others
+#: below.
+CREDENTIAL_FILE_ALLOWLIST = {
+    # The store: it owns the file.
+    ("credential_manager.py", "FlexibleCredentialManager.__init__"),
+    ("credential_manager.py", "FlexibleCredentialManager._ensure_setup"),
+    ("credential_manager.py", "FlexibleCredentialManager._create_env_template"),
+    (
+        "credential_manager.py",
+        "FlexibleCredentialManager._ensure_credential_unchecked",
+    ),
+    ("credential_manager.py", "FlexibleCredentialManager.get_credential_status"),
+    ("credential_manager.py", "DotEnvCredentialSource.__init__"),
+    ("credential_manager.py", "DotEnvCredentialSource.is_available"),
+    ("credential_manager.py", "DotEnvCredentialSource.get_credentials"),
+    # The CLI that exists to set up, edit and reset that file. These write
+    # and hand it to $EDITOR; they are the documented way in.
+    ("cli_credentials.py", "setup_credentials_interactive"),
+    ("cli_credentials.py", "edit_credentials_command"),
+    ("cli_credentials.py", "reset_credentials_command"),
+    # Route 7's write side, which is a release decision and is gated as one.
+    ("auth_manager.py", "AuthenticationManager._store_in_env_file"),
+    # Naming the file in a refusal message. Prose, not a read.
+    ("config.py", "_load_default_config"),
+    # A *deny*-list of filename patterns that must not be staged to a
+    # worker. The opposite of a read.
+    ("staging.py", ""),
+}
+
+
 def _definitions_of(tree: ast.AST) -> List[Tuple[ast.AST, str]]:
     """Every node paired with the dotted name of the definitions enclosing it."""
     found: List[Tuple[ast.AST, str]] = []
@@ -137,6 +228,41 @@ def _definitions_of(tree: ast.AST) -> List[Tuple[ast.AST, str]]:
 def _modules():
     for path in sorted(CLUSTRIX.rglob("*.py")):
         yield path, ast.parse(path.read_text(encoding="utf-8"))
+
+
+def _is_environ_attribute(node: ast.AST) -> bool:
+    """``os.environ``, however ``os`` is spelled."""
+    return isinstance(node, ast.Attribute) and node.attr == "environ"
+
+
+def _accounted_for_environ_reads(tree: ast.AST) -> Set[int]:
+    """The ``os.environ`` nodes some *specific* read already accounts for.
+
+    ``os.environ[x]`` and ``os.environ.get(x)`` name one variable, so rule 4
+    can decide about them by looking at the key. Every other way of touching
+    the mapping -- ``dict(os.environ)``, ``{**os.environ}``,
+    ``os.environ.copy()``, ``os.environ.items()``, passing it as an argument
+    -- hands over **all** of it, including whichever variable holds the
+    secret, and no key is there to judge.
+
+    That was leaker L2, and it walked past the rule untouched:
+    ``dict(os.environ).get(var)`` is a ``.get`` on a ``Call``, not on an
+    ``Attribute`` whose ``attr`` is ``environ``, so nothing matched. A bulk
+    read is *less* decidable than a computed key, not more, so it is written
+    down rather than exempted.
+    """
+    accounted: Set[int] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and _is_environ_attribute(node.value):
+            accounted.add(id(node.value))
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "get"
+            and _is_environ_attribute(node.func.value)
+        ):
+            accounted.add(id(node.func.value))
+    return accounted
 
 
 def _is_environ_lookup(node: ast.AST) -> bool:
@@ -272,13 +398,19 @@ STORE_ACCESS_ALLOWLIST = {
         (GATE, "_release_stored"),
     },
     "_sources": {
-        # The class-level declaration SECRET_SURFACES points at.
-        (STORE, "FlexibleCredentialManager"),
-        (STORE, "FlexibleCredentialManager.__init__"),
         (STORE, "FlexibleCredentialManager._ensure_credential_unchecked"),
         (STORE, "FlexibleCredentialManager._configured_fields"),
         (STORE, "FlexibleCredentialManager.list_available_providers"),
         (STORE, "FlexibleCredentialManager.get_credential_status"),
+    },
+    # The storage behind that property. Watched too, or the frame check
+    # would be one attribute name away from being decoration -- which is
+    # the whole reason the readable name got a check in the first place.
+    "__sources": {
+        # The class-level declaration SECRET_SURFACES points at.
+        (STORE, "FlexibleCredentialManager"),
+        (STORE, "FlexibleCredentialManager.__init__"),
+        (STORE, "FlexibleCredentialManager._sources"),
     },
 }
 
@@ -393,6 +525,147 @@ def test_every_run_time_environment_lookup_is_written_down():
     )
 
 
+def test_every_bulk_read_of_the_environment_is_written_down():
+    """Rule 5: handing over the whole mapping, which rule 4 could not see.
+
+    ``dict(os.environ).get(var)`` reads exactly what
+    ``os.environ.get(var)`` reads and matched nothing, because rule 4 looks
+    for ``.get`` on an ``Attribute`` named ``environ`` and this is ``.get``
+    on a ``Call``. A copy is strictly less decidable than a computed key --
+    there is no key at all -- so it is enumerated rather than exempted.
+    """
+    found: Set[Tuple[str, str]] = set()
+    for path, tree in _modules():
+        accounted = _accounted_for_environ_reads(tree)
+        for node, scope in _definitions_of(tree):
+            if _is_environ_attribute(node) and id(node) not in accounted:
+                found.add((path.name, scope))
+
+    assert found == ENVIRONMENT_BULK_READ_ALLOWLIST, (
+        "somewhere hands over the whole environment rather than reading one "
+        "variable out of it. If a secret can be in it, route it through "
+        "clustrix.credential_release.release_credential; if not, add it to "
+        "ENVIRONMENT_BULK_READ_ALLOWLIST with the reason.\n"
+        f"  unexpected: {sorted(found - ENVIRONMENT_BULK_READ_ALLOWLIST)}\n"
+        f"  gone:       {sorted(ENVIRONMENT_BULK_READ_ALLOWLIST - found)}"
+    )
+
+
+def _names_the_credential_file(node: ast.AST) -> bool:
+    """The credential file, by literal name or by the path attribute."""
+    if isinstance(node, ast.Constant) and node.value == ".env":
+        return True
+    return isinstance(node, ast.Attribute) and node.attr in (
+        "env_file",
+        "env_file_path",
+    )
+
+
+def test_everything_that_names_the_credential_file_is_written_down():
+    """Rule 6: the store's *file*, which no rule watched at all.
+
+    Every other rule here guards a function of the store or the gate, and
+    the shortest way past all of them was to not call the store: open
+    ``~/.clustrix/.env`` and split on ``=``. Planted as leaker L1 and proven
+    on the wire -- ``('victim', 'password')`` to a working-directory host --
+    while this suite stayed green.
+
+    Reading the file is not automatically a leak (the CLI edits it, the
+    store parses it), which is exactly why this is an inventory: a new
+    reader has to be written down, and writing it down is where somebody
+    asks who the contents are about to be given to.
+    """
+    found: Set[Tuple[str, str]] = set()
+    for path, tree in _modules():
+        for node, scope in _definitions_of(tree):
+            if _names_the_credential_file(node):
+                found.add((path.name, scope))
+
+    assert found == CREDENTIAL_FILE_ALLOWLIST, (
+        "something new names the credential file. Reading it is obtaining "
+        "a stored secret, which is "
+        "clustrix.credential_release.release_credential(target); if this "
+        "really is the store, the CLI that edits it, or prose, add it to "
+        "CREDENTIAL_FILE_ALLOWLIST and say which.\n"
+        f"  unexpected: {sorted(found - CREDENTIAL_FILE_ALLOWLIST)}\n"
+        f"  gone:       {sorted(CREDENTIAL_FILE_ALLOWLIST - found)}"
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "dict(os.environ).get(name)",
+        "{**os.environ}.get(name)",
+        "os.environ.copy()",
+        "values = os.environ",
+        "resolve(os.environ, provider)",
+        "for k in os.environ: pass",
+    ],
+    ids=["dict", "splat", "copy", "alias", "argument", "iterate"],
+)
+def test_rule_five_sees_the_bulk_reads_that_walked_past_rule_four(source):
+    """L2 and its neighbours. A copy has no key to judge, so it is watched."""
+    tree = ast.parse(source)
+    accounted = _accounted_for_environ_reads(tree)
+
+    assert any(
+        _is_environ_attribute(node) and id(node) not in accounted
+        for node in ast.walk(tree)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["os.environ.get(name)", "os.environ['LITERAL']", "os.environ[name]"],
+    ids=["get", "literal-subscript", "computed-subscript"],
+)
+def test_a_single_variable_read_is_not_a_bulk_read(source):
+    """Rule 5 must not fire on every environment read there is.
+
+    Those are rule 4's business, and one of them is deliberately allowed.
+    """
+    tree = ast.parse(source)
+    accounted = _accounted_for_environ_reads(tree)
+
+    assert not any(
+        _is_environ_attribute(node) and id(node) not in accounted
+        for node in ast.walk(tree)
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '(get_config_dir() / ".env").read_text()',
+        'open(config_dir / ".env").read()',
+        "text = manager.env_file.read_text()",
+        "values = parse(source.env_file_path)",
+    ],
+    ids=["read_text", "open", "attribute", "path-attribute"],
+)
+def test_rule_six_sees_the_shapes_that_read_the_credential_file(source):
+    """L1, in the spellings anybody would actually write."""
+    tree = ast.parse(source)
+
+    assert any(_names_the_credential_file(node) for node in ast.walk(tree))
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "path = directory / '.envrc'",
+        "shutil.copy(src, dst)",
+    ],
+    ids=["envrc", "unrelated"],
+)
+def test_rule_six_does_not_fire_on_a_different_file(source):
+    """``.envrc`` is a shell file, not the credential store."""
+    tree = ast.parse(source)
+
+    assert not any(_names_the_credential_file(node) for node in ast.walk(tree))
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -473,6 +746,94 @@ def test_rule_two_sees_the_shapes_that_used_to_walk_past_it(source):
     assert seen, f"nothing in {source!r} was recognised as touching the store"
 
 
+#: The ``huggingface_hub`` entry points that take a ``token=`` and choose
+#: their host from ``$HF_ENDPOINT`` when none is given.
+HUGGINGFACE_CLIENTS = ("HfApi", "hf_hub_download")
+
+
+def _pins_its_endpoint(node: ast.Call) -> bool:
+    """Whether a HuggingFace client call names the host it will talk to."""
+    for keyword in node.keywords:
+        if keyword.arg == "endpoint":
+            return True
+        if keyword.arg is None:
+            value = keyword.value
+            func = value.func if isinstance(value, ast.Call) else None
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute) else None
+            )
+            if name == "huggingface_client_kwargs":
+                return True
+    return False
+
+
+def test_every_huggingface_client_is_pinned_to_the_compiled_in_host():
+    """Rule 7: route 13b, which is the gate's own claim being untrue.
+
+    ``CredentialTarget.fixed_service("huggingface.co")`` says the recipient
+    is compiled in and no configuration can move it. Every client built
+    around the released token was ``HfApi(token=...)`` with no ``endpoint=``,
+    and ``huggingface_hub`` fills that in from ``$HF_ENDPOINT`` -- so an
+    inherited environment variable chose where the token went, which is the
+    same vector the redirected-configuration-directory rule already
+    distrusts. Five call sites, each free to forget; measured with
+    ``HF_ENDPOINT`` pointed at a loopback listener, which received the token
+    in an ``Authorization`` header.
+
+    So there is one helper,
+    :func:`clustrix.credential_release.huggingface_client_kwargs`, and this
+    is what stops the sixth call site being written without it.
+    """
+    offenders: Set[str] = set()
+    for path, tree in _modules():
+        for node, scope in _definitions_of(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = (
+                func.id
+                if isinstance(func, ast.Name)
+                else func.attr if isinstance(func, ast.Attribute) else None
+            )
+            if name in HUGGINGFACE_CLIENTS and not _pins_its_endpoint(node):
+                offenders.add(f"{path.name}:{scope} -> {name}")
+
+    assert offenders == set(), (
+        "a HuggingFace client is built without naming its endpoint, so "
+        "$HF_ENDPOINT chooses where the token goes. Pass "
+        "**huggingface_client_kwargs(): " + repr(sorted(offenders))
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    ["HfApi(token=t)", "hf_hub_download(repo_id=r, token=t)"],
+    ids=["HfApi", "hf_hub_download"],
+)
+def test_rule_seven_sees_an_unpinned_client(source):
+    """The rule above is not vacuous; this is the shape it must catch."""
+    call = ast.parse(source).body[0].value
+
+    assert not _pins_its_endpoint(call)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        'HfApi(token=t, endpoint="https://huggingface.co")',
+        "HfApi(token=t, **huggingface_client_kwargs())",
+        "hf_hub_download(repo_id=r, token=t, **huggingface_client_kwargs())",
+    ],
+    ids=["explicit", "helper", "download-helper"],
+)
+def test_rule_seven_accepts_a_pinned_client(source):
+    call = ast.parse(source).body[0].value
+
+    assert _pins_its_endpoint(call)
+
+
 @pytest.mark.parametrize("module, symbol", SECRET_SURFACES)
 def test_every_declared_secret_surface_still_exists(module, symbol):
     """``SECRET_SURFACES`` is a list of real things, not a stale comment.
@@ -489,8 +850,8 @@ def test_every_declared_secret_surface_still_exists(module, symbol):
             continue
         # An instance attribute exists only on instances, so the class
         # declaration is what a reader -- and this test -- can point at.
-        # ``_sources`` is one: constructing a manager to look for it would
-        # create a ~/.clustrix directory as a side effect of an AST test.
+        # Constructing a manager to look for one would create a ~/.clustrix
+        # directory as a side effect of an AST test.
         annotations = getattr(obj, "__annotations__", {})
         assert part in annotations, f"{module}.{symbol} no longer exists"
         return

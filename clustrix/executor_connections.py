@@ -124,6 +124,15 @@ class ConnectionManager:
         else:
             connect_kwargs["username"] = os.getenv("USER")
 
+        # Paramiko searches ``~/.ssh`` and the ssh-agent by itself unless
+        # told not to, and this used to leave both at their defaults: the
+        # gate's refusal was logged and ``connect()`` then authenticated
+        # with the victim's own key anyway. That is route 13, and it is
+        # strictly stronger than route 10 because the hostile file need name
+        # nothing but ``cluster_host``. Off until the gate says otherwise.
+        connect_kwargs["look_for_keys"] = False
+        connect_kwargs["allow_agent"] = False
+
         # Ask the one gate -- for every credential, including this config's
         # own ``key_file`` and ``password``.
         #
@@ -148,6 +157,8 @@ class ConnectionManager:
                 config=self.config,
                 sources=("config-field", "stored-credential", "environment"),
             )
+            connect_kwargs["look_for_keys"] = release.local_identities
+            connect_kwargs["allow_agent"] = release.local_identities
             if release.refusal is not None:
                 logger.warning(
                     "Not using a stored SSH credential for %s: %s.",

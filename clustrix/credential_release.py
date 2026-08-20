@@ -64,6 +64,30 @@ Three locks, in decreasing strength:
    that a caller which rebinds ``__name__`` defeats it -- a caller that
    hostile already has the interpreter.
 
+**A refusal has to stop the connection, not just the release.** Route 13:
+three connection paths -- ``ConnectionManager.setup_ssh_connection``,
+``ClusterFilesystem`` and ``validation.validate_ssh_key_auth``, the last of
+which asked no gate at all -- logged this module's refusal and then called
+``paramiko.connect()`` anyway, with ``look_for_keys`` and ``allow_agent``
+left at paramiko's defaults. Paramiko then ran its *own* search of
+``~/.ssh`` and the ssh-agent and authenticated. A ``./clustrix.yml`` naming
+only ``cluster_host`` -- no ``key_file``, no password, no stored credential
+-- was measured getting ``('victim', 'publickey')`` on all three, which is
+strictly stronger than route 10.
+
+A fourth site reaches the same identities without paramiko's help:
+``ssh_utils.setup_ssh_keys`` tries *every* key in ``~/.ssh`` against
+``config.cluster_host`` one ``key_filename=`` at a time, so turning the
+implicit search off says nothing about it.
+
+Those identities name no host, exactly as a bare ``SSH_PASSWORD`` does, so
+they are rule 2 like everything else. The connection paths read
+:attr:`CredentialRelease.local_identities`, which is
+:func:`hostless_secret_refusal`'s answer decided here; the two that are
+offering identities rather than asking for a credential ask that function
+directly. What none of them do is decide for themselves -- four call sites
+deciding separately is how there came to be four of them wrong.
+
 **What this gate relies on being true of its input, and what it cannot
 check.** ``release_credential`` decides with two facts: the hostname about
 to receive the secret, and *who chose that hostname*. The first it is
@@ -131,7 +155,7 @@ there is still exactly one definition of "same host".
 import logging
 import os
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Dict, Mapping, Optional, Sequence
 
 from .config import (
@@ -189,7 +213,7 @@ DEFAULT_RELEASE_SOURCES = ("stored-credential", "environment")
 #: A module-name check alone is satisfied by construction for anything
 #: reached from inside this file, which made ``_stored_credential`` an
 #: import away from being a public store; see
-#: :func:`assert_called_from_the_gate`.
+#: :func:`assert_called_from`.
 CREDENTIAL_OBTAINERS = ("describe_credential", "_release_stored")
 
 #: The function of this module that may call the store. Named here rather
@@ -197,11 +221,44 @@ CREDENTIAL_OBTAINERS = ("describe_credential", "_release_stored")
 #: own rule.
 STORE_CALLERS = ("_stored_credential",)
 
+#: The module the credential store lives in.
+STORE_MODULE = "clustrix.credential_manager"
+
+#: The methods of the store that may read its configured
+#: :class:`~clustrix.credential_manager.CredentialSource` objects.
+#:
+#: Privatising ``_ensure_credential_unchecked`` and then checking its caller
+#: left one door: ``get_credential_manager()._sources[0].get_credentials("ssh")``
+#: returned the password with no target named and no frame judged at all.
+#: An underscore alone is exactly the standard ``_stored_credential`` was
+#: found insufficient by, so the list the store points at is behind the same
+#: kind of check its store call is.
+SOURCE_READERS = (
+    "_ensure_credential_unchecked",
+    "_configured_fields",
+    "list_available_providers",
+    "get_credential_status",
+)
+
 #: Hosts :meth:`CredentialTarget.fixed_service` may name: services compiled
 #: into clustrix, which no configuration file can move. Not a registry and
 #: not a plugin point -- a name that belongs here is one written in this
 #: source file.
 FIXED_SERVICE_HOSTS = ("huggingface.co",)
+
+#: The Hub URL an authenticated HuggingFace client must be pointed at.
+#:
+#: Beside :data:`FIXED_SERVICE_HOSTS` because it is the same fact, and the
+#: two drifting apart was route 13b: ``fixed_service("huggingface.co")``
+#: said "no configuration file can move this recipient" while every client
+#: was built as ``HfApi(token=...)`` with no ``endpoint=``, and
+#: ``huggingface_hub`` fills that in from ``$HF_ENDPOINT``. So an inherited
+#: environment variable chose where the released token was actually sent --
+#: the same vector the redirected-configuration-directory rule already
+#: distrusts, and measured: with ``HF_ENDPOINT=https://attacker.invalid``
+#: the gate released the token for ``huggingface.co`` and the client
+#: carrying it was pointed at the attacker.
+HUGGINGFACE_ENDPOINT = f"https://{FIXED_SERVICE_HOSTS[0]}"
 
 #: Every secret-bearing surface in the tree, as ``(module, symbol)`` pairs.
 #:
@@ -236,6 +293,22 @@ SECRET_SURFACES = (
     # that gets closed eighth.
     ("clustrix.auth_fallbacks", "get_cluster_password"),
 )
+
+
+def huggingface_client_kwargs() -> Dict[str, str]:
+    """The keyword arguments every authenticated HuggingFace client carries.
+
+    One helper rather than an ``endpoint=`` at each call site, for the same
+    reason :func:`release_credential` is one function: there were five
+    places building a client around a released token (``HfApi`` in
+    ``hf_jobs``, ``staging`` and ``cli_credentials``, ``hf_hub_download``
+    twice in ``staging``), each of them free to forget, and the one that
+    forgets is the one that sends the token somewhere ``$HF_ENDPOINT``
+    chose. ``tests/unit/test_every_credential_goes_through_one_gate.py``
+    asserts that no call site builds one of those without going through
+    here.
+    """
+    return {"endpoint": HUGGINGFACE_ENDPOINT}
 
 
 def hostname_matches(target: object, credential_host: object) -> bool:
@@ -308,8 +381,29 @@ def derived_provenance(
     ``None`` when nothing accompanied the request that records a chooser. It
     is not a member of :data:`clustrix.config.TRUSTED_CONFIG_SOURCES`, so
     every test against this value fails closed.
+
+    **Two ways this used to answer about somebody else.**
+
+    *The fall-through was about the wrong host.*
+    :func:`clustrix.config.get_config_source` answers "where did
+    ``config.cluster_host`` come from", and this function was returning it
+    for **any** hostname it was asked about. So a config the user really did
+    choose vouched for every host in the world that no file had happened to
+    name: ``derived_provenance(trusted_cfg, "totally-unrelated.attacker.example")``
+    answered ``user-config-dir``, and the hostless ``SSH_PASSWORD`` was
+    released to it. The config only speaks for the host it names, so the
+    fall-through now requires that the host asked about *is* that one.
+
+    *A falsy hostname skipped the guard.* The test was ``if hostname and not
+    normalize_hostname(hostname)``, so ``0``, ``None``, ``False``, ``[]``
+    and ``""`` never reached it -- they went on to inherit the config's
+    trust, while ``"   "`` and ``123`` were correctly refused. Whether an
+    unusable hostname is falsy or truthy is not a distinction anything
+    downstream can act on: neither can be recorded in the taint map and
+    neither can be compared by :func:`hostname_matches`, so both are
+    ``None``.
     """
-    if hostname and not normalize_hostname(hostname):
+    if not normalize_hostname(hostname):
         # Unrecordable is exactly the state the taint map cannot describe,
         # and "the map has nothing on it" may not read as "it is fine". The
         # same rule ``config_source_is_trusted`` applies, applied to the
@@ -319,6 +413,11 @@ def derived_provenance(
     if named_by:
         return named_by
     if config is None:
+        return None
+    if not hostname_matches(hostname, getattr(config, "cluster_host", None)):
+        # The config is evidence about its own ``cluster_host`` and about
+        # nothing else. Anything else is a host nothing in this process
+        # accounted for, which is exactly what ``None`` means.
         return None
     return get_config_source(config)
 
@@ -513,6 +612,16 @@ class CredentialTarget:
         because "compiled in" is a claim about *which* host, and a
         constructor that accepted any hostname while asserting that one
         would be the declared-provenance defect wearing a different hat.
+
+        **What this does not by itself establish**, and route 13b is the
+        proof: naming the recipient here settles who the gate *decided*
+        about, not where the token is *sent*. Every client was built as
+        ``HfApi(token=...)`` with no ``endpoint=``, and ``huggingface_hub``
+        reads ``$HF_ENDPOINT`` when none is given -- so with
+        ``HF_ENDPOINT=https://attacker.invalid`` the gate released the token
+        for ``huggingface.co`` and the object carrying it pointed at the
+        attacker. The recipient is only fixed if the client is pinned too,
+        which is :func:`huggingface_client_kwargs`.
         """
         if normalize_hostname(hostname) not in FIXED_SERVICE_HOSTS:
             raise ValueError(
@@ -552,6 +661,29 @@ class CredentialRelease:
     #: Why nothing was released, in the user's terms, naming a remedy that
     #: works.
     refusal: Optional[str] = None
+    #: Whether paramiko's own credential discovery -- ``look_for_keys`` and
+    #: ``allow_agent`` -- may run for this target. **Route 13.**
+    #:
+    #: A refusal that still authenticates is not a refusal. Every connection
+    #: path logged this module's refusal and then called ``connect()``
+    #: anyway with paramiko's defaults, so paramiko searched ``~/.ssh`` and
+    #: the running agent and authenticated with the victim's own key. A
+    #: ``./clustrix.yml`` naming *only* ``cluster_host`` -- no ``key_file``,
+    #: no password, no stored credential -- got ``('victim', 'publickey')``
+    #: on the wire, which is strictly stronger than route 10 because it
+    #: needs the attacker to name nothing at all.
+    #:
+    #: ``~/.ssh/id_rsa`` and an agent identity are secrets that name no
+    #: host, so they are rule 2 of :func:`stored_credential_is_for_config`
+    #: and no different from a bare ``SSH_PASSWORD``: usable for a
+    #: ``cluster_host`` the user chose, and for nobody else. It is a field
+    #: of the release rather than a flag each call site sets because that
+    #: is the whole point of a choke point -- three call sites each deciding
+    #: for themselves is how there came to be three of them wrong.
+    #:
+    #: ``False`` by default, so a ``CredentialRelease`` built anywhere but
+    #: :func:`release_credential` cannot open the search by omission.
+    local_identities: bool = False
 
     def __post_init__(self) -> None:
         has_secret = bool(self.password) or bool(self.key_path) or bool(self.token)
@@ -588,7 +720,7 @@ def _stored_credential(provider: str) -> Optional[Dict[str, str]]:
     function's, which is in this module whoever called it. So this asks the
     same question one frame further down, about the function calling it.
     """
-    assert_called_from_the_gate(CREDENTIAL_OBTAINERS)
+    assert_called_from(GATE_MODULE, CREDENTIAL_OBTAINERS)
 
     from .credential_manager import get_credential_manager
 
@@ -823,6 +955,15 @@ def hostless_secret_refusal(
     The public name for the one rule, so that a caller holding a secret this
     module does not store -- a Colab userdata entry, say -- can ask the same
     question rather than inventing a second answer to it.
+
+    **A key in ``~/.ssh`` and an identity in the ssh-agent are exactly that
+    kind of secret**, which is why route 13 is this rule and not a new one.
+    :attr:`CredentialRelease.local_identities` is this answer as a boolean,
+    carried on every release so the connection paths cannot forget it;
+    ``validation.validate_ssh_key_auth`` and ``ssh_utils.setup_ssh_keys``
+    ask here directly, because neither is asking for a credential -- they
+    are about to offer identities the user already has -- and both were
+    doing it with no provenance check anywhere in the path.
     """
     return stored_credential_is_for_config(config, {}, hostname=target.hostname)
 
@@ -953,13 +1094,20 @@ def release_credential(
         "config-field": lambda: _release_config_field(target, config),
         "fallback-environment": lambda: _release_fallback_environment(target, config),
     }
+    # Decided once, here, and carried on every answer -- including the
+    # refusals. Route 13 was that a refusal left paramiko's own key and
+    # agent search running, so the connection authenticated anyway with
+    # ``~/.ssh/id_rsa``; see ``CredentialRelease.local_identities``.
+    local_identities = hostless_secret_refusal(target, config) is None
+
     for source in sources:
         released = branches[source]()
         if released is not None:
-            return released
+            return replace(released, local_identities=local_identities)
 
     return CredentialRelease(
         target=target,
+        local_identities=local_identities,
         refusal=(
             f"no {provider} credential is available for {target.described_as}. "
             f"Add one with 'clustrix credentials setup' or by editing "
@@ -971,13 +1119,18 @@ def release_credential(
     )
 
 
-def assert_called_from_the_gate(allowed: Sequence[str] = ()) -> None:
-    """Raise unless the frame two up belongs to this module.
+def assert_called_from(module: str, allowed: Sequence[str] = ()) -> None:
+    """Raise unless the frame two up is one of ``allowed`` in ``module``.
 
     Lock 3. **Always on**, in production, with no reference to tests and no
     different behaviour under pytest -- it is a fact about which module may
     obtain a secret, not test-awareness, so it does not violate the mocking
     policy's rule 4.
+
+    ``module`` is a parameter rather than a constant because two different
+    surfaces need the same rule: the gate's own ``_stored_credential``, and
+    the store's ``_sources``. One implementation, so the two cannot drift
+    into disagreeing about what "called from inside" means.
 
     ``sys._getframe`` rather than ``inspect.stack()``: the latter reads
     source files off disk for every frame, and this runs on the connection
@@ -1002,7 +1155,7 @@ def assert_called_from_the_gate(allowed: Sequence[str] = ()) -> None:
         frame = None
     caller = frame.f_globals.get("__name__") if frame is not None else None
     function = frame.f_code.co_name if frame is not None else None
-    if caller != GATE_MODULE or (allowed and function not in allowed):
+    if caller != module or (allowed and function not in allowed):
         raise RuntimeError(
             "Stored credentials are released only through "
             "clustrix.credential_release.release_credential(target), which "

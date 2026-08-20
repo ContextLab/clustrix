@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
 import paramiko
 from clustrix.config import ClusterConfig
+from clustrix.credential_release import CredentialTarget, hostless_secret_refusal
 from clustrix.auth_fallbacks import setup_auth_with_fallback
 from clustrix.ssh_security import (
     configure_host_key_policy,
@@ -604,6 +605,26 @@ def setup_ssh_keys(
         hostname = config.cluster_host
         username = config.username
         port = getattr(config, "cluster_port", 22)
+
+        # Setting up key authentication *starts* by offering the host every
+        # key already in ``~/.ssh`` (step 1, ``detect_existing_ssh_key``)
+        # and then connecting with whatever else is lying around
+        # (``deploy_public_key``'s manual path). Those are secrets that name
+        # no host, so this is the same decision as route 13 and it is asked
+        # in the same place. A ``./clustrix.yml`` naming ``cluster_host``
+        # reaches here through ``clustrix ssh-setup``, both widgets' "Setup
+        # SSH keys" buttons and ``setup_auth_with_fallback`` -- and offering
+        # the victim's whole key collection to the host that file named is
+        # the leak whether or not a password was released alongside it.
+        try:
+            target = CredentialTarget.for_config(config)
+        except ValueError as exc:
+            result["error"] = str(exc)
+            return result
+        refusal = hostless_secret_refusal(target, config)
+        if refusal:
+            result["error"] = f"not offering your SSH keys to {hostname!r}: {refusal}"
+            return result
 
         # Step 1: Check if SSH keys already work (unless force_refresh)
         existing_key = None

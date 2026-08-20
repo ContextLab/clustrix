@@ -242,12 +242,37 @@ class GitHubActionsCredentialSource(CredentialSource):
 class FlexibleCredentialManager:
     """Main credential manager with automatic .env file creation and multiple sources."""
 
-    #: Declared here, and private, because it is a secret-bearing surface in
-    #: its own right: every element answers ``get_credentials(provider)``
-    #: with the password in it. It is named in
-    #: ``clustrix.credential_release.SECRET_SURFACES``, and this annotation
-    #: is what that entry points at.
-    _sources: List[CredentialSource]
+    #: Where the sources actually live. Name-mangled rather than merely
+    #: underscored because the readable name is a *property* with a frame
+    #: check on it, and a check whose storage sits beside it under an
+    #: equally guessable name is decoration.
+    __sources: List[CredentialSource]
+
+    @property
+    def _sources(self) -> List[CredentialSource]:
+        """The configured credential sources. Store-internal.
+
+        A secret-bearing surface in its own right: every element answers
+        ``get_credentials(provider)`` with the password in it, and these
+        particular elements are the ones pointing at ``~/.clustrix/.env``,
+        so reaching them is reaching the file without having to know where
+        it is. ``get_credential_manager()._sources[0].get_credentials("ssh")``
+        returned the password with no recipient named and no frame judged --
+        which is the same door ``_stored_credential`` was, and an underscore
+        was already found to be an insufficient lock for that one.
+
+        So the same lock: :func:`clustrix.credential_release.assert_called_from`,
+        which admits only :data:`~clustrix.credential_release.SOURCE_READERS`
+        of this module. It is always on and makes no reference to tests.
+        Constructing a :class:`DotEnvCredentialSource` over a path of your
+        own is untouched and is not a bypass -- a caller that already holds
+        the path can read the file with ``open``. What this guards is the
+        *manager's* list.
+        """
+        from .credential_release import SOURCE_READERS, STORE_MODULE, assert_called_from
+
+        assert_called_from(STORE_MODULE, SOURCE_READERS)
+        return self.__sources
 
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize credential manager with automatic setup."""
@@ -262,7 +287,7 @@ class FlexibleCredentialManager:
         # the *method* private while leaving the objects it reads reachable
         # through a public attribute closed the door and left the window
         # open.
-        self._sources = [
+        self.__sources = [
             DotEnvCredentialSource(self.env_file),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
@@ -340,7 +365,7 @@ class FlexibleCredentialManager:
         who is about to receive them. Deciding that is
         :func:`clustrix.credential_release.release_credential`, whose first
         positional parameter is the recipient, and this raises for anybody
-        else -- see :func:`clustrix.credential_release.assert_called_from_the_gate`.
+        else -- see :func:`clustrix.credential_release.assert_called_from`.
 
         The guard is always on. It makes no reference to tests and behaves
         identically whether or not pytest is running, so it is a fact about
@@ -354,11 +379,12 @@ class FlexibleCredentialManager:
         cluster password without saying who for.
         """
         from .credential_release import (
+            GATE_MODULE,
             STORE_CALLERS,
-            assert_called_from_the_gate,
+            assert_called_from,
         )
 
-        assert_called_from_the_gate(STORE_CALLERS)
+        assert_called_from(GATE_MODULE, STORE_CALLERS)
 
         logger.debug(f"Looking up {provider} credentials...")
 

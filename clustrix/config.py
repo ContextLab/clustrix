@@ -1108,6 +1108,24 @@ def set_config_source(
     loader in the tree knows which file it opened and so leaves the default
     alone; the only caller that passes False is ``__post_init__``, whose
     source is inferred rather than known.
+
+    **A ``record_host=False`` mark does not survive ``dataclasses.replace``,
+    and that is the point rather than a hole.** ``replace`` rebuilds the
+    object, ``__post_init__`` runs again, and with no untrusted read in
+    flight the second time it infers ``runtime``. Making the mark survive
+    would mean writing the *hostname* down permanently on the strength of a
+    guess -- the claim this parameter exists to refuse, and the one measured
+    over-tainting 96,739 of 96,740 constructions with no way back.
+
+    What makes that safe is that the guess never fires on the attacker's own
+    config. Every loader in the tree calls this function *itself*, with
+    ``record_host`` left True, so a config actually built from a file has its
+    hostname in :data:`_HOSTS_NAMED_BY_UNTRUSTED_SOURCES` and stays refused
+    through ``replace``, ``asdict`` round trips and any rebuild --
+    ``tests/unit/test_a_cloned_repository_cannot_take_your_password.py``
+    asserts exactly that. The guess covers *other* configs, constructed
+    elsewhere in the process while that read happens to be open, and for
+    those the rebuild's answer is the accurate one.
     """
     if source not in CONFIG_SOURCES:
         raise ValueError(
