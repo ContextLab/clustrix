@@ -960,11 +960,26 @@ class TestANamedEnvironmentDoesNotPayForOneItWillNotUse:
 
         With no environment named, the same call reaches for the SSH
         connection there is none of, and says so about the remote host.
+
+        "Says so about the remote host" is checked as *naming* that host, not
+        as containing the word "remote". The probe used to swallow its own
+        failure and return ``False``, which sent the caller into a message
+        stating flatly that no matching interpreter exists on the cluster --
+        a confident claim about a machine clustrix never managed to ask
+        (#123). That message now names ``cluster_host`` directly and only
+        falls back to the literal "the remote host" when the field is empty,
+        so an assertion on the bare word passed for a reason that has since
+        stopped being true. Both spellings are accepted here because both
+        satisfy the requirement this test exists for: the reader is told
+        which end failed.
         """
         manager = self._manager()
         with pytest.raises((AttributeError, RuntimeError)) as excinfo:
             manager._setup_job_environment("/remote/job", dict(self.FUNC_DATA), None)
-        assert "remote" in str(excinfo.value).lower(), excinfo.value
+        message = str(excinfo.value)
+        assert (
+            manager.config.cluster_host in message or "remote" in message.lower()
+        ), excinfo.value
 
     def test_the_two_venv_branch_still_builds_and_says_why(self):
         """VENV1 is clustrix's own serialization venv and is still required.
