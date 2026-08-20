@@ -100,7 +100,13 @@ def cluster(
                 "memory": memory or config.default_memory,
                 "time": time or config.default_time,
                 "partition": partition or config.default_partition,
-                "environment": environment or config.conda_env_name,
+                # The per-call value only. `resolve_named_environment` falls
+                # back to `config.conda_env_name` itself, and folding the
+                # fallback in here erased the difference between "the caller
+                # asked for this environment" and "an old configuration file
+                # still names it" -- which is exactly the difference the
+                # migration notice for that field is about (#164).
+                "environment": environment,
             }
 
             # Per-job overrides the backends read off job_config. hf_jobs.py

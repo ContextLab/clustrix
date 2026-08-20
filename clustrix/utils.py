@@ -85,11 +85,11 @@ def verify_signed_payload(
 #: lines, which stop meaning what they mean the moment quotes appear in them.
 #: Anything outside this set is shell (or directive) syntax, so it is refused
 #: rather than mangled.
-_SHELL_SAFE_FRAGMENT = re.compile(r"^[A-Za-z0-9._:/=+,@%-]+$")
+_SHELL_SAFE_FRAGMENT = re.compile(r"[A-Za-z0-9._:/=+,@%-]+")
 
 #: A POSIX shell variable name. ``export`` needs the name unquoted, so the
 #: name itself can only be validated.
-_ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_ENV_VAR_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 #: Longest environment name clustrix will put in a job script. A conda
 #: environment is a directory, so the name is bounded by the filesystem's
@@ -98,7 +98,42 @@ _ENV_VAR_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 #: environment, and refusing it early beats pasting it into a command line.
 _MAX_ENV_NAME_LENGTH = 255
 
-#: Where clustrix looks for a conda installation, in the order it looks.
+#: Shell helpers every conda search emits before it searches.
+#:
+#: Two things the search needs, written once because the SSH probe and the
+#: generated job script both need them and a second copy is how one path gets
+#: fixed while the other keeps failing.
+#:
+#: ``_clustrix_conda_base`` asks conda where it lives. It is bounded in time
+#: (a ``conda info --base`` against a wedged NFS home hangs, and it hung the
+#: whole job because nothing had a timeout) and reduced to the first line
+#: that is an absolute path, because conda prefixes that output with an
+#: upgrade warning often enough that taking the whole thing silently defeated
+#: the entry.
+#:
+#: ``_clustrix_conda_works`` is the difference between "conda is a name on
+#: PATH" and "conda can run this job". At sites where conda is a wrapper that
+#: refuses to act until conda.sh has been sourced, the first is true and the
+#: second is false, so ``command -v`` alone is not the question to ask.
+#:
+#: No single quote appears in either: the SSH probe wraps them in
+#: ``bash -lc '...'``.
+_CONDA_SHELL_HELPERS = (
+    "_clustrix_conda_base() { "
+    "command -v conda >/dev/null 2>&1 || return 0; "
+    "if command -v timeout >/dev/null 2>&1; then "
+    "timeout 10 conda info --base 2>/dev/null; "
+    "else conda info --base 2>/dev/null; fi "
+    '| grep -E "^/" | head -1 || true; return 0; }',
+    "_clustrix_conda_works() { "
+    "command -v conda >/dev/null 2>&1 || return 1; "
+    "if command -v timeout >/dev/null 2>&1; then "
+    "timeout 10 conda --version >/dev/null 2>&1; "
+    "else conda --version >/dev/null 2>&1; fi; }",
+)
+
+#: Where clustrix looks for a conda installation, in the order it looks, as
+#: ``(shell word, what to call it in a diagnostic)``.
 #:
 #: Used in exactly two places, and deliberately defined once. The SSH probe in
 #: ``setup_two_venv_environment`` runs this search when it *prepares* a job,
@@ -107,27 +142,36 @@ _MAX_ENV_NAME_LENGTH = 255
 #: environment replication. Two copies of this list is how one path gets
 #: fixed while the other keeps failing with "conda: command not found".
 #:
-#: The order is: whatever conda is already active in this shell; whatever
-#: conda says its own base is; then the four per-user install locations
-#: miniconda/anaconda/miniforge use by default; then the three system-wide
-#: ones. Each entry is a shell word, safe inside single quotes.
+#: The order is semantic, not cosmetic: whatever conda is already active in
+#: this shell, then whatever conda says its own base is, then the three
+#: per-user install locations miniconda/anaconda/miniforge use by default,
+#: then the three system-wide ones. A system-wide ``/opt/conda`` must not
+#: outrank the environment the user is standing in, so this order is pinned
+#: by a test.
+#:
+#: Every parameter expansion is written ``${VAR:-}``. A job whose
+#: ``pre_execution_commands`` contain ``set -u`` -- or whose site profile
+#: exports ``SHELLOPTS=nounset``, which is inherited -- died on the bare
+#: ``"$CONDA_PREFIX"`` with "unbound variable" before it looked anywhere,
+#: even on a node that had conda.
 _CONDA_SEARCH_LOCATIONS = (
-    '"$CONDA_PREFIX"',
-    '"$(conda info --base 2>/dev/null)"',
-    '"$HOME/miniconda3"',
-    '"$HOME/anaconda3"',
-    '"$HOME/miniforge3"',
-    "/opt/conda",
-    "/usr/local/miniconda3",
-    "/usr/local/anaconda3",
+    ('"${CONDA_PREFIX:-}"', "$CONDA_PREFIX"),
+    ('"$(_clustrix_conda_base)"', "$(conda info --base)"),
+    ('"${HOME:-}/miniconda3"', "$HOME/miniconda3"),
+    ('"${HOME:-}/anaconda3"', "$HOME/anaconda3"),
+    ('"${HOME:-}/miniforge3"', "$HOME/miniforge3"),
+    ("/opt/conda", "/opt/conda"),
+    ("/usr/local/miniconda3", "/usr/local/miniconda3"),
+    ("/usr/local/anaconda3", "/usr/local/anaconda3"),
 )
 
+#: The search list as one shell word list, for a ``for`` loop.
+_CONDA_SEARCH_WORDS = " ".join(word for word, _ in _CONDA_SEARCH_LOCATIONS)
+
 #: The same list as prose, for the message a job prints when none of them
-#: exists. Written with single quotes around it in the script, so the ``$``
-#: below is never expanded.
-_CONDA_SEARCH_LOCATIONS_HUMAN = ", ".join(
-    location.strip('"') for location in _CONDA_SEARCH_LOCATIONS
-)
+#: works. Written with single quotes around it in the script, so the ``$``
+#: below is printed rather than expanded.
+_CONDA_SEARCH_LOCATIONS_HUMAN = ", ".join(human for _, human in _CONDA_SEARCH_LOCATIONS)
 
 
 def validate_shell_fragment(config_key: str, value: Any) -> str:
@@ -150,7 +194,11 @@ def validate_shell_fragment(config_key: str, value: Any) -> str:
         ValueError: naming ``config_key`` and the offending value.
     """
     text = str(value)
-    if not _SHELL_SAFE_FRAGMENT.match(text):
+    # ``fullmatch``, not ``match``. ``$`` matches before a trailing newline, so
+    # ``re.match`` accepted ``"/scratch/work\n"`` -- which splits the
+    # ``#SBATCH --output=`` line it is pasted into, after which SLURM ignores
+    # every directive below it and the job runs with the wrong resources.
+    if not _SHELL_SAFE_FRAGMENT.fullmatch(text):
         raise ValueError(
             f"clustrix config {config_key}={text!r} cannot be used: it is "
             "written into a generated job script at a place that must stay "
@@ -161,17 +209,52 @@ def validate_shell_fragment(config_key: str, value: Any) -> str:
     return text
 
 
+#: Characters conda itself refuses in an environment name (a name is a
+#: directory component, and ``:`` and ``#`` have meaning in conda's own
+#: parsing), plus the four that would change what the generated script *does*
+#: rather than what it names.
+#:
+#: ``'`` closes the single-quoted diagnostic the name is printed inside.
+#: ``"``, ``$``, ``\`` and a backtick are the characters that make a shell
+#: word expand, and the name is also written into a bare ``# Using conda
+#: environment <name>`` comment; a comment does not expand today, but a name
+#: that would run a command if any emitter ever quoted it differently is not
+#: worth accepting to support environments nobody has.
+#:
+#: Everything else is allowed, including non-ASCII: ``análisis`` and ``环境``
+#: are environments conda creates happily, and clustrix refusing them was an
+#: accident of reusing the scheduler-directive allowlist, which exists for a
+#: different problem.
+_ENV_NAME_FORBIDDEN = "/:#'\"$\\`"
+
+
 def validate_environment_name(config_key: str, value: Any) -> str:
     """Refuse a cluster environment name that is not a name.
 
-    ``validate_shell_fragment`` is necessary here and not sufficient. The
-    value lands in ``conda run -n <name>``, which is an *argument* position,
-    and the shell-safe allowlist contains ``-`` because scheduler directives
-    need it. So ``environment="--no-capture-output"`` passes that check and
-    then parses as an option to ``conda run`` rather than as an environment:
-    the job runs, quietly, somewhere other than where the user asked. Same
-    for ``-n`` and ``-p``. An environment name is never an option flag, so a
-    leading ``-`` is refused outright rather than enumerated flag by flag.
+    The rules are conda's own, plus what this program does with the value.
+    Conda bars ``/``, whitespace, ``:`` and ``#`` in an environment name; so
+    does this. It does *not* bar non-ASCII, and neither does this: the
+    previous implementation reused ``validate_shell_fragment``'s allowlist,
+    which exists to keep shell syntax out of an unquoted scheduler directive,
+    and as a side effect refused ``análisis``, ``环境``, ``env(1)``,
+    ``my~env`` and ``a&b`` -- all of them environments conda will create.
+
+    Four more characters are refused than conda refuses, and each has a
+    reason in this program: see ``_ENV_NAME_FORBIDDEN``.
+
+    A leading ``-`` is refused because the value lands in ``conda run -n
+    <name>``, an *argument* position: ``environment="--no-capture-output"``
+    otherwise parses as an option and the job runs, quietly, somewhere other
+    than where the user asked. Same for ``-n`` and ``-p``. An environment name
+    is never an option flag, so a leading ``-`` goes rather than enumerating
+    flags one by one.
+
+    A path is refused rather than accepted and then failed on. Conda addresses
+    an environment by *prefix* with ``conda run -p /path``; clustrix only ever
+    emits ``-n``, so a path used to pass validation and then fail inside conda
+    on the compute node, with the job already queued and the error attributed
+    to the cluster. Prefix environments are a feature clustrix does not have,
+    and the honest place to say so is here.
 
     The length bound is the filesystem's, since a conda environment is a
     directory (see ``_MAX_ENV_NAME_LENGTH``).
@@ -186,7 +269,48 @@ def validate_environment_name(config_key: str, value: Any) -> str:
     Raises:
         ValueError: naming ``config_key`` and the offending value.
     """
-    text = validate_shell_fragment(config_key, value)
+    text = str(value)
+    # Not folded into the checks below: an empty name is not an unsafe name,
+    # it is the absence of one, and every caller that can produce it is
+    # supposed to have stopped before here. Reaching this with "" means a
+    # caller lost the "no environment was named" case, and `conda run -n ''`
+    # is not what to do about that.
+    if not text:
+        raise ValueError(
+            f"clustrix config {config_key} is empty. An empty string is not "
+            "the name of an environment; leave the setting unset (or null) "
+            "to run in the environment clustrix replicates from your local "
+            "one."
+        )
+    if "/" in text:
+        raise ValueError(
+            f"clustrix config {config_key}={text!r} looks like a path. "
+            "clustrix runs a job in a *named* conda environment (`conda run "
+            "-n <name>`) and has no support for addressing one by prefix "
+            "(`conda run -p <path>`), so a path here would be accepted now "
+            "and fail on the compute node with the job already queued. Give "
+            "the environment's name, as `conda env list` shows it."
+        )
+    if text in (".", ".."):
+        raise ValueError(
+            f"clustrix config {config_key}={text!r} is a directory reference, "
+            "not an environment name. conda refuses it too."
+        )
+    for character in text:
+        if character.isspace() or not character.isprintable():
+            raise ValueError(
+                f"clustrix config {config_key}={text!r} cannot be used: a "
+                "conda environment name contains no whitespace and no "
+                "control characters. conda refuses such a name as well."
+            )
+        if character in _ENV_NAME_FORBIDDEN:
+            raise ValueError(
+                f"clustrix config {config_key}={text!r} cannot be used: it "
+                f"contains {character!r}, which is either refused by conda "
+                "itself or would change what the generated job script runs "
+                "rather than which environment it runs in. Allowed is any "
+                "other printable character, including non-ASCII."
+            )
     if text.startswith("-"):
         raise ValueError(
             f"clustrix config {config_key}={text!r} cannot be used: it is "
@@ -211,7 +335,9 @@ def validate_env_var_name(name: str) -> str:
     ``export FOO=bar; touch /tmp/pwn=1`` is a valid dict key and an injection.
     The value beside it is quoted, but the name cannot be.
     """
-    if not _ENV_VAR_NAME.match(str(name)):
+    # ``fullmatch`` for the same reason as ``validate_shell_fragment``: with
+    # ``match``, ``"FOO\n"`` passed and carried a newline into ``export``.
+    if not _ENV_VAR_NAME.fullmatch(str(name)):
         raise ValueError(
             f"clustrix config environment_variables has an invalid name "
             f"{name!r}. A shell variable name must start with a letter or "
@@ -1541,7 +1667,8 @@ def setup_two_venv_environment(
     conda_setup_prefix = ""
     conda_probe = (
         "bash -lc '"
-        f"for p in {' '.join(_CONDA_SEARCH_LOCATIONS)}; do "
+        f"{' '.join(_CONDA_SHELL_HELPERS)} "
+        f"for p in {_CONDA_SEARCH_WORDS}; do "
         'if [ -n "$p" ] && [ -f "$p/etc/profile.d/conda.sh" ]; then '
         'echo "$p/etc/profile.d/conda.sh"; exit 0; fi; done; '
         # An uninitialised conda wrapper names conda.sh in the very error it
@@ -2268,33 +2395,59 @@ def _conda_discovery_lines(named_env: str) -> list:
     contains no quote and no whitespace and is safe inside the single-quoted
     diagnostics below; the search list is single-quoted for the same reason,
     so the ``$CONDA_PREFIX`` named in the message is printed, not expanded.
+
+    Three orderings matter here, and each was wrong once:
+
+    * A conda that already works is left alone, so the search runs *inside*
+      ``if ! _clustrix_conda_works``. With the search first, a site that puts
+      a module-loaded conda on PATH -- whose base holds no
+      ``etc/profile.d/conda.sh`` -- had the user's ``~/miniconda3`` sourced
+      over the top of it, and ``-n <name>`` then resolved in the wrong
+      installation entirely.
+    * Sourcing is checked by its *effect*, not its exit status. A ``conda.sh``
+      that is unreadable or truncated leaves ``conda`` still missing, and the
+      old shape took the "sourced it, all good" branch and skipped the
+      diagnostic, so the job died at ``conda: command not found`` (rc 127)
+      with none of the message below.
+    * The diagnostic is the last word either way, so failure names the
+      environment, the places searched and the two settings that fix it.
     """
-    locations = " ".join(_CONDA_SEARCH_LOCATIONS)
-    return [
-        "# clustrix: a batch shell does not initialise conda, and this job was",
-        "# not preceded by environment replication, so no conda installation",
-        "# was measured for this cluster. Find one now, or stop with a reason.",
-        "_clustrix_conda_sh=''",
-        f"for _clustrix_base in {locations}; do",
-        '  if [ -n "$_clustrix_base" ] && '
-        '[ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then',
-        '    _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"',
-        "    break",
-        "  fi",
-        "done",
-        'if [ -n "$_clustrix_conda_sh" ]; then',
-        '  . "$_clustrix_conda_sh"',
-        "elif ! command -v conda >/dev/null 2>&1; then",
-        f"  echo 'clustrix: cannot run this job in conda environment "
-        f"{named_env}: no conda installation was found on this node.' >&2",
-        "  echo 'clustrix: looked for etc/profile.d/conda.sh under "
-        f"{_CONDA_SEARCH_LOCATIONS_HUMAN}.' >&2",
-        "  echo 'clustrix: if this cluster initialises conda some other way, "
-        'put that in module_loads (e.g. module_loads=["anaconda"]) or '
-        "pre_execution_commands; both run before this point.' >&2",
-        "  exit 1",
-        "fi",
-    ]
+    return (
+        [
+            "# clustrix: a batch shell does not initialise conda, and this job was",
+            "# not preceded by environment replication, so no conda installation",
+            "# was measured for this cluster. Find one now, or stop with a reason.",
+        ]
+        + list(_CONDA_SHELL_HELPERS)
+        + [
+            "if ! _clustrix_conda_works; then",
+            '  _clustrix_conda_sh=""',
+            f"  for _clustrix_base in {_CONDA_SEARCH_WORDS}; do",
+            '    if [ -n "$_clustrix_base" ] && '
+            '[ -f "$_clustrix_base/etc/profile.d/conda.sh" ]; then',
+            '      _clustrix_conda_sh="$_clustrix_base/etc/profile.d/conda.sh"',
+            "      break",
+            "    fi",
+            "  done",
+            '  if [ -n "$_clustrix_conda_sh" ]; then',
+            # `|| true` so that a conda.sh which fails part way through does
+            # not take the job down before the message below can explain it,
+            # and so that `set -e` from pre_execution_commands cannot either.
+            '    . "$_clustrix_conda_sh" || true',
+            "  fi",
+            "fi",
+            "if ! _clustrix_conda_works; then",
+            f"  echo 'clustrix: cannot run this job in conda environment "
+            f"{named_env}: no conda installation was found on this node.' >&2",
+            "  echo 'clustrix: looked for etc/profile.d/conda.sh under "
+            f"{_CONDA_SEARCH_LOCATIONS_HUMAN}.' >&2",
+            "  echo 'clustrix: if this cluster initialises conda some other way, "
+            'put that in module_loads (e.g. module_loads=["anaconda"]) or '
+            "pre_execution_commands; both run before this point.' >&2",
+            "  exit 1",
+            "fi",
+        ]
+    )
 
 
 def generate_two_venv_execution_commands(
@@ -2826,7 +2979,8 @@ def resolve_named_environment(
     cannot be picked up here by accident.
     """
     from_config = str(getattr(config, "conda_env_name", None) or "").strip()
-    name = job_config.get("environment") or from_config
+    per_call = str(job_config.get("environment") or "").strip()
+    name = per_call or from_config
     if not name:
         return None
     stripped = str(name).strip()
@@ -2840,7 +2994,13 @@ def resolve_named_environment(
     # that lands unquoted -- and, because ``conda run -n`` is an argument
     # position, against being an option flag as well.
     validated = validate_environment_name("conda_env_name", stripped)
-    if from_config and from_config == stripped:
+    # Announced only when the standing configuration is what chose the
+    # environment. `@cluster(environment="prod")` on a config that also says
+    # `conda_env_name="prod"` is a decision made today that happens to agree
+    # with the file, not a value left in a file nobody has read since -- and
+    # telling that user their configuration "is now honoured" points them at
+    # a setting that had no part in the choice.
+    if not per_call and from_config:
         _warn_conda_env_name_is_now_honoured(validated)
     return validated
 
