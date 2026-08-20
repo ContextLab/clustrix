@@ -36,8 +36,8 @@ that catches everything and then does nothing about it, unless the site is
 recorded: as a decision in ``JUSTIFIED_SWALLOWS`` or as a defect with an issue
 number in ``TRACKED_DEFECTS``. It is fast, it reaches handlers no test can
 drive, and it is worth having for that. It is also porous, and this module
-says how porous rather than implying otherwise: four successive AST guards in
-this repository have now been defeated 12, 30, 14-and-16, and 22 ways
+says how porous rather than implying otherwise: five successive AST guards in
+this repository have now been defeated 12, 30, 14-and-16, 22 and 8 ways
 respectively. Its reach is executable -- ``BYPASSES`` (caught), ``ACCEPTED``
 (correctly ignored), ``BLIND_SPOTS`` (missed on purpose, each asserted to be
 missed, counted by ``KNOWN_BLIND_SPOTS``).
@@ -338,6 +338,51 @@ def test_a_bound_that_cannot_be_folded_gives_no_range_rather_than_a_wrong_one():
     assert folded.result == {"start": 0, "stop": 5, "step": 1}
 
 
+def test_a_bug_inside_the_range_evaluator_is_not_laundered_into_unknown():
+    """The narrowed tuple is the fix; the test above passes without it.
+
+    ``safe = False`` -- "this bound is not statically known" -- is the correct
+    answer for the errors constant folding can really raise, and the test
+    above pins that. What it does not pin is the *narrowing*: widening either
+    handler back to ``except Exception`` still returns an unknown bound for a
+    ``TypeError``, so that test stays green while the defect this round fixed
+    comes straight back.
+
+    So drive something the evaluator has no correct answer for. ``local_vars``
+    is real bound arguments -- ``find_parallelizable_loops`` hands the caller's
+    own values straight to ``SafeRangeEvaluator`` -- and an ``int`` subclass is
+    an ``int``, so ``isinstance(value, int)`` accepts it and the evaluator
+    folds ``n + 1`` by calling the user's ``__add__``. When that raises
+    something folding cannot raise, the only honest outcome is for it to
+    propagate: reporting it as "unknown bound" hides a defect behind a
+    plausible answer, which is the whole of issue #123.
+
+    Both handlers are on this path -- ``_evaluate_binop`` first, then
+    ``visit_Call`` -- so widening either one turns the raise back into
+    ``safe is False`` and fails here.
+    """
+
+    from clustrix.loop_analysis import SafeRangeEvaluator
+
+    class EvaluatorBug(Exception):
+        """Stands in for a defect in the evaluator, not a foldable bound."""
+
+    class Bound(int):
+        def __add__(self, other):
+            raise EvaluatorBug("constant folding is broken")
+
+    evaluator = SafeRangeEvaluator({"n": Bound(5)})
+
+    with pytest.raises(EvaluatorBug):
+        evaluator.visit(ast.parse("range(n + 1)", mode="eval").body)
+
+    # ...and the swallow-worthy error is still swallowed, or the narrowing has
+    # merely been traded for a different wrong answer.
+    foldable = SafeRangeEvaluator({})
+    foldable.visit(ast.parse('range("a" + 1)', mode="eval").body)
+    assert (foldable.safe, foldable.result) == (False, None)
+
+
 # ---------------------------------------------------------------------------
 # utils: serialization must not degrade to a by-reference payload
 # ---------------------------------------------------------------------------
@@ -468,6 +513,65 @@ def test_a_listening_socket_is_reported_as_reachable(server, caplog):
 
     assert (reachable, reason) == (True, "")
     assert caplog.records == []
+
+
+def _press_test_config(host, port):
+    """Drive the widget's real "Test configuration" button for ``host:port``.
+
+    Everything here is real: a real ``EnhancedClusterConfigWidget`` with real
+    ipywidgets fields, and ``_on_test_config`` is the callback the button is
+    actually wired to. Leaving the username empty stops the run right after
+    the network probe, which is the step under test; ``status_output`` is a
+    real ``widgets.Output``, which outside a kernel passes ``print`` straight
+    through to stdout, so ``capsys`` sees exactly what a user would.
+    """
+    widget = EnhancedClusterConfigWidget()
+    widget.cluster_type.value = "ssh"
+    widget.host_field.value = host
+    widget.port_field.value = port
+    widget.username_field.value = ""
+    widget._on_test_config(None)
+
+
+def test_the_widget_does_not_tell_the_user_a_host_is_down_on_no_evidence(capsys):
+    """The tri-state is only worth having if the caller renders it.
+
+    The three tests above pin ``_test_remote_connectivity``'s return value,
+    and they are not enough: deleting the caller's ``if reachable is None:``
+    branch leaves all of them green and reproduces the headline defect
+    verbatim -- ``.invalid``, which RFC 2606 reserves so that it can never
+    resolve, comes back out of the widget as "Cannot reach
+    no-such-host.invalid:22 ... Check if the hostname/IP is correct and
+    accessible". The hostname is correct. Clustrix never managed to ask.
+
+    What the user reads is the product, so assert on what the user reads.
+    """
+    _press_test_config("no-such-host.invalid", 22)
+    printed = capsys.readouterr().out
+
+    assert "Could not tell whether no-such-host.invalid:22 is reachable" in printed
+    assert "NOT evidence that the host is down" in printed
+    assert "Cannot reach" not in printed, (
+        "the widget claimed a host was unreachable on the strength of a probe "
+        "that never ran"
+    )
+
+
+def test_the_widget_still_reports_a_refusal_it_really_measured(capsys):
+    """The negative control, or the test above is satisfied by saying nothing.
+
+    Port 1 on the loopback interface is a real TCP connect that is really
+    refused, so here the widget has measured the host and must say so plainly.
+    """
+    _press_test_config("127.0.0.1", 1)
+    printed = capsys.readouterr().out
+
+    assert "Cannot reach 127.0.0.1:1" in printed
+    assert "Check if the hostname/IP is correct and accessible" in printed
+    assert "Could not tell whether" not in printed, (
+        "a refusal the probe really measured was downgraded to 'I could not "
+        "tell', which is the opposite failure and just as misleading"
+    )
 
 
 def test_a_profile_file_that_could_not_be_read_says_so(tmp_path, caplog):
@@ -758,7 +862,7 @@ TRACKED_DEFECTS = {
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: They fall into seven root causes, and the first one is the big one:
+#: They fall into eight root causes, and the first one is the big one:
 #:
 #: A. **Any call at all counts as reporting.** Six spellings are recorded
 #:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
@@ -786,7 +890,21 @@ TRACKED_DEFECTS = {
 #: G. **Two swallows in one function.** Keys are per function, so a justified
 #:    site licenses a second, unjustified one beside it. Narrowing the key to
 #:    a line number would make every entry rot on the next edit above it.
-KNOWN_BLIND_SPOTS = 12
+#: H. **Dead code the pruner cannot model.** ``_live_statements`` folds
+#:    ``if <constant>`` and ``while <constant>`` and nothing else, so a
+#:    ``raise`` that can never run still reads as a re-raise. Eight spellings
+#:    are recorded below: a loop over an empty tuple or list, a ``match`` case
+#:    that cannot be selected, a nested handler for an exception its body
+#:    cannot raise, a membership test in an empty container, an ``await`` and
+#:    a ``yield`` that are never reached or never driven, and an exception
+#:    accessor spelled on an unrelated object. Deciding a statement is
+#:    unreachable in general is the halting problem; each guard added here so
+#:    far has been defeated by the next spelling, and this family is recorded
+#:    rather than chased for that reason. None of the eight occurs in the
+#:    package -- ``test_the_lint_finds_no_unrecorded_silent_swallow`` scans
+#:    for real handlers, and the behavioural tests in the first half of this
+#:    module are what actually guarantee those.
+KNOWN_BLIND_SPOTS = 20
 
 
 class Swallow(NamedTuple):
@@ -1632,6 +1750,73 @@ BLIND_SPOTS = {
                     self.other()
                 except Exception:
                     pass
+    """,
+    # H. dead code the pruner cannot model
+    "a raise in a loop over an empty tuple": """
+        def f():
+            try:
+                g()
+            except Exception:
+                for _ in ():
+                    raise
+    """,
+    "a raise in a match case that can never be selected": """
+        def f():
+            try:
+                g()
+            except Exception:
+                match 0:
+                    case 1:
+                        raise
+    """,
+    "a raise in a nested handler that can never fire": """
+        def f():
+            try:
+                g()
+            except Exception:
+                try:
+                    pass
+                except ZeroDivisionError:
+                    raise
+    """,
+    "a raise guarded by a membership test in an empty container": """
+        def f():
+            try:
+                g()
+            except Exception:
+                if 0 in ():
+                    raise
+    """,
+    "a raise under a with block in a loop over an empty list": """
+        def f(x):
+            try:
+                g()
+            except Exception:
+                for _ in []:
+                    with x:
+                        raise
+    """,
+    "an await the empty loop around it never reaches": """
+        async def f():
+            try:
+                g()
+            except Exception:
+                for _ in ():
+                    await h()
+    """,
+    "a yield in a generator nobody drains": """
+        def f():
+            try:
+                g()
+            except Exception:
+                yield 1
+    """,
+    "an exception accessor named on an unrelated object": """
+        def f(SOME):
+            try:
+                g()
+            except Exception:
+                value = SOME.format_exc
     """,
 }
 

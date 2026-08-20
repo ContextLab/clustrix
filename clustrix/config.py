@@ -774,6 +774,13 @@ def get_config() -> ClusterConfig:
     is checked by
     ``tests/unit/test_import_has_no_side_effects.py::test_nothing_binds_the_singleton_by_name``,
     which found two by-name importers the first time it was run.
+
+    Call this each time you need the configuration rather than holding on to
+    what it returns: ``load_config`` *rebinds* the singleton to a new
+    ``ClusterConfig``, so a reference taken earlier keeps the values it had
+    then and silently stops tracking the live configuration. (``configure``
+    mutates in place, so a held reference does follow that one -- which is
+    exactly what makes the difference easy to miss.)
     """
     _ensure_default_config_loaded()
     return _config
