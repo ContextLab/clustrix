@@ -996,3 +996,51 @@ in flight on `work/fixes`; #171 is still queued. Fold both in before applying.
   **open**, each with the reason it cannot be closed locally.
 - The "#165 Apply is a no-op" report is explicitly **not** written up: it is
   true on `work/fixes` alone and resolved by the merge.
+
+## Route 13 fully closed at seven sites (`19a5026` on `work/credential-gate`)
+
+2045 passed / 0 failed; black 26.3.1, flake8, mypy clean. **`sphinx -W` exit 0
+verified by me** on this branch, closing the agent's stated gap (d) — sphinx is
+not in `rt4venv`; it lives in `/private/tmp/clustrix-docs-venv`. The worktree
+was left clean.
+
+Two mechanisms worth remembering:
+
+- **`IdentitiesOnly=yes` alone is insufficient.** `ssh -G` shows the default
+  identity files survive it. The fix needed `IdentityFile=<the key being
+  deployed>` and `IdentityAgent=none` as well.
+- **`ssh-copy-id` pins identities only in its *filter* step.** The invocation
+  that actually logs in and appends to `authorized_keys` runs plain `ssh`. So
+  reading the first invocation and concluding it was safe would have been wrong.
+
+Measured, not argued: with a repo-named host under the **default `reject`**
+policy, `known_hosts` went 0 → 882 bytes. `add_host_key` is now conditional on
+`auto_add` and stays exported for deliberate use. Its #123-shape swallow was
+fixed too — a failed scan and an empty scan are now distinguishable.
+
+The AST rule was extended to `subprocess` invocations of ssh/ssh-copy-id/scp/
+sftp, anchored on `subprocess.*` so a list like `["ssh","huggingface"]` is not a
+false positive, with a self-test.
+
+**A test was rewritten, not relaxed**, and said so:
+`test_deploy_public_key_ssh_copy_id_success` asserted the *defective* argv.
+
+### Stated honestly rather than left silent — and one is a real remaining hole
+
+- **`ssh_host_key_policy` is an ordinary declared field**, so an untrusted
+  `./clustrix.yml` can set `auto_add` itself. Same shape as route 10. Recorded
+  in `test_host_key_policy.py`. **This is a genuine open hole**, not a caveat —
+  the next red-team is asked to establish how far it actually gets an attacker.
+- The wire proof measures only the **ssh-agent half**: OpenSSH resolves
+  `~/.ssh/id_rsa` from the passwd database rather than `$HOME`, so no test can
+  redirect the default-identity half. The `ssh -v` trace does show the real
+  defaults being attempted.
+- The AST rule cannot see command lists built across functions, `shell=True`,
+  or `ssh-keyscan` — all three in its docstring.
+
+## Merge target re-verified at current tips
+
+base `0cbce38` + silent-failures `fcd922a` + widget-apply `feb1fd9` + named-env
+`f2a152d` = `376701f`: **2175 passed, 17 skipped, 0 failed**, black/flake8/mypy
+clean. Same three conflicts, same resolutions, executed twice independently
+with identical results — the recorded plan is proven rather than predicted.
