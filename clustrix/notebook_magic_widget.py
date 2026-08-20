@@ -29,6 +29,7 @@ except ImportError:
     from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import (
+    ClusterConfig,
     configure,
     get_config,
     get_config_dir,
@@ -37,6 +38,11 @@ from .config import (
     strip_secret_fields,
     write_text_securely,
 )
+
+# The one gate. The connectivity test is a connection, so it asks the same
+# question ``executor_connections`` and ``filesystem`` ask, of the same
+# function -- see ``_config_under_test``.
+from .credential_release import CredentialTarget, release_credential
 
 # The one implementation of "create each level 0700"; see its docstring for
 # why ``mkdir(parents=True, mode=0o700)`` is not the same thing. Imported
@@ -1055,6 +1061,46 @@ class EnhancedClusterConfigWidget:
         except Exception:
             return False
 
+    def _config_under_test(self, config: Dict[str, Any]) -> ClusterConfig:
+        """The widget's fields as a real ``ClusterConfig``, for the gate to judge.
+
+        The gate's subject is a ``ClusterConfig``: ``CredentialTarget`` is
+        built from one and every provenance rule is derived from one. This
+        widget carries a dict of form fields instead, and that difference is
+        the whole reason the connectivity test was the last unconverted call
+        site. Building the object here is what keeps it on the *single* rule;
+        a second, weaker copy of the rule written to fit the dict is how the
+        two would drift, and a rule that has drifted is one that no longer
+        decides anything.
+
+        Only the fields the decision and the connection actually use, and
+        deliberately not ``configure(**config)``: applying the form is a
+        different act from asking a question about it -- it writes the live
+        configuration -- and the widget re-emits keys (``name``, ``queue``,
+        ``ssh_key_path``) that are not settings at all. ``ssh_key_path`` is
+        this widget's spelling of ``key_file``, which is the field the gate
+        and the connection both know.
+
+        Provenance is recorded the same way Apply records it, from the same
+        map: a profile the widget *found* in a file is not a profile the user
+        typed, however many times it is copied between a dict and an object.
+        That is belt and braces over the hostname record
+        ``_initialize_configs`` already wrote -- that record is keyed by the
+        name, outranks any object, and is what actually refuses here -- but a
+        config built out of a file should say so rather than rely on it.
+        """
+        cluster_config = ClusterConfig(
+            cluster_host=config.get("cluster_host"),
+            username=config.get("username") or "",
+            cluster_port=config.get("cluster_port", 22),
+            key_file=config.get("ssh_key_path") or None,
+            password=config.get("password") or None,
+        )
+        discovered_source = self.config_source_map.get(self.current_config_name or "")
+        if discovered_source:
+            set_config_source(cluster_config, discovered_source)
+        return cluster_config
+
     def _test_ssh_connectivity(self, config, timeout=10):
         """Test SSH connectivity with provided credentials."""
         try:
@@ -1071,15 +1117,55 @@ class EnhancedClusterConfigWidget:
                 "username": config.get("username"),
                 "port": config.get("cluster_port", 22),
                 "timeout": timeout,
+                # Paramiko searches ``~/.ssh`` and the ssh-agent by itself
+                # unless told not to, and this left both at their defaults:
+                # pressing "Test" in a notebook opened inside a cloned
+                # repository authenticated to the host that repository named,
+                # with the victim's own ``~/.ssh/id_rsa``, on a form carrying
+                # no credential at all. That is route 13, and it is the same
+                # rule as the other four call sites, so the gate answers it
+                # and this one does not. Off until it says otherwise.
+                "look_for_keys": False,
+                "allow_agent": False,
             }
 
-            # Add authentication
-            if config.get("password"):
-                connect_params["password"] = config["password"]
-            elif config.get("ssh_key_path"):
-                key_path = Path(config["ssh_key_path"]).expanduser()
+            cluster_config = self._config_under_test(config)
+            try:
+                target = CredentialTarget.for_config(cluster_config)
+            except ValueError as exc:
+                # A half-filled form names nobody to decide about, so there
+                # is nothing to test and nothing to offer. Reported rather
+                # than raised -- the user is still typing -- and reported
+                # *instead of* connecting, because "no host yet" must not
+                # read as "no restriction".
+                return False, str(exc)
+
+            # The same sources and the same precedence as the execution and
+            # filesystem paths: ``config-field`` first keeps this button's
+            # own fields ahead of a stored credential, and puts them behind
+            # the rule.
+            release = release_credential(
+                target,
+                provider="ssh",
+                config=cluster_config,
+                sources=("config-field", "stored-credential", "environment"),
+            )
+            connect_params["look_for_keys"] = release.local_identities
+            connect_params["allow_agent"] = release.local_identities
+            if release.refusal is not None:
+                logger.warning(
+                    "Not using a stored SSH credential for %s: %s.",
+                    cluster_config.cluster_host,
+                    release.refusal,
+                )
+            elif release.key_path:
+                key_path = Path(release.key_path).expanduser()
                 if key_path.exists():
                     connect_params["key_filename"] = str(key_path)
+                connect_params["look_for_keys"] = False
+            elif release.password:
+                connect_params["password"] = release.password
+                connect_params["look_for_keys"] = False
 
             ssh_client.connect(**connect_params)
 

@@ -2280,6 +2280,29 @@ def test_a_target_cannot_name_nobody(nobody):
         )
 
 
+def test_a_config_naming_no_host_makes_no_target_at_all():
+    """``str(None)`` is ``"None"``, and ``"None"`` is a perfectly good hostname.
+
+    So ``for_config`` on a config with no ``cluster_host`` built a target
+    naming the literal host ``None`` instead of raising, and the
+    ``ValueError`` that four call sites catch to mean "there is nobody to
+    release a credential to" was never raised for the one case it is named
+    after. The stringify is still there for the value it is for -- PyYAML
+    hands back an ``int`` for an unquoted ``0x7f000001``, which has to reach
+    ``__post_init__`` to be refused by it.
+    """
+    with pytest.raises(ValueError):
+        CredentialTarget.for_config(ClusterConfig(username="victim"))
+
+    # The stringify still does its job for the value it exists for.
+    assert (
+        CredentialTarget.for_config(
+            ClusterConfig(cluster_host="hpc.example.edu"), hostname=2130706433
+        ).hostname
+        == "2130706433"
+    )
+
+
 def test_a_target_cannot_declare_its_own_provenance():
     """The keyword is gone, so the forgery cannot even be written.
 
@@ -3047,6 +3070,334 @@ def test_the_local_identities_still_reach_a_host_the_user_chose(
     assert validate_ssh_key_auth(config) is True
     assert set(key_only_server.authentications) == {("victim", "publickey")}
     assert len(key_only_server.authentications) == 3
+
+
+def _the_host_is_already_known(server):
+    """A ``known_hosts`` entry for ``server``, as ``ssh-keyscan`` would write.
+
+    The widget's connectivity test verifies host keys strictly whatever the
+    file said -- ``_save_config_from_widgets`` never emits
+    ``ssh_host_key_policy``, so the dict it hands over carries none and the
+    secure default applies. Without a known key the handshake fails before
+    authentication is ever attempted, and both arms below would record
+    nothing for reasons that have nothing to do with credentials. A host the
+    user has connected to before is exactly this file, so this is the
+    precondition the route needs rather than a concession to it.
+    """
+    known_hosts = pathlib.Path.home() / ".ssh" / "known_hosts"
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    known_hosts.write_text(
+        "".join(
+            f"[{server.host}]:{server.port} {key.get_name()} {key.get_base64()}\n"
+            for key in server.host_keys()
+        ),
+        encoding="utf-8",
+    )
+    known_hosts.chmod(0o600)
+
+
+def _clusterfy_widget_testing(config_name):
+    """Drive the real ``%%clusterfy`` widget: pick the config, press Test."""
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+    assert config_name in widget.config_dropdown.options, (
+        f"the widget did not offer {config_name!r}: "
+        f"{widget.config_dropdown.options}"
+    )
+    widget.config_dropdown.value = config_name
+    widget._on_test_config(None)
+    return widget
+
+
+def test_the_widget_connectivity_test_does_not_let_paramiko_find_the_key_itself(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """Route 13 on the ``%%clusterfy`` widget's "Test configuration" button.
+
+    The last unconverted call site, and the one that looked hardest to
+    convert: ``_test_ssh_connectivity`` is handed a dict of *form fields*,
+    not a ``ClusterConfig``, so it could ask the gate only by building one or
+    by writing a second, weaker copy of the rule. It builds one --
+    ``_config_under_test`` -- because two copies of a rule like this drift,
+    and the drift is invisible until they disagree.
+
+    RED before the fix: ``[('victim', 'publickey')]``. Nothing was typed into
+    the password or key box and the repository's file names no credential of
+    any kind; paramiko found ``~/.ssh/id_rsa`` by itself, for a host a
+    ``./clustrix.yml`` chose.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file()
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+    _the_host_is_already_known(key_only_server)
+
+    _clusterfy_widget_testing("clustrix")
+
+    assert key_only_server.authentications == [], (
+        "the widget's Test button offered the victim's own key to a host "
+        "named by a working-directory file: " + repr(key_only_server.authentications)
+    )
+
+
+def test_the_widget_connectivity_test_still_reaches_a_host_the_user_chose(
+    key_only_server, env_file
+):
+    """And the button does not become one that refuses everything.
+
+    The identical widget flow, with the identical file in the clustrix
+    configuration directory instead of the working directory. Testing a
+    connection to your own cluster with the key you already have is the whole
+    purpose of the button.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file()
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    _the_host_is_already_known(key_only_server)
+
+    _clusterfy_widget_testing("config")
+
+    assert key_only_server.authentications == [
+        ("victim", "publickey")
+    ], "the widget's Test button stopped working for a host the user chose: " + repr(
+        key_only_server.authentications
+    )
+
+
+def test_a_form_with_no_host_yet_is_not_a_form_that_may_use_your_keys(tmp_path):
+    """Half-filled is neither an error to raise nor a reason to trust.
+
+    The user is still typing, so this may not blow up; there is nobody to
+    decide about, so it may not connect either. It reports and stops.
+    """
+    pytest.importorskip("ipywidgets")
+    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
+
+    widget = EnhancedClusterConfigWidget()
+
+    answer = widget._test_ssh_connectivity({"username": "victim"})
+
+    assert answer[0] is False
+    assert "host" in answer[1]
+
+
+#: Every paramiko connection has to decide whether paramiko may run its own
+#: search of ``~/.ssh`` and the ssh-agent. Both default to yes, so a call
+#: that names neither has not taken the decision -- it has inherited one.
+LOCAL_IDENTITY_SETTINGS = ("look_for_keys", "allow_agent")
+
+
+def _unpinned_paramiko_connects(text):
+    """``x.connect(...)`` calls in ``text`` that leave either setting open.
+
+    A ``connect`` call carrying keywords is paramiko's: clustrix's own
+    ``self.connect()`` takes none, and ``socket.connect((host, port))``
+    passes a positional tuple. Both settings must be named -- as literal
+    keywords on the call, or, for the call sites that assemble a ``**kwargs``
+    dict, as string keys anywhere in the innermost enclosing function.
+
+    Reading the enclosing function is what lets the rule cover the shape the
+    connection paths actually use, and it is equally the rule's limit: a
+    function that merely mentions the names passes. It detects "somebody
+    added another ``connect``", which is the realistic regression, not an
+    adversary.
+    """
+    import ast
+
+    tree = ast.parse(text)
+    offenders = []
+
+    def settings_named_in(scope):
+        return {
+            node.value
+            for node in ast.walk(scope)
+            if isinstance(node, ast.Constant) and node.value in LOCAL_IDENTITY_SETTINGS
+        }
+
+    def visit(node, scope):
+        for child in ast.iter_child_nodes(node):
+            if (
+                isinstance(child, ast.Call)
+                and isinstance(child.func, ast.Attribute)
+                and child.func.attr == "connect"
+                and child.keywords
+            ):
+                named = settings_named_in(scope) | {kw.arg for kw in child.keywords}
+                missing = tuple(s for s in LOCAL_IDENTITY_SETTINGS if s not in named)
+                if missing:
+                    offenders.append((child.lineno, missing))
+            inner = (
+                child
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+                else scope
+            )
+            visit(child, inner)
+
+    visit(tree, tree)
+    return sorted(set(offenders))
+
+
+def test_no_connection_path_leaves_paramikos_own_key_search_to_paramiko():
+    """The rule that stops a sixth route-13 call site appearing.
+
+    Five were found by reading the tree, and reading the tree again is not a
+    control. ``deploy_public_key`` was the sixth, found by this rule rather
+    than by the audit that found the others: its "try with existing keys"
+    branch named neither setting, and paramiko offers agent keys and
+    ``~/.ssh`` *before* a password, so its password branch presented them
+    too.
+    """
+    package = pathlib.Path(config_module.__file__).parent
+
+    offenders = {}
+    for path in sorted(package.glob("*.py")):
+        found = _unpinned_paramiko_connects(path.read_text(encoding="utf-8"))
+        if found:
+            offenders[path.name] = found
+
+    assert not offenders, (
+        "a paramiko connect() left look_for_keys/allow_agent at paramiko's "
+        "defaults, so a refusal by the gate would be followed by an "
+        "authentication out of ~/.ssh or the agent anyway (route 13): "
+        + repr(offenders)
+    )
+
+
+def _a_public_key_to_deploy(tmp_path):
+    """A public key file for ``deploy_public_key`` to install. Not a secret."""
+    path = tmp_path / "to-deploy.pub"
+    path.write_text(
+        f"ssh-rsa {paramiko.RSAKey.generate(2048).get_base64()} deployed\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_key_deployment_does_not_offer_your_key_collection_to_a_repo_host(
+    key_only_server, env_file, tmp_path, monkeypatch
+):
+    """The sixth call site, and the rule above is what found it.
+
+    ``deploy_public_key`` named neither setting on either branch. Its
+    no-password branch is *literally* "try with existing keys", and paramiko
+    offers agent keys and ``~/.ssh`` before it offers a password, so the
+    branch that was handed one presented them first as well. Reached from
+    ``setup_ssh_keys`` the decision has already been taken; this function is
+    public and ``deploy_ssh_key`` is a second door into it.
+
+    Measured at ``f31a98f``: ``RESULT True AUTH [('victim', 'publickey')]``
+    -- the victim's own key authenticated *and* the requested key was
+    installed in the attacker's ``authorized_keys``.
+
+    ``ssh-copy-id`` runs before the paramiko fallback and is deliberately not
+    suppressed: it is a subprocess offering OpenSSH's own default identity,
+    so if it ever authenticates here that is a finding rather than noise.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    env_file()
+    to_deploy = _a_public_key_to_deploy(tmp_path)
+    _repository_naming_only_the_host(key_only_server, tmp_path, monkeypatch)
+
+    # The refusal surfaces as SSHKeyDeploymentError; letting it propagate
+    # would make the first assertion be about the exception rather than
+    # about what the server saw, and what the server saw is the measurement.
+    try:
+        deployed = deploy_public_key(
+            key_only_server.host,
+            "victim",
+            str(to_deploy),
+            key_only_server.port,
+            None,
+            config=get_config(),
+        )
+    except Exception:
+        deployed = False
+
+    assert key_only_server.authentications == [], (
+        "key deployment authenticated with the victim's own key to a host "
+        "named by a working-directory file: " + repr(key_only_server.authentications)
+    )
+    assert deployed is False
+
+
+def test_key_deployment_still_works_for_a_host_the_user_chose(
+    key_only_server, env_file, tmp_path
+):
+    """Deploying a key to your own cluster is the feature, and it survives."""
+    from clustrix.ssh_utils import deploy_public_key
+
+    env_file()
+    to_deploy = _a_public_key_to_deploy(tmp_path)
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(key_only_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    deployed = deploy_public_key(
+        key_only_server.host,
+        "victim",
+        str(to_deploy),
+        key_only_server.port,
+        None,
+        config=get_config(),
+    )
+
+    assert deployed is True
+    assert set(key_only_server.authentications) == {("victim", "publickey")}
+
+
+def test_the_connect_rule_fires_on_what_it_is_for_and_nothing_else():
+    """Kills: matching every ``.connect``, and matching only literal keywords.
+
+    A rule that cries at ``self.connect()`` or at a socket is a rule somebody
+    deletes; a rule that misses ``connect(**kwargs)`` misses every shipped
+    connection path, all of which build a dict.
+    """
+    assert _unpinned_paramiko_connects(
+        "def f(c):\n    c.connect(hostname='h', username='u')\n"
+    ) == [(2, ("look_for_keys", "allow_agent"))]
+    assert _unpinned_paramiko_connects(
+        "def f(c):\n    c.connect(hostname='h', allow_agent=False)\n"
+    ) == [(2, ("look_for_keys",))]
+    assert (
+        _unpinned_paramiko_connects(
+            "def f(c):\n"
+            "    c.connect(hostname='h', look_for_keys=False, allow_agent=False)\n"
+        )
+        == []
+    )
+
+    # The shape every shipped connection path uses.
+    assert (
+        _unpinned_paramiko_connects(
+            "def f(c):\n"
+            "    kw = {'hostname': 'h'}\n"
+            "    kw['look_for_keys'] = False\n"
+            "    kw['allow_agent'] = False\n"
+            "    c.connect(**kw)\n"
+        )
+        == []
+    )
+    # ...and the dict has to be the one this function built.
+    assert _unpinned_paramiko_connects("def f(c, kw):\n    c.connect(**kw)\n") == [
+        (2, ("look_for_keys", "allow_agent"))
+    ]
+
+    # Not clustrix's own method, and not a socket.
+    assert _unpinned_paramiko_connects("def f(self):\n    self.connect()\n") == []
+    assert _unpinned_paramiko_connects("def f(s, h, p):\n    s.connect((h, p))\n") == []
+
+    # A sibling function's pinning does not vouch for this one.
+    assert _unpinned_paramiko_connects(
+        "def pinned(c):\n"
+        "    c.connect(hostname='h', look_for_keys=False, allow_agent=False)\n"
+        "\n"
+        "def unpinned(c):\n"
+        "    c.connect(hostname='h')\n"
+    ) == [(5, ("look_for_keys", "allow_agent"))]
 
 
 def test_the_gate_decides_the_local_identity_search_not_the_call_site():

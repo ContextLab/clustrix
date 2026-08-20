@@ -434,18 +434,51 @@ def deploy_public_key(
         client = paramiko.SSHClient()
         configure_host_key_policy(client, config)
 
-        # Connect with password or existing key
+        # Connect with password or existing key.
+        #
+        # Both branches used to leave ``look_for_keys`` and ``allow_agent``
+        # at paramiko's defaults, and paramiko offers agent keys and
+        # ``~/.ssh`` *before* it offers the password -- so even the branch
+        # holding a credential presented the victim's whole key collection
+        # first, to whatever host the caller named. Reached from
+        # ``setup_ssh_keys`` the decision has already been taken above; this
+        # function is public and ``deploy_ssh_key`` is another door into it,
+        # so it is taken here as well rather than assumed.
         if password:
+            # It has the credential it needs; the local identities add
+            # nothing but the leak.
             client.connect(
                 hostname=hostname,
                 username=username,
                 password=password,
                 port=port,
                 timeout=30,
+                look_for_keys=False,
+                allow_agent=False,
             )
         else:
-            # Try with existing keys
-            client.connect(hostname=hostname, username=username, port=port, timeout=30)
+            # "Try with existing keys" *is* paramiko's own search of
+            # ``~/.ssh`` and the agent -- secrets that name no host, so the
+            # same rule as everywhere else, asked of the same function. With
+            # no config there is nothing that says who chose ``hostname``,
+            # and that is a refusal rather than a default.
+            local_identities = config is not None and (
+                hostless_secret_refusal(
+                    CredentialTarget.for_config(
+                        config, hostname=hostname, username=username
+                    ),
+                    config,
+                )
+                is None
+            )
+            client.connect(
+                hostname=hostname,
+                username=username,
+                port=port,
+                timeout=30,
+                look_for_keys=local_identities,
+                allow_agent=local_identities,
+            )
 
         # Create .ssh directory if it doesn't exist
         stdin, stdout, stderr = client.exec_command(

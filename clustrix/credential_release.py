@@ -597,7 +597,16 @@ class CredentialTarget:
         user = username if username is not None else config.username
         source = derived_provenance(config, host) or get_config_source(config)
         return cls(
-            hostname=host if isinstance(host, str) else str(host),
+            # ``str(host)`` so that a value ``__post_init__`` can then judge
+            # is what reaches it -- PyYAML hands back an *int* for an
+            # unquoted ``0x7f000001``. Not for ``None``, though: ``str(None)``
+            # is ``"None"``, which normalises perfectly well, so a config
+            # naming no host at all produced a target naming the literal host
+            # ``None`` and the ValueError four call sites catch to mean
+            # "there is nobody to release a credential to" was never raised.
+            hostname=(
+                "" if host is None else (host if isinstance(host, str) else str(host))
+            ),
             username=user or "",
             described_as=f"cluster_host={host!r} (from {source})",
         )
