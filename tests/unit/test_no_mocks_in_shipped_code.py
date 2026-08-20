@@ -24,6 +24,18 @@ nothing outside it is claimed:
    reviewable act, which is exactly what ``CLUSTRIX_TEST_MODE`` or
    ``PYTEST_CURRENT_TEST`` would need.
 
+Rules 3 and 4 reach ``sys.modules`` and ``sys.argv`` through four
+spellings: the plain attribute, an aliased module (``import sys as _s``),
+a ``from sys import modules`` / ``argv`` binding, and a local name
+assigned one of those (``a = sys.argv``). They used to match the literal
+name ``sys`` only, so ``import sys as _s; _s.modules['pytest']`` passed a
+rule whose own wording said ``sys.modules`` "may not be subscripted at
+all", and ``_s.argv`` passed one that said "however it is reached". A
+guard whose comment overstates it is worse than no guard, because it is
+believed; the wording and the code now agree, and
+``KNOWN_BLIND_SPOTS`` below records -- and asserts -- what is still
+outside them.
+
 WHAT IT DELIBERATELY DOES NOT CLAIM. Every rule above stops at what the
 parser can work out from the source, and three of them have doors that
 must stay open because real code in this package needs them:
@@ -42,9 +54,15 @@ must stay open because real code in this package needs them:
   rule.
 
 Anything that hides a name from the parser -- ``"".join([...])``,
-``chr(112) + "ytest"``, a name arriving as a function argument -- is
-outside all five rules. No AST guard can close that, and pretending
-otherwise is worse than saying so.
+``getattr(sys, "ar" + "gv")``, an object arriving as a function argument
+-- is outside all five rules. No AST guard can close that, and pretending
+otherwise is worse than saying so. Those shapes are listed in
+``KNOWN_BLIND_SPOTS`` and asserted to be *unseen*, so that this docstring
+cannot quietly drift back into claiming more than the code does.
+
+One near miss is not a blind spot: an unknowable key in a membership test
+against ``sys.modules`` is flagged on its own, because nothing legitimate
+asks whether a module the source will not name is loaded.
 
 WHY IT IS NOT A SEARCH FOR THE WORD "MOCK". The previous version of this
 file flagged any of ``Mock``/``MagicMock``/``create_autospec`` appearing
@@ -192,21 +210,57 @@ def _string_bindings(tree):
     return names
 
 
-def _is_sys_modules(node):
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr == "modules"
-        and (isinstance(node.value, ast.Name) and node.value.id == "sys")
-    )
+def _module_aliases(tree, module_name):
+    """Local names that refer to ``module_name`` itself.
+
+    ``import sys`` binds ``sys``; ``import sys as _s`` binds ``_s``. Rules
+    3 and 4 used to hardcode the literal name ``sys``, so ``import sys as
+    _s`` walked straight past both of them -- while their wording claimed
+    ``sys.argv`` was caught "however it is reached" and that ``sys.modules``
+    "may not be subscripted at all". Both claims were false; this closes
+    the gap rather than softening the claim.
+    """
+    aliases = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == module_name:
+                    aliases.add(alias.asname or alias.name)
+    return aliases
 
 
-def _is_sys_argv(node):
-    return (
-        isinstance(node, ast.Attribute)
-        and node.attr == "argv"
-        and isinstance(node.value, ast.Name)
-        and node.value.id == "sys"
-    )
+def _attribute_bindings(tree, module_name, module_aliases, attribute):
+    """Bare names bound to ``<module>.<attribute>``.
+
+    Covers ``from sys import argv``, ``from sys import argv as a``, and
+    ``a = sys.argv`` -- three more ways to reach the same object without
+    the literal ``sys.argv`` ever appearing.
+    """
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == module_name:
+            for alias in node.names:
+                if alias.name == attribute:
+                    names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Assign):
+            value = node.value
+            if (
+                isinstance(value, ast.Attribute)
+                and value.attr == attribute
+                and isinstance(value.value, ast.Name)
+                and value.value.id in module_aliases
+            ):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        names.add(target.id)
+    return names
+
+
+def _is_sys_attribute(node, attribute, aliases, bound_names):
+    """``sys.<attribute>``, an alias of it, or a name bound to it."""
+    if isinstance(node, ast.Attribute) and node.attr == attribute:
+        return isinstance(node.value, ast.Name) and node.value.id in aliases
+    return isinstance(node, ast.Name) and node.id in bound_names
 
 
 def _is_environ(node):
@@ -244,6 +298,15 @@ def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
         return [f"{rel}:{exc.lineno}: could not be parsed: {exc.msg}"]
 
     names = _string_bindings(tree)
+    sys_aliases = _module_aliases(tree, "sys")
+    modules_names = _attribute_bindings(tree, "sys", sys_aliases, "modules")
+    argv_names = _attribute_bindings(tree, "sys", sys_aliases, "argv")
+
+    def is_sys_modules(node):
+        return _is_sys_attribute(node, "modules", sys_aliases, modules_names)
+
+    def is_sys_argv(node):
+        return _is_sys_attribute(node, "argv", sys_aliases, argv_names)
 
     def forbidden(dotted):
         return dotted in FORBIDDEN_MODULES or dotted.split(".")[0] in {
@@ -282,7 +345,7 @@ def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
             if (
                 called in {"get", "__contains__"}
                 and isinstance(func, ast.Attribute)
-                and _is_sys_modules(func.value)
+                and is_sys_modules(func.value)
                 and node.args
             ):
                 for value in _fold_all(node.args[0], names):
@@ -304,7 +367,7 @@ def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
 
         # Rule 3: sys.modules[...] -- never legitimate here.
         elif isinstance(node, ast.Subscript):
-            if _is_sys_modules(node.value):
+            if is_sys_modules(node.value):
                 hits.append(f"{rel}:{node.lineno}: subscripts sys.modules")
             elif _is_environ(node.value):
                 for value in _fold_all(node.slice, names):
@@ -319,7 +382,7 @@ def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
             for op, comparator in zip(node.ops, node.comparators):
                 if not isinstance(op, (ast.In, ast.NotIn)):
                     continue
-                if not _is_sys_modules(comparator):
+                if not is_sys_modules(comparator):
                     continue
                 candidates = _fold_all(node.left, names)
                 if not candidates:
@@ -335,7 +398,7 @@ def _violations_in(rel, text):  # noqa: C901 - one branch per stated rule
                         )
 
         # Rule 4: sys.argv, however it is reached.
-        if _is_sys_argv(node):
+        if is_sys_argv(node):
             hits.append(f"{rel}:{node.lineno}: reads sys.argv")
 
     return sorted(set(hits))
@@ -490,6 +553,63 @@ BYPASSES = {
         "        return 'fake-job-id'\n"
         "    return _really_submit()\n"
     ),
+    # An unknowable key in a membership test against sys.modules is
+    # flagged on its own: there is no legitimate reason to ask whether a
+    # module the source will not name is loaded.
+    "membership_key_built_from_chr": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if chr(112) + 'ytest' in sys.modules:\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    # --- the five that contradicted rules 3 and 4 as written ---
+    "aliased_sys_argv_sniff": (
+        "import sys as _s\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if _s.argv[0].endswith('py.test'):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "argv_imported_directly": (
+        "from sys import argv\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if argv[0].endswith('py.test'):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "argv_bound_to_a_local": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    command_line = sys.argv\n"
+        "    if command_line[0].endswith('py.test'):\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "aliased_sys_modules_subscript": (
+        "import sys as _s\n"
+        "\n"
+        "\n"
+        "def client():\n"
+        "    return _s.modules['unittest.mock'].MagicMock()\n"
+    ),
+    "modules_imported_directly": (
+        "from sys import modules\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        "    if 'pytest' in modules:\n"
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
     # Naming the flag through a constant does not hide it either.
     "env_flag_behind_a_constant": (
         "import os\n"
@@ -540,6 +660,62 @@ def test_guard_catches_every_known_bypass(name, real_package_copy):
 
     with pytest.raises(AssertionError):
         assert not hits, "planted violation must trip the same assertion"
+
+
+#: Shapes this guard provably does NOT see, recorded and asserted so the
+#: docstring above cannot drift back into claiming more than the code
+#: does. Each hides a name from the parser, which is the boundary every
+#: one of the five rules stops at. None of these is acceptable code; the
+#: guard simply is not what would catch it, and saying so is the point.
+#:
+#: There is no AST fix for these -- ``getattr(sys, name)`` with ``name``
+#: computed at runtime is indistinguishable from legitimate reflection,
+#: which ``dependency_analysis.py`` and ``utils.py`` really do use. What
+#: catches this class of thing is behaviour, not source: a mock reaching
+#: production would have to change what the code *does*, and the real-run
+#: verification described in ``CLAUDE.md`` is what observes that.
+KNOWN_BLIND_SPOTS = {
+    "getattr_on_sys": (
+        "import sys\n"
+        "\n"
+        "\n"
+        "def submit():\n"
+        '    if getattr(sys, "ar" + "gv")[0].endswith("py.test"):\n'
+        "        return 'fake-job-id'\n"
+        "    return _really_submit()\n"
+    ),
+    "joined_module_name": (
+        "import importlib\n"
+        "\n"
+        "\n"
+        "def client():\n"
+        "    name = ''.join(['unittest', '.', 'mock'])\n"
+        "    return importlib.import_module(name).MagicMock()\n"
+    ),
+    "module_arriving_as_an_argument": (
+        "def client(fake_factory):\n" "    return fake_factory()\n"
+    ),
+    "sys_reached_through_globals": (
+        "def submit():\n"
+        "    interpreter = globals()['__builtins__']['__import__']('sys')\n"
+        "    return interpreter.argv\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(KNOWN_BLIND_SPOTS))
+def test_the_guard_is_blind_to_these_and_says_so(name):
+    """Pin the guard's limits so its docstring stays true.
+
+    If somebody extends the guard to catch one of these, this test fails
+    and forces the docstring and ``KNOWN_BLIND_SPOTS`` to be updated in
+    the same commit -- which is exactly the coupling that was missing when
+    rules 3 and 4 claimed coverage they did not have.
+    """
+    assert _violations_in("planted.py", KNOWN_BLIND_SPOTS[name]) == [], (
+        f"the guard now catches {name!r}; move it into BYPASSES and update "
+        "the docstring's list of what is outside the rules"
+    )
 
 
 #: Things that look like violations to a grep, or to the previous version

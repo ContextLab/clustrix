@@ -6,7 +6,37 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dataclasses import asdict, fields as dataclass_fields
 
-from .config import ClusterConfig, get_config_dir
+from .config import (
+    ClusterConfig,
+    get_config_dir,
+    strip_secret_fields,
+    write_config_file_securely,
+)
+
+
+def _mkdir_private(directory: Path) -> None:
+    """Create ``directory`` and any missing parent, each mode 0700.
+
+    ``Path.mkdir(parents=True, mode=0o700)`` applies the mode to the leaf
+    only -- the parents are created with the default permissions, so
+    ``~/.clustrix`` ended up 0755 while ``~/.clustrix/profiles`` under it
+    was 0700. Profiles are the user's cluster coordinates and usernames;
+    nothing under the clustrix config directory is other people's
+    business. Each level is therefore created explicitly.
+
+    An existing directory is left exactly as the user set it up: widening
+    is the bug, and silently re-moding a directory somebody else created
+    is the same overreach that ``write_text_securely`` refuses.
+    """
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for path in reversed(missing):
+        path.mkdir(mode=0o700, exist_ok=True)
 
 
 class ProfileManager:
@@ -27,7 +57,7 @@ class ProfileManager:
         else:
             self.config_dir = Path(config_dir).expanduser()
         try:
-            self.config_dir.mkdir(parents=True, exist_ok=True)
+            _mkdir_private(self.config_dir)
         except OSError as e:
             # An unwritable config directory must not stop the widget from
             # opening. Profiles then live for the session only, and _persist
@@ -38,6 +68,7 @@ class ProfileManager:
 
         self.profiles: Dict[str, ClusterConfig] = {}
         self.active_profile: Optional[str] = None
+        self._announced_dropped_secrets = False
         self._load_default_profiles()
         self._restore()
 
@@ -251,23 +282,89 @@ class ProfileManager:
         self._persist()
         return self.profiles[name]
 
-    def save_to_file(self, filepath: str) -> None:
-        """Save all profiles to a configuration file."""
-        filepath_obj = Path(filepath)
+    def _announce_dropped_secrets(self, persisted: Dict[str, Any]) -> None:
+        """Say once that credentials were left out of the file.
 
-        # Prepare data for saving
+        Compares what is about to be written against what is held in
+        memory. Warning once per manager rather than per save is the point:
+        ``_persist()`` fires from seven mutators, so a per-save warning
+        would be noise and would be filtered out, which is the same as not
+        warning at all.
+        """
+        if self._announced_dropped_secrets:
+            return
+        dropped = {
+            field
+            for name, config in self.profiles.items()
+            for field, value in asdict(config).items()
+            if value not in (None, "") and field not in persisted.get(name, {})
+        }
+        if not dropped:
+            return
+        self._announced_dropped_secrets = True
+
+        import warnings
+
+        warnings.warn(
+            "Profiles are not a credential store: "
+            f"{', '.join(sorted(dropped))} were not written to disk and will "
+            "not survive a restart. They still work for the rest of this "
+            "session. To supply a password without writing it to disk, set "
+            "password_env_var to the name of an environment variable holding "
+            "it.",
+            stacklevel=3,
+        )
+
+    def save_to_file(self, filepath: str) -> None:
+        """Save all profiles to a configuration file, owner-readable only.
+
+        Two properties this deliberately shares with
+        :meth:`clustrix.config.ClusterConfig.save_to_file`, because it used
+        to have neither:
+
+        **Mode.** The write goes through ``write_text_securely``, so the
+        file is 0600 from the instant it exists. It used to be a plain
+        ``open(..., "w")``, which under the default umask leaves the file
+        0644 -- readable by every other local user (issue #111).
+
+        **Secrets.** Passwords, tokens and API keys are dropped, with no
+        ``include_secrets`` escape hatch, so a profile bundle can never
+        hold a credential in plaintext. ``asdict(config)`` used to route
+        straight around the filtering that ``ClusterConfig.save_to_file``
+        applies, and wrote them.
+
+        Dropping rather than offering an opt-in is the deliberate call,
+        for three reasons:
+
+        1. **Nobody asked for this write.** ``_persist()`` fires
+           automatically from seven mutators -- creating, cloning,
+           renaming, removing, saving, importing a profile, or merely
+           switching the active one. ``include_secrets=True`` on
+           ``ClusterConfig.save_to_file`` is a considered act by a caller
+           who named a path; there is no equivalent moment here at which
+           a user could consent to their password being written out.
+        2. **One file, every profile.** ``profiles.yml`` is a bulk store,
+           so a single leak is as many credentials as the user has hosts.
+        3. **There is a supported channel.** ``password_env_var`` (kept:
+           it names a variable, it is not itself a secret) is how a
+           credential is meant to reach clustrix without being written to
+           disk -- see ``CLAUDE.md``.
+
+        The cost is bounded and in-memory only: a secret set on a profile
+        stays usable for the rest of the session, it simply does not
+        survive a restart. That is the intended trade, and it is said out
+        loud once per session rather than happening silently -- discarding
+        something the user typed without telling them would be its own
+        surprise.
+        """
         data: Dict[str, Any] = {"active_profile": self.active_profile, "profiles": {}}
 
         for name, config in self.profiles.items():
-            data["profiles"][name] = asdict(config)
+            data["profiles"][name] = strip_secret_fields(asdict(config))
 
-        # Save based on file extension
-        if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        else:  # Default to YAML (.yml, .yaml, or no extension)
-            with open(filepath_obj, "w", encoding="utf-8") as f:
-                yaml.dump(data, f, default_flow_style=False, indent=2)
+        self._announce_dropped_secrets(data["profiles"])
+
+        write_config_file_securely(Path(filepath), data)
 
     def load_from_file(self, filepath: str) -> None:
         """Replace the current profiles with those in `filepath`.
@@ -316,20 +413,19 @@ class ProfileManager:
         )
 
     def export_profile(self, profile_name: str, filepath: str) -> None:
-        """Export a single profile to a file."""
+        """Export a single profile to a file, owner-readable only.
+
+        Same two rules as :meth:`save_to_file`, and for a stronger reason:
+        an exported profile is a file made to be sent to a colleague or
+        committed to a repository, which is the last place a password
+        should be.
+        """
         if profile_name not in self.profiles:
             raise ValueError(f"Profile '{profile_name}' does not exist")
 
-        config = self.profiles[profile_name]
-        filepath_obj = Path(filepath)
-
-        # Save based on file extension
-        if filepath_obj.suffix.lower() == ".json":
-            with open(filepath_obj, "w", encoding="utf-8") as f:
-                json.dump(asdict(config), f, indent=2)
-        else:  # Default to YAML
-            with open(filepath_obj, "w", encoding="utf-8") as f:
-                yaml.dump(asdict(config), f, default_flow_style=False, indent=2)
+        config_data = strip_secret_fields(asdict(self.profiles[profile_name]))
+        self._announce_dropped_secrets({profile_name: config_data})
+        write_config_file_securely(Path(filepath), config_data)
 
     def import_profile(self, filepath: str, profile_name: Optional[str] = None) -> str:
         """Import a single profile from a file."""

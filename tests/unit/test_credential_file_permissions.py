@@ -3,8 +3,9 @@
 
 Regression guard for issue #111.
 
-``clustrix/cli_credentials.py`` and ``clustrix/credential_manager.py`` both
-used to write a file and *then* narrow it::
+``clustrix/cli_credentials.py``, ``clustrix/credential_manager.py``,
+``clustrix/ssh_utils.py`` and ``clustrix/profile_manager.py`` all used to
+write a file and *then* narrow it::
 
     path.write_text(secrets)
     path.chmod(0o600)
@@ -19,53 +20,49 @@ running as another local user can read it in between. Reproduced directly::
     '0o644'
     >>> f.chmod(0o600)
 
-``clustrix/ssh_utils.py`` had the same shape at its SSH-config writer and
-was not covered by the first version of this guard, which is why it is in
-``CREDENTIAL_WRITERS`` below. All three now go through
-``write_text_securely``.
+WHAT THIS FILE IS, AND WHAT IT IS NOT.
 
-THE RULE THIS TEST ENFORCES -- this docstring is the specification:
+    **The guarantee lives in ``tests/unit/test_persisted_files_are_private.py``.**
+    That test points ``$HOME`` and the config directory at a temporary tree,
+    runs every public API that persists anything, and walks the result
+    asserting that no file is wider than 0600 and no directory wider than
+    0700. It never reads source, so no spelling can evade it.
 
-    **No module in ``CREDENTIAL_WRITERS`` may create or write a file except
-    through ``write_text_securely()``.** Every file-creating operation in
-    those modules is flagged: ``open()`` for writing (builtin or
-    ``Path.open``), ``Path.write_text`` / ``write_bytes`` / ``touch``,
-    ``os.open`` / ``os.fdopen`` / ``os.creat`` / ``os.symlink`` /
-    ``os.link``, ``tempfile``'s factories, and ``shutil``'s copiers.
-    Directory creation must pass an explicit ``mode=`` with no group or
-    other bits. The single sanctioned implementation is exempt, and there
-    must be exactly one of it in the package.
+    **Everything below the "behavioural" heading is a real exercise of the
+    real writers**, and pins the specific properties of
+    ``write_text_securely`` -- the symlink case, the descriptor window, the
+    difference between the default and ``append=True`` modes, atomic
+    replacement -- which a tree walk cannot distinguish.
 
-WHY IT IS PHRASED THAT WAY, AND NOT AS "NO CHMOD". The first version of
-this guard forbade ``chmod`` in these modules, on the reasoning that the
-window exists because a ``chmod`` follows a write. That rule was defeated
-seven ways -- ``from os import chmod as _c``, ``getattr(os, "ch" + "mod")``,
-``subprocess.run(["chmod", ...])``, binding ``p.chmod`` to a local, a
-``narrow()`` helper in a third module -- and, far worse, it *passed*
-``p.write_text(secret)`` with no chmod at all, which leaves the file 0644
-permanently. It forbade the shape of the fix while permitting the bug it
-was written to prevent. Every one of those seven still has to write the
-file somewhere, so flagging the write catches all of them and the
-no-chmod-at-all case too. ``test_guard_catches_every_known_bypass`` plants
-each one in a copy of the real package and proves it.
+    **The static scan at the bottom is a fast lint and nothing more.** It
+    flags the common shape early, in the five modules most likely to grow
+    one. It is *not* the guarantee, and this docstring will not pretend
+    otherwise: three rounds of adversarial review defeated an
+    enumerate-the-spellings guard seven ways and then fourteen, and four of
+    those really did leave 0644 under umask 022. ``KNOWN_BLIND_SPOTS``
+    below lists shapes this lint provably does not see, and
+    ``test_the_lint_is_blind_to_these_and_says_so`` asserts that it does
+    not, so nobody reads a green run here as proof of anything wider than
+    what the lint claims.
 
-WHAT IT DOES NOT CLAIM. The rule is about Python-level file creation
-inside these three modules.
+WHAT THE LINT CLAIMS, EXACTLY:
 
-* A file created by a subprocess is out of scope: ``ssh_utils`` runs
-  ``ssh-keygen``, and ``cli_credentials`` opens ``$EDITOR`` on the .env
-  file. ``ssh-keygen`` creates the private key 0600 itself, which
-  ``test_generated_private_key_is_never_world_readable`` verifies against
-  the real binary under a permissive umask rather than assuming.
-* ``Path.replace``/``rename`` is permitted: it moves an inode that already
-  exists rather than creating one, and any insecure creation of that inode
-  inside these modules is itself flagged. That is what makes the
-  write-to-scratch-then-``replace()`` atomic write in ``cli_credentials``
-  legitimate.
-* A credential file created by a *fourth* module that these three merely
-  call is not visible to a module-scoped scan.
-* ``mkdir(mode=0o700, exist_ok=True)`` does not widen an existing
-  directory, and this guard does not require it to.
+    In the modules listed in ``CREDENTIAL_WRITERS``, a *directly named*
+    file-creating call -- ``open()`` for writing, ``Path.write_text`` /
+    ``write_bytes`` / ``touch``, ``os.open`` / ``os.fdopen`` / ``os.creat``,
+    ``tempfile``'s factories, ``shutil``'s copiers -- is a violation, and
+    directory creation must pass an explicit mode with no group or other
+    bits. It claims nothing about calls it cannot name.
+
+WHY IT IS PHRASED AS "NO UNSANCTIONED WRITE", AND NOT AS "NO CHMOD". The
+first version of this guard forbade ``chmod`` in these modules. That rule
+was defeated seven ways -- ``from os import chmod as _c``,
+``getattr(os, "ch" + "mod")``, ``subprocess.run(["chmod", ...])``, binding
+``p.chmod`` to a local, a ``narrow()`` helper in a third module -- and, far
+worse, it *passed* ``p.write_text(secret)`` with no chmod at all, which
+leaves the file 0644 permanently. It forbade the shape of the fix while
+permitting the bug. Flagging the write catches the no-chmod-at-all case
+too.
 
 No secret-shaped literals appear below: the fixture content uses the
 ``<redacted>`` spelling that ``tests/unit/test_check_for_secrets.py``
@@ -75,6 +72,7 @@ already treats as a placeholder.
 import ast
 import os
 import pathlib
+import resource
 import shutil
 import stat
 import subprocess
@@ -90,17 +88,30 @@ from clustrix.ssh_utils import generate_ssh_key, update_ssh_config
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 
-#: The modules that write credential files or the SSH configuration that
-#: points at them. None may create a file except through the helper.
+#: The modules the lint scans: those that write credential files, profiles,
+#: or the SSH configuration that points at them. ``profile_manager.py`` is
+#: here because it was missing, and that is precisely where a live 0644
+#: credential path survived -- it wrote ``profiles.yml`` with
+#: ``open(..., "w")`` and ``asdict(config)``, so passwords reached disk
+#: world-readable and unredacted.
 CREDENTIAL_WRITERS = (
     "clustrix/config.py",
     "clustrix/cli_credentials.py",
     "clustrix/credential_manager.py",
+    "clustrix/profile_manager.py",
     "clustrix/ssh_utils.py",
 )
 
 #: The one sanctioned way to put bytes in a file in those modules.
 SANCTIONED_WRITER = "write_text_securely"
+
+#: ``write_config_file_securely`` renders a mapping and hands it straight
+#: to the helper, so a module that calls it is also writing securely.
+SANCTIONED_CALLS = (SANCTIONED_WRITER, "write_config_file_securely")
+
+#: Where the actual guarantee lives. Named here so that a reader who lands
+#: on this file first is told immediately.
+BEHAVIOURAL_GUARANTEE = "tests/unit/test_persisted_files_are_private.py"
 
 #: ``open()`` modes that cannot create or truncate anything.
 READ_ONLY_MODES = frozenset({"r", "rb", "rt", "tr", "br", "rU", "U"})
@@ -405,6 +416,92 @@ def test_append_mode_creates_owner_only_and_leaves_an_existing_file_alone(
     assert fresh.read_text(encoding="utf-8") == "Host one\nHost two\n"
 
 
+def test_a_failed_write_leaves_the_original_file_intact(permissive_umask, tmp_path):
+    """A write that cannot start must not have destroyed anything.
+
+    The previous implementation unlinked the destination and *then*
+    created it afresh. If the create failed -- ENOSPC, or EEXIST because
+    something was planted in the gap -- the original was already gone and
+    nothing had replaced it. That was a regression against the ``O_TRUNC``
+    behaviour it replaced on the config-save path.
+
+    The failure here is real, not simulated, and it is specifically one
+    that lets ``unlink`` succeed and stops ``os.open`` -- which is the
+    shape that lost data. The process descriptor limit is dropped to 3 for
+    the duration, so the create fails with EMFILE exactly as it would fail
+    with ENOSPC on a full disk, while ``unlink`` (which needs no
+    descriptor) would still have gone through. Making the *directory*
+    unwritable instead would not reproduce it: the unlink fails first, and
+    the old code survived that case by accident.
+    """
+    directory = tmp_path / "config"
+    directory.mkdir(mode=0o700)
+    target = directory / "clustrix.yml"
+    write_text_securely(target, "cluster_type: local\n")
+
+    soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    resource.setrlimit(resource.RLIMIT_NOFILE, (3, hard))
+    try:
+        failure = None
+        try:
+            write_text_securely(target, 'password = "<redacted>"\n')
+        except OSError as exc:  # noqa: BLE001 - recorded, asserted below
+            failure = exc
+    finally:
+        # Restore before asserting: pytest needs descriptors of its own to
+        # report a failure.
+        resource.setrlimit(resource.RLIMIT_NOFILE, (soft, hard))
+
+    assert failure is not None, "the descriptor limit did not stop the write"
+    assert target.exists(), "the original file was destroyed by a failed write"
+    assert target.read_text(encoding="utf-8") == "cluster_type: local\n"
+    assert _mode(target) == 0o600
+    assert [p.name for p in directory.iterdir()] == ["clustrix.yml"]
+
+
+def test_a_failure_during_replacement_leaves_no_copy_of_the_secret(
+    permissive_umask, tmp_path
+):
+    """The scratch file holds the secret too, so it must not survive.
+
+    ``os.replace`` onto a directory fails for real (``IsADirectoryError``),
+    which exercises the cleanup path after the content has already been
+    written to the scratch file.
+    """
+    destination = tmp_path / "occupied"
+    destination.mkdir(mode=0o700)
+    (destination / "keep").write_text("still here\n", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        write_text_securely(destination, 'password = "<redacted>"\n')
+
+    assert destination.is_dir(), "the destination was clobbered"
+    assert [p.name for p in destination.iterdir()] == ["keep"]
+    leftovers = [p.name for p in tmp_path.iterdir() if p.name != "occupied"]
+    assert leftovers == [], f"a copy of the secret was left behind: {leftovers}"
+
+
+def test_the_replacement_is_atomic_for_a_concurrent_reader(permissive_umask, tmp_path):
+    """A reader never sees a half-written file, only old content or new.
+
+    ``os.replace`` swaps the inode into position in one step. A reader
+    that opened the old file keeps reading the old file; a reader that
+    opens after the swap gets the whole new content.
+    """
+    target = tmp_path / "clustrix.yml"
+    write_text_securely(target, "cluster_type: local\n")
+
+    reader = os.open(str(target), os.O_RDONLY)
+    try:
+        write_text_securely(target, "cluster_type: slurm\n")
+        held = os.pread(reader, 4096, 0)
+    finally:
+        os.close(reader)
+
+    assert held == b"cluster_type: local\n", "the old inode changed under a reader"
+    assert target.read_text(encoding="utf-8") == "cluster_type: slurm\n"
+
+
 def test_write_text_securely_leaks_no_descriptor_when_open_succeeds(tmp_path):
     """The helper owns a raw fd; it must not leave one behind.
 
@@ -548,15 +645,31 @@ def test_generated_private_key_is_never_world_readable(permissive_umask, tmp_pat
 # --------------------------------------------------------------------------
 
 
+def test_the_behavioural_guarantee_still_exists():
+    """This file is the lint; that file is the guarantee.
+
+    If the behavioural test were deleted or renamed, the lint below would
+    keep passing and would look like the whole protection. It is not.
+    """
+    guarantee = REPO_ROOT / BEHAVIOURAL_GUARANTEE
+    assert guarantee.exists(), (
+        f"{BEHAVIOURAL_GUARANTEE} is gone. The static scan in this file "
+        "cannot replace it: it enumerates spellings, and the set of ways "
+        "to create a file in Python is unbounded."
+    )
+    source = guarantee.read_text(encoding="utf-8")
+    assert "MAX_FILE_MODE = 0o600" in source and "MAX_DIR_MODE = 0o700" in source
+
+
 def test_the_scan_actually_reads_the_modules():
     """A scan that parses nothing would pass forever."""
     for rel in CREDENTIAL_WRITERS:
         path = REPO_ROOT / rel
         assert path.exists(), f"{rel} moved; this guard is now checking nothing"
         source = path.read_text(encoding="utf-8")
-        assert (
-            f"{SANCTIONED_WRITER}(" in source
-        ), f"{rel} no longer writes through {SANCTIONED_WRITER}()"
+        assert any(
+            f"{call}(" in source for call in SANCTIONED_CALLS
+        ), f"{rel} no longer writes through any of {SANCTIONED_CALLS}"
 
 
 def test_there_is_exactly_one_secure_writer_in_the_package():
@@ -590,52 +703,13 @@ def test_credential_writers_create_files_only_through_the_helper():
     )
 
 
-#: Every way the previous "no chmod" guard was defeated, plus the case it
-#: rewarded: writing the file and never narrowing it at all.
+#: A representative sample of what the lint does catch, kept small on
+#: purpose. An exhaustive list is not achievable -- that is the whole
+#: reason the guarantee is behavioural -- so this proves the lint does what
+#: it claims and no more. Each is planted into a copy of a real module and
+#: must be reported.
 BYPASSES = {
-    "aliased_chmod_import": (
-        "from os import chmod as _c\n"
-        "\n"
-        "\n"
-        "def save(path, secret):\n"
-        "    path.write_text(secret)\n"
-        "    _c(path, 0o600)\n"
-    ),
-    "getattr_chmod": (
-        "import os\n"
-        "\n"
-        "\n"
-        "def save(path, secret):\n"
-        "    path.write_text(secret)\n"
-        '    getattr(os, "ch" + "mod")(path, 0o600)\n'
-    ),
-    "subprocess_chmod": (
-        "import subprocess\n"
-        "\n"
-        "\n"
-        "def save(path, secret):\n"
-        "    path.write_text(secret)\n"
-        '    subprocess.run(["chmod", "600", str(path)], check=True)\n'
-    ),
-    "bound_method_chmod": (
-        "def save(path, secret):\n"
-        "    path.write_text(secret)\n"
-        "    narrow = path.chmod\n"
-        "    narrow(0o600)\n"
-    ),
-    "helper_in_a_third_module": (
-        "from clustrix.config import get_config_dir\n"
-        "\n"
-        "\n"
-        "def narrow(path):\n"
-        "    pass\n"
-        "\n"
-        "\n"
-        "def save(path, secret):\n"
-        "    path.write_text(secret)\n"
-        "    narrow(path)\n"
-    ),
-    # The one the old guard rewarded: no chmod at all, 0644 forever.
+    # The case the original no-chmod rule rewarded: 0644 forever.
     "no_chmod_at_all": ("def save(path, secret):\n" "    path.write_text(secret)\n"),
     "open_for_writing": (
         "def save(path, secret):\n"
@@ -647,16 +721,8 @@ BYPASSES = {
         '    with path.open("w", encoding="utf-8") as handle:\n'
         "        handle.write(secret)\n"
     ),
-    "computed_open_mode": (
-        "def save(path, secret, mode):\n"
-        "    with open(path, mode) as handle:\n"
-        "        handle.write(secret)\n"
-    ),
     "write_bytes": (
         "def save(path, secret):\n" "    path.write_bytes(secret.encode())\n"
-    ),
-    "touch_then_write": (
-        "def save(path, secret):\n" "    path.touch()\n" "    path.write_text(secret)\n"
     ),
     "named_temporary_file": (
         "import tempfile\n"
@@ -689,6 +755,84 @@ BYPASSES = {
         "def prepare(directory):\n" "    directory.mkdir(exist_ok=True)\n"
     ),
 }
+
+#: Shapes this lint provably does NOT see. Recorded here, and asserted
+#: below, so that the file states its own limits rather than implying it
+#: has none. Every one of these leaves a file at the umask default, and
+#: every one is caught by the behavioural test in
+#: ``BEHAVIOURAL_GUARANTEE`` -- verified by planting
+#: ``logging.FileHandler`` (0666 under umask 000), ``sqlite3.connect``
+#: (0644 regardless of umask) and a bound ``write_text`` into a copy of
+#: the real package: the lint reported nothing for all three, the
+#: behavioural test failed on all three.
+KNOWN_BLIND_SPOTS = {
+    "logging_file_handler": (
+        "import logging\n"
+        "\n"
+        "\n"
+        "def save(path, secret):\n"
+        "    handler = logging.FileHandler(str(path))\n"
+        "    handler.close()\n"
+    ),
+    "sqlite3_connect": (
+        "import sqlite3\n"
+        "\n"
+        "\n"
+        "def save(path, secret):\n"
+        "    sqlite3.connect(str(path)).close()\n"
+    ),
+    "bound_write_text": (
+        "def save(path, secret):\n" "    emit = path.write_text\n" "    emit(secret)\n"
+    ),
+    "getattr_open": (
+        "import os\n"
+        "\n"
+        "\n"
+        "def save(path, secret):\n"
+        '    getattr(os, "op" + "en")(str(path), os.O_WRONLY | os.O_CREAT)\n'
+    ),
+    "dict_dispatched_open": (
+        "def save(path, secret):\n"
+        '    writers = {"plain": open}\n'
+        '    with writers["plain"](path, "w") as handle:\n'
+        "        handle.write(secret)\n"
+    ),
+    "zipfile": (
+        "import zipfile\n"
+        "\n"
+        "\n"
+        "def save(path, secret):\n"
+        '    with zipfile.ZipFile(str(path), "w") as archive:\n'
+        '        archive.writestr("secret", secret)\n'
+    ),
+    "os_popen": (
+        "import os\n"
+        "\n"
+        "\n"
+        "def save(path, secret):\n"
+        "    handle = os.popen('cat > ' + str(path), 'w')\n"
+        "    handle.write(secret)\n"
+        "    handle.close()\n"
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(KNOWN_BLIND_SPOTS))
+def test_the_lint_is_blind_to_these_and_says_so(name):
+    """The lint must not be believed to cover what it cannot see.
+
+    A guard whose docstring overstates it is worse than no guard, because
+    it is believed. This asserts the overstatement is impossible: if
+    somebody extends the lint to catch one of these, this test fails and
+    forces the docstring and ``KNOWN_BLIND_SPOTS`` to be updated together.
+
+    None of these is acceptable code. Each is caught by
+    ``BEHAVIOURAL_GUARANTEE``, which observes the mode on disk.
+    """
+    assert _file_creations("planted.py", KNOWN_BLIND_SPOTS[name]) == [], (
+        f"the lint now catches {name!r}; move it out of KNOWN_BLIND_SPOTS "
+        "and into BYPASSES, and update the docstring"
+    )
 
 
 @pytest.fixture

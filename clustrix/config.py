@@ -1,5 +1,6 @@
 import json
 import re
+import secrets as _secrets
 import yaml
 import os
 from pathlib import Path
@@ -232,14 +233,9 @@ class ClusterConfig:
         config_path_obj = Path(config_path)
         config_data = asdict(self)
         if not include_secrets:
-            for key in SECRET_FIELDS:
-                config_data.pop(key, None)
-            for key in SECRET_BEARING_MAPPINGS:
-                value = config_data.get(key)
-                if isinstance(value, dict):
-                    config_data[key] = _redact_secret_entries(value)
+            config_data = strip_secret_fields(config_data)
 
-        _write_config_file_securely(config_path_obj, config_data)
+        write_config_file_securely(config_path_obj, config_data)
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
@@ -393,6 +389,27 @@ def _redact_secret_entries(mapping: dict) -> dict:
     }
 
 
+def strip_secret_fields(config_data: dict) -> dict:
+    """Return ``config_data`` with every credential-bearing entry removed.
+
+    One implementation of "what may not reach disk", so that a second
+    persistence path cannot quietly disagree with
+    :meth:`ClusterConfig.save_to_file`. ``clustrix/profile_manager.py``
+    used to serialise ``asdict(config)`` directly and therefore wrote
+    passwords and API tokens in plaintext, in a file that
+    :meth:`ClusterConfig.save_to_file` would have withheld them from.
+
+    Both the whole-field cases (``SECRET_FIELDS``) and the entries inside
+    a secret-bearing mapping (``SECRET_BEARING_MAPPINGS``) are handled.
+    """
+    stripped = {k: v for k, v in config_data.items() if k not in SECRET_FIELDS}
+    for key in SECRET_BEARING_MAPPINGS:
+        value = stripped.get(key)
+        if isinstance(value, dict):
+            stripped[key] = _redact_secret_entries(value)
+    return stripped
+
+
 def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
     """Write ``text`` to ``path`` without ever exposing it to other users.
 
@@ -404,25 +421,38 @@ def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
 
     What this guarantees, exactly:
 
-    * **Default (``append=False``).** The secret is always written into a
-      brand-new inode that this call created. Anything already at ``path``
-      is unlinked first, then the file is created with ``O_CREAT | O_EXCL``
-      and mode ``0o600``, so it is never wider than ``0o600 & ~umask`` at
-      any instant, including the case where a file was already there. That
-      case is why the unlink is needed rather than ``O_TRUNC``: reusing a
-      pre-existing 0666 inode leaves it at 0666 between ``os.open()`` and
-      ``os.fchmod()``, and a process that opens it during that window keeps
-      a readable descriptor after the mode is narrowed -- measured, and it
-      really does read the secret back. The unlink also disposes of the
-      symlink case: ``path`` being a symlink used to mean the secret was
-      written to the link's *target* and the target was chmodded; now the
-      link itself is removed and a fresh regular file takes its place,
-      leaving the target untouched. ``O_EXCL`` and ``O_NOFOLLOW`` close
-      the remaining race -- a file or symlink planted between the unlink
-      and the open is a hard failure rather than something a secret is
-      written into.
-      ``fchmod()`` on the descriptor we exclusively own then pins the mode
-      at exactly 0600 regardless of umask, before any content is written.
+    * **Default (``append=False``).** The secret is written into a
+      brand-new inode that this call created, in the destination's own
+      directory, and that inode is then ``os.replace()``-d into position.
+      The scratch file is created with ``O_CREAT | O_EXCL | O_NOFOLLOW``
+      and mode ``0o600`` under a name nothing else can guess, so it is
+      never wider than ``0o600 & ~umask`` at any instant. ``fchmod()`` on
+      the descriptor we exclusively own pins the mode at exactly 0600
+      regardless of umask, before any content is written.
+
+      Writing into a scratch file rather than into ``path`` itself is what
+      makes this safe in three separate ways:
+
+      1. *It cannot lose data.* An earlier version unlinked ``path`` and
+         then created it afresh. If the create failed -- ENOSPC, or an
+         EEXIST because something was planted in the gap -- the original
+         file was already gone and nothing had been written in its place.
+         ``os.replace()`` is atomic: either the new content is in position
+         or the old file is untouched, and a failure anywhere before it
+         leaves the destination exactly as it was.
+      2. *It closes the descriptor window.* Reusing a pre-existing 0666
+         inode (``O_TRUNC``) leaves it at 0666 between ``os.open()`` and
+         ``os.fchmod()``, and a process that opens it during that window
+         keeps a readable descriptor after the mode is narrowed --
+         measured, and it really does read the secret back. Nothing can
+         have a descriptor on an inode that did not exist until now.
+      3. *It disposes of the symlink case.* ``path`` being a symlink used
+         to mean the secret was written to the link's *target* and the
+         target was chmodded. ``os.replace()`` replaces the link itself,
+         leaving the target untouched.
+
+      The scratch file is removed if anything fails, so a failed write
+      leaves neither a partial file in position nor litter beside it.
     * **``append=True``.** The content is appended, so an existing file
       cannot be replaced and its mode is left alone -- this call does not
       own it. All that is guaranteed is that a file *this call creates* is
@@ -434,44 +464,68 @@ def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
 
     Neither mode is atomic against an attacker who can create files in the
     containing directory; they fail loudly instead of writing into
-    somebody else's file. Callers that need atomic replacement write to a
-    scratch path in the same directory and ``replace()`` it into position.
+    somebody else's file.
 
-    Windows caveat, shared with ``clustrix.config._write_config_file_securely``:
+    Windows caveat, shared with ``clustrix.config.write_config_file_securely``:
     ``os.fchmod`` does not exist there before Python 3.13, ``os.O_NOFOLLOW``
     does not exist at all, and ``chmod`` only toggles the read-only
     attribute rather than restricting who may read, so on Windows the file
     inherits the directory's ACL.
     """
     if append:
-        flags = os.O_WRONLY | os.O_CREAT | os.O_APPEND
-    else:
+        fd = os.open(str(path), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
-            os.unlink(path)
-        except FileNotFoundError:
-            pass
-        flags = (
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0)  # absent on Windows
-        )
+            handle = os.fdopen(fd, "a", encoding="utf-8")
+        except BaseException:
+            # Nothing owns the descriptor yet, so it would otherwise leak;
+            # on Windows a leaked handle also makes the file undeletable.
+            os.close(fd)
+            raise
+        with handle as f:
+            f.write(text)
+        return
 
-    fd = os.open(str(path), flags, 0o600)
+    # A name in the destination's own directory: os.replace() is only
+    # atomic within a filesystem, and /tmp is frequently a different one.
+    # The random component means a scratch path cannot be predicted and
+    # pre-created by another local process.
+    scratch = path.parent / f".{path.name}.{_secrets.token_hex(8)}.tmp"
+    flags = (
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | getattr(os, "O_NOFOLLOW", 0)  # absent on Windows
+    )
+    fd = os.open(str(scratch), flags, 0o600)
     try:
-        if not append and hasattr(os, "fchmod"):
+        if hasattr(os, "fchmod"):
             os.fchmod(fd, 0o600)
-        handle = os.fdopen(fd, "a" if append else "w", encoding="utf-8")
+        handle = os.fdopen(fd, "w", encoding="utf-8")
     except BaseException:
-        # Nothing owns the descriptor yet, so it would otherwise leak; on
-        # Windows a leaked handle also makes the file undeletable.
         os.close(fd)
+        _discard(scratch)
         raise
-    with handle as f:
-        f.write(text)
+
+    try:
+        with handle as f:
+            f.write(text)
+        os.replace(scratch, path)
+    except BaseException:
+        # The destination is untouched; drop the half-written scratch file
+        # rather than leaving a copy of the secret beside it.
+        _discard(scratch)
+        raise
 
 
-def _write_config_file_securely(config_path_obj: Path, config_data: dict) -> None:
+def _discard(path: Path) -> None:
+    """Remove ``path``, ignoring the case where it is already gone."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
+def write_config_file_securely(config_path_obj: Path, config_data: dict) -> None:
     """Write ``config_data`` to ``config_path_obj`` with 0600 permissions.
 
     Renders first and hands the text to :func:`write_text_securely`, which
