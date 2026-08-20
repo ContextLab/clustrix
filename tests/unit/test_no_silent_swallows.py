@@ -58,7 +58,7 @@ import pytest
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig
 from clustrix.executor_connections import ConnectionManager
 from clustrix.executor_scheduler_status import SchedulerStatusManager
-from clustrix.loop_analysis import find_parallelizable_loops
+from clustrix.loop_analysis import find_parallelizable_loops, SafeRangeEvaluator
 from clustrix.modern_notebook_widget import ModernClustrixWidget
 from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
 from clustrix.utils import (
@@ -322,8 +322,6 @@ def test_a_bound_that_cannot_be_folded_gives_no_range_rather_than_a_wrong_one():
     folding can actually raise so that a bug *in the evaluator* is no longer
     laundered into an unknown bound.
     """
-    from clustrix.loop_analysis import SafeRangeEvaluator
-
     tree = ast.parse('range("a" + 1)', mode="eval")
     analyzer = SafeRangeEvaluator({})
     analyzer.visit(tree.body)
@@ -362,8 +360,6 @@ def test_a_bug_inside_the_range_evaluator_is_not_laundered_into_unknown():
     ``safe is False`` and fails here.
     """
 
-    from clustrix.loop_analysis import SafeRangeEvaluator
-
     class EvaluatorBug(Exception):
         """Stands in for a defect in the evaluator, not a foldable bound."""
 
@@ -381,6 +377,119 @@ def test_a_bug_inside_the_range_evaluator_is_not_laundered_into_unknown():
     foldable = SafeRangeEvaluator({})
     foldable.visit(ast.parse('range("a" + 1)', mode="eval").body)
     assert (foldable.safe, foldable.result) == (False, None)
+
+
+def test_a_bug_inside_the_range_evaluator_reaches_the_caller():
+    """The narrowing above is worth nothing if the entry point re-swallows it.
+
+    The test before this one pins ``SafeRangeEvaluator``. It was written, and
+    passed, while ``find_parallelizable_loops`` -- the only way anything in
+    clustrix reaches that evaluator -- still turned the propagated bug back
+    into ``[]``: ``_analyze_for_loop`` wrapped the whole analysis in
+    ``except Exception: logger.debug(...); return None``, and
+    ``detect_loops_in_function`` wrapped *that* in
+    ``except Exception: return []``. Measured, on the same input as below:
+    the evaluator raised and the caller got ``[]``, "this function has no
+    parallelizable loops". So the claim that "the only honest outcome is for
+    it to propagate" was true of the evaluator and false of clustrix.
+
+    That is issue #123's own defect class living inside a fix for it, and it
+    is the lesson the previous round already paid for: the function was
+    pinned, the call site was not. This test is at the call site. Widening
+    either outer handler back to ``except Exception`` fails it while every
+    evaluator-level test above stays green.
+    """
+
+    class EvaluatorBug(Exception):
+        """Stands in for a defect in the evaluator, not a foldable bound."""
+
+    class Bound(int):
+        def __add__(self, other):
+            raise EvaluatorBug("constant folding is broken")
+
+    def target(count):
+        total = 0
+        for index in range(count + 1):
+            total += index
+        return total
+
+    with pytest.raises(EvaluatorBug):
+        find_parallelizable_loops(target, (Bound(5),), {})
+
+
+def test_the_entry_point_still_analyzes_an_ordinary_function():
+    """The negative control for the test above.
+
+    Narrowing the two outer handlers must not turn ordinary analysis into a
+    raise, and must not stop it finding anything: an unfoldable bound is still
+    an answer, not an error, and a plain function still yields its loop.
+    """
+    from clustrix.loop_analysis import detect_loops_in_function
+
+    def target(count):
+        results = []
+        for index in range(count):
+            results.append(index * 2)
+        return results
+
+    loops = detect_loops_in_function(target, (10,), {})
+    assert [loop.loop_type for loop in loops] == ["for"]
+    assert loops[0].range_info == {"start": 0, "stop": 10, "step": 1}
+
+    # A function whose source cannot be read is still "no loops", not a raise:
+    # that is the one condition the narrowed outer handler still answers for.
+    namespace: dict = {}
+    exec("def made_by_exec():\n    for i in range(3):\n        pass\n", namespace)
+    assert detect_loops_in_function(namespace["made_by_exec"], (), {}) == []
+
+
+@pytest.mark.parametrize("error", [TypeError, ValueError, OverflowError])
+def test_every_error_constant_folding_can_raise_is_answered_not_raised(error, caplog):
+    """Pins the *membership* of ``_evaluate_binop``'s narrowed tuple.
+
+    Dropping ``OverflowError`` from it survived the whole suite, because
+    ``visit_Call``'s tuple lists ``OverflowError`` too and caught it one frame
+    out -- the observable answer (``safe is False``, ``result is None``) is
+    identical either way. So this asserts *which handler answered*, by the
+    line it logs. Remove any member from the folding tuple and the folding
+    message stops appearing.
+    """
+
+    class Bound(int):
+        def __add__(self, other):
+            raise error("this bound cannot be folded")
+
+    evaluator = SafeRangeEvaluator({"n": Bound(5)})
+    with caplog.at_level(logging.DEBUG, logger="clustrix.loop_analysis"):
+        evaluator.visit(ast.parse("range(n + 1)", mode="eval").body)
+
+    assert (evaluator.safe, evaluator.result) == (False, None)
+    messages = [record.getMessage() for record in caplog.records]
+    assert any(
+        "Could not fold a constant loop bound" in message for message in messages
+    ), messages
+
+
+@pytest.mark.parametrize(
+    "error", [TypeError, ValueError, OverflowError, RecursionError]
+)
+def test_every_error_reading_a_range_argument_is_answered_not_raised(error):
+    """Pins the membership of ``visit_Call``'s narrowed tuple.
+
+    ``range(-n)`` negates the bound in ``_evaluate_node``, which is *outside*
+    ``_evaluate_binop``'s handler, so ``visit_Call``'s tuple is the only one
+    that can answer -- drop a member from it and this raises instead of
+    reporting an unknown bound.
+    """
+
+    class Bound(int):
+        def __neg__(self):
+            raise error("this bound cannot be read")
+
+    evaluator = SafeRangeEvaluator({"n": Bound(5)})
+    evaluator.visit(ast.parse("range(-n)", mode="eval").body)
+
+    assert (evaluator.safe, evaluator.result) == (False, None)
 
 
 # ---------------------------------------------------------------------------
@@ -758,12 +867,13 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #
 # Read this before trusting a green run of anything below.
 #
-# This repository has now had four AST guards written to stop silent swallows,
-# and all four were defeated: 12 ways, then 30, then 14 and 16, and then this
-# one 22 ways out of 24 attempts. That is not four unlucky implementations. It
-# is the same result four times, and the conclusion it supports is that "did
-# this handler do something useful about the failure?" is not decidable by
-# inspecting the handler. A call might report or might be a no-op; following
+# This repository has now had five AST guards written to stop silent swallows,
+# and all five were defeated: 12 ways, then 30, then 14, then 16, and then this
+# one 22 ways out of 24 attempts -- and then, a round later, 7 more, in nothing
+# more exotic than the ways an `except` clause can be spelled. That is not five
+# unlucky implementations. It is the same result five times, and the conclusion
+# it supports is that "did this handler do something useful about the failure?"
+# is not decidable by inspecting the handler. A call might report or might be a no-op; following
 # it needs whole-program analysis and the callee is often not even in this
 # package.
 #
@@ -782,7 +892,7 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #
 #   * everything BELOW is a lint. It is fast, it runs over the whole package
 #     including handlers no test can reach, and it is worth having for
-#     exactly that. It is *not* evidence that a handler reports, and the 12
+#     exactly that. It is *not* evidence that a handler reports, and the 20
 #     entries in KNOWN_BLIND_SPOTS are the executable statement of how much
 #     it misses -- each asserted to be missed, so the list cannot quietly
 #     become optimistic.
@@ -796,6 +906,18 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #: Names that catch everything. A handler for either of these, a bare
 #: ``except:``, or a tuple containing either, stops every failure.
 CATCH_ALL_NAMES = frozenset({"Exception", "BaseException"})
+
+#: The statement nodes that carry ``handlers``/``finalbody``. ``except*``
+#: (PEP 654) parses to ``ast.TryStar``, which is *not* an ``ast.Try``, so a
+#: scan that tested ``isinstance(node, ast.Try)`` could not see
+#: ``except* Exception: pass`` at all. Both 3.11 and 3.12 are in tests.yml, so
+#: that shape is reachable on CI today, which is why it is caught rather than
+#: recorded. ``ast.TryStar`` does not exist before 3.11 -- and neither does
+#: the syntax, so on 3.10 there is nothing to miss.
+TRY_NODES = (ast.Try,) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
+
+#: What ``contextlib.suppress`` may be called; see ``_suppress_aliases``.
+SUPPRESS_NAME = "suppress"
 
 #: Logging methods a handler might use to report. ``exception`` is absent on
 #: purpose: it attaches the traceback whatever its arguments are, so it always
@@ -862,7 +984,7 @@ TRACKED_DEFECTS = {
 #: rather than aspirational -- if one of these ever *does* start being caught,
 #: that test fails and the entry gets deleted.
 #:
-#: They fall into eight root causes, and the first one is the big one:
+#: They fall into nine root causes, and the first one is the big one:
 #:
 #: A. **Any call at all counts as reporting.** Six spellings are recorded
 #:    below (``_record(exc)`` where ``_record`` is empty, ``errors.append``,
@@ -904,7 +1026,17 @@ TRACKED_DEFECTS = {
 #:    package -- ``test_the_lint_finds_no_unrecorded_silent_swallow`` scans
 #:    for real handlers, and the behavioural tests in the first half of this
 #:    module are what actually guarantee those.
-KNOWN_BLIND_SPOTS = 20
+#: I. **An alias bound by anything but a literal.** ``_catch_all_aliases``
+#:    resolves ``_E = Exception``, ``_E = (Exception,)``, ``_A, _B =
+#:    Exception, ValueError`` and ``from builtins import Exception as _E``,
+#:    which is every spelling found by red-teaming it on 2026-08-20 and
+#:    every one that is a literal. It does not resolve a binding produced by
+#:    a *call* -- ``_ERRORS = tuple([Exception])`` -- and it will not: that
+#:    is constant propagation through arbitrary expressions, which is the
+#:    same whole-program problem as family A. One spelling is recorded below.
+#:    Widening the alias resolver rather than recording this is how the four
+#:    previous guards were lost.
+KNOWN_BLIND_SPOTS = 21
 
 
 class Swallow(NamedTuple):
@@ -956,31 +1088,96 @@ def _enclosing_qualname(qualnames, node):
 
 
 def _catch_all_aliases(tree):
-    """Module-level names bound to ``Exception``/``BaseException``.
+    """Names bound to ``Exception``/``BaseException``, however indirectly.
 
     ``_Exc = Exception`` followed by ``except _Exc:`` is the same handler
     written in two lines, and the guard used to read only the second one.
+    Three more indirections were found by red-teaming it on 2026-08-20 and are
+    resolved here as well, because each is one line of code to bind and one
+    line to catch:
+
+    * ``_ERRORS = (Exception,)`` then ``except _ERRORS:`` -- a *tuple* value,
+      which the Name-only branch below could not see.
+    * ``_A, _B = Exception, ValueError`` then ``except _A:`` -- a tuple
+      target paired elementwise with a tuple value.
+    * ``_ERRORS = (Exception,)`` then ``suppress(*_ERRORS)`` -- the same
+      binding reached through a starred argument (see
+      ``_suppresses_everything``).
     """
     aliases = set(CATCH_ALL_NAMES)
+
+    def names_a_catch_all(value):
+        if isinstance(value, ast.Name):
+            return value.id in aliases
+        if isinstance(value, ast.Attribute):
+            return value.attr in CATCH_ALL_NAMES
+        if isinstance(value, ast.Tuple):
+            return any(names_a_catch_all(element) for element in value.elts)
+        return False
+
+    def bind(name):
+        if name in aliases:
+            return False
+        aliases.add(name)
+        return True
+
     changed = True
     while changed:  # a chain of aliases resolves in a couple of passes
         changed = False
         for node in ast.walk(tree):
-            if isinstance(node, ast.Assign) and isinstance(node.value, ast.Name):
-                if node.value.id not in aliases:
-                    continue
+            if isinstance(node, ast.Assign):
                 for target in node.targets:
-                    if isinstance(target, ast.Name) and target.id not in aliases:
-                        aliases.add(target.id)
-                        changed = True
+                    # `_A, _B = Exception, ValueError` -- pair them off, so
+                    # only the element that really is a catch-all is bound.
+                    if (
+                        isinstance(target, ast.Tuple)
+                        and isinstance(node.value, ast.Tuple)
+                        and len(target.elts) == len(node.value.elts)
+                    ):
+                        for element, value in zip(target.elts, node.value.elts):
+                            if isinstance(element, ast.Name) and names_a_catch_all(
+                                value
+                            ):
+                                changed |= bind(element.id)
+                    elif isinstance(target, ast.Name) and names_a_catch_all(node.value):
+                        changed |= bind(target.id)
             elif isinstance(node, ast.ImportFrom) and node.module == "builtins":
                 for alias in node.names:
                     if alias.name in CATCH_ALL_NAMES:
-                        bound = alias.asname or alias.name
-                        if bound not in aliases:
-                            aliases.add(bound)
-                            changed = True
+                        changed |= bind(alias.asname or alias.name)
     return aliases
+
+
+def _suppress_aliases(tree):
+    """Names ``contextlib.suppress`` is reachable under in this module.
+
+    ``from contextlib import suppress as quiet`` made ``quiet(Exception)``
+    invisible, because the check below required the literal spelling.
+    """
+    names = {SUPPRESS_NAME}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "contextlib":
+            for alias in node.names:
+                if alias.name == SUPPRESS_NAME:
+                    names.add(alias.asname or alias.name)
+    return names
+
+
+def _is_catch_all_expression(item, aliases):
+    """One name in an ``except`` clause that stops everything.
+
+    ``ast.Attribute`` is here for ``except builtins.Exception:``, which the
+    Name-only test could not see. The attribute name alone is enough: a
+    ``foo.Exception`` that is not the builtin would be a class someone chose
+    to call ``Exception``, and treating it as a catch-all errs toward
+    reporting a handler rather than toward missing one -- the only direction
+    a lint may err in.
+    """
+    if isinstance(item, ast.Name):
+        return item.id in aliases
+    if isinstance(item, ast.Attribute):
+        return item.attr in CATCH_ALL_NAMES
+    return False
 
 
 def _catches_everything(handler, aliases):
@@ -990,7 +1187,7 @@ def _catches_everything(handler, aliases):
     candidates = (
         handler.type.elts if isinstance(handler.type, ast.Tuple) else [handler.type]
     )
-    return any(isinstance(item, ast.Name) and item.id in aliases for item in candidates)
+    return any(_is_catch_all_expression(item, aliases) for item in candidates)
 
 
 def _is_contentless_log(call):
@@ -1117,18 +1314,24 @@ def _accounts_for_the_failure(body, bound_name):
     return False
 
 
-def _suppresses_everything(call, aliases):
-    """``contextlib.suppress(Exception)`` is ``except Exception: pass``."""
+def _suppresses_everything(call, aliases, suppress_names):
+    """``contextlib.suppress(Exception)`` is ``except Exception: pass``.
+
+    ``suppress_names`` carries the import aliases, and ``ast.Starred`` covers
+    ``suppress(*_ERRORS)`` -- both were ways past the literal-name test this
+    used to be.
+    """
     function = call.func
     name = function.attr if isinstance(function, ast.Attribute) else None
     if name is None:
         name = getattr(function, "id", None)
-    if name != "suppress":
+    if name not in suppress_names:
         return False
-    return any(
-        isinstance(argument, ast.Name) and argument.id in aliases
+    arguments = [
+        argument.value if isinstance(argument, ast.Starred) else argument
         for argument in call.args
-    )
+    ]
+    return any(_is_catch_all_expression(argument, aliases) for argument in arguments)
 
 
 def find_silent_swallows(source, module):
@@ -1140,11 +1343,12 @@ def find_silent_swallows(source, module):
     """
     tree = ast.parse(source, filename=module)
     aliases = _catch_all_aliases(tree)
+    suppress_names = _suppress_aliases(tree)
     qualnames = _qualified_names(tree)
     found = []
 
     for node in ast.walk(tree):
-        if isinstance(node, ast.Try):
+        if isinstance(node, TRY_NODES):
             for handler in node.handlers:
                 if not _catches_everything(handler, aliases):
                     continue
@@ -1171,7 +1375,9 @@ def find_silent_swallows(source, module):
                             "block, which discards an exception in flight",
                         )
                     )
-        elif isinstance(node, ast.Call) and _suppresses_everything(node, aliases):
+        elif isinstance(node, ast.Call) and _suppresses_everything(
+            node, aliases, suppress_names
+        ):
             found.append(
                 Swallow(
                     module,
@@ -1540,7 +1746,79 @@ BYPASSES = {
                 except Exception:
                     pass
     """,
+    # ---- found by red-teaming the *spelling* of the clause, 2026-08-20 ---
+    # Seven shapes, none of which the guard modelled: it recognised a bare
+    # ``Name`` and nothing else. These six are one line of AST each to catch,
+    # which is the whole reason they are caught rather than recorded -- the
+    # families in BLIND_SPOTS are the ones that need whole-program analysis,
+    # and these need none. The seventh, ``except*``, is added below the dict
+    # because it is a syntax error before 3.11.
+    "except builtins.Exception (dotted)": """
+        import builtins
+
+        def f():
+            try:
+                g()
+            except builtins.Exception:
+                pass
+    """,
+    "a name bound to a tuple containing Exception": """
+        _ERRORS = (Exception,)
+
+        def f():
+            try:
+                g()
+            except _ERRORS:
+                pass
+    """,
+    "a name bound by tuple unpacking": """
+        _A, _B = Exception, ValueError
+
+        def f():
+            try:
+                g()
+            except _A:
+                pass
+    """,
+    "contextlib.suppress imported under another name": """
+        from contextlib import suppress as quiet
+
+        def f():
+            with quiet(Exception):
+                g()
+    """,
+    "suppress over a starred tuple of exceptions": """
+        from contextlib import suppress
+
+        _ERRORS = (Exception,)
+
+        def f():
+            with suppress(*_ERRORS):
+                g()
+    """,
+    "suppress over a dotted Exception": """
+        import builtins
+        import contextlib
+
+        def f():
+            with contextlib.suppress(builtins.Exception):
+                g()
+    """,
 }
+
+if hasattr(ast, "TryStar"):  # PEP 654; the syntax does not parse before 3.11
+    # This one reaches CI: tests.yml runs 3.11 and 3.12. ``except*`` parses to
+    # ``ast.TryStar``, which is not an ``ast.Try``, so the scan walked straight
+    # past it -- a whole statement form the guard could not see. It cannot be
+    # exercised on 3.10, where the syntax does not exist and so neither does
+    # the hole.
+    BYPASSES["except* Exception (PEP 654)"] = """
+        def f():
+            try:
+                g()
+            except* Exception:
+                pass
+    """
 
 
 @pytest.mark.parametrize("bypass", sorted(BYPASSES), ids=sorted(BYPASSES))
@@ -1555,6 +1833,22 @@ def test_the_lint_catches_every_known_bypass(bypass):
     found = find_silent_swallows(source, "probe.py")
 
     assert found, f"the lint does not catch: {bypass}"
+
+
+def test_the_scan_looks_at_every_statement_form_that_has_handlers():
+    """``except*`` is a second statement node, not a spelling of the first.
+
+    The bypass entry above can only be collected on 3.11+, because the syntax
+    is a parse error before that. This assertion runs everywhere and pins the
+    wiring: whenever the interpreter has ``ast.TryStar``, the scan must be
+    looking at it. Without that, ``except* Exception: pass`` is invisible on
+    the two interpreters CI actually runs.
+    """
+    assert ast.Try in TRY_NODES
+    if hasattr(ast, "TryStar"):
+        assert ast.TryStar in TRY_NODES
+    else:
+        assert TRY_NODES == (ast.Try,)
 
 
 def test_the_renamed_nested_function_is_not_licensed_by_the_allowlist():
@@ -1810,6 +2104,15 @@ BLIND_SPOTS = {
                 g()
             except Exception:
                 yield 1
+    """,
+    "a name bound to a tuple built by a call": """
+        _ERRORS = tuple([Exception])
+
+        def f():
+            try:
+                g()
+            except _ERRORS:
+                pass
     """,
     "an exception accessor named on an unrelated object": """
         def f(SOME):

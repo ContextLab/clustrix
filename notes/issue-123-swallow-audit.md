@@ -280,3 +280,98 @@ error above happened):
 | sites the lint calls silent and unrecorded | 0 | 0 |
 | the second red-team's 22 probes, reconstructed as `BYPASSES` / `BLIND_SPOTS` entries | 2 caught | 15 caught, 7 recorded as blind spots |
 | `BYPASSES` (each asserted caught) / `ACCEPTED` / `BLIND_SPOTS` | 17 / 8 / 7 | 33 / 8 / 12 |
+
+## Closing round (2026-08-20): three open items from the final review
+
+### R1 — the narrowing was nullified downstream, by this issue's own defect
+
+`SafeRangeEvaluator`'s two handlers were narrowed at `771c54d` so a bug in the
+evaluator propagates instead of being reported as "this bound is not
+statically known". Through the real entry point it was re-swallowed twice:
+
+* `LoopDetector._analyze_for_loop` — `except Exception: logger.debug(...);
+  return None`
+* `detect_loops_in_function` — one `try` around the whole body ending in
+  `except Exception: return []`
+
+Measured at `771c54d`, driving `find_parallelizable_loops` with an `int`
+subclass whose `__add__` raises:
+
+| | entry point |
+|-|-|
+| before | `ENTRY POINT RETURNED: []` |
+| after | `ENTRY POINT RAISED: EvaluatorBug: constant folding is broken` |
+
+So the previous round's claim that "the only honest outcome is for it to
+propagate" was true of `SafeRangeEvaluator` and false of clustrix. Fixed by
+narrowing `_analyze_for_loop`/`_analyze_while_loop` to `RecursionError` (the
+one genuinely expected failure: both analyzers are `ast.NodeVisitor`s) and by
+shrinking `detect_loops_in_function`'s guard to the source acquisition alone,
+`except (OSError, TypeError, SyntaxError)`.
+
+**Sibling found.** `detect_loops_in_function`'s argument-binding handler,
+narrowed to `(TypeError, ValueError)` in the same commit, sat *lexically*
+inside that same catch-all — so it too was nullified for every other error.
+Shrinking the outer guard removes the nesting entirely. A scan of `clustrix/`
+for narrowed handlers lexically inside a catch-all `try` found 13 sites; the
+other 12 all predate issue #123.
+
+### R2 — E7: the detaching-handle paragraph is now pinned
+
+`get_config`'s docstring says `load_config` *rebinds* the singleton (so a held
+reference silently stops tracking) while `configure` *mutates in place*.
+Making `_load_config_locked` mutate in place passed the whole suite, so the
+paragraph was prose. Pinned by
+`test_load_config_detaches_a_held_reference_and_configure_does_not`
+(`tests/unit/test_import_has_no_side_effects.py`), which kills both mutants:
+load-mutates-in-place, and configure-rebinds.
+
+### R3 — bypass 31: seven spellings of the clause, all now caught
+
+The guard recognised a bare `ast.Name` and nothing else.
+
+| shape | status |
+|-|-|
+| `except builtins.Exception:` | caught (`_is_catch_all_expression` reads `ast.Attribute`) |
+| `_ERRORS = (Exception,); except _ERRORS:` | caught (tuple-valued binding) |
+| `_A, _B = Exception, ValueError; except _A:` | caught (tuple unpacking, paired elementwise) |
+| `from contextlib import suppress as quiet` | caught (`_suppress_aliases`) |
+| `suppress(*_ERRORS)` | caught (`ast.Starred` unwrapped) |
+| `contextlib.suppress(builtins.Exception)` | caught (same dotted rule) |
+| `except* Exception: pass` | caught (`TRY_NODES` includes `ast.TryStar`) |
+
+Six are RED-verified by mutation on 3.10. **`except*` is not**: the syntax is
+a parse error before 3.11 and no 3.11+ interpreter is installed here, so its
+`BYPASSES` entry is added only when `ast.TryStar` exists, and
+`test_the_scan_looks_at_every_statement_form_that_has_handlers` pins the
+wiring on every interpreter. CI runs 3.11 and 3.12, where the entry collects.
+
+Recorded rather than chased: a ninth blind-spot family, **an alias bound by
+anything but a literal** (`_ERRORS = tuple([Exception])`). Resolving that is
+constant propagation through arbitrary expressions — the same whole-program
+problem as family A, and widening the resolver instead of recording it is how
+the previous guards were lost. `KNOWN_BLIND_SPOTS` 20 → 21.
+
+**Stale prose corrected**: "four AST guards" → five (the sentence already
+enumerated five), and "the 12 entries in KNOWN_BLIND_SPOTS" → 21.
+
+### R4 — E6: tuple membership pinned, in both tuples
+
+Dropping `OverflowError` from `_evaluate_binop`'s tuple was invisible because
+`visit_Call`'s tuple lists it too and caught it one frame out — the observable
+answer is identical. The new tests separate them:
+
+* `test_every_error_constant_folding_can_raise_is_answered_not_raised`
+  asserts *which handler answered*, by the line it logs. Kills the
+  drop-`OverflowError`-from-`_evaluate_binop` mutant.
+* `test_every_error_reading_a_range_argument_is_answered_not_raised` drives
+  `range(-n)`, whose negation happens outside `_evaluate_binop`, so only
+  `visit_Call`'s tuple can answer. Kills drop-`OverflowError` and
+  drop-`RecursionError` from that tuple.
+
+### Gate for this round
+
+`1887 collected / 27 deselected / 1860 selected / 1843 passed / 17 skipped /
+0 failed` on pyenv 3.10.12 (+18 on the 1869 baseline: +17 in
+`test_no_silent_swallows.py`, +1 in `test_import_has_no_side_effects.py`).
+flake8, mypy and black 26.3.1 all clean.

@@ -46,6 +46,7 @@ from clustrix.config import (
     ConfigFileError,
     configure,
     get_config,
+    load_config,
 )
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -314,6 +315,50 @@ def test_configure_applies_on_top_of_the_file_not_underneath_it(unloaded_config)
 
     assert config.default_cores == 11, "configure() was overwritten by the file"
     assert config.cluster_host == "fromfile.example", "the file was never read"
+
+
+def test_load_config_detaches_a_held_reference_and_configure_does_not(
+    unloaded_config, tmp_path
+):
+    """The difference ``get_config``'s docstring documents, actually measured.
+
+    That docstring tells callers to re-fetch rather than hold on to what
+    ``get_config`` returns, because ``load_config`` *rebinds* the singleton
+    while ``configure`` *mutates it in place* -- so a held reference silently
+    stops tracking one and keeps tracking the other. Nothing anywhere asserted
+    it: changing ``_load_config_locked`` to mutate the existing object instead
+    of rebinding passed the entire suite, which made the paragraph prose. Six
+    justifications in this campaign were written before they were checked;
+    this is the seventh, and it is checked here instead.
+
+    Both halves matter. If ``load_config`` stopped rebinding, the advice would
+    be pointless; if ``configure`` stopped mutating in place, the parenthesis
+    explaining why the difference is easy to miss would be wrong.
+    """
+    (unloaded_config / "config.yml").write_text(
+        "cluster_type: ssh\ncluster_host: fromfile.example\n"
+    )
+
+    held = get_config()
+    assert held.cluster_host == "fromfile.example"
+
+    other = tmp_path / "other.yml"
+    other.write_text("cluster_type: ssh\ncluster_host: loaded.example\n")
+    load_config(str(other))
+
+    live = get_config()
+    assert live.cluster_host == "loaded.example"
+    assert live is not held, "load_config no longer rebinds the singleton"
+    assert held.cluster_host == "fromfile.example", (
+        "the reference taken before load_config followed the load, so holding "
+        "one is safe after all and the docstring is wrong"
+    )
+
+    # ...and the other half: configure() is seen by a reference held across it.
+    still_held = get_config()
+    configure(cluster_host="configured.example")
+    assert get_config() is still_held, "configure no longer mutates in place"
+    assert still_held.cluster_host == "configured.example"
 
 
 def test_nothing_binds_the_singleton_by_name():
@@ -775,10 +820,15 @@ def test_a_configure_is_not_torn_in_half_by_a_concurrent_load(
         name: getattr(final, name) == value
         for name, value in _CONFIGURE_KEYWORDS.items()
     }
-    assert set(from_keywords.values()) in ({True}, {False}), (
-        "configure() was torn in half by a concurrent load_config: "
-        f"{ {name: getattr(final, name) for name in _CONFIGURE_KEYWORDS} }"
-    )
+    # Bound to a name rather than written inline: a dict display directly
+    # inside an f-string needs padding spaces to stop `{{` reading as an
+    # escape, and pycodestyle reads those as E201/E202 once the interpreter
+    # tokenizes f-string internals (3.12+), which the pre-commit flake8 does.
+    landed = {name: getattr(final, name) for name in _CONFIGURE_KEYWORDS}
+    assert set(from_keywords.values()) in (
+        {True},
+        {False},
+    ), f"configure() was torn in half by a concurrent load_config: {landed}"
     if not any(from_keywords.values()):
         # The load won outright, which is the other legal outcome: an explicit
         # file load replaces the configuration wholesale. It must have won
