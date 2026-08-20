@@ -56,7 +56,9 @@ fixture asserts that no conda is reachable before it puts its own there.
 import os
 import pathlib
 import re
+import shlex
 import stat
+import sys
 
 import pytest
 
@@ -65,7 +67,12 @@ from clustrix.executor_core import ClusterExecutor
 from clustrix.utils import serialize_function
 from tests.ssh_server import LocalSSHServer
 
-PASSWORD = "submission-invariants"
+#: The account password the fixture SSH server accepts. Spelled with a
+#: leading "test-" because ``scripts/check_for_secrets.py`` reads
+#: ``PASSWORD = "<8+ characters>"`` as an assigned credential unless the
+#: value is visibly a stand-in, and the remedy for that is always to fix
+#: the literal rather than to widen the scanner.
+PASSWORD = "test-submission-invariants"
 
 #: PATH for the "cluster" account. Deliberately not ``os.environ["PATH"]``:
 #: on a developer machine that leads clustrix straight to the developer's own
@@ -108,18 +115,29 @@ def _account(tmp_path, with_conda=True):
     return root
 
 
-def _assert_no_other_conda(server):
+def _assert_no_other_conda(server, expected=""):
     """Fail loudly if anything but the fixture's conda is reachable.
 
     Not a nicety. ``setup_two_venv_environment`` runs ``conda create`` in
     whatever conda it finds, and a leaked ``PATH`` makes that the machine's
     real one.
+
+    Both shells are checked, because the two callers differ: clustrix's
+    commands run in the non-login shell paramiko gives them, while the conda
+    probe wraps its program in ``bash -lc`` -- and a login shell sources the
+    profile scripts, which is exactly where a developer's ``conda init``
+    block lives.
     """
-    _, stdout, _ = server_exec(server, "command -v conda || true")
-    assert not stdout.strip(), (
-        "a conda outside this fixture is reachable from the test account "
-        f"({stdout.strip()!r}); clustrix would run `conda create` in it"
-    )
+    for shell, command in (
+        ("non-login", "command -v conda || true"),
+        ("login", "bash -lc " + shlex.quote("command -v conda || true")),
+    ):
+        _, stdout, _ = server_exec(server, command)
+        assert stdout.strip() == expected, (
+            f"the {shell} shell of the test account reaches "
+            f"{stdout.strip()!r} rather than {expected!r}; clustrix would run "
+            "`conda create` in it"
+        )
 
 
 def server_exec(server, command):
@@ -221,25 +239,37 @@ def submit(server, cluster_type, **overrides):
 _STAGE_LAUNCH = re.compile(r'^(?!#).*-c "$')
 
 
-def venv2_launch_line(script):
-    """The line that starts the interpreter the user's function runs in.
+def venv2_block(script):
+    """VENV2's setup lines and the line that starts its interpreter.
 
     Located structurally -- by the comment the generator writes above the
     block -- rather than by pattern-matching for what a mutant produces, so
-    the assertions below are about the interpreter VENV2 gets, whatever that
+    the assertions below are about the environment VENV2 gets, whatever that
     turns out to be.
+
+    Both halves matter, and which one carries the environment depends on the
+    layout. With conda the launch line names it (``conda run -n <env>
+    python``); with plain virtualenvs the launch line is a bare ``python``
+    and the preceding ``source .../bin/activate`` is what decides which
+    interpreter that is.
     """
     lines = script.splitlines()
     for index, line in enumerate(lines):
         if line.startswith("# Step 2: Use VENV2 to execute the function"):
-            for candidate in lines[index + 1 :]:
+            block = lines[index + 1 :]
+            for offset, candidate in enumerate(block):
                 if _STAGE_LAUNCH.match(candidate):
-                    return candidate
+                    return block[:offset], candidate
             raise AssertionError("the VENV2 block opens no interpreter")
     # Single-venv layout: there is one launch line and it is VENV2's.
     launches = [line for line in lines if _STAGE_LAUNCH.match(line)]
     assert len(launches) == 1, f"expected exactly one launch line, got {launches}"
-    return launches[0]
+    return [], launches[0]
+
+
+def venv2_launch_line(script):
+    """The line that starts the interpreter the user's function runs in."""
+    return venv2_block(script)[1]
 
 
 def assert_venv2_is_not_venv1(script):
@@ -251,7 +281,7 @@ def assert_venv2_is_not_venv1(script):
     the user's function in the serialization environment instead of the one
     they named.
     """
-    launch = venv2_launch_line(script)
+    preamble, launch = venv2_block(script)
     assert "venv1_serialization" not in launch, (
         "VENV2 is started with VENV1's interpreter, so the user's function "
         f"runs in clustrix's serialization venv:\n  {launch}"
@@ -259,6 +289,12 @@ def assert_venv2_is_not_venv1(script):
     assert (
         "clustrix_venv1_" not in launch
     ), f"VENV2 is started with VENV1's conda environment:\n  {launch}"
+    for line in preamble:
+        assert "venv1_serialization" not in line and "clustrix_venv1_" not in line, (
+            "VENV2's block activates VENV1 before it runs the user's "
+            "function, so the bare `python` on the launch line below is "
+            f"VENV1's:\n  {line}\n  {launch}"
+        )
     for line in script.splitlines():
         assert line.count("conda run") <= 1, (
             "a `conda run` is nested inside another `conda run`; the inner "
@@ -268,12 +304,35 @@ def assert_venv2_is_not_venv1(script):
 
 BACKENDS = ["slurm", "ssh"]
 
+#: The two ways a submission reaches the two-venv script.
+#:
+#: ``None`` is the default and was the gap: every invariant test round four
+#: wrote passed ``conda_env_name="prod"``, so the path clustrix takes when the
+#: user names nothing -- the pair of environments clustrix builds itself --
+#: had no invariant test at all. Two mutants lived there. Aliasing
+#: ``venv2_python`` and ``conda_env2_name`` to VENV1's in
+#: ``enhanced_setup_two_venv_environment``, or in its no-GPU branch, launches
+#: VENV2 as ``conda run -n clustrix_venv1_<key> python`` and survives
+#: everything -- but only on this path, because a named environment overrides
+#: the name before the script is generated.
+NAMED_ENVIRONMENTS = [None, "prod"]
 
+
+@pytest.mark.parametrize(
+    "named_env", NAMED_ENVIRONMENTS, ids=["clustrix-built", "user-named"]
+)
 @pytest.mark.parametrize("cluster_type", BACKENDS)
-def test_a_named_environment_never_runs_in_venv1(cluster, cluster_type):
-    """M13, on the default path: two-venv setup plus a named environment."""
-    script, _ = submit(cluster, cluster_type, conda_env_name="prod")
-    assert 'conda run -n prod python -c "' in script, script
+def test_venv2_never_runs_in_venv1(cluster, cluster_type, named_env):
+    """M13, R15 and R21: two-venv setup, with and without a named env."""
+    script, _ = submit(cluster, cluster_type, conda_env_name=named_env)
+    launch = venv2_launch_line(script)
+    if named_env:
+        assert launch == f'conda run -n {named_env} python -c "', script
+    else:
+        assert launch.startswith("conda run -n clustrix_venv2_"), (
+            "with no environment named, VENV2 must run in the second "
+            f"environment clustrix built:\n  {launch}"
+        )
     assert_venv2_is_not_venv1(script)
 
 
@@ -317,6 +376,75 @@ def test_a_submission_does_not_change_python_executable(cluster, cluster_type):
     assert (
         first == second
     ), f"submission 2 emits a different VENV2 launch line:\n  {first}\n  {second}"
+
+
+def _fake_python_script():
+    """A Python that answers the version probe and builds a venv-shaped dir.
+
+    The plain-virtualenv branch of ``setup_two_venv_environment`` is real
+    shell: ``python -m venv``, ``source .../bin/activate``, ``pip install dill
+    cloudpickle``, twice. Run against a real interpreter that is a real pip
+    install off PyPI in a unit test -- two of them -- so this account's
+    interpreter creates the directory layout and an ``activate`` that defines
+    ``pip`` and ``deactivate`` as no-ops. Nothing here stands in for anything
+    clustrix ships: what is asserted is the *script clustrix emits* for this
+    layout, and that script does not depend on what the interpreter did.
+    """
+    major, minor = sys.version_info[:2]
+    return (
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        f'    -c) echo "({major}, {minor})" ;;\n'
+        "    -m)\n"
+        '        if [ "$2" = "venv" ]; then\n'
+        '            mkdir -p "$3/bin"\n'
+        "            printf '%s\\n' 'pip() { :; }' 'deactivate() { :; }' "
+        '> "$3/bin/activate"\n'
+        "        fi\n"
+        "        ;;\n"
+        "esac\n"
+        "exit 0\n"
+    )
+
+
+@pytest.fixture
+def cluster_without_conda(tmp_path):
+    """An account with no conda, so the plain-virtualenv layout is generated."""
+    root = _account(tmp_path, with_conda=False)
+    interpreter = (
+        root / "bin" / f"python{sys.version_info.major}.{sys.version_info.minor}"
+    )
+    interpreter.write_text(_fake_python_script())
+    interpreter.chmod(0o755)
+    path = os.pathsep.join((str(root / "bin"),) + SAFE_PATH_DIRS)
+    with LocalSSHServer(
+        root=str(root), password=PASSWORD, env={"PATH": path}
+    ) as server:
+        _assert_no_other_conda(server)
+        yield server
+
+
+@pytest.mark.parametrize("cluster_type", BACKENDS)
+def test_the_plain_virtualenv_layout_never_runs_venv2_in_venv1(
+    cluster_without_conda, cluster_type
+):
+    """The layout where the launch line does not name the environment.
+
+    With conda, handing VENV2 VENV1's environment shows up in the launch line
+    itself. Without it, both stages launch a bare ``python`` and the
+    ``source .../bin/activate`` above decides which one that is -- so a VENV2
+    block that sources ``venv1_serialization`` runs the user's function in
+    clustrix's serialization venv while every line the earlier tests looked at
+    stays exactly right. Only the goldens saw that; now the invariant does.
+    """
+    script, config = submit(cluster_without_conda, cluster_type)
+    assert config.venv_info.get("uses_conda") is False, (
+        "this account has no conda, so the plain-virtualenv layout is the one "
+        f"under test here: {config.venv_info}"
+    )
+    launch = venv2_launch_line(script)
+    assert launch.endswith('/venv2_execution/bin/python -c "'), script
+    assert_venv2_is_not_venv1(script)
 
 
 # ---------------------------------------------------------------------------
@@ -376,6 +504,71 @@ def test_a_working_conda_on_path_is_left_alone_by_the_probe(tmp_path):
         "the probe sourced a competing conda over one that already works; "
         f"got {config.venv_info.get('conda_setup_prefix')!r}"
     )
+
+
+#: A conda that is on ``PATH``, does not work, and names its own ``conda.sh``
+#: in the error it prints. This is what an HPC module file leaves behind when
+#: it puts the wrapper on ``PATH`` without running ``conda init``, and the
+#: message really is the only pointer to the installation available.
+BROKEN_CONDA = """\
+#!/bin/sh
+echo "CommandNotFoundError: Your shell has not been properly configured." >&2
+echo "To initialize, run: source SITE/etc/profile.d/conda.sh" >&2
+exit 1
+"""
+
+
+def test_the_probe_falls_back_to_the_conda_sh_named_in_condas_own_error(tmp_path):
+    """The probe's last resort, which until now no test ever executed.
+
+    Every other fixture reaches ``conda.sh`` through the search or through
+    ``_clustrix_conda_works``, so replacing the final line of the probe
+    program with ``echo /POISON/etc/profile.d/conda.sh`` left the whole suite
+    green. It is not dead code -- it is the only thing that finds conda at a
+    site whose installation is in none of the searched locations -- but an
+    unexecuted line of emitted shell in this file is exactly what round three
+    shipped broken, so it gets a fixture that forces it.
+
+    The account here has no ``conda.sh`` anywhere the search looks, and a
+    ``conda`` on ``PATH`` that fails and names its installation in the failure.
+    """
+    root = _account(tmp_path, with_conda=False)
+    site = root / "opt" / "site-conda"
+    (site / "etc" / "profile.d").mkdir(parents=True)
+    (site / "etc" / "profile.d" / "conda.sh").write_text(CONDA_SH)
+    conda = root / "bin" / "conda"
+    conda.write_text(BROKEN_CONDA.replace("SITE", str(site)))
+    conda.chmod(0o755)
+
+    path = os.pathsep.join((str(root / "bin"),) + SAFE_PATH_DIRS)
+    with LocalSSHServer(
+        root=str(root), password=PASSWORD, env={"PATH": path}
+    ) as server:
+        # The only conda reachable is this fixture's broken one, in both the
+        # shell clustrix runs commands in and the login shell the probe uses.
+        _assert_no_other_conda(server, expected=str(conda))
+        # ... and nothing the search looks at holds a conda.sh, so a pass here
+        # cannot come from the search block.
+        _, found, _ = server_exec(
+            server,
+            "for d in /opt/conda /usr/local/miniconda3 /usr/local/anaconda3 "
+            '"$HOME/miniconda3" "$HOME/anaconda3" "$HOME/miniforge3"; do '
+            '[ -f "$d/etc/profile.d/conda.sh" ] && echo "$d"; done; true',
+        )
+        assert not found.strip(), (
+            "a searched location on this machine holds a conda.sh "
+            f"({found.strip()!r}), so this test would pass without the "
+            "fallback it exists to exercise"
+        )
+        script, config = submit(server, "slurm", conda_env_name="prod")
+
+    assert config.venv_info.get("conda_setup_prefix") == (
+        f"source {site}/etc/profile.d/conda.sh"
+    ), (
+        "the probe did not fall back to the conda.sh conda named in its own "
+        f"error: {config.venv_info.get('conda_setup_prefix')!r}"
+    )
+    assert_venv2_is_not_venv1(script)
 
 
 def test_the_probe_program_is_valid_shell():

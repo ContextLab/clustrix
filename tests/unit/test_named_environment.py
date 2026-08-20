@@ -1302,14 +1302,27 @@ class TestAPathIsRefusedAtConfigurationTime:
 
     @pytest.mark.parametrize("bad", BAD)
     def test_a_configuration_file_refuses_it(self, tmp_path, bad):
+        """And the refusal says which file the bad name came out of.
+
+        ``load_config`` validates before it builds the ``ClusterConfig``, and
+        the construction would raise on its own -- so the only thing the
+        earlier call adds is the ``source`` it passes, which names the file.
+        Unasserted, that call is indistinguishable from redundant, and the
+        next reader deletes it and leaves a user with a config directory of
+        several files and a message that names none of them.
+        """
         import json
 
         from clustrix.config import load_config
 
         path = tmp_path / "clustrix.yml"
         path.write_text(json.dumps({"cluster_type": "slurm", "conda_env_name": bad}))
-        with pytest.raises(ValueError, match="conda_env_name"):
+        with pytest.raises(ValueError, match="conda_env_name") as raised:
             load_config(str(path))
+        assert str(path) in str(raised.value), (
+            "the refusal does not name the configuration file it came from: "
+            f"{raised.value}"
+        )
 
     def test_a_real_name_is_still_accepted_everywhere(self, tmp_path):
         import json
