@@ -55,12 +55,20 @@ automatically. Changing directory does not reload it.
    ``clustrix.yml`` takes effect as before. Two things make the credential
    available again, and they are the only two:
 
-   - Set ``SSH_HOST`` in the credential file (``<config dir>/.env``) to the
+   - Set ``SSH_HOST`` in the credential file (``~/.clustrix/.env``) to the
      host that may receive the secret. That is you naming the recipient, in
      a file only you can write, and it is checked before provenance is --
      so it works whatever the hostname's provenance turns out to be.
-   - Move the settings into ``<config dir>/config.yml``, delete the
-     working-directory file, and start a new process.
+   - Move the settings into ``~/.clustrix/config.yml``, delete the
+     working-directory file, unset ``CLUSTRIX_CONFIG_DIR`` if it is set,
+     and start a new process.
+
+   Both remedies name ``~/.clustrix`` rather than ``<config dir>``. The
+   placeholder is right for *where clustrix looks*, and wrong here: under a
+   ``CLUSTRIX_CONFIG_DIR`` redirect it stands for a directory somebody else
+   chose, so a sentence about authorising a host would be pointing at a
+   file the redirector controls. Quickstart says ``~/.clustrix/.env`` for
+   the same reason.
 
    ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
    that list, however obvious they look. See the next paragraph.

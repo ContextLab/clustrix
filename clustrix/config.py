@@ -4,6 +4,7 @@ import contextvars
 import json
 import re
 import secrets as _secrets
+import threading
 import warnings
 import yaml
 import os
@@ -244,7 +245,7 @@ class ClusterConfig:
         # Python however it is spelled, so every loader declares itself with
         # ``config_built_from_file`` and this picks the declaration up. See
         # ``CONFIG_SOURCE_*`` below.
-        set_config_source(self, _CONFIG_SOURCE_BEING_READ.get())
+        set_config_source(self, _source_being_read())
 
     def get_env_password(self) -> Optional[str]:
         """Get password from specified environment variable."""
@@ -871,9 +872,57 @@ _HOSTS_NAMED_BY_UNTRUSTED_SOURCES: Dict[str, str] = {}
 #: declaration; each thread starts from its own empty context, and a
 #: declaration leaking across would be a *trusted* config built while some
 #: other thread happened to be reading an untrusted file, or the reverse.
+#:
+#: **Which direction is dangerous.** A fresh context is *safe* for a thread
+#: that is not loading anything and *unsafe* for a loader that delegates the
+#: construction out of its own block -- to a ``Thread``, a
+#: ``ThreadPoolExecutor``, a ``ProcessPoolExecutor``. The delegate does not
+#: inherit the declaration, so it reads the default, ``runtime``, which is
+#: the *trusted* end of the scale: a file the loader distrusts would come
+#: back marked as somebody's Python. It holds across everything that stays
+#: inside one context -- nesting, exception unwind, a generator yielding
+#: mid-block, ``await``, ``create_task``, ``fork``, and every rebuild route
+#: (``copy``, ``deepcopy``, ``pickle``, ``replace``,
+#: ``ClusterConfig(**asdict(...))``).
+#:
+#: :data:`_UNTRUSTED_LOADS_IN_FLIGHT` closes the thread half of that, and
+#: ``tests/unit/test_a_cloned_repository_cannot_take_your_password.py``
+#: fails if a shipped loader ever starts delegating across a *process*
+#: boundary, which no mechanism inside one interpreter can follow.
 _CONFIG_SOURCE_BEING_READ: contextvars.ContextVar[str] = contextvars.ContextVar(
     "clustrix_config_source_being_read", default=CONFIG_SOURCE_RUNTIME
 )
+
+#: Untrusted reads currently in progress *anywhere in this process*, by
+#: source, with a count because two can overlap. Deliberately a module
+#: global -- shared by every thread -- and deliberately consulted only when
+#: the calling context declares nothing, so it does not cost the ContextVar
+#: its precision. See :func:`_source_being_read`.
+_UNTRUSTED_LOADS_IN_FLIGHT: Dict[str, int] = {}
+_UNTRUSTED_LOADS_LOCK = threading.Lock()
+
+
+def _source_being_read() -> str:
+    """The source to stamp on a ``ClusterConfig`` being constructed now.
+
+    The declaration of the calling context when there is one. When there is
+    not -- which is the honest answer for a script constructing a config,
+    and the *wrong* one for work a loader handed to another thread -- an
+    untrusted read in flight elsewhere in the process wins, because the two
+    cases are indistinguishable from here and only one of them is safe to
+    guess at. Over-distrusting costs a refusal whose message explains
+    itself; under-distrusting costs the cluster password.
+    """
+    declared = _CONFIG_SOURCE_BEING_READ.get()
+    if declared != CONFIG_SOURCE_RUNTIME:
+        return declared
+    with _UNTRUSTED_LOADS_LOCK:
+        if not _UNTRUSTED_LOADS_IN_FLIGHT:
+            return CONFIG_SOURCE_RUNTIME
+        # Sorted so the answer does not depend on dict insertion order when
+        # two untrusted reads overlap. Both are untrusted, so which one is
+        # named changes the message and not the decision.
+        return sorted(_UNTRUSTED_LOADS_IN_FLIGHT)[0]
 
 
 @contextlib.contextmanager
@@ -907,9 +956,25 @@ def config_built_from_file(source: str) -> Iterator[None]:
             f"Known sources are {sorted(CONFIG_SOURCES)}."
         )
     token = _CONFIG_SOURCE_BEING_READ.set(source)
+    # Recorded process-wide as well, so that a construction this loader
+    # delegates to another thread -- which starts from an empty context and
+    # would otherwise read the trusted default -- still comes out untrusted.
+    untrusted = source in UNTRUSTED_CONFIG_SOURCES
+    if untrusted:
+        with _UNTRUSTED_LOADS_LOCK:
+            _UNTRUSTED_LOADS_IN_FLIGHT[source] = (
+                _UNTRUSTED_LOADS_IN_FLIGHT.get(source, 0) + 1
+            )
     try:
         yield
     finally:
+        if untrusted:
+            with _UNTRUSTED_LOADS_LOCK:
+                remaining = _UNTRUSTED_LOADS_IN_FLIGHT.get(source, 0) - 1
+                if remaining > 0:
+                    _UNTRUSTED_LOADS_IN_FLIGHT[source] = remaining
+                else:
+                    _UNTRUSTED_LOADS_IN_FLIGHT.pop(source, None)
         _CONFIG_SOURCE_BEING_READ.reset(token)
 
 

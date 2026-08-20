@@ -1265,3 +1265,254 @@ def test_configure_names_asdict_when_it_is_handed_an_internal_attribute():
 
     assert "asdict" in str(raised.value)
     assert "__dict__" in str(raised.value)
+
+
+# --------------------------------------------------------------------------
+# The widget's Load menu is a *discovery*, not a choice.
+#
+# ``_discover_config_files`` globs ``Path.cwd()`` for any *.yml/*.yaml/*.json
+# holding a ``profiles:`` mapping and offers it in the Load dropdown, so a
+# bundle a cloned repository ships appears there without the user having gone
+# looking for it. ``_on_load_config`` then called ``load_from_file(filename)``
+# on the default ``explicit-file`` -- the trusted end of the scale, meaning
+# "the user named this path". Measured before the fix: ``source=explicit-file
+# trusted=True`` and the sentinel on the wire to the repository's host.
+# --------------------------------------------------------------------------
+
+
+def _widget_loading(filename):
+    """Drive the real Load button with ``filename`` in the real Combobox."""
+    from clustrix.modern_notebook_widget import ModernClustrixWidget
+
+    widget = ModernClustrixWidget()
+    widget.widgets["config_filename"].value = filename
+    widget._on_load_config(None)
+    return widget
+
+
+def test_the_load_menu_does_not_trust_a_bundle_found_in_the_working_directory(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """The reproduction. RED before the fix: ``explicit-file``, and the leak."""
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    repo = tmp_path / "cloned-repository"
+    repo.mkdir()
+    (repo / "profiles.yml").write_text(
+        _profile_bundle(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(repo)
+
+    from clustrix.modern_notebook_widget import ModernClustrixWidget
+
+    # The menu really does offer it, by full path, without being asked.
+    offered = ModernClustrixWidget()._discover_config_files()
+    chosen = [entry for entry in offered if entry == str(repo / "profiles.yml")]
+    assert chosen, f"the working-directory bundle was not offered: {offered}"
+
+    widget = _widget_loading(chosen[0])
+    profile = widget.profile_manager.get_active_profile()
+
+    assert profile.cluster_host == attacker_server.host
+    assert (
+        get_config_source(profile) == config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    )
+    assert stored_credential_is_for_config(profile, {"password": SENTINEL_PASSWORD})
+
+    manager = ConnectionManager(profile)
+    try:
+        manager.setup_ssh_connection()
+    except Exception:
+        pass
+    finally:
+        manager.disconnect()
+
+    assert attacker_server.authentications == [], (
+        "the widget's Load menu sent the cluster password to a host named by "
+        "a profile bundle it found in the working directory: "
+        + repr(attacker_server.authentications)
+    )
+
+
+def test_the_load_menu_still_trusts_the_store_in_the_configuration_directory(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """And the fix does not turn Load into a button that refuses everything.
+
+    A bare ``profiles.yml`` resolves to the clustrix configuration directory,
+    which is where Save puts it. That is the documented round trip and it has
+    to keep authenticating.
+    """
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+
+    store = get_config_dir() / "profiles.yml"
+    store.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    store.write_text(_profile_bundle(attacker_server), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    widget = _widget_loading("profiles.yml")
+    profile = widget.profile_manager.get_active_profile()
+
+    assert get_config_source(profile) == CONFIG_SOURCE_USER_CONFIG_DIR
+    assert (
+        stored_credential_is_for_config(profile, {"password": SENTINEL_PASSWORD})
+        is None
+    )
+
+    manager = ConnectionManager(profile)
+    try:
+        manager.setup_ssh_connection()
+        authenticated = manager.ssh_client.get_transport().is_authenticated()
+    finally:
+        manager.disconnect()
+    assert authenticated
+    assert attacker_server.authentications[-1] == ("victim", "password")
+
+
+# --------------------------------------------------------------------------
+# The declaration must not be lost by delegating construction elsewhere.
+#
+# ``_CONFIG_SOURCE_BEING_READ`` is a ContextVar, and a new thread starts from
+# an empty context: it reads the default, ``runtime``, which is *trusted*. So
+# a loader that built its configs on a worker thread would hand back a file's
+# hostname marked as somebody's Python. Latent -- no shipped loader does it --
+# but so did the profile store look before it was found.
+# --------------------------------------------------------------------------
+
+
+def _built_in_a_thread(host):
+    import threading
+
+    built = {}
+
+    def build():
+        built["config"] = ClusterConfig(cluster_type="ssh", cluster_host=host)
+
+    thread = threading.Thread(target=build)
+    thread.start()
+    thread.join()
+    return built["config"]
+
+
+def test_a_loader_that_builds_on_a_worker_thread_still_produces_a_file_config():
+    """RED before the fix: ``runtime``, i.e. trusted."""
+    from clustrix.config import config_built_from_file
+
+    with config_built_from_file(config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR):
+        built = _built_in_a_thread("delegated.to.a.worker.thread.example")
+
+    assert (
+        get_config_source(built) == config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    ), "a config a loader built on a worker thread came back trusted"
+
+
+def test_a_thread_outside_every_read_is_still_somebody_s_python():
+    """The guard must not make every threaded construction untrusted."""
+    assert (
+        get_config_source(_built_in_a_thread("typed.on.a.worker.thread.example"))
+        == CONFIG_SOURCE_RUNTIME
+    )
+
+
+def test_an_inner_declaration_still_wins_over_an_outer_one():
+    """The process-wide record is consulted only when nothing is declared."""
+    from clustrix.config import config_built_from_file
+
+    with config_built_from_file(config_module.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR):
+        with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
+            built = ClusterConfig(
+                cluster_type="ssh", cluster_host="named.inside.a.nested.block.example"
+            )
+    assert get_config_source(built) == CONFIG_SOURCE_EXPLICIT_FILE
+
+
+def test_the_process_wide_record_does_not_outlive_the_read():
+    """Including when the read raises: a permanent record would taint the
+    whole process, which is the mirror-image failure."""
+    from clustrix.config import config_built_from_file
+
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+    with config_built_from_file(config_module.CONFIG_SOURCE_WORKING_DIRECTORY):
+        with config_built_from_file(config_module.CONFIG_SOURCE_WORKING_DIRECTORY):
+            assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {
+                config_module.CONFIG_SOURCE_WORKING_DIRECTORY: 2
+            }
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+
+    with pytest.raises(RuntimeError):
+        with config_built_from_file(config_module.CONFIG_SOURCE_WORKING_DIRECTORY):
+            raise RuntimeError("the read failed")
+    assert config_module._UNTRUSTED_LOADS_IN_FLIGHT == {}
+    assert get_config_source(ClusterConfig()) == CONFIG_SOURCE_RUNTIME
+
+
+def test_no_loader_delegates_construction_across_a_process_boundary():
+    """The half of the hole nothing inside one interpreter can close.
+
+    A ``spawn``ed child starts a fresh interpreter: it has neither the
+    ContextVar nor the process-wide record, so a ``ClusterConfig`` it builds
+    for a loader in the parent reads ``runtime``. There is no mechanism that
+    follows a declaration across that boundary, so the defence is that no
+    shipped loader crosses it -- and this fails the moment one starts to.
+
+    Checked over the abstract syntax tree rather than the text, so the prose
+    above (which names ``ProcessPoolExecutor``) is not itself a finding.
+    """
+    import ast
+
+    package = pathlib.Path(config_module.__file__).parent
+    delegating = {
+        "multiprocessing",
+        "ProcessPoolExecutor",
+        "billiard",
+        "loky",
+        "joblib",
+    }
+
+    offenders = {}
+    for path in sorted(package.glob("*.py")):
+        text = path.read_text(encoding="utf-8")
+        if "config_built_from_file" not in text:
+            continue
+        tree = ast.parse(text)
+        referenced = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                referenced.add(node.id)
+            elif isinstance(node, ast.Attribute):
+                referenced.add(node.attr)
+            elif isinstance(node, ast.Import):
+                referenced.update(a.name.split(".")[0] for a in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                referenced.add((node.module or "").split(".")[0])
+                referenced.update(a.name for a in node.names)
+        found = referenced & delegating
+        if found:
+            offenders[path.name] = sorted(found)
+
+    assert not offenders, (
+        "a module that declares configuration reads now also delegates work "
+        "to another process; a ClusterConfig built there would come back "
+        "marked runtime, i.e. trusted: " + repr(offenders)
+    )
+
+
+def test_the_documented_remedy_names_a_file_the_reader_controls():
+    """``<config dir>/.env`` is the attacker's directory under a redirect.
+
+    The placeholder is correct where the docs describe *where clustrix
+    looks*, and wrong in the sentence that tells a reader which file
+    authorises a host: ``CLUSTRIX_CONFIG_DIR`` is exactly the thing a hostile
+    repository sets, so the remedy would have pointed at a file the
+    redirector controls. Quickstart already spelled it out; the two pages
+    have to say the same thing.
+    """
+    docs = pathlib.Path(__file__).resolve().parents[2] / "docs" / "source"
+    configuration = (docs / "configuration.rst").read_text(encoding="utf-8")
+    quickstart = (docs / "quickstart.rst").read_text(encoding="utf-8")
+
+    assert "``<config dir>/.env``" not in configuration
+    assert "``~/.clustrix/.env``" in configuration
+    assert "``~/.clustrix/.env``" in quickstart
