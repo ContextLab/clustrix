@@ -120,6 +120,34 @@ def cluster(
                 parallel if parallel is not None else config.auto_parallel
             )
 
+            use_async = (
+                async_submit
+                if async_submit is not None
+                else getattr(config, "async_submit", False)
+            )
+
+            # #152: ``cores`` asks for N workers. Three routes run the function
+            # exactly once on this machine, where there is no second unit of
+            # work to give a second worker, and the number was simply dropped:
+            # the plain local path, the async local path (one job on a thread),
+            # and ``cluster_type="local"``, which reaches LocalJobManager. Only
+            # an explicit ``@cluster(cores=N)`` is warned about; a global
+            # ``default_cores`` is a resource default rather than a per-call
+            # instruction, and warning on it would fire for every local call.
+            if cores is not None and cores > 1:
+                if execution_mode == "local" and (use_async or not should_parallelize):
+                    _warn_cores_unused(
+                        cores,
+                        "the local backend runs the decorated function once, in "
+                        "this process" + (", on a worker thread" if use_async else ""),
+                    )
+                elif execution_mode == "remote" and config.cluster_type == "local":
+                    _warn_cores_unused(
+                        cores,
+                        'cluster_type "local" runs the submitted function here '
+                        "as a single unit of work",
+                    )
+
             # ``auto_gpu_parallel`` no longer does anything. The path it
             # switched on returned the traces of random matrices instead of
             # calling the function at all (see the module docstring of
@@ -138,12 +166,6 @@ def cluster(
                 )
 
             if execution_mode == "local":
-                use_async = (
-                    async_submit
-                    if async_submit is not None
-                    else getattr(config, "async_submit", False)
-                )
-
                 if use_async:
                     # Async local execution
                     async_executor = _shared_async_executor(config)
@@ -151,17 +173,14 @@ def cluster(
                         func, args, func_kwargs, job_config
                     )
                 elif should_parallelize:
-                    return _execute_local_parallel(func, args, func_kwargs, job_config)
+                    return _execute_local_parallel(
+                        func, args, func_kwargs, job_config, requested_cores=cores
+                    )
                 else:
                     # Execute locally without parallelization
                     return func(*args, **func_kwargs)
             else:
                 # Remote execution
-                use_async = (
-                    async_submit
-                    if async_submit is not None
-                    else getattr(config, "async_submit", False)
-                )
                 if use_async:
                     # Async execution
                     async_executor = _shared_async_executor(config)
@@ -438,8 +457,32 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     return "remote"
 
 
+def _warn_cores_unused(cores: Optional[int], because: str) -> None:
+    """Say out loud that a requested worker count is being discarded.
+
+    ``@cluster(cores=8)`` reads as "use eight workers". On every local route
+    that runs the function once there is nothing to hand a second worker, and
+    the number used to be dropped in silence -- the shape of defect this
+    project keeps finding (#152). The caller gets one message naming the
+    single condition under which ``cores`` does change local behaviour.
+    """
+    if cores is None or cores <= 1:
+        return
+    logger.warning(
+        "@cluster(cores=%s) has no effect here: %s. Locally, cores sets the "
+        "worker count only when parallel=True finds a parallelizable loop and "
+        "the function accepts the matching _parallel_<var> keyword.",
+        cores,
+        because,
+    )
+
+
 def _execute_local_parallel(
-    func: Callable, args: tuple, kwargs: dict, job_config: dict
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    job_config: dict,
+    requested_cores: Optional[int] = None,
 ) -> Any:
     """
     Execute function locally with parallelization.
@@ -449,15 +492,25 @@ def _execute_local_parallel(
         args: Function arguments
         kwargs: Function keyword arguments
         job_config: Job configuration
+        requested_cores: The value the caller wrote in ``@cluster(cores=N)``,
+            or ``None`` if they wrote nothing. ``job_config["cores"]`` cannot
+            answer that -- it has already been merged with
+            ``config.default_cores`` -- and every route out of this function
+            that declines to split the work discards the request (#152).
 
     Returns:
         Function result
     """
+    name = getattr(func, "__name__", repr(func))
+
     # Find parallelizable loops
     parallelizable_loops = find_parallelizable_loops(func, args, kwargs)
 
     if not parallelizable_loops:
         # No parallelizable loops found, execute normally
+        _warn_cores_unused(
+            requested_cores, f"no parallelizable loop was found in {name}"
+        )
         return func(*args, **kwargs)
 
     # Use the first parallelizable loop
@@ -476,6 +529,9 @@ def _execute_local_parallel(
 
             if not work_chunks:
                 # Fallback to normal execution
+                _warn_cores_unused(
+                    requested_cores, f"the work in {name} was not split into chunks"
+                )
                 return func(*args, **kwargs)
 
             # Execute in parallel
@@ -495,6 +551,9 @@ def _execute_local_parallel(
         # Fallback to normal execution on error
         logger.warning(
             f"Local parallel execution failed, falling back to sequential: {e}"
+        )
+        _warn_cores_unused(
+            requested_cores, f"parallel execution of {name} fell back to sequential"
         )
         return func(*args, **kwargs)
 

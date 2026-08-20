@@ -501,9 +501,14 @@ class LocalJobManager:
         }
         self.active_jobs[job_id] = record
 
-        executor = LocalExecutor(max_workers=job_config.get("cores"), use_threads=True)
+        # No LocalExecutor here. One deserialized call is one unit of work, so
+        # a pool has nothing to distribute: the ``max_workers`` and
+        # ``use_threads`` this used to pass were read by ``_create_executor``,
+        # which ``execute_single`` never calls (#152). Constructing a pool
+        # object and then not using it is what made ``cores`` look honoured.
+        # ``@cluster`` warns when a caller asked for cores>1 on this route.
         try:
-            record["result"] = executor.execute_single(func, args, kwargs)
+            record["result"] = func(*args, **kwargs)
             record["status"] = "completed"
         except Exception as e:
             record["error"] = e
