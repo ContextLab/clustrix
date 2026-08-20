@@ -11,10 +11,8 @@ from dataclasses import asdict, fields as dataclass_fields
 from .config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
     ClusterConfig,
-    config_built_from_file,
     config_source_for_discovered_path,
     get_config_dir,
-    set_config_source,
     strip_secret_fields,
     write_config_file_securely,
 )
@@ -538,31 +536,27 @@ class ProfileManager:
             raise ValueError(f"{filepath} does not contain a profile bundle")
 
         loaded: Dict[str, ClusterConfig] = {}
-        with config_built_from_file(source):
-            for name, config_dict in (data.get("profiles") or {}).items():
-                if not isinstance(config_dict, dict):
-                    raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
-                known = {f.name for f in dataclass_fields(ClusterConfig)}
-                unknown = set(config_dict) - known
-                if unknown:
-                    raise ValueError(
-                        f"Profile {name!r} in {filepath} has unknown setting(s): "
-                        f"{', '.join(sorted(unknown))}"
-                    )
-                loaded[name] = ClusterConfig(**config_dict)
-
-        # This loader opened the file, so it -- and not the constructor --
-        # is what may say so permanently. ``__post_init__`` infers a source
-        # and stamps the object with it, but passes ``record_host=False``:
-        # inference is not good enough to refuse a hostname for the life of
-        # the process, and doing that on a guess is what made an unrelated
-        # untrusted read in another thread deny the user their own cluster.
-        # Here there is no guess -- ``source`` names the file just parsed --
-        # so the hostname goes into the record and a later rebuild (Apply's
-        # ``configure(**asdict(cfg))``, ``dataclasses.replace``) cannot
-        # launder it back to ``runtime``.
-        for config in loaded.values():
-            set_config_source(config, source)
+        for name, config_dict in (data.get("profiles") or {}).items():
+            if not isinstance(config_dict, dict):
+                raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
+            known = {f.name for f in dataclass_fields(ClusterConfig)}
+            unknown = set(config_dict) - known
+            if unknown:
+                raise ValueError(
+                    f"Profile {name!r} in {filepath} has unknown setting(s): "
+                    f"{', '.join(sorted(unknown))}"
+                )
+            # ``from_file_content`` takes the source as an argument, so this
+            # loader cannot forget to say where the bytes came from -- which
+            # is exactly what it used to do. It also makes the permanent
+            # claim on the hostname: this loader opened the file, unlike
+            # ``__post_init__``, which infers a source and may therefore
+            # only mark one object. A later rebuild (Apply's
+            # ``configure(**asdict(cfg))``, ``dataclasses.replace``) cannot
+            # launder it back to ``runtime``.
+            loaded[name] = ClusterConfig.from_file_content(
+                config_dict, source, origin=f"Profile {name!r} in {filepath}"
+            )
 
         if not loaded:
             raise ValueError(f"{filepath} contains no profiles")
@@ -608,10 +602,11 @@ class ProfileManager:
                 config_dict = yaml.safe_load(f)
 
         # Create config object. The caller named this path, so it is
-        # ``explicit-file`` -- but it is still a file, so it is declared as
-        # one rather than left to ``__post_init__``'s ``runtime`` default.
-        with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
-            config = ClusterConfig(**config_dict)
+        # ``explicit-file`` -- but it is still a file, so the source is
+        # passed rather than left to ``__post_init__``'s ``runtime`` default.
+        config = ClusterConfig.from_file_content(
+            config_dict, CONFIG_SOURCE_EXPLICIT_FILE, origin=str(filepath_obj)
+        )
 
         # Generate profile name if not provided
         if profile_name is None:

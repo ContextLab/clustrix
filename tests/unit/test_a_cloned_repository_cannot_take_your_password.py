@@ -2452,3 +2452,90 @@ def test_the_credential_file_is_still_written_for_a_host_the_user_chose(
     assert "SSH_HOST" in keys
     assert "SSH_USERNAME" in keys
     assert "SSH_PASSWORD" in keys
+
+
+# ---------------------------------------------------------------------------
+# Route 3, structurally: provenance is an argument, not ambient context.
+# ---------------------------------------------------------------------------
+
+
+def test_a_loader_cannot_build_a_config_from_file_content_without_a_source():
+    """``from_file_content(mapping)`` is a ``TypeError``.
+
+    Every loader used to construct ``ClusterConfig(**parsed)`` and
+    *remember* to wrap it in ``config_built_from_file``. ``ProfileManager``
+    did not, and a profile store shipped by a repository came back stamped
+    ``runtime``. There is now nothing to forget.
+    """
+    with pytest.raises(TypeError):
+        ClusterConfig.from_file_content(  # type: ignore[call-arg]
+            {"cluster_host": "named.by.the.repository"}
+        )
+
+
+def test_from_file_content_stamps_the_source_it_was_given():
+    config = ClusterConfig.from_file_content(
+        {"cluster_type": "ssh", "cluster_host": "named.by.the.repository"},
+        CONFIG_SOURCE_WORKING_DIRECTORY,
+    )
+
+    assert get_config_source(config) == CONFIG_SOURCE_WORKING_DIRECTORY
+    assert stored_credential_is_for_config(config, {"password": SENTINEL_PASSWORD})
+
+
+def test_from_file_content_survives_being_handed_to_another_thread():
+    """The reason an argument beats a ContextVar.
+
+    A ``ContextVar`` declaration does not cross a thread boundary: a loader
+    that delegates its construction to a worker gets the *default*, which is
+    ``runtime`` -- the trusted end. An argument goes wherever the call goes.
+    """
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        config = pool.submit(
+            ClusterConfig.from_file_content,
+            {"cluster_type": "ssh", "cluster_host": "handed.to.a.worker"},
+            CONFIG_SOURCE_WORKING_DIRECTORY,
+        ).result()
+
+    assert get_config_source(config) == CONFIG_SOURCE_WORKING_DIRECTORY
+
+
+def test_from_file_content_still_names_the_offending_setting():
+    """The loader's error message is about the user's file, not our internals."""
+    with pytest.raises(ValueError) as raised:
+        ClusterConfig.from_file_content(
+            {"cleanup_remote_files": True},
+            CONFIG_SOURCE_EXPLICIT_FILE,
+            origin="/somewhere/clustrix.yml",
+        )
+
+    assert "/somewhere/clustrix.yml" in str(raised.value)
+    assert "cleanup_remote_files" in str(raised.value)
+
+
+def test_recording_a_discovered_hostname_is_the_one_public_name_for_the_claim():
+    """And a trusted source records nothing: the map describes hosts nobody chose."""
+    config_module.record_discovered_hostname(
+        "found.in.the.working.directory", CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+    config_module.record_discovered_hostname(
+        "found.in.your.config.dir", CONFIG_SOURCE_USER_CONFIG_DIR
+    )
+
+    recorded = config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES
+    assert recorded.get("found.in.the.working.directory") == (
+        CONFIG_SOURCE_WORKING_DIRECTORY
+    )
+    assert "found.in.your.config.dir" not in recorded
+
+    # There is deliberately no way to un-record one.
+    assert not hasattr(config_module, "clear_taint")
+    assert not hasattr(config_module, "forget_discovered_hostname")
+
+
+def test_recording_a_hostname_refuses_a_source_that_does_not_exist():
+    """A typo may not invent a source that is neither trusted nor untrusted."""
+    with pytest.raises(ValueError):
+        config_module.record_discovered_hostname("somewhere", "totally-fine-honest")

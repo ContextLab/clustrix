@@ -9,7 +9,7 @@ import warnings
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, Iterator, Optional, Any, get_args, get_origin
+from typing import Any, Dict, Iterator, Mapping, Optional, get_args, get_origin
 from dataclasses import dataclass, asdict, fields
 
 
@@ -300,8 +300,48 @@ class ClusterConfig:
             else:
                 config_data = json.load(f)
 
-        with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
-            return cls(**config_data)
+        return cls.from_file_content(
+            config_data, CONFIG_SOURCE_EXPLICIT_FILE, origin=str(config_path_obj)
+        )
+
+    @classmethod
+    def from_file_content(
+        cls,
+        mapping: Mapping[str, Any],
+        source: str,
+        *,
+        origin: Optional[str] = None,
+    ) -> "ClusterConfig":
+        """The only supported way to build a config out of parsed file bytes.
+
+        **Provenance is an argument, not ambient context.** Every loader in
+        the tree used to construct ``ClusterConfig(**parsed)`` and *remember*
+        to wrap it in :func:`config_built_from_file`; ``ProfileManager`` did
+        not, so a profile store shipped by a repository came back stamped
+        ``runtime`` -- the trusted end of the scale -- and the victim's
+        ``SSH_PASSWORD`` reached the repository's host. Here the source is a
+        required parameter: ``from_file_content(mapping)`` is a ``TypeError``
+        and there is nothing to forget. Because it is an argument rather than
+        a context variable, it also survives being handed to another thread,
+        which a ``ContextVar`` declaration does not.
+
+        The declaration is kept as well as the stamp, because they answer
+        different questions: the stamp records where *this object* came from,
+        and the declaration is what any other ``ClusterConfig`` built from
+        this file's content gets -- including ones built by code this calls.
+
+        ``origin`` names the file in error messages and is cosmetic;
+        ``source`` is the security-relevant one.
+        """
+        where = origin or f"the {source} configuration"
+        _validate_config_mapping(mapping, where)
+        with config_built_from_file(source):
+            config = cls(**mapping)
+        # The loader opened the file, so it -- unlike ``__post_init__``,
+        # which infers -- may write the hostname into the process-wide
+        # record. See ``set_config_source``.
+        set_config_source(config, source)
+        return config
 
 
 # Fields treated as secret-bearing when saving configuration to disk. Derived
@@ -367,6 +407,36 @@ def _removed_setting_reason(name: str) -> Optional[str]:
             where = f" (see issue #{issue})" if issue else ""
             return f"{name} configured {what}, which has been removed{where}"
     return None
+
+
+def _validate_config_mapping(mapping: Mapping[str, Any], origin: str) -> None:
+    """Reject settings ``ClusterConfig`` does not have, naming the file.
+
+    An unknown key used to surface as a bare
+    "ClusterConfig.__init__() got an unexpected keyword argument
+    'cleanup_remote_files'", which names the internals rather than the file
+    the user wrote, and stops at the first offender.
+    """
+    known = {f.name for f in fields(ClusterConfig)}
+    unknown = sorted(set(mapping) - known)
+    if unknown:
+        import difflib
+
+        hints = []
+        for name in unknown:
+            # A setting a removed backend owned gets a real explanation. The
+            # did-you-mean path below would otherwise match "k8s_namespace"
+            # against some unrelated field and send the reader after it.
+            removed = _removed_setting_reason(name)
+            if removed:
+                hints.append(removed)
+                continue
+            close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
+            hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
+        raise ValueError(f"{origin} contains unknown setting(s): {'; '.join(hints)}")
+
+    if "cluster_type" in mapping:
+        validate_cluster_type(mapping["cluster_type"], source=f"{origin}: cluster_type")
 
 
 def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:
@@ -1052,10 +1122,36 @@ def set_config_source(
     # an object that lost the attribute reads as untrusted rather than
     # falling back to a trusted class value. See ``get_config_source``.
     setattr(config, "_clustrix_config_source", source)
-    if record_host and source in UNTRUSTED_CONFIG_SOURCES:
-        host = normalize_hostname(getattr(config, "cluster_host", None))
-        if host:
-            _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.setdefault(host, source)
+    if record_host:
+        record_discovered_hostname(getattr(config, "cluster_host", None), source)
+
+
+def record_discovered_hostname(hostname: object, source: str) -> None:
+    """Record that a file clustrix *found* -- rather than a person -- named this host.
+
+    The single public name for the claim, so that code which reads a
+    hostname out of file content without building a ``ClusterConfig`` can
+    make it too. The ``%%clusterfy`` widget is exactly that: it carries raw
+    dicts from the files it globbed, which is why route 5 tainted nothing.
+
+    A trusted source records nothing -- the record exists to describe hosts
+    nobody chose. There is deliberately no way to *un*-record: "forget that
+    this was untrusted" is the laundering route with a friendlier name.
+    Only a caller holding the file it read may call this; a caller that
+    merely *inferred* a source passes ``record_host=False`` to
+    :func:`set_config_source` and gets to mark one object, not one name
+    forever.
+    """
+    if source not in CONFIG_SOURCES:
+        raise ValueError(
+            f"Unknown configuration source: {source!r}. "
+            f"Known sources are {sorted(CONFIG_SOURCES)}."
+        )
+    if source not in UNTRUSTED_CONFIG_SOURCES:
+        return
+    host = normalize_hostname(hostname)
+    if host:
+        _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.setdefault(host, source)
 
 
 def get_config_source(config: ClusterConfig) -> str:
@@ -1213,46 +1309,12 @@ def load_config(config_path: str) -> None:
             f"(parsed as {type(config_data).__name__})."
         )
 
-    # An unknown key used to surface as a bare
-    # "ClusterConfig.__init__() got an unexpected keyword argument
-    # 'cleanup_remote_files'", which names the internals rather than the file
-    # the user wrote, and stops at the first offender.
-    known = {f.name for f in fields(ClusterConfig)}
-    unknown = sorted(set(config_data) - known)
-    if unknown:
-        import difflib
-
-        hints = []
-        for name in unknown:
-            # A setting a removed backend owned gets a real explanation. The
-            # did-you-mean path below would otherwise match "k8s_namespace"
-            # against some unrelated field and send the reader after it.
-            removed = _removed_setting_reason(name)
-            if removed:
-                hints.append(removed)
-                continue
-            close = difflib.get_close_matches(name, known, n=1, cutoff=0.6)
-            hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
-        raise ValueError(
-            f"{config_path} contains unknown setting(s): {'; '.join(hints)}"
-        )
-
-    if "cluster_type" in config_data:
-        validate_cluster_type(
-            config_data["cluster_type"], source=f"{config_path}: cluster_type"
-        )
-
     # The caller named this path, so the caller chose it. The search of the
     # standard locations overwrites this with what it actually found; see
     # ``_load_default_config``.
-    #
-    # Declared around the construction as well as stamped after it, because
-    # the two answer different questions: the stamp records where *this
-    # object* came from, and the declaration is what any ``ClusterConfig``
-    # built from this file's content gets even if it is not the one returned.
-    with config_built_from_file(CONFIG_SOURCE_EXPLICIT_FILE):
-        _config = ClusterConfig(**config_data)
-    set_config_source(_config, CONFIG_SOURCE_EXPLICIT_FILE)
+    _config = ClusterConfig.from_file_content(
+        config_data, CONFIG_SOURCE_EXPLICIT_FILE, origin=str(config_path)
+    )
 
 
 def save_config(config_path: str, include_secrets: bool = False) -> None:
