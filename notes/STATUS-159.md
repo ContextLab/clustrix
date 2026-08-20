@@ -1110,3 +1110,45 @@ So the lint will not report it, `live` will not contain the key,
 **Fix at merge time:** delete that one entry from `TRACKED_DEFECTS` in the
 merge commit, and re-count the swallow audit. Nothing else is required — this
 is a bookkeeping consequence of the fix, not a defect in either branch.
+
+## #172's defect was real-world harm, now fixed (`da5bed8`); #169 hardened (`de9e742`)
+
+1791 passed / 0 failed; black 26.3.1, flake8, mypy clean.
+
+**RT5-6 was not theoretical.** Verified with a real `lspci` on the real SSH
+server and a real `pip` on the host PATH recording its own invocation: an
+NVIDIA HD-Audio function *alone*, and an nForce chipset alongside ASPEED
+graphics, each reported `gpu_available=True` **and actually ran**
+`pip install torch … --index-url …/cu118`.
+
+**Two changes, and the second is the important one:**
+
+1. `lspci` is now matched on PCI **device class**, not the vendor string:
+   `lspci -nn | grep -Ei '\[03[0-9a-f]{2}\]:.*\[10de:'`. Base class 03 covers
+   `0300` VGA and `0302` 3D, which is how A100/H100 enumerate; vendor id
+   `10de` matches even when `pci.ids` is too old to name the card.
+2. The CUDA install now gates on a **new** `nvidia_driver_present`, set only by
+   `nvidia-smi` and `/proc/driver/nvidia` — the two methods that observe the
+   **driver** rather than the bus. A card on the bus may have no driver, have
+   nouveau bound, be too old for cu118, or be passed through to a guest. On
+   lspci-only evidence clustrix builds the standard VENV2 and says so. The
+   duplicate copy of that condition in `enhanced_setup_two_venv_environment`
+   was deleted — one definition, not two.
+
+`gpu_count` stays `None` on lspci evidence (SR-IOV/vGPU functions, MIG).
+`ls -1` closed the column-wrapping miscount: a wrapper forcing `-C` read 4 GPUs
+as 1 before, 4 after. RED against pristine `25640bd`: 8 failed / 16 passed.
+
+**#169**: all five bypasses reproduced at 8/8 green, all five now die. Checks
+run against **every** publisher and cover steps, `continue-on-error` at both
+levels, `matrix`, `uses:` jobs, `branches-ignore` and bare `pull_request:`.
+12 bypasses pinned across 21 tests, with an executable `KNOWN_BLIND_SPOTS`
+following the `test_credential_file_permissions.py` precedent.
+
+**Residual, named rather than hidden**: a publisher step that is `exit 0`; one
+appending `|| true`; an aggregator omitting a job from `needs`; a `runs-on`
+label nobody provides; a third-party action of unknown behaviour. Two more have
+no document to plant and live in the docstring — repository state (Actions or
+the workflow disabled, a fork awaiting "Approve and run") and the required
+contexts drifting from `REQUIRED_CONTEXTS`. **Only a real docs-only PR settles
+any of it**, so #169 still must not be closed on a green suite.
