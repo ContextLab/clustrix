@@ -157,6 +157,7 @@ Table of Contents
 
    execution_model
    configuration
+   data_packages
    ssh_setup
    limitations
    troubleshooting

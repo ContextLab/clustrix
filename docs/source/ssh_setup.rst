@@ -123,11 +123,7 @@ message:
         that enables MITM attacks), set on ClusterConfig:
           ssh_host_key_policy="auto_add"
 
-**This is a change from clustrix's old behavior.** Every SSH call site used
-to call paramiko's ``AutoAddPolicy()``, which silently trusted whatever key
-a host offered on first connection -- convenient, but it meant clustrix
-never actually verified who it was talking to. The default is now secure,
-which means the first connection to any cluster needs one of:
+A secure default means the first connection to any cluster needs one of:
 
 1. Run the ``ssh-keyscan`` command the error message gives you (this is the
    same thing ``ssh`` itself would ask you to confirm interactively the
@@ -138,9 +134,26 @@ which means the first connection to any cluster needs one of:
    for that host, or
 3. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
    ``ClusterConfig`` or ``configure(...)`` call -- but understand that this
-   restores the old "trust anything" behavior for that configuration, which
-   is genuinely insecure. Only do this for a host you already trust through
-   some other channel (e.g. you set it up yourself and typed the hostname).
+   accepts whatever key a host offers, which is genuinely insecure. Only do
+   this for a host you already trust through some other channel (e.g. you set
+   it up yourself and typed the hostname).
+
+``auto_add`` writes what it accepts. Clustrix creates ``~/.ssh/known_hosts``
+if it does not exist yet -- the directory at mode ``0700`` and the file at
+``0600``, which is what OpenSSH itself does before first contact -- and hands
+the path to paramiko so the accepted key is appended to it. Without that file
+in place, paramiko has nowhere to save to and quietly saves nothing, so every
+connection re-accepts the same host forever: trust on first use with the
+"first" removed. The ``reject`` policy never writes to your filesystem, since
+verifying is not a reason to create anything.
+
+The automated key setup described above writes to that same file, and says so
+explicitly: ``ssh-keyscan`` output is appended to it, and ``ssh-copy-id`` is
+handed it with ``-o UserKnownHostsFile=``. OpenSSH resolves ``~`` from the
+passwd database rather than from the environment, so without that flag the
+Python half of clustrix would verify against one file while ``ssh-copy-id``
+appended to another -- which differ in a container, under ``sudo -u``, and on
+a login node with a relocated home.
 
 .. code-block:: python
 

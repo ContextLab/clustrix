@@ -129,8 +129,9 @@ What Clustrix will move is data you *declare*, never data it guesses at.
 then pass to the function as an ordinary argument; the worker dereferences it
 on demand. Nothing is inferred from your source code, which is the whole point
 -- an inferred upload triggered by a string literal is the worst failure mode
-available here. `Issue #151
-<https://github.com/ContextLab/clustrix/issues/151>`_ tracks that work.
+available here. Small packages ride inside the payload; larger ones go to a
+private HuggingFace dataset repo that clustrix creates in your account and
+never deletes, so read :doc:`data_packages` before you stage anything big.
 
 .. _alternatives:
 

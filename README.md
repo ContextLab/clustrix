@@ -382,7 +382,32 @@ the files you name into an object you pass to the function as an ordinary
 argument, and the worker reads it on demand. Nothing is inferred from your
 source code — an upload triggered by a string that merely looks like a path is
 the worst failure mode available here, so declaration is the only route.
-[#151](https://github.com/ContextLab/clustrix/issues/151) tracks that work.
+
+```python
+# cluster-required: needs a configured cluster and a real data/ directory
+import clustrix
+from clustrix import cluster
+
+subjects = clustrix.data_package("data/subjects.h5")
+
+@cluster(cores=8)
+def fit(pkg):
+    with open(pkg.path("subjects.h5"), "rb") as handle:
+        ...
+
+fit(subjects)
+```
+
+Two things to know before you stage anything large. A package under
+`stage_inline_max_bytes` (1 MB, measured on the serialized package rather than
+on the raw data) rides inside the payload and needs nothing else; a package
+above it is uploaded to a **private HuggingFace dataset repo that clustrix
+creates in your account**, which needs HuggingFace credentials. And nothing is
+ever cleaned up automatically — no TTL, no reaper, no deletion when the job
+ends. `pkg.delete()` is the only thing that removes a staged package, and
+`clustrix.list_data_packages()` / `clustrix.delete_data_package(id)` are there
+for when the object is gone. The full guide is
+[Data packages](https://clustrix.readthedocs.io/en/latest/data_packages.html).
 
 ### Cost monitoring
 

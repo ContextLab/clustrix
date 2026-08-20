@@ -86,6 +86,41 @@ did so. This matters for code that runs *on* a shared-filesystem HPC
 cluster already: it avoids SSH-ing to itself over the loopback interface
 for every filesystem call.
 
+What the remote side promises
+-----------------------------
+
+The point of one call working against two filesystems is that it gives the
+same answer on both. Three places where that is easy to get wrong, and what
+each one actually does:
+
+**Globbing is** ``glob.glob``. ``_local_glob`` is a thin wrapper around the
+standard library, and the remote side runs that same algorithm --
+``glob._iglob``, ``_glob0``, ``_glob1`` and ``_iterdir``, mirrored
+component-for-component with SFTP where the stdlib uses ``os`` -- against
+remote directory entries. Nothing reaches a shell, so no pattern needs
+quoting and none can be injected. Every rule you know from ``glob.glob``
+therefore holds remotely: a trailing slash matches directories only, so
+``"*/"`` returns directories and ``"alpha.csv/"`` returns nothing at all; a
+leading dot is matched only by a pattern that has one; and an absolute
+pattern ignores the working directory entirely. Both sides then reduce each
+match with ``os.path.relpath`` against the search directory, so a pattern
+containing ``..`` comes back in the same normalised shape either way. Brace
+expansion is a shell feature rather than a ``glob``
+one, so ``"*.{yml,json}"`` matches a file literally named that and nothing
+else. Match each extension separately.
+
+**``cluster_du`` counts symlinks the way** ``os.walk(followlinks=False)``
+plus ``os.path.getsize`` count them, on both sides. A link to a regular file
+contributes its *target's* size, counted once. A link to a directory
+contributes nothing and is never descended into, which is also why the walk
+terminates: a symlink loop is the only way to build a cycle out of
+directories, and the walk does not follow them. A broken link is skipped
+rather than raising.
+
+**``FileInfo.permissions`` is always three octal digits.** ``"000"``,
+``"007"``, ``"644"`` -- a fixed width, so string comparison and slicing mean
+what they look like they mean.
+
 Core Functions
 --------------
 

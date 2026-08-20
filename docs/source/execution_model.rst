@@ -107,6 +107,13 @@ The fallback is written as ``cores or config.default_cores``, so ``cores=0``
 also falls back. Any resource key still missing when a job script is generated
 is filled in again by ``resolve_job_resources``.
 
+``queue`` is resolved along with the rest and then read by nothing. No
+supported backend submits to a queue, so the value lands in the job
+configuration and stops there; ``default_queue`` and ``@cluster(queue=...)``
+are both inert (`issue #158
+<https://github.com/ContextLab/clustrix/issues/158>`_). Use
+``default_partition`` on SLURM.
+
 Memory strings are rewritten per scheduler by ``normalize_memory``:
 
 .. code-block:: python

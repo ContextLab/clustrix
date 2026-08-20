@@ -123,7 +123,10 @@ The host is not in your ``known_hosts``. This is the default and it is
 deliberate. The message contains the exact ``ssh-keyscan`` command to add it.
 The alternative, ``ssh_host_key_policy="auto_add"``, trusts any key and is what
 makes machine-in-the-middle attacks possible; choose it knowingly or not at
-all.
+all. It also writes: on that policy clustrix creates ``~/.ssh/known_hosts`` if
+it is absent -- directory ``0700``, file ``0600`` -- so that the key it accepts
+is actually recorded and the *second* connection to that host is verified
+rather than re-accepted. ``reject`` never creates anything.
 
 **"This function uses package(s) that cannot be installed on the cluster: ..."**
 
@@ -145,6 +148,18 @@ has its own ``/tmp``, so an environment built on the login node
 simply is not there at run time. Use a home directory or shared scratch. The
 default (``~/.clustrix/jobs``) is already safe; this bites people who set
 ``/tmp/...`` deliberately.
+
+**The call has not returned and the job is still queued**
+
+A scheduler backend blocks in a poll loop, and that loop has a deadline:
+``job_wait_timeout``, 24 hours by default. On expiry you get a
+``TimeoutError`` naming the job's last known status and the remote directory
+its files are in. The job is deliberately **not** cancelled -- it may still be
+queued, and cancelling someone's allocation because the client got bored is
+not that function's decision -- so the result can still be collected by hand
+from the directory the message names. Raise ``job_wait_timeout`` for a queue
+that legitimately runs longer, or set it to ``None`` to wait indefinitely.
+``job_poll_interval`` (30 seconds) controls how often the loop asks.
 
 **Parallelization silently did not happen**
 
