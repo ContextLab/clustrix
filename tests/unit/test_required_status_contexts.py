@@ -95,3 +95,66 @@ def test_required_context_is_not_path_filtered(context):
             "so the context is never reported, and GitHub blocks the merge "
             "forever waiting for it. See #169."
         )
+
+
+# A job-level `if:` is the same trap one level down (#169, review RT-3).
+#
+# The trigger is only the first of two places a required check can be
+# silenced. Even on a workflow that fires for every pull request, the job
+# publishing the context runs only if its own `if:` evaluates true and its
+# `needs:` let it start. `if: github.event_name == 'push'` on `status-check`
+# leaves `fast_ci.yml` firing on every pull request and reporting `CI Status`
+# on none of them -- and a skipped job is not a stuck one that anybody
+# notices: GitHub counts a skipped required check as satisfied, so the gate
+# stops gating and nothing goes red to say so. The tests above inspect only
+# `on.pull_request`, so that mutation survived them all.
+
+# Expressions that cannot evaluate false. GitHub accepts `if:` bare or
+# wrapped in `${{ }}`, and YAML may hand either back as a string.
+ALWAYS_RUNS = frozenset(
+    {
+        "always()",
+        "${{ always() }}",
+        "${{always()}}",
+    }
+)
+
+
+@pytest.mark.parametrize("context", REQUIRED_CONTEXTS)
+def test_required_context_job_cannot_be_conditionally_skipped(context):
+    """The publishing job must run on every pull request, unconditionally."""
+    path, document, job_id = _publisher(context)
+    job = document["jobs"][job_id]
+    condition = job.get("if")
+
+    if condition is not None:
+        assert str(condition).strip() in ALWAYS_RUNS, (
+            f"{path.name} publishes the required status context {context!r} "
+            f"from job {job_id!r}, which is guarded by `if: {condition}`. A "
+            "required check is only required when it is reported: a pull "
+            "request where that condition is false skips the job, GitHub "
+            "counts the skip as satisfying branch protection, and the gate "
+            "silently stops gating. The only condition allowed here is one "
+            f"that cannot be false -- one of {sorted(ALWAYS_RUNS)}. See #169."
+        )
+
+
+@pytest.mark.parametrize("context", REQUIRED_CONTEXTS)
+def test_required_context_job_still_reports_when_a_dependency_fails(context):
+    """A gate with ``needs:`` and no ``always()`` skips itself on failure.
+
+    Without ``if: always()`` a job whose dependency failed is skipped rather
+    than run, so the context is never reported on exactly the pull requests
+    that most need a verdict -- and the skip reads as a pass.
+    """
+    path, document, job_id = _publisher(context)
+    job = document["jobs"][job_id]
+
+    if job.get("needs"):
+        assert str(job.get("if", "")).strip() in ALWAYS_RUNS, (
+            f"{path.name}'s job {job_id!r} publishes {context!r} and depends "
+            f"on {job['needs']}, but its `if:` is {job.get('if')!r}. A job "
+            "whose dependency fails or is skipped does not run, so the "
+            "required context goes unreported precisely when a job broke. "
+            f"Use one of {sorted(ALWAYS_RUNS)}. See #169."
+        )
