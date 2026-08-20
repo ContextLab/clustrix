@@ -77,6 +77,9 @@ class ClusterConfig:
     remote_work_dir: str = "~/.clustrix/jobs"
     local_work_dir: Optional[str] = None  # If None, uses current working directory
     local_cache_dir: str = "~/.clustrix/cache"
+    # An existing conda environment on the cluster to run jobs in. It wins
+    # over environment replication -- see job_execution_lines() -- and is
+    # the standing-configuration spelling of @cluster(environment=...).
     conda_env_name: Optional[str] = None
     python_executable: str = "python"
     package_manager: str = "pip"  # pip, uv, or auto

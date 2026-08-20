@@ -2599,13 +2599,66 @@ def result_signing_lines(indent: str = "    ", serializer: str = "pickle") -> li
     ] + payload_signing_lines("_payload_bytes", "result.pkl", indent)
 
 
-def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
+def resolve_named_environment(
+    job_config: Dict[str, Any], config: ClusterConfig
+) -> Optional[str]:
+    """The *existing* cluster environment the user asked their job to run in.
+
+    Two spellings reach this, and both used to be discarded (#164):
+    ``@cluster(environment="myenv")``, which ``decorator.py`` already resolves
+    against ``config.conda_env_name`` and drops into
+    ``job_config["environment"]``, and ``configure(conda_env_name="myenv")``
+    on its own. Reading both here is what makes a job script generated
+    directly -- without going through the decorator -- honour the config
+    field too.
+
+    Deliberately reads the *user's* value. The synthetic
+    ``clustrix_venv2_<key>`` name that ``setup_two_venv_environment`` invents
+    lives in ``config.venv_info``, never in ``config.conda_env_name``, so it
+    cannot be picked up here by accident.
+    """
+    name = job_config.get("environment") or getattr(config, "conda_env_name", None)
+    if not name:
+        return None
+    stripped = str(name).strip()
+    if not stripped:
+        return None
+    # The name is quoted where it is *executed* (``conda run -n <name>``), but
+    # the two-venv generator also writes it into a bare ``# Using conda
+    # environment <name>`` comment, which a newline would escape. Until #164
+    # that comment only ever held a synthetic ``clustrix_venv2_<key>``; it now
+    # holds user input, so the value is validated like every other setting
+    # that lands unquoted.
+    return validate_shell_fragment("conda_env_name", stripped)
+
+
+def job_execution_lines(
+    remote_job_dir: str, config: ClusterConfig, named_env: Optional[str] = None
+) -> list:
     """The lines that actually run the user's function in a job script.
 
     Shared by every scheduler, rather than living inside one generator: the
     now-removed PBS and SGE generators each carried a divergent copy, and
     both therefore missed the two-venv path, the result signing and every
     fix made to the SLURM one.
+
+    Args:
+        remote_job_dir: Remote working directory for this job.
+        config: Cluster configuration.
+        named_env: An existing conda environment on the cluster, from
+            ``resolve_named_environment()``. When given it is the environment
+            the user's function executes in -- it replaces the *execution*
+            environment (VENV2), never the serialization one (VENV1), because
+            VENV1 is clustrix's own machinery and needs dill at the local
+            Python version whatever the user's environment contains.
+
+    Precedence: a named environment beats environment replication. Replication
+    is the default -- every user gets it whether or not they asked -- while
+    naming an environment is an explicit instruction about a specific
+    environment that already exists on the cluster. Silently preferring the
+    default over the instruction is the defect this parameter had for its
+    whole life, so the instruction wins, and when both are in play the
+    generator says so rather than choosing quietly.
     """
     script_lines: list = []
     # Add execution commands
@@ -2622,6 +2675,22 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
         script_lines.append(f"cd {quoted_dir}")
         conda_env1_name = config.venv_info.get("conda_env1_name", None)
         conda_env2_name = config.venv_info.get("conda_env2_name", None)
+        if named_env:
+            replicated = conda_env2_name or config.venv_info.get(
+                "venv2_path", "the replicated execution environment"
+            )
+            logger.warning(
+                "Both an existing environment and environment replication are "
+                "in play for this job: you named %r, and clustrix replicated "
+                "your local environment into %s. The named environment wins -- "
+                "your function runs in %r -- and the replicated execution "
+                "environment is not used, so building it was wasted work. "
+                "Set use_two_venv=False if you do not want it built.",
+                named_env,
+                replicated,
+                named_env,
+            )
+            conda_env2_name = named_env
         script_lines.append(result_key_export_line(remote_job_dir))
         script_lines.extend(conda_activation_lines(config))
         script_lines.extend(
@@ -2630,14 +2699,25 @@ def job_execution_lines(remote_job_dir: str, config: ClusterConfig) -> list:
             )
         )
     else:
-        # Use the original single-venv approach
-        script_lines.append(result_key_export_line(remote_job_dir))
-        script_lines.extend(
-            [
+        # Use the original single-venv approach. A named existing environment
+        # replaces the venv clustrix would otherwise have built and activated;
+        # `conda` itself has to be on PATH for that -- a batch script gets a
+        # non-login shell -- which is what module_loads and
+        # pre_execution_commands are for.
+        if named_env:
+            entry_lines = [
+                f"cd {quoted_dir}",
+                f'conda run -n {shlex.quote(named_env)} python -c "',
+            ]
+        else:
+            entry_lines = [
                 f"cd {quoted_dir}",
                 "source venv/bin/activate",
                 f'{python_cmd} -c "',
             ]
+        script_lines.append(result_key_export_line(remote_job_dir))
+        script_lines.extend(
+            entry_lines
             + key_capture_lines()
             + [
                 "import pickle",
@@ -2744,7 +2824,11 @@ def _create_slurm_script(
     # Add environment setup
     script_lines.extend(environment_setup_lines(config))
 
-    script_lines.extend(job_execution_lines(remote_job_dir, config))
+    script_lines.extend(
+        job_execution_lines(
+            remote_job_dir, config, resolve_named_environment(job_config, config)
+        )
+    )
 
     return "\n".join(script_lines)
 
@@ -2770,7 +2854,11 @@ def _create_ssh_script(
         script_lines.append("")
 
     # Check if we have two-venv setup
-    script_lines.extend(job_execution_lines(remote_job_dir, config))
+    script_lines.extend(
+        job_execution_lines(
+            remote_job_dir, config, resolve_named_environment(job_config, config)
+        )
+    )
 
     return "\n".join(script_lines)
 

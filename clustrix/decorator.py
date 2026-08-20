@@ -62,7 +62,12 @@ def cluster(
             program per GPU and returned the traces of random matrices as
             the result -- so it was deleted. Passing this warns.
             Parallelize across GPUs inside your own function instead.
-        environment: Conda environment name
+        environment: Name of a conda environment that already exists on
+            the cluster. The function is executed in it -- it replaces
+            the *execution* environment clustrix would otherwise
+            replicate, and takes precedence over that replication;
+            clustrix's own serialization environment is unaffected.
+            Falls back to ``config.conda_env_name``.
         async_submit: Whether to submit jobs asynchronously (non-blocking)
         **kwargs: Additional job parameters
 
