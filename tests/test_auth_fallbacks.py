@@ -5,6 +5,12 @@ import sys
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
+from clustrix.config import (
+    CONFIG_SOURCE_WORKING_DIRECTORY,
+    ClusterConfig,
+    record_discovered_hostname,
+)
+from clustrix.credential_release import CredentialTarget
 from clustrix.auth_fallbacks import (
     detect_environment,
     get_password_gui,
@@ -146,6 +152,15 @@ class TestGetPasswordWidget:
         assert result is None
 
 
+def _a_target(hostname="example.com", username="testuser"):
+    """The recipient every one of these calls now has to name."""
+    return CredentialTarget(
+        hostname=hostname,
+        username=username,
+        described_as=f"{hostname}, in a test",
+    )
+
+
 class TestGetClusterPassword:
     """Test cluster password retrieval."""
 
@@ -156,7 +171,7 @@ class TestGetClusterPassword:
 
         mock_userdata = Mock()
         mock_userdata.get.side_effect = lambda key: {
-            "CLUSTER_PASSWORD_example.com": "colab_password"
+            "CLUSTER_PASSWORD_EXAMPLE_COM": "colab_password"
         }.get(key)
 
         # Create a mock colab module
@@ -170,7 +185,7 @@ class TestGetClusterPassword:
         with patch.dict(
             sys.modules, {"google": mock_google, "google.colab": mock_colab}
         ):
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result == "colab_password"
 
@@ -204,7 +219,7 @@ class TestGetClusterPassword:
         with patch.dict(
             sys.modules, {"google": mock_google, "google.colab": mock_colab}
         ):
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result == "found_password"
 
@@ -217,7 +232,7 @@ class TestGetClusterPassword:
         with patch.dict(sys.modules, {}, clear=False):
             if "google.colab" in sys.modules:
                 del sys.modules["google.colab"]
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -227,7 +242,7 @@ class TestGetClusterPassword:
         """Test password retrieval from environment variables."""
         mock_detect.return_value = "cli"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "env_password"
 
@@ -238,7 +253,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "notebook"
         mock_gui.return_value = "gui_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "gui_password"
         mock_gui.assert_called_once_with("Password for testuser@example.com")
@@ -254,7 +269,7 @@ class TestGetClusterPassword:
         mock_gui.return_value = None
         mock_widget.return_value = "widget_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "widget_password"
         mock_widget.assert_called_once_with("Password for testuser@example.com")
@@ -266,7 +281,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.return_value = "cli_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "cli_password"
         mock_getpass.assert_called_once_with("Password for testuser@example.com: ")
@@ -280,7 +295,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.side_effect = KeyboardInterrupt()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -291,7 +306,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.side_effect = EOFError()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -302,7 +317,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "script"
         mock_input.return_value = "script_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "script_password"
         mock_input.assert_called_once_with("Password for testuser@example.com: ")
@@ -316,7 +331,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "script"
         mock_input.side_effect = KeyboardInterrupt()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -325,7 +340,7 @@ class TestGetClusterPassword:
         """Test password retrieval in unknown environment."""
         mock_detect.return_value = "unknown"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 

@@ -71,15 +71,14 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
     ("config.py", "get_config_dir"),
     # A module constant naming the auto-display switch. Not a secret.
     ("notebook_magic_core.py", "auto_display_on_import"),
-    # NOT gated, and listed here so that it cannot be forgotten:
-    # ``get_cluster_password`` scans CLUSTRIX_DEFAULT_PASSWORD and
-    # CLUSTER_PASSWORD -- variables that name **no host** -- and hands what
-    # it finds to whatever hostname it was passed, which on the
-    # ``setup_auth_with_fallback`` path is ``config.cluster_host``. That is
-    # the same shape as routes 2 and 6 and it is an open finding rather than
-    # an approved exception; it is written down here because a surface
-    # nobody has written down is the one that gets closed eighth.
-    ("auth_fallbacks.py", "get_cluster_password"),
+    # Route 9, and gated now: ``get_cluster_password`` used to scan
+    # CLUSTRIX_DEFAULT_PASSWORD and CLUSTER_PASSWORD -- variables that name
+    # **no host** -- and hand what it found to whatever hostname it was
+    # passed, which on the ``setup_auth_with_fallback`` path is
+    # ``config.cluster_host``. The scan moved here, behind the same rule 2
+    # as everything else, and the variables that *do* name a host are
+    # released on that strength alone.
+    ("credential_release.py", "_release_fallback_environment"),
 }
 
 

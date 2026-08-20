@@ -22,6 +22,7 @@ from clustrix.auth_fallbacks import (
     setup_auth_with_fallback,
 )
 from clustrix.config import ClusterConfig
+from clustrix.credential_release import CredentialTarget
 
 
 @pytest.fixture
@@ -143,7 +144,11 @@ class TestAuthFallbacksReal:
             m.setattr("clustrix.auth_fallbacks.detect_environment", lambda: "cli")
 
             password = get_cluster_password(
-                hostname="cluster.example.com", username="testuser"
+                CredentialTarget(
+                    hostname="cluster.example.com",
+                    username="testuser",
+                    described_as="a test",
+                )
             )
 
             assert password == test_password
@@ -157,34 +162,64 @@ class TestAuthFallbacksReal:
         - Security best practices
         - Fallback ordering
 
-        NOTE (Issue #114): two real-API mismatches fixed here:
-        - get_cluster_password()'s first parameter is "hostname", not
-          "host".
-        - "CLUSTRIX_PASSWORD" does not match any of the environment
-          variable names get_cluster_password() actually checks (it looks
-          for "CLUSTRIX_PASSWORD_<HOST>", "CLUSTER_PASSWORD_<HOST>",
-          "<HOST>_PASSWORD", "CLUSTRIX_DEFAULT_PASSWORD", or
-          "CLUSTER_PASSWORD" -- never the bare, unsuffixed
-          "CLUSTRIX_PASSWORD"). Setting a name the function never checks
-          meant this test always fell through to the interactive
-          fallbacks, which is why the original assertion had to tolerate
-          "or password is None" -- and in this process 'ipykernel' ends up
-          in sys.modules as a side effect of `import clustrix`
-          (clustrix/__init__.py imports the notebook widget modules),
-          which makes detect_environment() report "notebook" here and
-          triggers a real, blocking tkinter GUI prompt with no user to
-          answer it, hanging the test. Using a real recognized name
-          ("CLUSTRIX_DEFAULT_PASSWORD") makes get_cluster_password()
-          return from the environment-variable check before ever reaching
-          the interactive branches, avoiding the hang and giving a
-          deterministic assertion.
+        NOTE (Issue #114): ``CLUSTRIX_PASSWORD`` does not match any of the
+        environment variable names ``get_cluster_password()`` checks (it
+        looks for ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
+        ``<HOST>_PASSWORD``, ``CLUSTRIX_DEFAULT_PASSWORD`` or
+        ``CLUSTER_PASSWORD`` -- never the bare, unsuffixed
+        ``CLUSTRIX_PASSWORD``). Setting a name the function never checks
+        meant this test always fell through to the interactive fallbacks,
+        which in this process means a real, blocking tkinter prompt with no
+        user to answer it.
+
+        **The assertion changed with issue #167 (route 9), and it was the
+        assertion that was wrong.** ``CLUSTRIX_DEFAULT_PASSWORD`` names no
+        host. Handing it to whatever hostname the caller passed is the same
+        shape as routes 2 and 6, and on the ``setup_auth_with_fallback``
+        path that hostname is ``config.cluster_host`` -- which a cloned
+        repository's ``clustrix.yml`` can choose. So the hostless variable
+        is rule 2 now: offered for a host the user chose, refused
+        otherwise. A host-named variable is unaffected, because naming the
+        host *is* the authorisation.
         """
-        # Set environment variable
         test_password = "env_password_456"
         monkeypatch.setenv("CLUSTRIX_DEFAULT_PASSWORD", test_password)
+        monkeypatch.setattr(
+            "clustrix.auth_fallbacks.detect_environment", lambda: "unknown"
+        )
+        target = CredentialTarget(
+            hostname="cluster.example.com",
+            username="testuser",
+            described_as="a test",
+        )
+
+        # Nothing accompanies the request that records who chose this host.
+        assert get_cluster_password(target) is None
+
+        # A config the user typed does record it.
+        chosen = ClusterConfig(cluster_host="cluster.example.com", username="testuser")
+        assert get_cluster_password(target, config=chosen) == test_password
+
+    def test_a_host_named_password_variable_needs_no_config(self, monkeypatch):
+        """Naming the host in the variable is the user authorising it.
+
+        The counterpart to the rule above, and the reason it is not simply
+        "the fallback no longer works": ``CLUSTRIX_PASSWORD_<HOST>`` says
+        which host may have the secret, exactly as ``SSH_HOST`` in the
+        credential file does, so no provenance is required.
+        """
+        test_password = "env_password_789"
+        monkeypatch.setenv("CLUSTRIX_PASSWORD_CLUSTER_EXAMPLE_COM", test_password)
+        monkeypatch.setattr(
+            "clustrix.auth_fallbacks.detect_environment", lambda: "unknown"
+        )
 
         password = get_cluster_password(
-            hostname="cluster.example.com", username="testuser"
+            CredentialTarget(
+                hostname="cluster.example.com",
+                username="testuser",
+                described_as="a test",
+            )
         )
 
         assert password == test_password

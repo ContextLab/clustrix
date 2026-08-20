@@ -39,11 +39,13 @@ configuration directory, an explicit ``load_config(path)``, or Python. See
 import pathlib
 import warnings
 
+import paramiko
 import pytest
 
 import clustrix.config as config_module
 import clustrix.credential_manager as credential_manager_module
 import clustrix.credential_release as credential_release_module
+from clustrix.auth_fallbacks import setup_auth_with_fallback
 from clustrix.auth_methods import stored_credential_is_for_config
 from clustrix.credential_release import (
     CredentialRelease,
@@ -66,6 +68,7 @@ from clustrix.config import (
     record_discovered_hostname,
 )
 from clustrix.executor_connections import ConnectionManager
+from clustrix.ssh_security import configure_host_key_policy
 from tests.ssh_server import LocalSSHServer
 
 #: The value that must never leave the machine. Assembled from parts so that
@@ -303,6 +306,104 @@ def test_a_key_file_from_a_config_the_user_chose_still_authenticates(
         assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
         assert _attempt_connection() is True
         assert server.authentications[-1] == ("victim", "publickey")
+
+
+def test_the_ssh_key_fallback_does_not_hand_a_hostless_password_to_a_repo_host(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """Route 9, end to end. RED before the fix: the server logs the sentinel.
+
+    ``setup_auth_with_fallback`` -> ``get_cluster_password`` ->
+    ``$CLUSTRIX_DEFAULT_PASSWORD`` -- a variable that names **no host** --
+    handed to ``config.cluster_host``, which a cloned repository's
+    ``clustrix.yml`` chose. The reviewer measured the sentinel arriving at
+    the attacker's server *while ``release_credential`` was refusing the
+    same host in the same process*, which is what an unconverted call site
+    looks like. Lock 3 could never have caught it: it reads ``os.environ``
+    directly and never touches the store.
+    """
+    env_file()
+    monkeypatch.setenv("CLUSTRIX_DEFAULT_PASSWORD", SENTINEL_PASSWORD)
+
+    cloned_repository = tmp_path / "cloned-repository"
+    cloned_repository.mkdir()
+    (cloned_repository / "clustrix.yml").write_text(
+        _config_text(attacker_server), encoding="utf-8"
+    )
+    monkeypatch.chdir(cloned_repository)
+
+    with pytest.warns(UserWarning, match="current working directory"):
+        config_module._load_default_config()
+
+    offered = []
+
+    def setup_ssh_keys(config, **kwargs):
+        """Stand-in for the real key setup: it connects with what it is given.
+
+        The measurement is the server's log, not this function's argument
+        -- ``password`` is carried to a real ``paramiko.connect`` so that
+        an entry in ``server.authentications`` means the sentinel was
+        transmitted.
+        """
+        password = kwargs.get("password")
+        offered.append(password)
+        if password:
+            client = paramiko.SSHClient()
+            # The sanctioned path, and the one the config asks for:
+            # ``_config_text`` sets ssh_host_key_policy=auto_add, so this is
+            # what clustrix itself would install. Naming paramiko's policy
+            # class here would trip tests/unit/test_no_autoadd_policy.py,
+            # and rightly.
+            configure_host_key_policy(client, config)
+            try:
+                client.connect(
+                    hostname=config.cluster_host,
+                    port=config.cluster_port,
+                    username=config.username,
+                    password=password,
+                    allow_agent=False,
+                    look_for_keys=False,
+                )
+            except Exception:
+                pass
+            finally:
+                client.close()
+        return {"success": False, "connection_tested": False, "error": "publickey"}
+
+    monkeypatch.setattr("clustrix.auth_fallbacks.detect_environment", lambda: "unknown")
+    setup_auth_with_fallback(get_config(), setup_ssh_keys)
+
+    assert attacker_server.authentications == [], (
+        "the hostless default password was sent to a host named by a file "
+        "in the working directory: " + repr(attacker_server.authentications)
+    )
+    assert SENTINEL_PASSWORD not in offered
+
+
+def test_the_ssh_key_fallback_still_works_for_a_host_the_user_chose(
+    attacker_server, env_file, monkeypatch
+):
+    """The fix must not disable the fallback where it always worked."""
+    env_file()
+    monkeypatch.setenv("CLUSTRIX_DEFAULT_PASSWORD", SENTINEL_PASSWORD)
+
+    (get_config_dir() / "config.yml").write_text(
+        _config_text(attacker_server), encoding="utf-8"
+    )
+    config_module._load_default_config()
+
+    assert get_config_source(get_config()) == CONFIG_SOURCE_USER_CONFIG_DIR
+
+    offered = []
+
+    def setup_ssh_keys(config, **kwargs):
+        offered.append(kwargs.get("password"))
+        return {"success": False, "connection_tested": False, "error": "publickey"}
+
+    monkeypatch.setattr("clustrix.auth_fallbacks.detect_environment", lambda: "unknown")
+    setup_auth_with_fallback(get_config(), setup_ssh_keys)
+
+    assert SENTINEL_PASSWORD in offered
 
 
 def test_a_credential_that_names_this_host_is_used_from_anywhere(

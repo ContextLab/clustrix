@@ -149,7 +149,32 @@ logger = logging.getLogger(__name__)
 GATE_MODULE = __name__
 
 #: Every branch :func:`release_credential` can answer from.
-RELEASE_SOURCES = ("stored-credential", "environment", "config-field")
+RELEASE_SOURCES = (
+    "stored-credential",
+    "environment",
+    "config-field",
+    "fallback-environment",
+)
+
+#: The variables the SSH-key fallback path scans that **name the host**.
+#: ``CLUSTRIX_PASSWORD_HPC_EXAMPLE_EDU`` is the user saying which host may
+#: have that password, exactly as ``SSH_HOST`` in the credential file is, so
+#: these are rule 1 and are released to the host they name.
+HOST_NAMED_PASSWORD_VARIABLES = (
+    "CLUSTRIX_PASSWORD_{host}",
+    "CLUSTER_PASSWORD_{host}",
+    "{host}_PASSWORD",
+)
+
+#: The variables that name **no host**, and so are rule 2: only for a
+#: ``cluster_host`` the user chose. These are route 9. ``get_cluster_password``
+#: read them with no host check and no provenance check and handed what it
+#: found to whatever hostname it was passed, which on the
+#: ``setup_auth_with_fallback`` path is ``config.cluster_host`` -- so a
+#: cloned repository's ``clustrix.yml`` collected ``$CLUSTRIX_DEFAULT_PASSWORD``
+#: while ``release_credential`` was refusing the same host in the same
+#: process.
+HOSTLESS_PASSWORD_VARIABLES = ("CLUSTRIX_DEFAULT_PASSWORD", "CLUSTER_PASSWORD")
 
 #: The branches a caller that names none is offered, in the order they are
 #: tried. ``"config-field"`` is deliberately absent: it exists for the two
@@ -203,13 +228,12 @@ SECRET_SURFACES = (
     ("clustrix.config", "ClusterConfig.password"),
     ("clustrix.config", "ClusterConfig.key_file"),
     ("clustrix.config", "ClusterConfig.password_env_var"),
-    # Not behind the gate, and listed because a surface nobody has written
-    # down is the one that gets closed eighth. ``get_cluster_password``
-    # scans CLUSTRIX_DEFAULT_PASSWORD and CLUSTER_PASSWORD -- variables that
-    # name **no host** -- and hands what it finds to whatever hostname it
-    # was passed, which on the ``setup_auth_with_fallback`` path is
-    # ``config.cluster_host``. Same shape as routes 2 and 6. Open finding,
-    # not an approved exception.
+    # Route 9, converted rather than merely written down: it takes a
+    # CredentialTarget now and its environment branch is
+    # ``release_credential(..., sources=("fallback-environment",))``. Listed
+    # because it is still a place a secret comes out -- the interactive
+    # prompt -- and because a surface nobody has written down is the one
+    # that gets closed eighth.
     ("clustrix.auth_fallbacks", "get_cluster_password"),
 )
 
@@ -786,6 +810,75 @@ def _release_config_field(
     )
 
 
+def hostless_secret_refusal(
+    target: CredentialTarget, config: Optional[ClusterConfig]
+) -> Optional[str]:
+    """Why a secret that names no host may not go to ``target``. Rule 2.
+
+    The public name for the one rule, so that a caller holding a secret this
+    module does not store -- a Colab userdata entry, say -- can ask the same
+    question rather than inventing a second answer to it.
+    """
+    return stored_credential_is_for_config(config, {}, hostname=target.hostname)
+
+
+def environment_password_variable(template: str, hostname: object) -> str:
+    """The variable name ``template`` produces for ``hostname``.
+
+    One definition, because the gate and any caller listing what a user
+    might set must agree on the spelling exactly.
+    """
+    return template.format(host=normalize_hostname(hostname).upper().replace(".", "_"))
+
+
+def _release_fallback_environment(
+    target: CredentialTarget, config: Optional[ClusterConfig]
+) -> Optional[CredentialRelease]:
+    """Route 9: the variables the SSH-key fallback path scans.
+
+    ``get_cluster_password`` read all five with no host check and no
+    provenance check, and ``setup_auth_with_fallback`` passed it
+    ``config.cluster_host``. The reviewer's attacker server logged
+    ``$CLUSTRIX_DEFAULT_PASSWORD`` while ``release_credential`` was refusing
+    the same host in the same process, which is the definition of an
+    unconverted call site: it was never an argument that this secret was
+    different, only that nobody had routed it here.
+
+    The two kinds are not the same rule. A variable that names the host is
+    the user authorising that host, exactly as ``SSH_HOST`` is, and needs no
+    provenance. A variable that names none is rule 2.
+    """
+    for template in HOST_NAMED_PASSWORD_VARIABLES:
+        name = environment_password_variable(template, target.hostname)
+        password = os.environ.get(name)
+        if password:
+            return CredentialRelease(
+                target=target, method="fallback-environment", password=password
+            )
+
+    for name in HOSTLESS_PASSWORD_VARIABLES:
+        if not os.environ.get(name):
+            continue
+        refusal = hostless_secret_refusal(target, config)
+        if refusal:
+            return CredentialRelease(
+                target=target,
+                refusal=(
+                    f"${name} was not offered: {refusal}. The variable names "
+                    f"no host, so it is only used for a cluster_host you "
+                    f"chose. To name this host, set "
+                    f"{environment_password_variable(HOST_NAMED_PASSWORD_VARIABLES[0], target.hostname)}"
+                    f" instead."
+                ),
+            )
+        return CredentialRelease(
+            target=target,
+            method="fallback-environment",
+            password=os.environ[name],
+        )
+    return None
+
+
 def release_credential(
     target: CredentialTarget,
     *,
@@ -809,6 +902,8 @@ def release_credential(
     3. ``"config-field"`` -- ``config.key_file`` and ``config.password``,
        gated the same way, and **not** in
        :data:`DEFAULT_RELEASE_SOURCES`.
+    4. ``"fallback-environment"`` -- the variables the SSH-key fallback path
+       scans (route 9), also opt-in.
 
     **Deviation 2, and why it was wrong.** These last two used to be
     deliberately outside the gate, on the argument that they are fields of
@@ -851,6 +946,7 @@ def release_credential(
         "stored-credential": lambda: _release_stored(target, provider, config),
         "environment": lambda: _release_environment(target, config),
         "config-field": lambda: _release_config_field(target, config),
+        "fallback-environment": lambda: _release_fallback_environment(target, config),
     }
     for source in sources:
         released = branches[source]()
