@@ -112,10 +112,26 @@ class SchedulerStatusManager:
                             f"wc -l {job_info['remote_dir']}/job.err"
                         )
                         line_count = int(stdout.strip().split()[0])
-                        if line_count > 0:
-                            return "failed"
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # This used to answer "running". It is not: the job
+                        # wrote an error file, and the only thing that failed
+                        # is our attempt to measure it. Reporting "running"
+                        # sent wait_for_result back around the poll loop until
+                        # job_wait_timeout expired, and the TimeoutError then
+                        # blamed a job that had already stopped. "unknown" is
+                        # the honest answer and is already a documented member
+                        # of this function's return set.
+                        logger.warning(
+                            "Job %s: could not measure %s/job.err (%s). Job "
+                            "status is unknown -- it is NOT known to be "
+                            "running.",
+                            job_id,
+                            job_info["remote_dir"],
+                            exc,
+                        )
+                        return "unknown"
+                    if line_count > 0:
+                        return "failed"
                     return "running"
                 else:
                     return "running"
@@ -268,7 +284,13 @@ class SchedulerStatusManager:
                         slurm_files = (
                             stdout.strip().split("\n") if stdout.strip() else []
                         )
-                    except Exception:
+                    except Exception as exc:
+                        logger.warning(
+                            "Could not list slurm-*.out under %s (%s); this "
+                            "job's status is being decided without them.",
+                            remote_dir,
+                            exc,
+                        )
                         slurm_files = []
 
                 if slurm_files:
@@ -341,8 +363,21 @@ class SchedulerStatusManager:
                                     f"Job {job_id} failed - Python traceback found in {filename}"
                                 )
                                 return "failed"
-                        except Exception:
-                            pass
+                        except Exception as exc:
+                            # Log and continue: the remaining files, and the
+                            # accounting query below, can still produce a
+                            # correct verdict, so one unreadable file is not
+                            # fatal. But it is not nothing either -- the file
+                            # that was skipped may have been the one holding
+                            # the traceback, so name it rather than letting
+                            # the scan look exhaustive when it was not.
+                            logger.warning(
+                                "Job %s: could not scan %s for a traceback "
+                                "(%s); skipping that file.",
+                                job_id,
+                                filename,
+                                exc,
+                            )
             else:
                 logger.warning(f"Job {job_id} directory is empty or doesn't exist")
         except Exception as e:
@@ -582,6 +617,7 @@ class SchedulerStatusManager:
         # Fallback to text error files
         error_files = ["job.err", "slurm-*.out"]
 
+        unreadable = []
         for error_file in error_files:
             try:
                 # remote_dir is quoted (it comes from config.remote_work_dir);
@@ -591,9 +627,27 @@ class SchedulerStatusManager:
                 )
                 if stdout.strip():
                     return stdout
-            except Exception:
-                continue
+            except Exception as exc:
+                logger.warning(
+                    "Job %s: could not read %s/%s (%s).",
+                    job_id,
+                    remote_dir,
+                    error_file,
+                    exc,
+                )
+                unreadable.append(f"{error_file} ({exc})")
 
+        if unreadable:
+            # "No error log found" is a statement about the cluster: there was
+            # nothing to read. Saying it when the read itself failed reports
+            # "I could not tell" as "no", and this string is what the user is
+            # shown as the reason their job died.
+            return (
+                "Could not read the error log for job "
+                f"{job_id}: {'; '.join(unreadable)}. The job may well have "
+                "written one -- this is a failure to retrieve it, not "
+                "evidence that it is absent."
+            )
         return "No error log found"
 
     def extract_original_exception(

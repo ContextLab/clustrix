@@ -6,9 +6,10 @@ a comprehensive interface for configuring and managing cluster settings in
 Jupyter notebooks.
 """
 
+import logging
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-import logging
 
 from .notebook_magic_config import (
     DEFAULT_CONFIGS,
@@ -938,7 +939,18 @@ class EnhancedClusterConfigWidget:
                 self.save_file_select.options = [""] + file_options
             else:
                 self.save_file_select.options = [""]
-        except Exception:
+        except Exception as exc:
+            # An empty dropdown reads as "there is nothing here to overwrite",
+            # which is a claim about the filesystem. When the scan itself
+            # failed -- an unreadable config directory, a dead automount --
+            # that claim is unfounded, and the user is one click away from
+            # writing a new file next to the one they meant to replace.
+            logger.warning(
+                "Could not list existing configuration files (%s); the "
+                "overwrite list is empty because the scan failed, not "
+                "because there are no files.",
+                exc,
+            )
             self.save_file_select.options = [""]
 
     def _on_load_config(self, button):
@@ -1005,17 +1017,42 @@ class EnhancedClusterConfigWidget:
                 print(f"❌ Error loading configuration: {str(e)}")
 
     def _test_remote_connectivity(self, host, port, timeout=5):
-        """Test basic network connectivity to a remote host."""
+        """Measure whether ``host:port`` accepts a TCP connection.
+
+        Returns ``(True, "")`` for a connection that was made and
+        ``(False, reason)`` for one that was refused or timed out. Both are
+        real measurements of the remote host.
+
+        Returns ``(None, reason)`` when the probe itself could not run -- an
+        unresolvable name, a socket the OS refused to create, an address
+        family mismatch. That is not a statement about the host at all, and
+        it used to be reported as ``False``, which the caller renders as
+        "Cannot reach {host}:{port}" -- a confident, wrong claim about
+        somebody else's machine, made on no evidence. Handing back a third
+        value is what lets the caller tell "I asked and got no" apart from
+        "I never managed to ask".
+        """
         import socket
 
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = sock.connect_ex((host, port))
-            sock.close()
-            return result == 0
-        except Exception:
-            return False
+            try:
+                sock.settimeout(timeout)
+                result = sock.connect_ex((host, port))
+            finally:
+                sock.close()
+        except Exception as exc:
+            logger.warning(
+                "The connectivity probe to %s:%s could not be run (%s). This "
+                "says nothing about whether the host is reachable.",
+                host,
+                port,
+                exc,
+            )
+            return None, str(exc)
+        if result == 0:
+            return True, ""
+        return False, os.strerror(result)
 
     def _test_ssh_connectivity(self, config, timeout=10):
         """Test SSH connectivity with provided credentials."""
@@ -1110,8 +1147,21 @@ class EnhancedClusterConfigWidget:
                         return
 
                     print(f"🌐 Testing network connectivity to {host}:{port}...")
-                    if not self._test_remote_connectivity(host, port):
-                        print(f"❌ Cannot reach {host}:{port}")
+                    reachable, reason = self._test_remote_connectivity(host, port)
+                    if reachable is None:
+                        # Not the same as "cannot reach", and saying so is the
+                        # whole point: the probe never got as far as asking.
+                        print(
+                            f"❓ Could not tell whether {host}:{port} is "
+                            f"reachable: {reason}"
+                        )
+                        print(
+                            "💡 The probe itself failed, so this is NOT "
+                            "evidence that the host is down"
+                        )
+                        return
+                    if not reachable:
+                        print(f"❌ Cannot reach {host}:{port}: {reason}")
                         print("💡 Check if the hostname/IP is correct and accessible")
                         return
 

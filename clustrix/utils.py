@@ -256,8 +256,18 @@ def detect_loops(func: Callable, args: tuple, kwargs: dict) -> Optional[Dict[str
 
         return None
 
-    except Exception:
-        # If analysis fails, assume no parallelizable loops
+    except Exception as exc:
+        # None means "no parallelizable loop", and running the loop whole is
+        # always correct, so the caller can still produce a correct result --
+        # it just produces it sequentially. That makes this log-and-continue
+        # rather than raise. What it is not is free: the user asked for
+        # parallelism and did not get it, and with the reason discarded there
+        # was nothing anywhere to explain why.
+        logger.warning(
+            "Loop analysis of %s failed (%s); running any loops in it " "sequentially.",
+            getattr(func, "__name__", func),
+            exc,
+        )
         return None
 
 
@@ -739,18 +749,39 @@ def _dumps_by_value(obj: Any) -> bytes:
                 f"Cannot send your local module(s) [{names}] to the cluster: {exc}."
             ) from exc
 
-    try:
-        return dill.dumps(obj, protocol=4, recurse=True)
-    except Exception:
-        pass
-    try:
-        return dill.dumps(obj, protocol=4)
-    except Exception:
-        pass
-    try:
-        return cloudpickle.dumps(obj, protocol=4)
-    except Exception:
-        return pickle.dumps(obj, protocol=4)
+    # Richest serializer first, degrading to the next on failure. Each step
+    # that fails says why: three silent `except Exception: pass` blocks meant
+    # that when the whole cascade misbehaved there was nothing at all to read.
+    strategies = (
+        ("dill(recurse=True)", lambda: dill.dumps(obj, protocol=4, recurse=True)),
+        ("dill", lambda: dill.dumps(obj, protocol=4)),
+        ("cloudpickle", lambda: cloudpickle.dumps(obj, protocol=4)),
+    )
+    failures = []
+    for label, dump in strategies:
+        try:
+            return dump()
+        except Exception as exc:
+            logger.debug("Serializing by value with %s failed: %s", label, exc)
+            failures.append(f"{label}: {exc}")
+
+    # The last resort used to be `pickle.dumps(obj, protocol=4)`, which almost
+    # always *succeeded* -- and that was the defect. stdlib pickle stores a
+    # function or class by qualified name, so the bytes it produced looked
+    # like a serialized job and then failed on the worker, in a fresh
+    # interpreter with no __main__ to resolve the name against, as
+    # "Can't get attribute" or AttributeError naming something the user never
+    # wrote. Every __main__ function submitted to a cluster went out this way.
+    # This function's own docstring already promised the exception propagates
+    # rather than shipping a payload that will fail remotely with an unrelated
+    # error; now it does.
+    raise RuntimeError(
+        "Cannot serialize this job by value. "
+        + "; ".join(failures)
+        + ". Nothing here can be sent to a worker by name -- a fresh "
+        "interpreter has no __main__ to resolve it against -- so the "
+        "submission is refused rather than failing later on the cluster."
+    )
 
 
 def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, Any]:
@@ -773,9 +804,19 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     func_source = None
     try:
         func_source = inspect.getsource(func)
-    except Exception:
-        # Cannot get source code - this is common for dynamically defined functions
-        pass
+    except (OSError, TypeError) as exc:
+        # Narrowed from `except Exception`, matching the second getsource()
+        # call below. A function built by exec(), typed at a REPL or defined
+        # in a C extension genuinely has no retrievable source, and that is
+        # not an error: dill and cloudpickle work from the code object, so the
+        # payload is complete without it. Only AST loop parallelization needs
+        # the text, and it already handles the absence.
+        logger.debug(
+            "No source available for %s (%s); serializing from the code "
+            "object alone.",
+            getattr(func, "__name__", func),
+            exc,
+        )
 
     # Serialize the function by VALUE, including everything it refers to.
     #
@@ -803,8 +844,18 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
 
     try:
         func_info["source"] = inspect.getsource(func)
-    except Exception:
-        pass
+    except (OSError, TypeError) as exc:
+        # Narrowed from `except Exception`. These are what getsource() raises
+        # for a function defined in a REPL, an exec() string or a C extension.
+        # Leaving `source` as None is a correct answer for the caller: the
+        # payload travels as bytecode and only AST loop parallelization needs
+        # the text, and that step already handles its absence by shipping the
+        # function as-is.
+        logger.debug(
+            "No source available for %s (%s); shipping without it.",
+            getattr(func, "__name__", func),
+            exc,
+        )
 
     return {
         "function": func_bytes,
@@ -877,7 +928,21 @@ def _source_checkout_path(dist: Any) -> Optional[str]:
         if dist.read_text("PKG-INFO") is None:
             return None
         location = os.path.realpath(str(dist.locate_file("")))
-    except Exception:  # pragma: no cover - metadata with no locatable path
+    except (OSError, KeyError, AttributeError, ValueError) as exc:
+        # Narrowed from a bare `except Exception`, and no longer silent.
+        # Returning None means "this is a normal installed package", which is
+        # what decides that a plain `pip install name==version` will recreate
+        # it on the worker. Saying that because the metadata could not be read
+        # is "I could not tell" answered as "no" -- and the cost lands minutes
+        # later on the cluster, as a ModuleNotFoundError for a package the
+        # user can see on their own disk.
+        logger.warning(
+            "Could not determine whether %s is an editable/source checkout "
+            "(%s); treating it as a normal installed package. If it is a "
+            "checkout, the worker will not be able to install it.",
+            getattr(dist, "_path", dist),
+            exc,
+        )
         return None
     rooted = location.rstrip(os.sep) + os.sep
     if any(rooted.startswith(root) for root in _INSTALLED_ROOTS):
@@ -958,14 +1023,34 @@ def _distribution_records() -> Dict[str, Dict[str, Any]]:
         try:
             name = dist.metadata["Name"]
             version = dist.version
-        except Exception:  # pragma: no cover - a broken .dist-info on disk
+        except (KeyError, AttributeError, OSError, ValueError) as exc:
+            # Narrowed, and no longer silent. Skipping a distribution drops it
+            # from the requirements sent to the worker, so the job dies there
+            # on `import` instead -- naming a package that is plainly
+            # installed here. Whatever is wrong with the metadata, the user
+            # needs to hear about it on this side.
+            logger.warning(
+                "Skipping a distribution at %s: its metadata could not be "
+                "read (%s). It will NOT be installed on the worker.",
+                getattr(dist, "_path", dist),
+                exc,
+            )
             continue
         if not name or not version:
             continue
         direct_url: Optional[Dict[str, Any]] = None
         try:
             raw = dist.read_text("direct_url.json")
-        except Exception:  # pragma: no cover - unreadable metadata file
+        except (OSError, ValueError) as exc:  # pragma: no cover - unreadable
+            # No direct_url.json means "an ordinary index install", which is
+            # what None encodes. An unreadable one means we do not know, and
+            # the difference decides whether the worker gets a working pin.
+            logger.warning(
+                "Could not read direct_url.json for %s (%s); treating it as "
+                "an ordinary index install.",
+                name,
+                exc,
+            )
             raw = None
         if raw:
             try:
@@ -1041,18 +1126,44 @@ def get_unreproducible_requirements() -> Dict[str, str]:
 
 
 def _distribution_import_names(dist: Any) -> List[str]:
-    """Top-level module names a distribution provides."""
+    """Top-level module names a distribution provides.
+
+    An empty result is not a neutral answer. The only caller,
+    :func:`unreproducible_module_owners`, uses this to *refuse* a submission
+    that reaches into a package the worker cannot reinstall. A distribution
+    whose metadata could not be read contributes no import names, the
+    submission is allowed, and the job dies on the worker at ``import`` --
+    minutes later, naming a module rather than the metadata that could not be
+    read. So a failure here is a warning, not a debug line: it is the
+    difference between a refusal now and a wrong answer later.
+    """
     names: Set[str] = set()
     try:
         text = dist.read_text("top_level.txt")
-    except Exception:  # pragma: no cover - unreadable metadata file
+    except Exception as exc:
+        logger.warning(
+            "Could not read top_level.txt for %s (%s); the modules it "
+            "provides will be missing from the reproducibility check, so a "
+            "job that imports them may be allowed to run and then fail on "
+            "the worker.",
+            dist,
+            exc,
+        )
         text = None
     if text:
         names.update(line.strip() for line in text.splitlines() if line.strip())
     if not names:
         try:
             files = dist.files or []
-        except Exception:  # pragma: no cover - metadata without a file list
+        except Exception as exc:
+            logger.warning(
+                "Could not list the files of %s (%s); the modules it provides "
+                "will be missing from the reproducibility check, so a job "
+                "that imports them may be allowed to run and then fail on the "
+                "worker.",
+                dist,
+                exc,
+            )
             files = []
         for entry in files:
             head = str(entry).replace("\\", "/").split("/")[0]
@@ -1095,8 +1206,22 @@ def get_environment_info() -> str:
 
         if result.returncode == 0:
             return result.stdout.strip()
-    except Exception:
-        pass
+        logger.warning(
+            "`pip list` exited %s while capturing the environment; reporting "
+            "no packages. stderr: %s",
+            result.returncode,
+            result.stderr.strip(),
+        )
+    except Exception as exc:
+        # An empty string here reads downstream as "this environment has no
+        # packages", which is never true and is indistinguishable from the
+        # real answer. It stays empty -- the callers treat it as advisory --
+        # but the reason no longer disappears with it.
+        logger.warning(
+            "Could not capture the local environment with `pip list` (%s); "
+            "reporting no packages.",
+            exc,
+        )
 
     return ""
 
@@ -1523,7 +1648,17 @@ def setup_two_venv_environment(
                 try:
                     version_str = version_output.split("(")[1].split(")")[0]
                     major, minor = map(int, version_str.split(", ")[:2])
-                except Exception:
+                except (IndexError, ValueError) as exc:
+                    # Narrowed to what parsing that output can raise. Skipping
+                    # an interpreter whose version banner is unreadable is a
+                    # correct answer -- it is not a usable candidate -- and
+                    # _select_remote_python raises if none of them are.
+                    logger.debug(
+                        "Ignoring remote interpreter %s: could not parse %r " "(%s).",
+                        python_cmd,
+                        version_output,
+                        exc,
+                    )
                     continue
                 if major == 3:
                     probed.append((python_cmd, f"{major}.{minor}"))
@@ -1855,13 +1990,22 @@ def setup_python_compatible_environment(
                 # Extract version tuple
                 version_str = version_output.split("(")[1].split(")")[0]
                 major, minor = map(int, version_str.split(", ")[:2])
-
-                # Check if version is compatible (3.6+)
-                if major == 3 and minor >= 6:
-                    compatible_python = python_cmd
-                    break
-            except Exception:
+            except (IndexError, ValueError) as exc:
+                # Narrowed, and reported. Same reasoning as the probe in
+                # setup_two_venv_environment: an unparseable banner means an
+                # unusable candidate, and the caller reports it if none are.
+                logger.debug(
+                    "Ignoring remote interpreter %s: could not parse %r (%s).",
+                    python_cmd,
+                    version_output,
+                    exc,
+                )
                 continue
+
+            # Check if version is compatible (3.6+)
+            if major == 3 and minor >= 6:
+                compatible_python = python_cmd
+                break
 
     if compatible_python:
         # Create a separate venv with the compatible Python version
@@ -1932,11 +2076,26 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
     wanted = f"python{_sys.version_info.major}.{_sys.version_info.minor}"
 
     def exists(candidate: str) -> bool:
+        """True if ``candidate`` is on the remote PATH; raises if unmeasured.
+
+        There is no honest ``False`` to return when the probe itself fails.
+        Returning one used to send the caller into the ``RuntimeError`` at
+        the bottom of this function, which states flatly that there is no
+        matching interpreter on the remote host and tells the user to go and
+        install one -- a confident claim about a machine clustrix never
+        managed to ask. A dead transport is a failure of this end, so it is
+        raised as one, with the exception that caused it chained on.
+        """
         try:
             stdin, stdout, stderr = ssh_client.exec_command(f"command -v {candidate}")
             return bool(stdout.read().decode().strip())
-        except Exception:  # pragma: no cover - defensive
-            return False
+        except Exception as exc:
+            host = getattr(config, "cluster_host", None) or "the remote host"
+            raise RuntimeError(
+                f"Could not ask {host} whether {candidate} is installed: "
+                f"{exc}. This is a failure of the connection, not evidence "
+                f"that {candidate} is absent."
+            ) from exc
 
     if exists(wanted):
         logger.debug("Using remote interpreter %s", wanted)
@@ -1951,7 +2110,10 @@ def resolve_remote_python(ssh_client, config: ClusterConfig) -> str:
                     f"{candidate} -c 'import sys; print(sys.version.split()[0])'"
                 )
                 version = stdout.read().decode().strip()
-            except Exception:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover - defensive
+                logger.debug(
+                    "Could not read the version of remote %s: %s", candidate, exc
+                )
                 version = "?"
             available.append(f"{candidate} ({version})")
 

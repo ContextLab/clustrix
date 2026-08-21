@@ -1,5 +1,6 @@
 """Unified authentication management with fallback support."""
 
+import logging
 from typing import Optional, List, Dict, Any
 
 from .config import ClusterConfig
@@ -15,6 +16,8 @@ from .auth_methods import (
     detect_environment,
     is_colab,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationManager:
@@ -176,9 +179,17 @@ class AuthenticationManager:
                 )
                 root.destroy()
                 return result
-            except Exception:
-                # Fall back to terminal
-                pass
+            except Exception as exc:
+                # Log and continue: the terminal prompt below asks the user the
+                # same question and gets the same answer, so the caller still
+                # gets a correct result -- this is a choice of interface, not a
+                # lost instruction. Debug rather than warning for that reason:
+                # a notebook with no display reaches here every single time.
+                logger.debug(
+                    "No GUI available for the credential-storage prompt (%s); "
+                    "asking on the terminal instead.",
+                    exc,
+                )
 
         if env_type in ["cli", "script"] or env_type == "notebook":
             # Use terminal prompt

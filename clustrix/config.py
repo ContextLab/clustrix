@@ -1,11 +1,15 @@
 import json
+import logging
 import re
 import secrets as _secrets
+import threading
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict, fields
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -552,49 +556,125 @@ def write_config_file_securely(config_path_obj: Path, config_data: dict) -> None
     write_text_securely(config_path_obj, rendered)
 
 
-# Global configuration instance
+# Global configuration instance.
+#
+# Constructing it is pure: ``__post_init__`` fills in mutable defaults and
+# validates two fields, and opens no file, socket or subprocess. Reading the
+# user's *configuration file* is the part that must not happen at import --
+# see ``_ensure_default_config_loaded`` at the bottom of this module.
 _config = ClusterConfig()
+
+
+class ConfigFileError(RuntimeError):
+    """A configuration file was found in a standard location and is unusable.
+
+    Raised on first use of the configuration rather than at import, and
+    deliberately not swallowed: a file the user wrote that clustrix cannot
+    read is an instruction it cannot carry out, and continuing on built-in
+    defaults would run their job somewhere other than where they said.
+    """
 
 
 def configure(**kwargs) -> None:
     """
     Configure Clustrix settings.
 
+    Runs under ``_DEFAULT_CONFIG_LOCK`` for the same reason
+    :func:`load_config` does, and the lock has to cover the ``setattr`` loop
+    at the bottom, not just the search above it. The loop reads the module
+    global ``_config`` on every iteration, and :func:`load_config` *rebinds*
+    it. With the loop unlocked, a ``load_config`` landing in the middle of it
+    left the keywords already applied written to the object that was just
+    discarded and the rest written to the new one -- a torn write in which
+    neither writer won, reported as success. Measured:
+    ``configure(cluster_host=..., username=..., cluster_port=...,
+    remote_work_dir=...)`` returned with ``cluster_host`` silently reverted to
+    the file's value and the other three applied.
+
+    So each of the two writers is now atomic with respect to the other, and
+    the loser loses whole: whichever acquires the lock second sees a
+    consistent configuration and writes a consistent one. What this does
+    *not* do is make ``configure`` beat a ``load_config`` that acquires the
+    lock after it -- an explicit file load replaces the configuration
+    wholesale, by design, and that includes replacing keywords set before it.
+    The documented precedence (defaults -> file -> runtime keywords) is about
+    the layering within one sequence of calls, not about which of two
+    concurrent writers wins; the only guarantee across threads is that
+    neither call is observed half-applied.
+
     Args:
         **kwargs: Configuration parameters matching ClusterConfig fields
     """
     global _config  # noqa: F824
 
-    # Validate everything before applying anything: a rejected keyword used
-    # to leave the earlier ones already written to the live config, so a
-    # failed configure() call still changed the process's behaviour.
-    for key in kwargs:
-        if hasattr(_config, key):
-            continue
-        removed = _removed_setting_reason(key)
-        if removed:
-            raise ValueError(removed)
-        raise ValueError(f"Unknown configuration parameter: {key}")
+    with _DEFAULT_CONFIG_LOCK:
+        # The file is the layer underneath these keywords (defaults -> file
+        # -> runtime), so it has to be in place before they are applied on
+        # top -- otherwise a later get_config() would run the search and
+        # overwrite them. Re-entrant: this is the same lock, and it is an
+        # RLock.
+        _ensure_default_config_loaded()
 
-    if "cluster_type" in kwargs:
-        # setattr below does not re-run __post_init__, so without this a
-        # removed backend reaches the executor and fails there instead --
-        # after connect(), i.e. after an SSH round trip to a host that was
-        # never going to be used.
-        validate_cluster_type(kwargs["cluster_type"])
+        # Validate everything before applying anything: a rejected keyword
+        # used to leave the earlier ones already written to the live config,
+        # so a failed configure() call still changed the process's behaviour.
+        for key in kwargs:
+            if hasattr(_config, key):
+                continue
+            removed = _removed_setting_reason(key)
+            if removed:
+                raise ValueError(removed)
+            raise ValueError(f"Unknown configuration parameter: {key}")
 
-    for key, value in kwargs.items():
-        setattr(_config, key, value)
+        if "cluster_type" in kwargs:
+            # setattr below does not re-run __post_init__, so without this a
+            # removed backend reaches the executor and fails there instead --
+            # after connect(), i.e. after an SSH round trip to a host that was
+            # never going to be used.
+            validate_cluster_type(kwargs["cluster_type"])
+
+        # Bound once. Even under the lock, re-reading the global on every
+        # iteration would make this loop depend on _config not being rebound
+        # mid-loop, which is the property the lock exists to provide rather
+        # than one to lean on twice.
+        target = _config
+        for key, value in kwargs.items():
+            setattr(target, key, value)
 
 
 def load_config(config_path: str) -> None:
     """
     Load configuration from a file (JSON or YAML).
 
+    Runs under ``_DEFAULT_CONFIG_LOCK``, which is not decoration. The lazy
+    search of the standard locations (see :func:`_ensure_default_config_loaded`)
+    also rebinds ``_config``, and it now runs on whichever thread happens to
+    touch the configuration first rather than during the import. Without this
+    lock the two writers interleave: a thread that entered the search *before*
+    an explicit ``load_config`` can finish *after* it and rebind ``_config``
+    to the file it found in ``~/.clustrix`` -- so the explicitly loaded file is
+    accepted, reported as loaded, and then thrown away. That is exactly the
+    defect class this module is being fixed for, so it does not get to be
+    reintroduced by the fix. The lock is an ``RLock`` because the search
+    itself calls this function.
+
+    Holding it across the parse as well as the assignment means the winner is
+    the last caller to *acquire the lock*, not the last to finish; a slow
+    large file cannot land on top of a small one loaded after it. Note the
+    correction: "the last caller to enter" was the wording here, and it was
+    false against a :func:`configure` competitor, which took no lock at all
+    and so could not queue behind anything. It does now.
+
     Args:
         config_path: Path to configuration file
     """
-    global _config
+    with _DEFAULT_CONFIG_LOCK:
+        _load_config_locked(config_path)
+
+
+def _load_config_locked(config_path: str) -> None:
+    """Body of :func:`load_config`; callers must hold ``_DEFAULT_CONFIG_LOCK``."""
+    global _config, _default_config_loaded
 
     config_path_obj = Path(config_path)
     if not config_path_obj.exists():
@@ -642,6 +722,10 @@ def load_config(config_path: str) -> None:
         )
 
     _config = ClusterConfig(**config_data)
+    # An explicit load replaces the configuration wholesale, so the search of
+    # the standard locations has nothing left to contribute. Marking it done
+    # stops a later get_config() from discarding what was just loaded.
+    _default_config_loaded = True
 
 
 def save_config(config_path: str, include_secrets: bool = False) -> None:
@@ -656,6 +740,7 @@ def save_config(config_path: str, include_secrets: bool = False) -> None:
         include_secrets: Write secret-bearing fields (passwords, tokens,
             API keys, etc.) in plaintext. Default False.
     """
+    _ensure_default_config_loaded()
     _config.save_to_file(config_path, include_secrets=include_secrets)
 
 
@@ -679,43 +764,209 @@ def get_config_dir() -> Path:
 
 
 def get_config() -> ClusterConfig:
-    """Get current configuration."""
+    """Get current configuration.
+
+    This is where the search of the standard locations for a user
+    configuration file actually happens, the first time anything asks. Every
+    read of the singleton goes through this function, and nothing anywhere in
+    the repository binds ``_config`` by name, so deferring the search to here
+    is complete. That second half is not an assertion of good intentions: it
+    is checked by
+    ``tests/unit/test_import_has_no_side_effects.py::test_nothing_binds_the_singleton_by_name``,
+    which found two by-name importers the first time it was run.
+
+    Call this each time you need the configuration rather than holding on to
+    what it returns: ``load_config`` *rebinds* the singleton to a new
+    ``ClusterConfig``, so a reference taken earlier keeps the values it had
+    then and silently stops tracking the live configuration. (``configure``
+    mutates in place, so a held reference does follow that one -- which is
+    exactly what makes the difference easy to miss.)
+    """
+    _ensure_default_config_loaded()
     return _config
 
 
-# Try to load configuration from default locations
-def _load_default_config():
-    """Load configuration from default locations."""
-    default_paths = []
+def _default_config_candidates() -> List[Path]:
+    """The paths searched for a user configuration file, in priority order."""
+    candidates: List[Path] = []
     try:
         config_dir = get_config_dir()
-    except RuntimeError:
+    except RuntimeError as exc:
         # Path.home() raises when the home directory cannot be determined --
         # e.g. a Windows service account or a scrubbed environment with no
-        # USERPROFILE. Discovering a user config file is best effort, so this
-        # must not make ``import clustrix`` fail; the working-directory
-        # candidates below are still searched.
-        pass
+        # USERPROFILE. The working-directory candidates below are still
+        # searched, but say so: silently searching three of six locations is
+        # how a config file that is definitely there appears not to be.
+        logger.warning(
+            "Could not determine a configuration directory (%s), so the "
+            "per-user location was not searched. Set %s to point at it.",
+            exc,
+            CONFIG_DIR_ENV_VAR,
+        )
     else:
-        default_paths += [
+        candidates += [
             config_dir / "config.yml",
             config_dir / "config.yaml",
             config_dir / "config.json",
         ]
-    default_paths += [
-        Path.cwd() / "clustrix.yml",
-        Path.cwd() / "clustrix.yaml",
-        Path.cwd() / "clustrix.json",
-    ]
+    try:
+        cwd = Path.cwd()
+    except OSError as exc:
+        # getcwd() fails for real: a directory deleted out from under a
+        # long-running process, or one the process may no longer read. The
+        # per-user candidates above are unaffected, so the search continues
+        # with what it can still reach -- having said which half it skipped.
+        logger.warning(
+            "Could not determine the current working directory (%s), so it "
+            "was not searched for a clustrix configuration file.",
+            exc,
+        )
+    else:
+        candidates += [
+            cwd / "clustrix.yml",
+            cwd / "clustrix.yaml",
+            cwd / "clustrix.json",
+        ]
+    return candidates
 
-    for path in default_paths:
-        if path.exists():
-            try:
-                load_config(str(path))
-                break
-            except Exception:
-                continue
+
+def _load_default_config() -> None:
+    """Adopt the first configuration file found in the standard locations.
+
+    Two different failures used to be indistinguishable from the outside, and
+    both presented as "there is no configuration file":
+
+    * A candidate that could not be *stat*ed. ``Path.exists()`` answers False
+      for ENOENT but propagates EACCES, and that call sat outside the try --
+      so a ``~/.clustrix`` the process could not read made ``import clustrix``
+      raise ``PermissionError`` from four frames inside a private function.
+    * A candidate that was found and then failed to load -- truncated YAML, a
+      typo'd setting name -- which was skipped in silence. The process then
+      ran on built-in defaults while the user believed their file was in
+      force, and that is the expensive one: a ``cluster_host`` that never took
+      effect means the job ran somewhere other than where it was told to.
+
+    The two are now told apart. "I could not look there" is a warning and the
+    search moves on, because there is still a correct answer to be had from
+    the remaining candidates. "I looked, found your file, and cannot use it"
+    raises, because there is not.
+    """
+    for path in _default_config_candidates():
+        try:
+            found = path.exists()
+        except OSError as exc:
+            logger.warning(
+                "Could not check for a clustrix configuration file at %s (%s). "
+                "Any settings in that location are NOT in effect.",
+                path,
+                exc,
+            )
+            continue
+        if not found:
+            continue
+        try:
+            load_config(str(path))
+        except Exception as exc:
+            raise ConfigFileError(
+                f"The clustrix configuration file {path} was found but could "
+                f"not be loaded: {exc}. Its settings are NOT in effect. Fix "
+                f"the file, move it aside, or load a different one with "
+                f"clustrix.config.load_config(path)."
+            ) from exc
+        logger.debug("Loaded clustrix configuration from %s", path)
+        return
 
 
-# Load default configuration on import
-_load_default_config()
+_default_config_loaded = False
+_default_config_loading = False
+_DEFAULT_CONFIG_LOCK = threading.RLock()
+
+
+def _reset_default_config_lock_after_fork() -> None:
+    """Make the lock and the in-progress flag mean something in a forked child.
+
+    ``fork`` copies the memory of the calling thread only. If any *other*
+    thread held ``_DEFAULT_CONFIG_LOCK`` at that instant -- which is precisely
+    the window the lazy search opened, because the search now runs on whichever
+    thread touches the configuration first and holds the lock for its whole
+    duration -- then the child inherits a lock that is recorded as held by a
+    thread that does not exist in the child and can never release it. The
+    child's first ``get_config()`` blocks forever. It inherits
+    ``_default_config_loading = True`` for the same reason, set by that same
+    absent thread.
+
+    This is not hypothetical for this package: ``LocalExecutor`` runs work in a
+    ``ProcessPoolExecutor``, and ``fork`` is a real start method (the default
+    on Linux). A worker whose first act is to read the configuration would
+    hang rather than fail.
+
+    A forked child is single-threaded at this point, so nothing can be
+    contending: replacing the lock outright is safe, and it is the only
+    available repair -- an inherited held lock has no owner left to release it.
+    ``_default_config_loaded`` is deliberately *not* touched. If the parent had
+    finished, the child inherits both the flag and the loaded ``_config`` and
+    is consistent; if it had not, the flag is already False and the child
+    simply redoes the search itself.
+    """
+    global _DEFAULT_CONFIG_LOCK, _default_config_loading
+    _DEFAULT_CONFIG_LOCK = threading.RLock()
+    _default_config_loading = False
+
+
+if hasattr(os, "register_at_fork"):  # not available on Windows
+    os.register_at_fork(after_in_child=_reset_default_config_lock_after_fork)
+
+
+def _ensure_default_config_loaded() -> None:
+    """Search the standard locations once, on first use rather than on import.
+
+    ``import clustrix`` used to read the user's home directory and the current
+    working directory as a side effect of the import statement. Two things
+    were wrong with that. It made importing a library do I/O nobody had asked
+    for yet -- including picking up a ``./clustrix.yml`` belonging to whatever
+    directory the process happened to start in -- and it put a whole class of
+    failure (an unreadable ``~/.clustrix``) inside an import, where there is
+    no caller in a position to handle it.
+
+    The singleton itself stays eager: ``_config = ClusterConfig()`` allocates
+    an object and touches nothing. Only the file read moved. That split is
+    what makes this safe, because every read of the singleton goes through
+    :func:`get_config`: nothing in the repository does
+    ``from .config import _config``, so there is no route by which a caller
+    can observe the pre-search object. A by-name importer would also be
+    holding the wrong object after any :func:`load_config`, which *rebinds*
+    the module attribute. The property is enforced by
+    ``test_nothing_binds_the_singleton_by_name`` rather than asserted here --
+    it was stated in this docstring before it was true, and a test fixture and
+    a script were both binding it by name at the time.
+
+    The lock makes concurrent first calls do the search exactly once, and two
+    separate flags are needed to keep that correct:
+
+    ``_default_config_loaded`` is the *published* answer, and it is set only
+    after the search has finished. Setting it first -- to guard against
+    re-entrancy -- is a race, and a measured one: a second thread takes the
+    unlocked fast path at the top, sees the flag already true, and returns the
+    singleton as it stood *before* the file was applied. Half the threads then
+    hold a configuration with no ``cluster_host``.
+
+    ``_default_config_loading`` is the re-entrancy guard instead. It is only
+    ever read with the lock held, and the lock is held for the whole search,
+    so the only thread that can observe it true is the one that set it.
+
+    Neither flag sticks on failure: an unusable configuration file keeps
+    failing rather than failing once and then quietly reporting built-in
+    defaults ever after.
+    """
+    global _default_config_loaded, _default_config_loading
+    if _default_config_loaded:
+        return
+    with _DEFAULT_CONFIG_LOCK:
+        if _default_config_loaded or _default_config_loading:
+            return
+        _default_config_loading = True
+        try:
+            _load_default_config()
+        finally:
+            _default_config_loading = False
+        _default_config_loaded = True

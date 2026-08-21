@@ -1,5 +1,6 @@
 """Modern notebook widget with profile management and horizontal layout."""
 
+import logging
 import os
 import re
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
@@ -34,6 +35,8 @@ from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
 from .auth_manager import AuthenticationManager
 from .validation import validate_cluster_auth, validate_ssh_key_auth
+
+logger = logging.getLogger(__name__)
 
 #: Profile holding whatever clustrix was already configured to do when the
 #: widget opened, so the live state is visible instead of contradicted.
@@ -1589,7 +1592,27 @@ class ModernClustrixWidget:
                     data = json.load(handle)
                 else:
                     data = yaml.safe_load(handle)
-        except Exception:  # noqa: BLE001 - unreadable or malformed: not offerable
+        except (OSError, UnicodeDecodeError) as exc:
+            # Not the same answer as the one below, and the difference is the
+            # whole point. This file was never read, so "it is not a profile
+            # bundle" is a guess: it may be exactly the profile store the user
+            # is looking for, sitting behind a permission bit or a dead
+            # automount. It still cannot be offered -- loading it would fail
+            # too -- but the reason has to be audible, because the symptom is
+            # a Load menu that is silently missing the entry the user wants.
+            logger.warning(
+                "Could not read %s, so it is not being offered in the profile "
+                "list (%s). This is a failure to read the file, not evidence "
+                "that it holds no profiles.",
+                path,
+                exc,
+            )
+            return False
+        except (yaml.YAMLError, json.JSONDecodeError) as exc:
+            # Read in full and it is not parseable, so it is genuinely not a
+            # profile bundle. A real answer, and a quiet one: a working tree
+            # is full of YAML that has nothing to do with clustrix.
+            logger.debug("Not offering %s as a profile file: %s", path, exc)
             return False
         return isinstance(data, dict) and isinstance(data.get("profiles"), dict)
 

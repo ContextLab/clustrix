@@ -257,13 +257,32 @@ class ClusterExecutor:
                 # client got bored is not this function's decision. The
                 # remote directory is named so the result can be collected
                 # by hand.
+                #
+                # "unknown" has to read differently from every other status
+                # here, or moving the unmeasurable case off "running" bought
+                # nothing: the loop still polls to the deadline either way,
+                # so the only place the distinction can reach the user is
+                # this message. "Timed out with last status 'running'" says
+                # the job was slow. It was not; clustrix could not see it,
+                # and the two call for completely different next steps.
+                if status == "unknown":
+                    diagnosis = (
+                        " That is not a synonym for 'still running': the last "
+                        "poll could not measure the job at all, so this "
+                        "timeout does not mean the job was slow -- it means "
+                        "clustrix lost sight of it, and the job may well have "
+                        "finished or failed already. Check the scheduler and "
+                        "the job directory directly."
+                    )
+                else:
+                    diagnosis = ""
                 raise TimeoutError(
                     f"Job {job_id} did not finish within "
                     f"{timeout}s (config.job_wait_timeout). Its last known "
-                    f"status was {status!r}. The job has NOT been cancelled; "
-                    f"its files are at {remote_dir} on the cluster. Raise "
-                    f"job_wait_timeout, or set it to None to wait "
-                    f"indefinitely."
+                    f"status was {status!r}.{diagnosis} The job has NOT been "
+                    f"cancelled; its files are at {remote_dir} on the "
+                    f"cluster. Raise job_wait_timeout, or set it to None to "
+                    f"wait indefinitely."
                 )
 
             # Wait before next poll

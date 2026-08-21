@@ -1,3 +1,4 @@
+import inspect
 import pytest
 import pickle
 from unittest.mock import patch, Mock, MagicMock
@@ -503,18 +504,40 @@ class TestSerializationEdgeCases:
     """Test edge cases in serialization functionality."""
 
     def test_serialize_function_source_exception(self):
-        """Test serialize_function when inspect.getsource fails."""
+        """A function with no retrievable source still serializes, and runs.
 
-        def test_func(x):
-            return x * 2
+        Rewritten, not relaxed. This test used to
+        ``patch("inspect.getsource", side_effect=Exception(...))`` and assert
+        that ``serialize_function`` swallowed it. Two things were wrong with
+        that. ``inspect.getsource`` does not raise a bare ``Exception`` -- it
+        raises ``OSError`` or ``TypeError`` -- so the test was asserting that
+        clustrix swallows *anything at all* from that call, which is the
+        defect (issue #123), not the contract. And it never exercised the real
+        case, so it could not have caught a regression in it.
 
-        with patch("inspect.getsource", side_effect=Exception("Source not available")):
-            serialized = serialize_function(test_func, (5,), {})
-            # Should still work, just without source
-            assert "function" in serialized
-            assert "args" in serialized
-            assert "kwargs" in serialized
-            assert serialized["func_info"]["source"] is None
+        The real case needs no patching: a function built by ``exec()`` has no
+        source file, ``inspect.getsource`` raises ``OSError`` for it, and dill
+        reconstructs it from the code object regardless.
+        """
+        namespace: dict = {}
+        exec("def made_at_runtime(x):\n    return x * 2\n", namespace)
+        test_func = namespace["made_at_runtime"]
+
+        with pytest.raises(OSError):
+            inspect.getsource(test_func)
+
+        serialized = serialize_function(test_func, (5,), {})
+
+        assert "function" in serialized
+        assert "args" in serialized
+        assert "kwargs" in serialized
+        assert serialized["func_info"]["source"] is None
+        assert serialized["function_source"] is None
+
+        # The payload is still complete: it round-trips and returns the right
+        # answer, which is the only reason missing source is tolerable here.
+        restored, args, kwargs = deserialize_function(serialized)
+        assert restored(*args, **kwargs) == 10
 
     def test_deserialize_function_bytes_format(self):
         """Test deserialize_function with bytes format."""
