@@ -266,6 +266,63 @@ def test_a_found_but_unusable_file_raises_instead_of_reverting_to_defaults(
     assert "NOT in effect" in message
 
 
+def test_a_widget_profile_bundle_is_declined_named_and_skipped(unloaded_config, caplog):
+    """The widget's Save writes a *bundle* -- one mapping of profile name to
+    settings -- into the same locations this search reads flat configurations
+    from. Adopting one profile out of several would pick for the user, and
+    raising would brick the first ``get_config()`` for anyone who ever pressed
+    Save. The decided behaviour (#159, merge decision (a)) is to decline the
+    bundle, say so, and keep searching."""
+    (unloaded_config / "config.yml").write_text(
+        "Ndoli Cluster:\n"
+        "  cluster_type: slurm\n"
+        "  cluster_host: ndoli.example.edu\n"
+        "GPU Box:\n"
+        "  cluster_type: ssh\n"
+        "  cluster_host: gpu.example.edu\n"
+    )
+    (unloaded_config / "clustrix.yml").write_text("cluster_type: local\n")
+
+    with caplog.at_level("WARNING", logger="clustrix.config"):
+        config = get_config()
+
+    assert config.cluster_type == "local", "the later flat candidate should win"
+    bundle_warnings = [
+        record.getMessage()
+        for record in caplog.records
+        if "named profile" in record.getMessage()
+    ]
+    assert len(bundle_warnings) == 1, [r.getMessage() for r in caplog.records]
+    message = bundle_warnings[0]
+    assert "config.yml" in message
+    assert "2" in message
+    assert "Ndoli Cluster" in message
+    assert "NOT in effect" in message
+
+
+def test_a_flat_config_of_pure_typos_still_raises(unloaded_config):
+    """The bundle detector must not become a new swallow: a flat file whose
+    keys are all unknown and whose values are not profile mappings is a typo'd
+    configuration, and it raises rather than being waved past."""
+    (unloaded_config / "config.yml").write_text("cluster_hots: x\nusernmae: y\n")
+
+    with pytest.raises(ConfigFileError):
+        get_config()
+
+
+def test_a_dict_valued_field_is_not_mistaken_for_a_bundle(unloaded_config):
+    """``environment_variables`` is a legitimate field whose value is a
+    mapping; a flat configuration containing it must still be adopted."""
+    (unloaded_config / "config.yml").write_text(
+        'cluster_type: local\nenvironment_variables:\n  MY_FLAG: "1"\n'
+    )
+
+    config = get_config()
+
+    assert config.cluster_type == "local"
+    assert config.environment_variables == {"MY_FLAG": "1"}
+
+
 def test_an_unusable_file_keeps_failing_rather_than_failing_once(unloaded_config):
     """The flag must not stick on failure.
 

@@ -1299,6 +1299,13 @@ JUSTIFIED_SWALLOWS = {
         "match. Three further credential sources follow, and if none supplies "
         "a password the caller raises rather than proceeding."
     ),
+    ("config.py", "_read_config_bundle"): (
+        "A parse failure here is not discarded: returning None hands the file "
+        "to load_config, which re-reads it and raises ConfigFileError naming "
+        "the file and the underlying reason. The catch-all exists so the "
+        "reason is reported once, with the path attached, rather than once "
+        "from a detector and again from the loader."
+    ),
 }
 
 #: ``(module, qualified enclosing name)`` -> the issue tracking it.

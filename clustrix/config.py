@@ -891,6 +891,44 @@ def _default_config_candidates() -> List[Path]:
     return candidates
 
 
+def _read_config_bundle(path: Path) -> Optional[Tuple[int, List[str]]]:
+    """The profile count and names if ``path`` is a widget profile bundle.
+
+    The notebook widget's Save writes a *bundle* -- one mapping of profile
+    name to a settings dict -- into the same standard locations this search
+    reads flat configurations from. With the strict loading above, such a
+    file raises ``ConfigFileError`` on its profile names, which meant pressing
+    Save bricked the next ``import clustrix``'s first ``get_config()``. That
+    is not an acceptable answer to a file this project itself wrote, so the
+    bundle shape is detected deliberately and declined instead (#159, merge
+    decision (a)).
+
+    The shape test is strict in both directions. A file holding even one
+    ``ClusterConfig`` field name is a flat configuration -- possibly with a
+    typo'd key beside it, and raising that error is ``load_config``'s job,
+    not this function's. And every value must be a mapping, so a flat file
+    whose keys are *all* wrong (``cluster_hots: x``) is not waved past as a
+    bundle either; it raises as the typo it is. A file that does not parse
+    here is left for ``load_config`` to report properly.
+    """
+    try:
+        with open(path) as handle:
+            if path.suffix.lower() in (".yml", ".yaml"):
+                parsed = yaml.safe_load(handle)
+            else:
+                parsed = json.load(handle)
+    except Exception:
+        return None
+    if not isinstance(parsed, dict) or not parsed:
+        return None
+    field_names = {field.name for field in fields(ClusterConfig)}
+    if any(key in field_names for key in parsed):
+        return None
+    if not all(isinstance(value, dict) for value in parsed.values()):
+        return None
+    return len(parsed), sorted(str(key) for key in parsed)
+
+
 def _load_default_config() -> None:
     """Adopt the first configuration file found in the standard locations.
 
@@ -924,6 +962,20 @@ def _load_default_config() -> None:
             )
             continue
         if not found:
+            continue
+        bundle = _read_config_bundle(path)
+        if bundle is not None:
+            count, names = bundle
+            logger.warning(
+                "The clustrix configuration file %s holds %d named profile(s) "
+                "(%s), not a flat configuration, so none of them was adopted; "
+                "its settings are NOT in effect. Load one with %%clustrix "
+                "config <name> in a notebook, or ProfileManager().get_profile"
+                "(<name>) followed by clustrix.configure(...).",
+                path,
+                count,
+                ", ".join(names),
+            )
             continue
         try:
             load_config(str(path))
