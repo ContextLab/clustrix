@@ -1161,7 +1161,7 @@ def test_a_config_scan_that_failed_is_not_an_empty_config_directory(
 #
 #   * everything BELOW is a lint. It is fast, it runs over the whole package
 #     including handlers no test can reach, and it is worth having for
-#     exactly that. It is *not* evidence that a handler reports, and the 28
+#     exactly that. It is *not* evidence that a handler reports, and the 29
 #     entries in KNOWN_BLIND_SPOTS are the executable statement of how much
 #     it misses -- each asserted to be missed, so the list cannot quietly
 #     become optimistic.
@@ -1222,7 +1222,44 @@ EXCEPTION_KEYWORDS = frozenset({"exc_info", "stack_info"})
 SILENCING_HOOKS = frozenset({"excepthook", "unraisablehook"})
 
 #: Values that put a replaced hook back, so assigning them is not silencing.
+#:
+#: The exemption is *receiver-qualified* and the matches above are not, which
+#: is not an inconsistency but the same rule applied in both directions:
+#: matching ``excepthook`` on the name alone errs toward reporting, and
+#: exempting ``__excepthook__`` on the name alone errs away from it.
+#: ``sys.excepthook = sys.__excepthook__`` really does put the interpreter's
+#: own hook back. ``sys.excepthook = _mine.__excepthook__`` names an attribute
+#: of something else entirely that happens to be spelled the same way, and
+#: until 2026-08-20 that was a free pass out of the check.
 HOOK_RESTORERS = frozenset({"__excepthook__", "__unraisablehook__"})
+
+#: Attributes whose assignment switches the ``logging`` module off wholesale.
+#:
+#: ``logging.getLogger().disabled = True`` and ``logging.root.disabled = True``
+#: silence the root logger; ``logging.Logger.manager.disable = 50`` sets the
+#: same global threshold ``logging.disable(50)`` sets. These were recorded as
+#: unreachable on the grounds that ``clustrix/modern_notebook_widget.py``
+#: assigns ``button.disabled`` six times, so matching ``disabled`` would flag
+#: all six. That is an argument against a *name-only* set, and nobody needs
+#: one: the check below also requires the object being assigned on to be
+#: rooted at the ``logging`` module, which ``button`` is not. The six sites
+#: stay unflagged, and ``test_the_lint_finds_no_unrecorded_silent_swallow``
+#: scans the real file rather than taking that on trust.
+LOGGING_SILENCERS = frozenset({"disabled", "disable"})
+
+#: Statement nodes that bind a name, and so can bind one of the attributes
+#: above. ``ast.NamedExpr`` is absent because a walrus target is a plain name
+#: by grammar -- ``(sys.excepthook := _quiet)`` is a ``SyntaxError``, which
+#: ``test_a_walrus_cannot_bind_an_attribute`` pins rather than assumes.
+BINDING_NODES = (
+    ast.Assign,
+    ast.AnnAssign,
+    ast.AugAssign,
+    ast.For,
+    ast.AsyncFor,
+    ast.comprehension,
+    ast.withitem,
+)
 
 #: ``(module, function)`` calls that turn reporting off for the whole process.
 #:
@@ -1370,20 +1407,42 @@ TRACKED_DEFECTS = {
 #:    returned nothing at all for it. It is caught now, along with
 #:    ``threading.excepthook``, ``sys.unraisablehook``, ``logging.disable``
 #:    and the two ``warnings`` filters, under aliases and from-imports (see
-#:    ``SILENCING_HOOKS`` and ``GLOBAL_SILENCERS``). What is caught is the
-#:    *name*, and three spellings are recorded below that never write it.
+#:    ``SILENCING_HOOKS`` and ``GLOBAL_SILENCERS``), and through every
+#:    statement form that binds a name rather than only through ``a.b = c``:
+#:    a tuple or list target, a star, a ``for`` target, a ``with ... as``
+#:    (see ``BINDING_NODES``). One comma used to be enough --
+#:    ``sys.excepthook, sys.unraisablehook = _quiet, _quiet`` -- because the
+#:    check demanded an ``ast.Attribute`` and got an ``ast.Tuple``.
+#:    ``logging.getLogger().disabled = True``, ``logging.root.disabled`` and
+#:    ``logging.Logger.manager.disable`` are caught too (see
+#:    ``LOGGING_SILENCERS``): what is required there is not the attribute
+#:    name alone but the object it sits on being rooted at the ``logging``
+#:    module, so the six ``button.disabled`` assignments in
+#:    ``clustrix/modern_notebook_widget.py`` are untouched. That direction
+#:    matters both ways round. Matching a *silencer* on its bare name errs
+#:    toward reporting, which is family K's trade and is allowed; exempting
+#:    one on its bare name errs the other way, so the exemptions are
+#:    receiver-qualified -- ``sys.excepthook = _mine.__excepthook__`` and
+#:    ``logging.disable(Foo.NOTSET)`` name attributes of unrelated objects
+#:    and used to buy a free pass out of the check.
+#:    Four spellings are recorded below that no name here reaches.
 #:    ``setattr(sys, "excepthook", _quiet)`` hands the name over as a string,
 #:    so there is no attribute to match -- family A's whole-program problem
-#:    once more. ``logging.getLogger().disabled = True`` switches the root
-#:    logger off, and ``disabled`` cannot be added to ``SILENCING_HOOKS``:
-#:    ``clustrix/modern_notebook_widget.py`` assigns ``button.disabled`` six
-#:    times, and matching that name alone would flag every one of them --
-#:    family K's trade, made in the direction a lint may not err in. And
-#:    ``warnings.filters.insert(...)`` mutates the filter list without calling
-#:    any of the functions named above. Recorded rather than chased, on the
-#:    same grounds as J: teaching the check these three closes exactly these
-#:    three.
-KNOWN_BLIND_SPOTS = 28
+#:    once more. ``warnings.filters.insert(...)`` mutates the filter list
+#:    without calling any of the functions named above.
+#:    ``asyncio.get_event_loop().set_exception_handler(lambda l, c: None)``
+#:    discards every unhandled failure on that loop through a method call on
+#:    an object the lint would have to identify first, which is family A
+#:    again -- and unlike ``LOGGING_SILENCERS`` there is no module-rooted
+#:    receiver to qualify it by, since the loop is ordinarily held in a
+#:    local. ``sys.stderr = open(os.devnull, "w")`` silences by where the
+#:    report goes rather than by turning reporting off; whether that is a
+#:    swallow depends on the destination, and a capture that is read back and
+#:    re-reported is the ordinary reason to assign it, so matching the name
+#:    would err in the direction a lint may not. Recorded rather than chased,
+#:    on the same grounds as J: teaching the check these four closes exactly
+#:    these four.
+KNOWN_BLIND_SPOTS = 29
 
 
 class Swallow(NamedTuple):
@@ -1712,22 +1771,57 @@ def _silencer_aliases(tree):
     return receivers, bare
 
 
-def _turns_reporting_back_on(target, call):
+def _rooted_at(expression, names):
+    """Whether ``expression`` is built out of one of ``names``.
+
+    ``logging.root``, ``logging.getLogger()`` and ``logging.Logger.manager``
+    are all rooted at ``logging``; ``button`` is rooted at ``button``. Walking
+    an attribute, call or subscript chain down to the name it starts from is
+    what makes a check *receiver-qualified* rather than name-only, and it is
+    the whole difference between flagging ``logging.getLogger().disabled``
+    and flagging the six ``button.disabled`` assignments in the widget.
+    """
+    while True:
+        if isinstance(expression, ast.Name):
+            return expression.id in names
+        if isinstance(expression, ast.Attribute):
+            expression = expression.value
+        elif isinstance(expression, ast.Call):
+            expression = expression.func
+        elif isinstance(expression, ast.Subscript):
+            expression = expression.value
+        else:
+            return False
+
+
+def _is_logging_notset(argument, logging_names):
+    """``logging.NOTSET`` or a literal zero -- and nothing that looks like it.
+
+    ``logging.disable(Foo.NOTSET)`` is not a re-enable: ``Foo`` is some other
+    object whose attribute happens to share the name, and reading the
+    attribute alone exempted it from the check. The receiver has to be the
+    ``logging`` module, under whatever name it was imported as.
+    """
+    if isinstance(argument, ast.Attribute):
+        return argument.attr == "NOTSET" and _rooted_at(argument.value, logging_names)
+    return isinstance(argument, ast.Constant) and argument.value == 0
+
+
+def _turns_reporting_back_on(target, call, logging_names):
     """The re-enabling spellings, which must not be flagged.
 
     ``logging.disable(logging.NOTSET)`` is how a process undoes a previous
     ``logging.disable``, and ``warnings.simplefilter("error")`` is the
     opposite of silencing. Flagging those would be wrong rather than merely
     noisy. An argument this cannot read is *not* treated as a re-enable: the
-    only direction a lint may err in is toward reporting.
+    only direction a lint may err in is toward reporting, and an exemption
+    runs the other way -- which is why the ``NOTSET`` half is qualified by
+    its receiver.
     """
     argument = call.args[0] if call.args else None
     if target == ("logging", "disable"):
-        if isinstance(argument, ast.Attribute):
-            return argument.attr == "NOTSET"
-        if isinstance(argument, ast.Constant):
-            return argument.value == 0
-        return False  # no argument at all defaults to CRITICAL
+        # No argument at all defaults to CRITICAL, so it silences.
+        return _is_logging_notset(argument, logging_names)
     if isinstance(argument, ast.Constant):
         return argument.value != "ignore"
     return False
@@ -1755,19 +1849,127 @@ def _silences_the_process(call, receivers, bare):
         target = None
     if target is None:
         return False
-    return not _turns_reporting_back_on(target, call)
+    return not _turns_reporting_back_on(target, call, receivers["logging"])
 
 
-def _assigns_a_silencing_hook(node):
-    """``sys.excepthook = _quiet`` and every object that spelling reaches."""
+def _flatten_target(target):
+    """The individual bindings inside an assignment target.
+
+    A tuple, a list and a star are containers; the binding is what is inside
+    them. Recursive, because ``(a, (b, c)) = ...`` nests.
+    """
+    if isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _flatten_target(element)
+    elif isinstance(target, ast.Starred):
+        yield from _flatten_target(target.value)
+    elif target is not None:
+        yield target
+
+
+def _bound_targets(node):
+    """Every name or attribute ``node`` binds, however the binding is spelled.
+
+    ``sys.excepthook = _quiet`` was the only shape the previous check
+    modelled -- it required ``isinstance(target, ast.Attribute)`` -- so one
+    comma put the same assignment out of its reach: ``sys.excepthook,
+    sys.unraisablehook = _quiet, _quiet`` hands it an ``ast.Tuple`` and it
+    walked straight past. So did ``[sys.excepthook] = [_quiet]``, ``for
+    sys.excepthook in hooks:`` and ``with _opened() as sys.excepthook:``,
+    all of which are ordinary Python and all of which bind the attribute.
+    Enumerating those four spellings is what the rest of this module is a
+    monument to not doing, so targets are *flattened* out of their containers
+    and every statement form that has one is walked.
+    """
+    if isinstance(node, ast.Assign):
+        raw = node.targets
+    elif isinstance(node, ast.withitem):
+        raw = [node.optional_vars]
+    else:
+        raw = [node.target]
+    return [bound for target in raw for bound in _flatten_target(target)]
+
+
+def _bound_value(node, target):
+    """The value ``target`` receives, when it can be read at all.
+
+    A single-target assignment gives it directly, and ``a, b = x, y`` gives
+    it positionally when both sides are the same length. Everything else --
+    unpacking whatever a call returned, a ``for`` target, a ``with ... as`` --
+    has no readable value, and ``None`` means the exemptions below do not
+    apply. That is the direction a lint may err in.
+    """
+    if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+        return None
     targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-    if not any(
-        isinstance(target, ast.Attribute) and target.attr in SILENCING_HOOKS
-        for target in targets
-    ):
-        return False
-    value = node.value
-    return not (isinstance(value, ast.Attribute) and value.attr in HOOK_RESTORERS)
+    for candidate in targets:
+        if candidate is target:
+            return node.value
+        if (
+            isinstance(candidate, (ast.Tuple, ast.List))
+            and isinstance(node.value, (ast.Tuple, ast.List))
+            and len(candidate.elts) == len(node.value.elts)
+        ):
+            for element, paired in zip(candidate.elts, node.value.elts):
+                if element is target:
+                    return paired
+    return None
+
+
+def _puts_the_hook_back(target, value):
+    """``sys.excepthook = sys.__excepthook__``, and only that.
+
+    Receiver-qualified: the restorer has to be named on the same object the
+    hook is being assigned on. ``sys.excepthook = _mine.__excepthook__`` is
+    an attribute of something else that happens to share the name, and
+    granting it the exemption on the strength of that name was a way out of
+    the check rather than a way into it.
+    """
+    return (
+        isinstance(value, ast.Attribute)
+        and value.attr in HOOK_RESTORERS
+        and ast.dump(target.value) == ast.dump(value.value)
+    )
+
+
+def _turns_logging_back_on(value, logging_names):
+    """``disabled = False`` and ``disable = 0`` / ``logging.NOTSET``.
+
+    The same trade :func:`_turns_reporting_back_on` makes: switching
+    reporting on is not silencing, and a value this cannot read is not
+    treated as switching it on.
+    """
+    if isinstance(value, ast.Constant):
+        return not value.value
+    return _is_logging_notset(value, logging_names)
+
+
+def _silences_uncaught_exceptions(node, logging_names):
+    """Every binding in ``node`` that replaces a report with nothing.
+
+    Yields ``(target, shape)``: the target rather than the statement, because
+    ``ast.withitem`` and ``ast.comprehension`` carry no line number of their
+    own and the binding does.
+    """
+    for target in _bound_targets(node):
+        if not isinstance(target, ast.Attribute):
+            continue
+        value = _bound_value(node, target)
+        if target.attr in SILENCING_HOOKS:
+            if not _puts_the_hook_back(target, value):
+                yield target, (
+                    "an assignment to a process-wide exception hook, which "
+                    "discards every failure nobody caught"
+                )
+        elif (
+            target.attr in LOGGING_SILENCERS
+            and _rooted_at(target.value, logging_names)
+            and not _turns_logging_back_on(value, logging_names)
+        ):
+            yield target, (
+                "an assignment that switches the logging module off for the "
+                "whole process"
+            )
 
 
 def find_silent_swallows(source, module):
@@ -1834,18 +2036,18 @@ def find_silent_swallows(source, module):
                     "a call that turns reporting off for the whole process",
                 )
             )
-        elif isinstance(
-            node, (ast.Assign, ast.AnnAssign)
-        ) and _assigns_a_silencing_hook(node):
-            found.append(
-                Swallow(
-                    module,
-                    _enclosing_qualname(qualnames, node),
-                    node.lineno,
-                    "an assignment to a process-wide exception hook, which "
-                    "discards every failure nobody caught",
+        elif isinstance(node, BINDING_NODES):
+            for target, shape in _silences_uncaught_exceptions(
+                node, receivers["logging"]
+            ):
+                found.append(
+                    Swallow(
+                        module,
+                        _enclosing_qualname(qualnames, target),
+                        target.lineno,
+                        shape,
+                    )
                 )
-            )
 
     return found
 
@@ -2341,6 +2543,83 @@ BYPASSES = {
 
         warnings.simplefilter(ACTION)
     """,
+    # ---- found by red-teaming the *binding*, 2026-08-20 -------------------
+    # The hook check demanded `isinstance(target, ast.Attribute)`, so every
+    # spelling that wraps the target in a container or puts it somewhere
+    # other than an `=` was invisible. One comma was enough. These are one
+    # AST walk each, not whole-program analysis, which is why they are caught
+    # rather than recorded.
+    "two hooks silenced by one tuple assignment": """
+        import sys as _s
+
+        def _quiet(*args):
+            pass
+
+        _s.excepthook, _s.unraisablehook = _quiet, _quiet
+    """,
+    "a hook silenced through a list target": """
+        import sys
+
+        [sys.excepthook] = [lambda *args: None]
+    """,
+    "a hook silenced through a starred target": """
+        import sys
+
+        sys.excepthook, *rest = hooks
+    """,
+    "a hook rebound by a for loop": """
+        import sys
+
+        for sys.excepthook in hooks:
+            pass
+    """,
+    "a hook rebound by a with statement": """
+        import sys
+
+        with _opened() as sys.excepthook:
+            pass
+    """,
+    "a hook rebound inside a comprehension": """
+        import sys
+
+        _ = [None for sys.excepthook in hooks]
+    """,
+    "a hook silenced by an annotated assignment": """
+        import sys
+
+        sys.excepthook: object = lambda *args: None
+    """,
+    # The exemptions, red-teamed the same way: each was granted on an
+    # attribute name with no check of the object it was named on.
+    "a restorer belonging to some other object entirely": """
+        import sys
+
+        sys.excepthook = _mine.__excepthook__
+    """,
+    "logging.disable exempted by an unrelated NOTSET": """
+        import logging
+
+        logging.disable(Foo.NOTSET)
+    """,
+    # Receiver-qualified `disabled`, which used to be recorded as
+    # unreachable because a name-only match would have flagged
+    # `button.disabled`. Rooting the check at the logging module catches
+    # these three and none of those six.
+    "the root logger switched off through getLogger": """
+        import logging
+
+        logging.getLogger().disabled = True
+    """,
+    "the root logger switched off through logging.root": """
+        import logging
+
+        logging.root.disabled = True
+    """,
+    "the global logging threshold set through the manager": """
+        import logging
+
+        logging.Logger.manager.disable = 50
+    """,
 }
 
 if hasattr(ast, "TryStar"):  # PEP 654; the syntax does not parse before 3.11
@@ -2513,6 +2792,32 @@ ACCEPTED = {
         import mymodule
 
         mymodule.disable(everything)
+    """,
+    # `disabled` is matched only on an object rooted at the logging module,
+    # so the widget's six button assignments stay quiet. This is the case
+    # that was used to argue the whole check could not exist.
+    "a widget button being greyed out": """
+        def _lock(button):
+            button.disabled = True
+    """,
+    "a widget button being switched back on": """
+        def _unlock(button):
+            button.disabled = False
+    """,
+    "the root logger switched back on": """
+        import logging
+
+        logging.getLogger().disabled = False
+    """,
+    "the global logging threshold cleared": """
+        import logging
+
+        logging.Logger.manager.disable = logging.NOTSET
+    """,
+    "putting the interpreter's own hook back under an alias": """
+        import sys as _s
+
+        _s.excepthook = _s.__excepthook__
     """,
 }
 
@@ -2833,20 +3138,29 @@ BLIND_SPOTS = {
         setattr(sys, "excepthook", lambda *args: None)
     """,
     ),
-    "the root logger switched off wholesale": (
-        "L",
-        """
-        import logging
-
-        logging.getLogger().disabled = True
-    """,
-    ),
     "the warnings filter list mutated in place": (
         "L",
         """
         import warnings
 
         warnings.filters.insert(0, ("ignore", None, Warning, "", 0))
+    """,
+    ),
+    "an asyncio loop told to drop every unhandled failure": (
+        "L",
+        """
+        import asyncio
+
+        asyncio.get_event_loop().set_exception_handler(lambda loop, ctx: None)
+    """,
+    ),
+    "the standard error stream pointed at the void": (
+        "L",
+        """
+        import os
+        import sys
+
+        sys.stderr = open(os.devnull, "w")
     """,
     ),
 }
@@ -2894,24 +3208,60 @@ def _module_source():
     return pathlib.Path(__file__).read_text(encoding="utf-8")
 
 
-def _flattened_source():
-    """The same text with newlines and comment markers blanked out.
+#: What a comment marker is. One definition, consulted by both readers of
+#: this module's prose.
+#:
+#: Three rounds of review each found a fabricated count hiding somewhere, and
+#: each fix closed exactly the spelling it was written for. The cause was
+#: structural rather than a missing case: :func:`_flattened_source` blanked
+#: ``#:`` and ``#``, while :func:`_family_paragraphs` stripped only ``^#:``
+#: at the start of a line, so any marker one reader normalised and the other
+#: did not was a place to hide. A count written as
+#:
+#:     #:    A further <N>
+#:     # spellings are recorded below for the resolver family.
+#:
+#: (The number is elided as ``<N>`` for the same reason
+#: ``test_no_spelling_count_is_stated_outside_a_family_paragraph`` elides it:
+#: writing that sentence with a real number anywhere but inside a family's
+#: own paragraph is what this file forbids.)
+#:
+#: was visible to the flat reader -- which is why no *stray* was reported,
+#: the sentence sitting inside family A's span -- and invisible to family A's
+#: own paragraph, which still saw one count and agreed with the entries. The
+#: hole is not "the bare ``#``"; the hole is two readers disagreeing, and any
+#: marker they disagree about reopens it.
+#:
+#: So there is one definition and both readers call it. Blanking is
+#: length-preserving, because :func:`_flattened_source` reports strays by
+#: line number and an offset into the flattened text has to be an offset into
+#: the file. ``#:`` is blanked as a unit and not one character at a time:
+#: leaving the colon behind splits the sentence just as effectively as the
+#: newline did, and an earlier draft did exactly that -- it found 8 of the 12
+#: counts, and the four it missed were the wrapped ones it exists for. That
+#: regression is pinned directly by
+#: ``test_a_comment_marker_is_blanked_as_a_unit``, so the normaliser cannot
+#: quietly go back to matching characters.
+_COMMENT_MARKER = re.compile(r"#:?|\n")
 
-    Character for character the same length as the source, so an offset into
-    this is an offset into the file and a match can be reported by line
-    number. Flattening is what makes a count sentence findable *wherever* it
-    is written: the prose wraps across ``#:`` lines and docstrings wrap across
-    plain ones, so "Six spellings are recorded" followed by "below" on the
-    next line is one sentence, and a scan that reads a line at a time cannot
-    see it. That is not a hypothetical -- four of the twelve families state
-    their count across a line break.
 
-    ``#:`` is blanked as a unit, not one character at a time: leaving the
-    colon behind splits the sentence just as effectively as the newline did,
-    and an earlier draft of this function did exactly that -- it found 8 of
-    the 12 counts, and the four it missed were the wrapped ones it exists for.
+def _blank_comment_markers(text):
+    """``text`` with every comment marker and newline replaced by spaces.
+
+    Character for character the same length as its input. Flattening is what
+    makes a count sentence findable *wherever* it is written: the prose wraps
+    across ``#:`` lines and docstrings wrap across plain ones, so "Six
+    spellings are recorded" followed by "below" on the next line is one
+    sentence, and a scan that reads a line at a time cannot see it. That is
+    not a hypothetical -- families here really do state their count across a
+    line break.
     """
-    return re.sub(r"#:|[#\n]", lambda hit: " " * len(hit.group(0)), _module_source())
+    return _COMMENT_MARKER.sub(lambda hit: " " * len(hit.group(0)), text)
+
+
+def _flattened_source():
+    """This module's text with the comment markers taken out of the way."""
+    return _blank_comment_markers(_module_source())
 
 
 def _prose_count(pattern):
@@ -2965,12 +3315,16 @@ def _family_paragraphs():
     source = _module_source()
     paragraphs = {}
     for family, (start, stop) in _family_paragraph_spans().items():
-        text = source[start:stop]
-        # The comment prefixes and the line wrapping are formatting, not
+        # The comment markers and the line wrapping are formatting, not
         # content: "Six spellings are recorded" then "#:    below" on the next
-        # line is one sentence.
-        unwrapped = re.sub(r"^#:\s*", " ", text, flags=re.MULTILINE)
-        paragraphs[family] = " ".join(unwrapped.split())
+        # line is one sentence. Normalised by the *same* function the flat
+        # reader uses, so the only remaining difference between the two is
+        # runs of whitespace -- which ``_SPELLING_COUNT`` matches with
+        # ``\s+`` and therefore cannot tell apart. This function used to
+        # strip ``^#:\s*`` and nothing else, which disagreed with the flat
+        # reader about every other spelling of a marker.
+        blanked = _blank_comment_markers(source[start:stop])
+        paragraphs[family] = " ".join(blanked.split())
     return paragraphs
 
 
@@ -3060,7 +3414,10 @@ def test_no_spelling_count_is_stated_outside_a_family_paragraph():
 
     strays = []
     for match in _SPELLING_COUNT.finditer(flat):
-        if any(start <= match.start() < stop for start, stop in spans):
+        # Wholly inside, not merely starting inside: a sentence that runs off
+        # the end of a paragraph is not in the text that paragraph's own test
+        # reads.
+        if any(start <= match.start() and match.end() <= stop for start, stop in spans):
             continue
         line = source.count("\n", 0, match.start()) + 1
         strays.append(f"line {line}: {' '.join(match.group(0).split())}")
@@ -3069,6 +3426,107 @@ def test_no_spelling_count_is_stated_outside_a_family_paragraph():
         "these state a spelling count outside every family paragraph, where "
         "no test compares it with the entries in BLIND_SPOTS:\n  " + "\n  ".join(strays)
     )
+
+
+def test_a_comment_marker_is_blanked_as_a_unit():
+    """The normaliser itself, pinned rather than inferred from its callers.
+
+    :func:`_blank_comment_markers` had exactly one caller and no test of its
+    own, so reverting it to the character-wise ``[#\n]`` blanking -- the
+    precise bug the commit that introduced it is named for -- passed the
+    whole module. It leaves the colon of a ``#:`` behind, and a colon splits
+    a wrapped sentence just as effectively as the newline it replaced: the
+    reader then finds 8 of the 12 counts and misses the four wrapped ones it
+    exists for. Asserting the exact output is what makes that revert loud.
+    """
+    # Both literals are split immediately before the noun on purpose: this
+    # file forbids itself from stating a count outside a family paragraph,
+    # and an unsplit literal here would be exactly that. The runtime values
+    # are the sentence; the file text never is.
+    sample = "#: Six\n#:    " "spellings are recorded below.\n# and a bare marker\n"
+
+    blanked = _blank_comment_markers(sample)
+
+    assert len(blanked) == len(sample), "blanking moved the offsets"
+    assert blanked == (
+        "   Six       " "spellings are recorded below.   and a bare marker "
+    )
+    # Character-wise blanking leaves " : Six  :    spellings", where the
+    # stranded colon stops this pattern matching at all.
+    assert _SPELLING_COUNT.findall(" ".join(blanked.split())) == ["Six"]
+
+
+def test_the_two_readers_of_this_module_see_the_same_counts():
+    r"""The structural fix, asserted as the property rather than as a spelling.
+
+    Three rounds each closed one hiding place and left the mechanism that
+    creates them: two readers with two ideas of what a comment marker is.
+    :func:`_flattened_source` blanked ``#:`` and ``#``;
+    :func:`_family_paragraphs` stripped only ``^#:`` at the start of a line.
+    So a marker written between the number and the noun --
+
+        #:    A further <N>
+        # spellings are recorded below for the resolver family.
+
+    -- was one sentence to the flat reader, which therefore reported no stray
+    because it sits inside family A's span, and was not a sentence at all to
+    family A's own paragraph, which went on seeing a single true count.
+
+    Both readers now normalise through :func:`_blank_comment_markers`, so
+    what remains between them is runs of whitespace, which ``_SPELLING_COUNT``
+    matches with ``\s+`` and cannot tell apart. This test states that as the
+    invariant: every count either reader can see, the other can see too. It
+    does not care which marker was used, so the next spelling of one is not
+    a new hole to find.
+    """
+    flat = sorted(_SPELLING_COUNT.findall(_flattened_source()))
+    per_family = sorted(
+        stated
+        for paragraph in _family_paragraphs().values()
+        for stated in _SPELLING_COUNT.findall(paragraph)
+    )
+
+    assert flat == per_family, (
+        "the flat reader and the per-family reader disagree about which "
+        f"counts this file states: flat={flat}, families={per_family}"
+    )
+
+
+def test_a_walrus_cannot_bind_an_attribute():
+    """Why ``ast.NamedExpr`` is absent from ``BINDING_NODES``.
+
+    Every other statement form that binds a name is walked, and leaving one
+    out on the strength of an assumption is how the previous rounds went. The
+    assumption here is checkable: the grammar restricts a walrus target to a
+    plain identifier, so there is no ``sys.excepthook`` shaped walrus for the
+    walker to miss.
+    """
+    with pytest.raises(SyntaxError):
+        ast.parse("(sys.excepthook := _quiet)")
+
+    # A walrus that binds a plain name parses, and binds nothing this guard
+    # is looking for.
+    assert find_silent_swallows("(excepthook := _quiet)\n", "probe.py") == []
+
+
+def test_a_hook_assignment_is_reported_where_the_binding_is():
+    """A ``with`` item and a comprehension carry no line number of their own.
+
+    Reporting the *statement* would have raised ``AttributeError`` on both,
+    which is the kind of thing that turns a widened guard back into a narrow
+    one via an exception nobody sees. The line reported is the target's.
+    """
+    source = textwrap.dedent("""
+        import sys
+
+        with _opened() as sys.excepthook:
+            pass
+        """)
+
+    found = find_silent_swallows(source, "probe.py")
+
+    assert [swallow.lineno for swallow in found] == [4]
+    assert found[0].qualname == "<module>"
 
 
 def test_the_blind_spot_list_matches_the_prose():
