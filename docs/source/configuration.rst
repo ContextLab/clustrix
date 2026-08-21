@@ -334,7 +334,74 @@ Paths and the remote environment
        conda, then pip). Applies to the single-venv fallback path.
    * - ``conda_env_name``
      - ``None``
-     - Passed through as the job's ``environment``.
+     - Names a conda environment that **already exists on the cluster**. The
+       job's function is then executed there, with ``conda run -n <name>``:
+       the name replaces the *execution* environment clustrix would otherwise
+       replicate from your local one, and takes precedence over that
+       replication. Clustrix's own serialization environment (VENV1 in
+       :ref:`two-venv`) is never replaced. ``@cluster(environment=...)`` is
+       the per-call spelling and wins over this field.
+
+       Because a batch job runs under a non-login shell, conda is not
+       initialised there, so the generated script makes ``conda`` usable
+       first. A conda that already works -- one your site puts on ``PATH``,
+       or one a ``module load`` in ``module_loads`` brings in -- is used as
+       it stands and nothing is sourced over it. Otherwise the script uses
+       the location measured over SSH when environment replication ran, and
+       failing that searches, in order, ``$CONDA_PREFIX``, ``conda info
+       --base``, ``~/miniconda3``, ``~/anaconda3``, ``~/miniforge3``,
+       ``/opt/conda``, ``/usr/local/miniconda3`` and
+       ``/usr/local/anaconda3``. A site that keeps conda somewhere else, or
+       behind a module, is not discoverable by that search: put its
+       initialisation in ``module_loads`` or ``pre_execution_commands``,
+       which run earlier in the same script. If none of it works the job
+       stops with a message naming the environment and the places searched,
+       rather than with ``conda: command not found``.
+
+       With ``use_two_venv=False`` -- the combination this field is really
+       for -- clustrix no longer replicates your local environment onto the
+       cluster before the job. The generated script never activates what that
+       replication builds, so building it only made every submission slower.
+       With ``use_two_venv=True`` the replication still runs, because
+       clustrix's serialization environment comes out of it; the job logs a
+       warning saying the execution half of it was built for nothing.
+
+       **What counts as a name.** conda's rules, not clustrix's: no ``/``, no
+       whitespace, no ``:`` and no ``#``. Non-ASCII names such as
+       ``análisis`` or ``环境`` are fine, as are ``env(1)``, ``my~env`` and
+       ``a&b``. Four more characters are refused than conda refuses --
+       ``'``, ``"``, ``$``, ``\`` and a backtick -- because the name is
+       written into the generated shell script. A leading ``-`` is refused
+       (it would parse as an option to ``conda run``), and so is anything
+       longer than 255 characters.
+
+       **The environment has to be on your Python minor version.** dill and
+       cloudpickle embed CPython bytecode, and that bytecode cannot be loaded
+       by a different minor version -- a function pickled under 3.12 and
+       opened under 3.11 fails inside the unpickler with an error that names
+       neither the environment nor the version. Clustrix pins the
+       environments it builds itself, but it cannot see inside one you named,
+       and it does not know where conda is on the compute node until the job
+       gets there. So the generated script asks: before anything else runs,
+       it compares the environment's ``sys.version_info[:2]`` with the
+       submitting interpreter's and stops the job with a message naming both
+       versions if they differ. Point ``conda_env_name`` at an environment
+       built on the same minor version you submit from, or submit from a
+       matching one.
+
+       **Prefix environments are not supported.** conda can address an
+       environment by path with ``conda run -p /path/to/env``; clustrix only
+       ever emits ``-n``, so a path here is refused when you set it rather
+       than accepted and then failed on the compute node with the job already
+       queued. Give the name ``conda env list`` shows.
+
+       This field was accepted and never used before clustrix honoured it
+       (`#164 <https://github.com/ContextLab/clustrix/issues/164>`_), so a
+       value left in an old ``clustrix.yml`` changes behaviour now. The first
+       job that uses it logs a warning saying so. Passing
+       ``@cluster(environment=...)`` explicitly is a decision made today and
+       is not announced, even when it names the same environment as the
+       field.
    * - ``use_two_venv``
      - ``True``
      - Build the two-environment layout described in :ref:`two-venv`. Turning

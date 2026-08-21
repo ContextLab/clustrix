@@ -82,7 +82,12 @@ def cluster(
             program per GPU and returned the traces of random matrices as
             the result -- so it was deleted. Passing this warns.
             Parallelize across GPUs inside your own function instead.
-        environment: Conda environment name
+        environment: Name of a conda environment that already exists on
+            the cluster. The function is executed in it -- it replaces
+            the *execution* environment clustrix would otherwise
+            replicate, and takes precedence over that replication;
+            clustrix's own serialization environment is unaffected.
+            Falls back to ``config.conda_env_name``.
         async_submit: Whether to submit jobs asynchronously (non-blocking)
         **kwargs: Additional job parameters
 
@@ -128,7 +133,13 @@ def cluster(
                 "memory": memory or config.default_memory,
                 "time": time or config.default_time,
                 "partition": partition or config.default_partition,
-                "environment": environment or config.conda_env_name,
+                # The per-call value only. `resolve_named_environment` falls
+                # back to `config.conda_env_name` itself, and folding the
+                # fallback in here erased the difference between "the caller
+                # asked for this environment" and "an old configuration file
+                # still names it" -- which is exactly the difference the
+                # migration notice for that field is about (#164).
+                "environment": environment,
             }
 
             # Per-job overrides the backends read off job_config. hf_jobs.py

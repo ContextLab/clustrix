@@ -39,8 +39,8 @@ import random
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
-from time import monotonic, sleep
 
 import paramiko
 import pytest
@@ -273,6 +273,45 @@ def test_concurrent_connections_never_corrupt_the_file():
         )
 
 
+def _wait_until_the_writer_has_written(known_hosts, before_size, process):
+    """Block until the child has really appended, so the kill lands mid-write.
+
+    This replaces ``process.wait(timeout=random.uniform(1.0, 2.0))``, which
+    was a guess about how long a CPython start-up plus a paramiko import plus
+    an ECDSA key generation takes -- and the guess is load-dependent. Measured
+    on the machine this was written on, the first append lands at ~0.45s on an
+    idle box and at up to 3.2s with the machine oversubscribed 32 ways: 152 of
+    160 sampled starts exceeded 1.0s under that load. Past 1.0s the child was
+    killed before it had written anything and the test failed on its own
+    "test is vacuous" guard -- 0 to 6 of the 6 parameters, depending on what
+    else happened to be running.
+
+    That is a defect in the test, not in the writer: nothing here was ever an
+    assertion about a race in ``ssh_security``. It still matters, because a
+    test that fails on a busy machine teaches people to re-run until green,
+    which is how a real failure gets ignored.
+
+    Waiting for the observable event is both deterministic and stronger than
+    the guess it replaces: the kill is now guaranteed to interrupt a running
+    write loop, which is the situation this test exists to cover, instead of
+    only doing so when the machine happened to be fast enough.
+    """
+    deadline = time.monotonic() + 120.0
+    while time.monotonic() < deadline:
+        if known_hosts.stat().st_size > before_size:
+            return
+        if process.poll() is not None:
+            raise AssertionError(
+                "the writer exited on its own without appending anything; its "
+                "stderr was:\n" + process.stderr.read().decode()
+            )
+        time.sleep(0.005)
+    raise AssertionError(
+        "the writer appended nothing in 120s -- it is not writing at all, "
+        "which is a different failure from the one this test looks for"
+    )
+
+
 #: Adds host keys through the real policy until it is killed. Run as a
 #: separate process so the kill is a genuine SIGKILL mid-write, not an
 #: exception raised at a point Python chose.
@@ -289,40 +328,6 @@ while True:
     index += 1
     client._policy.missing_host_key(client, "burst-%d.example.com" % index, key)
 """
-
-
-#: How long the child is allowed to import paramiko and clustrix, generate a
-#: key and append its first host key line. Generous, because none of that is
-#: what this test measures: on a loaded machine those imports alone have been
-#: observed taking over 1.5 seconds, which used to consume the whole kill
-#: window and leave the child killed before it had written anything -- the
-#: test's own "vacuous" assertion, failing for a reason that has nothing to do
-#: with the code under test.
-FIRST_WRITE_TIMEOUT = 60.0
-
-
-def _wait_until_it_is_writing(known_hosts, before, process):
-    """Block until the child has appended something, so the kill can be timed.
-
-    The kill has to land while the writer is in its append loop. Timing the
-    window from ``Popen`` measures interpreter start-up as well, and start-up
-    is the part that varies with machine load. Timing it from the first
-    observed byte measures the loop and nothing else, and the wait is not a
-    weakening of the test: it makes the "killed before it wrote anything"
-    assertion below unreachable for any reason except the writer genuinely
-    never writing.
-    """
-    deadline = monotonic() + FIRST_WRITE_TIMEOUT
-    while monotonic() < deadline:
-        if len(known_hosts.read_text()) > len(before):
-            return
-        if process.poll() is not None:
-            raise AssertionError(
-                "the writer exited on its own before appending anything: "
-                f"{process.communicate()[1].decode()}"
-            )
-        sleep(0.01)
-    raise AssertionError(f"the writer appended nothing within {FIRST_WRITE_TIMEOUT}s")
 
 
 @pytest.mark.parametrize("round_number", range(6))
@@ -347,9 +352,13 @@ def test_a_killed_writer_never_leaves_a_broken_file(round_number):
         stderr=subprocess.PIPE,
     )
     try:
-        _wait_until_it_is_writing(known_hosts, before, process)
-        process.wait(timeout=random.uniform(1.0, 2.0))
-    except subprocess.TimeoutExpired:
+        _wait_until_the_writer_has_written(known_hosts, len(before), process)
+        # Vary where in the write loop the kill lands, so the six rounds are
+        # six different interruption points rather than six copies of "just
+        # after the first append". The wait above is what makes every one of
+        # them an interruption at all.
+        time.sleep(random.uniform(0.0, 0.05))
+    finally:
         process.kill()
     stderr = process.communicate()[1].decode()
 

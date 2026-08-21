@@ -291,6 +291,40 @@ class TestValidatedSites:
             validate_env_var_name("1BAD")
         assert "environment_variables" in str(excinfo.value)
 
+    @pytest.mark.parametrize(
+        "key,value",
+        [
+            ("remote_work_dir", "/scratch/u/jobs\n"),
+            ("partition", "gpu\n"),
+            ("time", "01:00:00\n"),
+            ("module_loads", "gcc\n"),
+        ],
+    )
+    def test_a_trailing_newline_is_not_a_clean_value(self, key, value):
+        """``re.match`` with ``$`` accepted one, and ``$`` matches before it.
+
+        The whole allowlist exists to keep a directive line on one line.
+        ``"/scratch/u/jobs\n"`` passed it and then split
+        ``#SBATCH --output=<dir>/slurm-%j.out`` in two -- after which SLURM
+        stops reading directives entirely and every one below it, including
+        the resource requests, is silently ignored.
+        """
+        with pytest.raises(ValueError, match=key):
+            validate_shell_fragment(key, value)
+
+    def test_the_directive_a_newline_would_split_is_refused_end_to_end(self):
+        with pytest.raises(ValueError, match="remote_work_dir"):
+            create_job_script(
+                "slurm",
+                dict(BASE_JOB_CONFIG),
+                "/scratch/u/job_1\n#SBATCH --partition=owned",
+                ClusterConfig(),
+            )
+
+    def test_an_environment_variable_name_cannot_carry_a_newline_either(self):
+        with pytest.raises(ValueError, match="environment_variables"):
+            validate_env_var_name("MY_VAR\n")
+
     def test_ordinary_values_pass_through_unchanged(self):
         assert validate_shell_fragment("partition", "gpu-a100") == "gpu-a100"
         assert validate_shell_fragment("remote_work_dir", "/scratch/u/jobs") == (

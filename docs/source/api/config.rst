@@ -189,7 +189,16 @@ Paths
   but nothing in clustrix reads it -- setting it has no effect. It is listed
   here only so that a configuration file containing it is not mistaken for a
   file that does something.
-- ``conda_env_name``: Conda environment to activate on the cluster
+- ``conda_env_name``: An existing conda environment on the cluster to run
+  jobs in, by **name** -- a path (a ``conda run -p`` prefix environment) is
+  refused. It replaces the replicated execution environment and takes
+  precedence over it, and with ``use_two_venv=False`` that replication is
+  skipped entirely; see :doc:`../configuration` for how conda is located
+  inside the job, for what counts as a name, and for the Python
+  minor-version check the generated script makes before it runs anything.
+  The name is validated where you set it -- ``configure()``, the constructor
+  and a configuration file all refuse a path -- rather than at submission,
+  when the job directory and the pickle are already on the cluster.
 - ``venv_setup_timeout``: Seconds allowed for remote virtualenv creation
   (default: 300)
 
