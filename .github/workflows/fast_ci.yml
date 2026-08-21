@@ -1,15 +1,25 @@
 name: Fast CI
 
 on:
+  # No `paths:` filter on pull_request, deliberately.
+  #
+  # The `status-check` job below publishes the `CI Status` context, and
+  # master's branch protection lists that context as required. A required
+  # check that is never reported is not treated as passing -- GitHub blocks
+  # the merge on "Expected -- Waiting for status to be reported", forever --
+  # so while this trigger was path-filtered, a pull request touching only
+  # docs/, README.md or the notebooks could never be merged by anyone
+  # without an admin override (#169). A required check whose reporting
+  # depends on which files changed is a trap; the filter is not worth it.
+  #
+  # This repository is public, so Actions minutes are free and the cost of
+  # running the four jobs on a docs-only pull request is wall-clock time,
+  # not money.
   pull_request:
     branches: [main, master, develop]
-    paths:
-      - 'clustrix/**'
-      - 'tests/**'
-      - 'setup.py'
-      - 'pyproject.toml'
-      - 'requirements*.txt'
   push:
+    # The filter stays here. `CI Status` is not a required check for pushes
+    # to develop, so a run that never happens blocks nothing.
     branches: [develop]  # Only run on develop pushes to avoid duplication with main Tests workflow
     paths:
       - 'clustrix/**'

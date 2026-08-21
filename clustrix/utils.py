@@ -3547,18 +3547,74 @@ def detect_gpu_capabilities(
 
     Returns:
         Dictionary with GPU information including:
-        - gpu_available: bool
-        - gpu_count: int
-        - gpu_devices: List[Dict] with device info
+        - gpu_available: bool -- a GPU was positively identified
+        - gpu_detection_inconclusive: bool -- a GPU tool answered in a format
+          this code could not read, so neither presence nor absence is known
+        - gpu_count: Optional[int] -- how many GPUs, or ``None`` when a method
+          established that NVIDIA hardware is present but cannot count it
+        - gpu_devices: List[Dict] with device info; empty unless nvidia-smi
+          was readable, because no other method yields per-device detail
+        - nvidia_driver_present: bool -- the NVIDIA kernel driver was observed
+          bound to at least one GPU, which is a stronger claim than
+          ``gpu_available`` and the one that licenses installing CUDA builds
         - cuda_available: bool
         - cuda_version: str
         - pytorch_gpu_support: bool
         - tensorflow_gpu_support: bool
+
+    What happens when nvidia-smi answers something unreadable:
+
+    ``nvidia-smi --format=csv`` is not a stable contract. A driver can add a
+    column, change a unit, or print a warning line before the rows, and a GPU
+    name is free to contain a comma. This function asks for exactly five
+    fields per device and treats any line that does not yield all five as
+    output it did not understand -- *not* as a device to skip.
+
+    An unreadable answer is reported as neither yes nor no. ``gpu_available``
+    stays ``False`` because nothing was identified, ``gpu_count`` stays ``0``,
+    the offending lines go into ``detection_errors``, and
+    ``gpu_detection_inconclusive`` is set so a caller can tell "no GPU here"
+    apart from "could not tell". The remaining detection methods still run;
+    if one of them establishes that NVIDIA hardware is present then
+    availability *is* known, ``gpu_available`` becomes ``True`` on that
+    method's own evidence and ``gpu_detection_inconclusive`` is left
+    ``False``.
+
+    What the fallback methods do and do not license:
+
+    Each method is trusted only for what it can actually observe.
+    ``/proc/driver/nvidia/gpus/`` holds one directory per GPU, so it yields a
+    real count but no device detail. ``lspci`` yields neither: it reads the
+    PCI bus, so it can say that a graphics device made by NVIDIA is attached
+    and nothing further. A positive ``lspci`` therefore sets
+    ``gpu_available`` and leaves ``gpu_count`` at ``None`` -- an unknown
+    count is reported as unknown, never as the number of lines that happened
+    to match. Neither fallback ever fills ``gpu_devices``; a caller is not
+    handed a device list that was not read off a device.
+
+    The same distinction decides ``nvidia_driver_present``, which is what
+    ``setup_gpu_enabled_venv2`` gates a CUDA install on. nvidia-smi talks to
+    the driver and ``/proc/driver/nvidia/gpus/`` is created by it, so either
+    answering proves the driver is loaded and bound to a GPU. ``lspci`` proves
+    only that a card is in a slot: it may have no driver, be claimed by
+    ``nouveau``, be too old for any current CUDA build, or be assigned to a
+    guest VM. Installing multi-gigabyte CUDA wheels on that evidence is a
+    guess, so on ``lspci``-only evidence ``gpu_available`` is ``True`` and
+    ``nvidia_driver_present`` is ``False``.
+
+    It does not raise. Unlike ``_select_remote_python``, where no compatible
+    interpreter means no job can run at all, a caller here can proceed
+    perfectly well without a device list -- it just must not be told there is
+    a GPU on the strength of output nobody could read, which is what this
+    function used to do: ``gpu_available`` was set before the parse loop, and
+    a response that parsed into zero devices still reported success.
     """
     gpu_info: Dict[str, Any] = {
         "gpu_available": False,
+        "gpu_detection_inconclusive": False,
         "gpu_count": 0,
         "gpu_devices": [],
+        "nvidia_driver_present": False,
         "cuda_available": False,
         "cuda_version": None,
         "pytorch_gpu_support": False,
@@ -3568,6 +3624,10 @@ def detect_gpu_capabilities(
     }
 
     # Method 1: Try nvidia-smi (most reliable)
+    #
+    # `gpu_available` is claimed here only after the whole response has been
+    # read, never before: the claim is the parse result, not the exit status.
+    smi_unreadable = False
     try:
         stdin, stdout, stderr = ssh_client.exec_command(
             "nvidia-smi --query-gpu=index,name,memory.total,memory.free,compute_cap --format=csv,noheader,nounits 2>/dev/null"
@@ -3577,27 +3637,51 @@ def detect_gpu_capabilities(
         if exit_status == 0:
             smi_output = stdout.read().decode().strip()
             if smi_output:
-                gpu_info["gpu_available"] = True
-                gpu_info["detection_method"] = "nvidia-smi"
-
-                # Parse nvidia-smi output
+                # Parse nvidia-smi output. Exactly five fields were asked
+                # for; anything else means the columns are not where this
+                # code thinks they are, so the row is unreadable rather than
+                # merely uninteresting.
                 devices = []
+                unreadable_lines = []
                 for line in smi_output.split("\n"):
-                    if line.strip():
-                        parts = [p.strip() for p in line.split(",")]
-                        if len(parts) >= 5:
-                            devices.append(
-                                {
-                                    "index": int(parts[0]),
-                                    "name": parts[1],
-                                    "memory_total_mb": int(parts[2]),
-                                    "memory_free_mb": int(parts[3]),
-                                    "compute_capability": parts[4],
-                                }
+                    if not line.strip():
+                        continue
+                    parts = [p.strip() for p in line.split(",")]
+                    try:
+                        if len(parts) != 5:
+                            raise ValueError(
+                                f"expected 5 comma-separated fields, got {len(parts)}"
                             )
+                        device = {
+                            "index": int(parts[0]),
+                            "name": parts[1],
+                            "memory_total_mb": int(parts[2]),
+                            "memory_free_mb": int(parts[3]),
+                            "compute_capability": parts[4],
+                        }
+                    except ValueError as parse_error:
+                        unreadable_lines.append(f"{line.strip()!r} ({parse_error})")
+                        continue
+                    devices.append(device)
 
-                gpu_info["gpu_count"] = len(devices)
-                gpu_info["gpu_devices"] = devices
+                if unreadable_lines:
+                    # Discarding these and reporting the rest would be the
+                    # same defect one size smaller: a machine with four GPUs
+                    # would be described as having however many rows happened
+                    # to parse.
+                    smi_unreadable = True
+                    gpu_info["detection_errors"].append(
+                        "nvidia-smi output could not be parsed, so it is not "
+                        "used as evidence either way: " + "; ".join(unreadable_lines)
+                    )
+                elif devices:
+                    gpu_info["gpu_available"] = True
+                    # nvidia-smi answers by asking the driver, so a readable
+                    # answer is direct evidence the driver is loaded.
+                    gpu_info["nvidia_driver_present"] = True
+                    gpu_info["detection_method"] = "nvidia-smi"
+                    gpu_info["gpu_count"] = len(devices)
+                    gpu_info["gpu_devices"] = devices
     except Exception as e:
         gpu_info["detection_errors"].append(f"nvidia-smi failed: {str(e)}")
 
@@ -3617,20 +3701,56 @@ def detect_gpu_capabilities(
         gpu_info["detection_errors"].append(f"CUDA detection failed: {str(e)}")
 
     # Method 3: Check /proc/driver/nvidia if nvidia-smi fails
+    #
+    # The NVIDIA kernel driver creates exactly one directory per GPU under
+    # /proc/driver/nvidia/gpus/, named after the device's PCI address, so
+    # one entry there is one GPU and counting the entries is a real answer.
+    #
+    # It is `find`, not `ls`, because `ls` cannot be asked for that count.
+    # Every `ls` formulation inherits some of its output shape from the
+    # environment, and a site `ls` -- a shell function or wrapper, which is
+    # how forced `--color` is usually arranged and which a non-interactive
+    # ssh command really does pick up -- prepends flags that the shipped
+    # flags cannot cancel. Two earlier attempts here failed that way: `ls
+    # -la` minus 2 forgot the `total` line and reported one GPU as two, and
+    # `ls -1` (which fixed a wrapper forcing `-C` from packing four GPUs
+    # onto one line) is still overcounted by a wrapper forcing `-a`, which
+    # adds `.` and `..`. That last one fails *open*: on an **empty**
+    # /proc/driver/nvidia/gpus/ the count is 2, so a host with no GPU at all
+    # reports `gpu_available` and, worse, `nvidia_driver_present` -- and
+    # that is the flag `setup_gpu_enabled_venv2` buys a multi-gigabyte CUDA
+    # wheel with. A forced `-R` recurses and reports 12.
+    #
+    # `find <dir> -mindepth 1 -maxdepth 1` states the whole result set
+    # instead of inheriting it: one path per line by construction, never `.`
+    # or `..` (that is what -mindepth 1 means), and never a level deeper
+    # (-maxdepth 1), whatever global options a wrapper puts in front of the
+    # path. The three failure modes stay fail-closed and unchanged: an
+    # absent directory, an unreadable one, and a host with no `find` at all
+    # each print nothing to stdout -- the diagnostics go to stderr, which is
+    # discarded -- so the count is 0, no GPU is claimed, and detection falls
+    # through to lspci. All four behaviours are exercised against the real
+    # `find` of whatever platform runs the tests, in
+    # tests/unit/test_gpu_detection_honesty.py. `-mindepth`/`-maxdepth` are
+    # not POSIX, but GNU findutils, BSD find and busybox all implement them,
+    # which covers the hosts the ssh and slurm backends reach.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(
-                "ls -la /proc/driver/nvidia/gpus/ 2>/dev/null | wc -l"
+                "find /proc/driver/nvidia/gpus/ -mindepth 1 -maxdepth 1 "
+                "2>/dev/null | wc -l"
             )
             exit_status = stdout.channel.recv_exit_status()
 
             if exit_status == 0:
                 gpu_count_str = stdout.read().decode().strip()
                 try:
-                    # Subtract 2 for . and .. entries
-                    gpu_count = max(0, int(gpu_count_str) - 2)
+                    gpu_count = int(gpu_count_str)
                     if gpu_count > 0:
                         gpu_info["gpu_available"] = True
+                        # Only the NVIDIA kernel driver creates this tree, and
+                        # it creates one entry per GPU it has bound.
+                        gpu_info["nvidia_driver_present"] = True
                         gpu_info["gpu_count"] = gpu_count
                         gpu_info["detection_method"] = "/proc/driver/nvidia"
                 except ValueError:
@@ -3640,28 +3760,111 @@ def detect_gpu_capabilities(
                 f"/proc/driver/nvidia detection failed: {str(e)}"
             )
 
-    # Method 4: Check for GPU via lspci (fallback)
+    # Method 4: Check for a display-class NVIDIA device via lspci (fallback)
+    #
+    # This asks lspci for the device *class*, not for the vendor's name.
+    # `lspci | grep -i nvidia` matched the vendor string, and NVIDIA has
+    # shipped a great deal of silicon that is not a GPU: every consumer card
+    # carries an "Audio device" function for HDMI sound, and the nForce
+    # chipsets put NVIDIA-branded SMBus, Ethernet, IDE and LPC bridges on the
+    # bus of machines with no NVIDIA graphics in them at all. Either of those
+    # matched, so `gpu_available` went true -- and, because the CUDA install
+    # downstream was gated on `gpu_available` alone, an HD Audio function was
+    # enough to make clustrix install a cu118 PyTorch build on a machine with
+    # no GPU. Verified against the real server with real lspci listings.
+    #
+    # `-nn` prints numeric ids alongside the names, so both halves of the
+    # match are stable: `[03xx]` is the PCI base class for display
+    # controllers (0300 VGA, 0302 3D -- what datacenter parts enumerate as --
+    # 0380 other), and `[10de:` is NVIDIA's vendor id, which is printed even
+    # on a host whose pci.ids is too old to know the device's name.
+    #
+    # The count is still not knowable from here, so it stays `None`: SR-IOV
+    # virtual functions and vGPU instances each enumerate as their own
+    # display-class function of one physical GPU, and MIG partitions do not
+    # enumerate at all. `gpu_devices` stays empty because lspci yields no
+    # per-device memory or compute capability.
+    #
+    # Two details here are deliberately not pinned by a test, because both
+    # fail closed: `-i` on the grep is belt-and-braces for a host that prints
+    # `[10DE:` (pciutils prints lowercase), and dropping `-nn` would remove
+    # the numeric ids the pattern matches on, so such a host would report no
+    # GPU rather than a wrong one.
     if not gpu_info["gpu_available"]:
         try:
             stdin, stdout, stderr = ssh_client.exec_command(
-                "lspci | grep -i nvidia | wc -l"
+                r"lspci -nn 2>/dev/null | grep -Ei '\[03[0-9a-f]{2}\]:.*\[10de:' | wc -l"
             )
             exit_status = stdout.channel.recv_exit_status()
 
             if exit_status == 0:
-                nvidia_count_str = stdout.read().decode().strip()
+                display_count_str = stdout.read().decode().strip()
                 try:
-                    nvidia_count = int(nvidia_count_str)
-                    if nvidia_count > 0:
-                        gpu_info["gpu_available"] = True
-                        gpu_info["gpu_count"] = nvidia_count
-                        gpu_info["detection_method"] = "lspci"
+                    display_functions = int(display_count_str)
                 except ValueError:
-                    pass
+                    display_functions = 0
+                if display_functions > 0:
+                    gpu_info["gpu_available"] = True
+                    gpu_info["gpu_count"] = None
+                    gpu_info["detection_method"] = "lspci"
         except Exception as e:
             gpu_info["detection_errors"].append(f"lspci detection failed: {str(e)}")
 
+    # "Could not tell" only survives if nothing else could tell either. A
+    # positive count from /proc/driver/nvidia or lspci is a real answer about
+    # availability, even though it says nothing about the devices.
+    gpu_info["gpu_detection_inconclusive"] = (
+        smi_unreadable and not gpu_info["gpu_available"]
+    )
+
     return gpu_info
+
+
+def gpu_detection_summary(gpu_info: Dict[str, Any]) -> str:
+    """Say what GPU detection established -- including "nothing".
+
+    "Could not determine" is not a wordier way of saying "no GPUs detected":
+    one means the cluster answered and the answer was no, the other means
+    clustrix could not read the answer, and a user deciding whether to
+    install a GPU build themselves needs to know which one they have.
+
+    "Yes" is not one sentence either, because the methods do not all
+    establish the same thing. Only nvidia-smi produces a device list;
+    ``/proc/driver/nvidia`` produces a count and nothing else; ``lspci``
+    produces neither, and the sentence for it must not contain a number,
+    since the only number available there is a count of PCI functions.
+
+    It must also not promise the GPU-enabled VENV2, because ``lspci``
+    evidence no longer triggers one: it says a graphics card is fitted, not
+    that anything on this host can drive it. The sentence has to say which
+    VENV2 is actually being built, or the user reads "detected" and never
+    learns why their CUDA build is missing.
+    """
+    if gpu_info.get("gpu_available", False):
+        count = gpu_info.get("gpu_count")
+        method = gpu_info.get("detection_method", "unknown")
+        if not gpu_info.get("nvidia_driver_present", False):
+            return (
+                f"NVIDIA graphics hardware detected by {method}, which reads "
+                "the PCI bus and not the driver: the number of GPUs is "
+                "unknown, and so is whether any CUDA build can run here. "
+                "Using standard VENV2 setup; install GPU builds yourself if "
+                "the driver is in fact loaded."
+            )
+        if not gpu_info.get("gpu_devices"):
+            return (
+                f"GPU detected ({count} devices) by {method}, which reports "
+                "no per-device details. Setting up GPU-enabled VENV2..."
+            )
+        return f"GPU detected ({count} devices), setting up GPU-enabled VENV2..."
+    if gpu_info.get("gpu_detection_inconclusive", False):
+        return (
+            "Could not determine whether this cluster has GPUs: "
+            + "; ".join(gpu_info.get("detection_errors", []))
+            + ". Using standard VENV2 setup; install GPU builds yourself if "
+            "the cluster does have GPUs."
+        )
+    return "No GPUs detected, using standard VENV2 setup..."
 
 
 def setup_gpu_enabled_venv2(
@@ -3676,6 +3879,10 @@ def setup_gpu_enabled_venv2(
 
     This function ensures that VENV2 has appropriate GPU-enabled packages
     even if the local environment doesn't have GPU support.
+
+    It installs nothing unless ``gpu_info["nvidia_driver_present"]`` is set,
+    i.e. unless a detection method that talks to the NVIDIA driver answered.
+    See the comment on that check for why ``gpu_available`` is not enough.
 
     Args:
         ssh_client: SSH client connection
@@ -3700,8 +3907,19 @@ def setup_gpu_enabled_venv2(
         "installation_errors": [],
     }
 
-    # Only proceed if GPUs are available on remote cluster
-    if not gpu_info.get("gpu_available", False):
+    # Only proceed where a CUDA build can actually run.
+    #
+    # USER-VISIBLE CHANGE: this used to read `gpu_available`, which is set by
+    # any detection method including lspci -- and lspci reads the PCI bus, so
+    # it answers "a graphics card is fitted", not "CUDA works here". A host
+    # whose card has no driver loaded, or has nouveau bound, or has the card
+    # passed through to a guest, was handed a multi-gigabyte cu118 PyTorch
+    # wheel it cannot use in place of the CPU build it asked for. The gate is
+    # now `nvidia_driver_present`, which only nvidia-smi and
+    # /proc/driver/nvidia set, because only they observe the driver. On
+    # lspci-only evidence clustrix says so and builds the standard VENV2; see
+    # `gpu_detection_summary`.
+    if not gpu_info.get("nvidia_driver_present", False):
         return venv2_info
 
     # Determine if we're using conda or venv
@@ -3848,17 +4066,16 @@ def enhanced_setup_two_venv_environment(
     print("Setting up two-venv environment...")
     venv_info = setup_two_venv_environment(ssh_client, work_dir, requirements, config)
 
-    # Step 3: Enhanced VENV2 with GPU support if GPUs are available
-    if gpu_info.get("gpu_available", False):
-        print(
-            f"GPU detected ({gpu_info['gpu_count']} devices), setting up GPU-enabled VENV2..."
-        )
-        gpu_venv2_info = setup_gpu_enabled_venv2(
-            ssh_client, work_dir, requirements, gpu_info, config
-        )
-        venv_info.update(gpu_venv2_info)
-    else:
-        print("No GPUs detected, using standard VENV2 setup...")
+    # Step 3: Enhanced VENV2 with GPU support where a CUDA build can run.
+    #
+    # The decision is `setup_gpu_enabled_venv2`'s own, and is made in exactly
+    # one place: a second copy of the condition here is a second thing to
+    # forget to update, which is how a `gpu_available` gate outlived the
+    # evidence that justified it.
+    print(gpu_detection_summary(gpu_info))
+    venv_info.update(
+        setup_gpu_enabled_venv2(ssh_client, work_dir, requirements, gpu_info, config)
+    )
 
     # Step 4: Add GPU detection results to venv_info
     venv_info["gpu_info"] = gpu_info
