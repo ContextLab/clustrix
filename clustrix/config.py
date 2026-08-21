@@ -6,7 +6,7 @@ import threading
 import yaml
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, FrozenSet, Iterable, List, Mapping, Optional, Tuple
 from dataclasses import dataclass, asdict, fields
 
 logger = logging.getLogger(__name__)
@@ -263,8 +263,10 @@ class ClusterConfig:
 # instead of silently leaking in plaintext until someone remembers to add it
 # here. Same approach as scripts/verify_cluster_usecases.py's redaction.
 #: Every backend ``ClusterExecutor`` can actually dispatch. This is the one
-#: place the set is written down; the CLI's ``click.Choice`` and the notebook
-#: widget's dropdown both read it. Offering a type the executor cannot run is
+#: place the set is written down; the CLI's ``click.Choice`` and *both*
+#: notebook widgets' dropdowns read it -- ``notebook_magic_widget`` spelled
+#: the four values out until #165, which is exactly the drift this comment
+#: claimed was impossible. Offering a type the executor cannot run is
 #: worse than not offering it, and omitting one it can run hides a feature.
 SUPPORTED_CLUSTER_TYPES = (
     "local",
@@ -640,6 +642,65 @@ def configure(**kwargs) -> None:
         target = _config
         for key, value in kwargs.items():
             setattr(target, key, value)
+
+
+def config_field_names() -> FrozenSet[str]:
+    """Every name :func:`configure` will accept.
+
+    Derived from the dataclass rather than listed, because a list is only
+    correct until the next field is added and nothing makes it fail loudly
+    when it stops being.
+    """
+    return frozenset(field.name for field in fields(ClusterConfig))
+
+
+def split_config_kwargs(
+    data: Mapping[str, Any],
+    bookkeeping: Iterable[str] = (),
+    reset_fields: Iterable[str] = (),
+) -> Tuple[Dict[str, Any], List[str]]:
+    """Split a saved configuration into what :func:`configure` accepts, and
+    the names it does not.
+
+    :func:`configure` rejects an unknown keyword on purpose -- a silently
+    ignored setting is worse than a rejected one -- so a caller holding a
+    dict that mixes settings with its own bookkeeping (a profile's ``name``,
+    say) has to do the separating itself. This is that separation, in one
+    place, so the widgets cannot drift apart on what a configuration key is.
+
+    ``bookkeeping`` names the keys the caller knows are not settings and
+    means to drop. Anything else that is not a field comes back in the
+    second return value instead of vanishing: a key nobody recognises is
+    either a stale profile written by an older clustrix or a control wired
+    to a name that no longer exists, and both deserve to be said out loud
+    rather than dropped on the floor.
+
+    ``reset_fields`` names the fields the caller *owns*: every one of them is
+    seeded with its :class:`ClusterConfig` default before ``data`` is laid on
+    top, so a control the user cleared clears the live setting instead of
+    leaving the previous configuration's value standing. Without it a caller
+    that drops empty values -- which both widgets do, so a blank box does not
+    overwrite a setting with an empty string -- can never say "unset this",
+    and a profile the user chose as ``local`` inherits the last profile's
+    ``cluster_host``. Fields outside this set are not touched at all, so
+    settings with no control anywhere survive an Apply. A name in
+    ``reset_fields`` that is not a field is reported rather than reset: it is
+    a control wired to a name that no longer exists.
+    """
+    accepted = config_field_names()
+    known_extras = set(bookkeeping)
+    owned = list(reset_fields)
+    defaults = asdict(ClusterConfig())
+    kwargs = {name: defaults[name] for name in owned if name in accepted}
+    kwargs.update({key: value for key, value in data.items() if key in accepted})
+    unrecognised = sorted(
+        {
+            key
+            for key in list(data) + owned
+            if key not in accepted and key not in known_extras
+        }
+    )
+    return kwargs, unrecognised
 
 
 def load_config(config_path: str) -> None:

@@ -7,7 +7,7 @@ import importlib
 import pytest
 
 import clustrix.notebook_magic
-from clustrix.config import ClusterConfig
+from clustrix.config import SUPPORTED_CLUSTER_TYPES, ClusterConfig
 
 # Check if widget dependencies are available
 try:
@@ -121,13 +121,11 @@ class TestWidgetConfigurationFixes:
         """Test that widget properly populates dropdown options."""
         widget = ClusterConfigWidget(auto_display=False)
 
-        # The cluster type dropdown offers exactly the retained backends.
-        assert list(widget.cluster_type.options) == [
-            "local",
-            "ssh",
-            "slurm",
-            "huggingface",
-        ]
+        # The cluster type dropdown offers exactly the retained backends --
+        # compared against SUPPORTED_CLUSTER_TYPES, not a second copy of the
+        # four names. This menu was a hardcoded list until #165, and asserting
+        # it against a hardcoded list is what let it stay one.
+        assert list(widget.cluster_type.options) == list(SUPPORTED_CLUSTER_TYPES)
 
         # HuggingFace hardware flavors have sensible defaults
         assert len(widget.hf_hardware_field.options) > 0

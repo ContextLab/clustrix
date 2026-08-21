@@ -8,7 +8,7 @@ from unittest.mock import Mock, MagicMock, patch
 from typing import Dict, Any
 
 from clustrix.profile_manager import ProfileManager
-from clustrix.config import ClusterConfig
+from clustrix.config import SUPPORTED_CLUSTER_TYPES, ClusterConfig
 
 
 class MockWidget:
@@ -305,7 +305,8 @@ class TestWidgetComponents:
         # Check cluster type dropdown
         cluster_type = widget.widgets["cluster_type"]
         assert cluster_type.value == "local"
-        assert list(cluster_type.options) == ["local", "ssh", "slurm", "huggingface"]
+        # Against the tuple, not a copy of it: see test_widget_fixes.
+        assert list(cluster_type.options) == list(SUPPORTED_CLUSTER_TYPES)
 
         # Check resource fields. Values come from the active profile
         # ("Local single-core" in BUILTIN_PROFILES), whose default_memory is

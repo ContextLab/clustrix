@@ -29,9 +29,12 @@ except ImportError:
     from .notebook_magic_fallback import display, HTML, widgets
 
 from .config import (
+    SUPPORTED_CLUSTER_TYPES,
     configure,
     get_config_dir,
+    split_config_kwargs,
     strip_secret_fields,
+    validate_cluster_type,
     write_text_securely,
 )
 
@@ -40,7 +43,52 @@ from .config import (
 # rather than copied so the widget and the profile store cannot drift.
 from .profile_manager import _mkdir_private
 
+# One implementation of "the saved configuration wins over a list baked into
+# the UI", shared with the modern widget.
+from .widget_controls import set_choice
+
 logger = logging.getLogger(__name__)
+
+#: Keys a saved profile carries that are not settings. ``name`` is the
+#: profile's own label in the dropdown, so dropping it before ``configure()``
+#: is not discarding an instruction -- there is no setting it could apply to.
+#: Everything else that is not a ``ClusterConfig`` field gets said out loud.
+PROFILE_BOOKKEEPING_KEYS = ("name",)
+
+#: Every ``ClusterConfig`` field this widget's controls can set. Apply resets
+#: exactly these to their defaults and then lays what is on screen on top, so
+#: a box the user emptied unsets the field instead of leaving the previously
+#: applied profile's value standing, while settings with no control here
+#: survive untouched. The same bargain the modern widget strikes, through the
+#: same ``split_config_kwargs(reset_fields=...)``, so the two cannot drift.
+#: A test asserts this stays equal to what _save_config_from_widgets produces.
+WIDGET_MANAGED_FIELDS = frozenset(
+    {
+        "cluster_type",
+        "default_cores",
+        "default_memory",
+        "default_time",
+        "remote_work_dir",
+        "cluster_host",
+        "username",
+        "password",
+        "cluster_port",
+        "package_manager",
+        "default_partition",
+        "key_file",
+        "hf_hardware",
+        "hf_token",
+        "environment_variables",
+        "module_loads",
+        "pre_execution_commands",
+    }
+)
+
+#: Keys this widget wrote before #165, and the live field each one means.
+#: Profiles already on disk still carry them, so they are read when loading
+#: and re-emitted under the live name -- migrated, not blanked, and not
+#: reported as unrecognised, because the setting does reach @cluster.
+MIGRATED_PROFILE_KEYS = {"queue": "default_partition", "ssh_key_path": "key_file"}
 
 
 def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
@@ -127,13 +175,14 @@ class EnhancedClusterConfigWidget:
         )
         self.add_config_btn.on_click(self._on_add_config)
         # Cluster type dropdown
+        # Read from SUPPORTED_CLUSTER_TYPES rather than repeating it. This
+        # menu spelled the four values out until #165, so adding a backend
+        # meant remembering to edit a list nothing pointed at -- and the
+        # comment on SUPPORTED_CLUSTER_TYPES already claimed "the notebook
+        # widget's dropdown" read it, which was true of the modern widget
+        # only.
         self.cluster_type = widgets.Dropdown(
-            options=[
-                "local",
-                "ssh",
-                "slurm",
-                "huggingface",
-            ],
+            options=list(SUPPORTED_CLUSTER_TYPES),
             description="Cluster Type:",
             tooltip=(
                 "Choose where to run your jobs: local machine, remote servers "
@@ -398,11 +447,15 @@ class EnhancedClusterConfigWidget:
             style=style,
             layout=full_layout,
         )
-        # Job queue/partition
-        self.queue_field = widgets.Text(
-            description="Queue/Partition:",
+        # SLURM partition. Collected as ``queue`` until #165: that is not a
+        # ClusterConfig field and never was, so the value went into the saved
+        # profile and no further -- #158 removed the last consumer of ``queue``
+        # when PBS and SGE went. ``default_partition`` is the live spelling;
+        # the decorator resolves it into the ``--partition`` directive.
+        self.partition_field = widgets.Text(
+            description="Partition:",
             placeholder="e.g., gpu, compute, high-mem",
-            tooltip="Job queue or partition name (cluster-specific)",
+            tooltip="SLURM partition to submit to",
             style=style,
             layout=widgets.Layout(width="48%"),
         )
@@ -497,7 +550,7 @@ class EnhancedClusterConfigWidget:
             self.env_vars_field,
             self.module_loads_field,
             self.pre_exec_commands_field,
-            self.queue_field,
+            self.partition_field,
             self.ssh_key_field,
         ]
         for field in fields_to_track:
@@ -585,39 +638,52 @@ class EnhancedClusterConfigWidget:
         # Mark as changed
         self._mark_unsaved_changes()
 
-    @staticmethod
-    def _set_choice(field, value):
-        """Select a value in a dropdown, widening the options if need be.
-
-        Every one of these assignments used to be bare `field.value = ...`, so
-        loading a configuration whose region or instance type was not in the
-        hardcoded ten-item list raised
-
-            TraitError: Invalid selection: value not found
-
-        and broke the widget outright. New hardware flavors appear faster than
-        the hardcoded list, so this was reachable with an ordinary config file.
-
-        The saved configuration is authoritative -- a list baked into the UI
-        should not be able to veto it -- so an unrecognised value is added to
-        the options rather than discarded.
-        """
-        if value in (None, ""):
-            return
-        if value not in field.options:
-            field.options = list(field.options) + [value]
-        field.value = value
-
     def _load_config_to_widgets(self, config_name: str):
-        """Load a configuration into the widgets."""
+        """Load a configuration into the widgets.
+
+        ``cluster_type`` is the one field here that is *not* loaded through
+        ``set_choice``, and the reason is the opposite of the one that applies
+        to every other dropdown. ``set_choice`` widens a menu because the
+        saved configuration is authoritative -- ``ClusterConfig`` accepts any
+        string for ``hf_flavor`` or ``package_manager``, so a list baked into
+        the UI has no standing to veto one. ``cluster_type`` is the single
+        field with an enforced domain: ``ClusterConfig(cluster_type="pbs")``
+        and ``load_config()`` both raise ``ValueError`` naming issue #140.
+        Here the *menu* is authoritative and the saved value is the thing that
+        can be wrong, so widening would offer a backend clustrix cannot run
+        and defer the failure to submission time.
+
+        A profile can still name one, because ``load_config_from_file`` is
+        deliberately tolerant -- it collects what is on disk rather than
+        validating it, so ``~/.clustrix/clustrix.yml`` with ``cluster_type:
+        pbs`` lands in ``self.configs`` intact. Selecting it used to assign
+        that string to the ``Dropdown`` and raise a bare ``TraitError:
+        Invalid selection`` out of the observer, which says nothing about
+        which backend or why. It is refused here instead, with the backend and
+        its tracking issue named, and nothing is loaded: a half-loaded profile
+        wearing some other profile's cluster type is worse than none.
+        """
         if config_name not in self.configs:
             return
         config = self.configs[config_name]
+
+        cluster_type = config.get("cluster_type", "local")
+        try:
+            validate_cluster_type(
+                str(cluster_type),
+                source=f"configuration {config_name!r}: cluster_type",
+            )
+        except ValueError as exc:
+            with self.status_output:
+                self.status_output.clear_output()
+                print(f"❌ {exc}")
+            return
+
         self.current_config_name = config_name
 
         # Basic fields
         self.config_name.value = config.get("name", config_name)
-        self.cluster_type.value = config.get("cluster_type", "local")
+        self.cluster_type.value = cluster_type
         self.cores_field.value = config.get("default_cores", 1)
         self.memory_field.value = config.get("default_memory", "16GB")
         self.time_field.value = config.get("default_time", "01:00:00")
@@ -631,10 +697,13 @@ class EnhancedClusterConfigWidget:
 
         # HuggingFace Jobs fields
         self.hf_token_field.value = config.get("hf_token", "")
-        self._set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
+        set_choice(self.hf_hardware_field, config.get("hf_hardware", "cpu-basic"))
 
-        # Advanced options
-        self.package_manager.value = config.get("package_manager", "pip")
+        # Advanced options. set_choice for the same reason as the hardware
+        # field: this menu offers only pip and conda, while ClusterConfig
+        # accepts any string and the modern widget writes "auto" and "uv" --
+        # so a profile saved there made this widget raise on load.
+        set_choice(self.package_manager, config.get("package_manager", "pip"))
 
         # Environment variables
         env_vars = config.get("environment_variables", {})
@@ -650,8 +719,19 @@ class EnhancedClusterConfigWidget:
             config.get("pre_execution_commands", []) or []
         )
 
-        self.queue_field.value = config.get("queue", "")
-        self.ssh_key_field.value = config.get("ssh_key_path", "")
+        # ``queue`` and ``ssh_key_path`` are what this widget wrote before
+        # #165. Profiles saved by an older clustrix are still on disk, so they
+        # are read as fallbacks rather than being silently blanked. The
+        # old-to-live mapping lives in one place because Apply needs it too --
+        # a key that is migrated must not also be reported as one the widget
+        # will not carry.
+        migrated_controls = {
+            "default_partition": self.partition_field,
+            "key_file": self.ssh_key_field,
+        }
+        for old_key, live_key in MIGRATED_PROFILE_KEYS.items():
+            control = migrated_controls[live_key]
+            control.value = config.get(live_key) or config.get(old_key) or ""
 
         # Trigger cluster type change to show/hide relevant fields
         self._on_cluster_type_change({"new": self.cluster_type.value})
@@ -672,8 +752,8 @@ class EnhancedClusterConfigWidget:
             "username": self.username_field.value,
             "cluster_port": self.port_field.value,
             "package_manager": self.package_manager.value,
-            "queue": self.queue_field.value,
-            "ssh_key_path": self.ssh_key_field.value,
+            "default_partition": self.partition_field.value,
+            "key_file": self.ssh_key_field.value,
         }
 
         # Include password only if provided
@@ -779,12 +859,52 @@ class EnhancedClusterConfigWidget:
             try:
                 # Save current state
                 config_data = self._save_config_from_widgets()
+
+                # Whatever the stored profile holds that no control here owns:
+                # a field with no widget (``stage_warn_bytes``), a key an older
+                # clustrix wrote, a typo. Rebuilding the profile from the
+                # controls alone erased all of it without a word. Values for
+                # managed fields are deliberately *not* taken from the stored
+                # profile -- the controls are what the user is looking at, and
+                # a box they just emptied has to win.
+                stored = self.configs.get(self.current_config_name) or {}
+                unmanaged = {
+                    key: value
+                    for key, value in stored.items()
+                    if key not in WIDGET_MANAGED_FIELDS
+                    and key not in MIGRATED_PROFILE_KEYS
+                }
+                config_data = {**unmanaged, **config_data}
+
                 # Update the config in our dictionary
                 if self.current_config_name:
                     self.configs[self.current_config_name] = config_data
-                # Apply to Clustrix
-                configure(**config_data)
+                # Apply to Clustrix. ``configure()`` rejects any keyword
+                # that is not a ClusterConfig field, and a profile carries at
+                # least one that is not -- its own ``name`` -- so splatting the
+                # profile straight in made Apply fail every single time (#165).
+                #
+                # ``reset_fields``: _save_config_from_widgets drops empty
+                # values so a blank box cannot overwrite a setting with "",
+                # which also meant a box the user *cleared* said nothing and
+                # the previous profile's value stayed live -- a run configured
+                # as ``local`` carrying the last cluster's host and username.
+                # Seeding this widget's own fields with their defaults first
+                # makes clearing a control mean clearing the setting.
+                settings, unrecognised = split_config_kwargs(
+                    config_data,
+                    PROFILE_BOOKKEEPING_KEYS,
+                    reset_fields=WIDGET_MANAGED_FIELDS,
+                )
+                configure(**settings)
                 print("✅ Configuration applied successfully!")
+                if unrecognised:
+                    # Not dropped quietly: a key nobody recognises is a
+                    # setting the user asked for and will not get.
+                    print(
+                        "⚠️  Ignored, not a clustrix setting: "
+                        + ", ".join(unrecognised)
+                    )
 
                 # Show current config summary
                 print("\n📋 Active configuration:")
@@ -1075,8 +1195,8 @@ class EnhancedClusterConfigWidget:
             # Add authentication
             if config.get("password"):
                 connect_params["password"] = config["password"]
-            elif config.get("ssh_key_path"):
-                key_path = Path(config["ssh_key_path"]).expanduser()
+            elif config.get("key_file"):
+                key_path = Path(config["key_file"]).expanduser()
                 if key_path.exists():
                     connect_params["key_filename"] = str(key_path)
 
@@ -1314,7 +1434,7 @@ class EnhancedClusterConfigWidget:
                 self.env_vars_field,
                 self.module_loads_field,
                 self.pre_exec_commands_field,
-                widgets.HBox([self.queue_field, widgets.HTML("")]),
+                widgets.HBox([self.partition_field, widgets.HTML("")]),
             ]
         )
         advanced_accordion = widgets.Accordion([advanced_content])
