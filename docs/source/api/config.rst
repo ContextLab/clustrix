@@ -119,7 +119,8 @@ above:
   ``~/.cache/huggingface/token``.
 - the variable *named by* ``password_env_var`` -- read for the SSH password
   when ``use_env_password`` is ``True``. The name is configurable, so there is
-  no fixed variable to document here; see ``ClusterConfig.get_env_password``.
+  no fixed variable to document here; the value is read (and gated) by
+  ``clustrix.credential_release.release_credential``.
 
 ``CLUSTRIX_CONFIG_DIR``
    Overrides the directory clustrix reads and writes user configuration in,
@@ -173,7 +174,11 @@ Cluster Settings
   connection and reports the exact ``ssh-keyscan`` command to add it.
   ``"auto_add"`` trusts unknown host keys automatically -- insecure
   (vulnerable to machine-in-the-middle attacks) and never the default; it
-  has to be chosen deliberately. See ``clustrix.ssh_security``.
+  has to be chosen deliberately, **by you**: set in a configuration clustrix
+  merely discovered (a ``./clustrix.yml``, or a redirected
+  ``$CLUSTRIX_CONFIG_DIR``) the value is ignored and warned about, because
+  the weakening is a security decision and it persists in your
+  ``known_hosts``. See ``clustrix.ssh_security``.
 
 Paths
 ~~~~~
@@ -220,7 +225,10 @@ Used when ``cluster_type='huggingface'``:
 - ``hf_image``: Container image. Defaults to ``python:<your minor version>-slim``,
   because dill payloads carry CPython bytecode and are not portable across
   minor versions. Overriding this with a mismatched Python is the most likely
-  way to get an "unknown opcode" failure.
+  way to get an "unknown opcode" failure. Like ``ssh_host_key_policy``, an
+  override is honoured only from a configuration you chose: a staged job
+  hands ``CLUSTRIX_HF_TOKEN`` to the image as a job secret, so naming the
+  image names who receives your account token.
 - ``hf_job_timeout``: Job timeout passed to the HF API (default: ``30m``)
 - ``hf_allow_gpu_flavors``: Must be ``True`` before any flavor whose name does
   not begin with ``cpu-`` is accepted. GPU flavors bill by the second.

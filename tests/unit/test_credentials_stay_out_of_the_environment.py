@@ -163,7 +163,11 @@ class TestNotConfiguredMeansNone:
 
         manager = FlexibleCredentialManager(config_dir=config_dir)
 
-        assert manager.ensure_credential("ssh") is None
+        # ``_configured_fields`` is the non-secret half of the old
+        # ``ensure_credential``: which source answered, and which field
+        # names it holds. "Nothing is configured" never needed the secret,
+        # and the store no longer hands one out to anybody but the gate.
+        assert manager._configured_fields("ssh") == (None, [])
         assert manager.get_missing_providers(["ssh"]) == ["ssh"]
 
     def test_a_configured_host_still_gets_the_default_port(self, monkeypatch):

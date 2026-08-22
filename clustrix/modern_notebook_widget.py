@@ -27,6 +27,7 @@ from pathlib import Path
 from .config import (
     ClusterConfig,
     SUPPORTED_CLUSTER_TYPES,
+    config_source_for_discovered_path,
     configure,
     get_config,
     get_config_dir,
@@ -1677,8 +1678,15 @@ class ModernClustrixWidget:
         try:
             filename = self._resolve_config_path(self.widgets["config_filename"].value)
 
-            # Load profiles from file
-            self.profile_manager.load_from_file(filename)
+            # Load profiles from file. The Load menu is populated by
+            # globbing the working directory, so a bundle a cloned repository
+            # ships is offered by the widget rather than named by the user --
+            # ``explicit-file`` would call it the user's choice and hand it
+            # the cluster password. Provenance of where it was found, exactly
+            # as ``ProfileManager._restore`` does.
+            self.profile_manager.load_from_file(
+                filename, source=config_source_for_discovered_path(filename)
+            )
             self._update_profile_dropdown()
 
             # Load the active profile into widgets

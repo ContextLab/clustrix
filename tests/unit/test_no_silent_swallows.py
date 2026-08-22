@@ -1293,11 +1293,14 @@ JUSTIFIED_SWALLOWS = {
         "caller left to give a correct or incorrect answer to. `with "
         "ClusterExecutor(...)` is the real teardown story; this is a backstop."
     ),
-    ("auth_fallbacks.py", "get_cluster_password"): (
+    ("auth_fallbacks.py", "_colab_password"): (
         "Colab's userdata.get raises for a secret that is simply not set, "
-        "which is the ordinary case for the three name variants that do not "
-        "match. Three further credential sources follow, and if none supplies "
-        "a password the caller raises rather than proceeding."
+        "which is the ordinary case for every name variant tried here -- the "
+        "host-named spellings first, then the hostless ones -- and for any "
+        "that do match, a following gate still decides whether the secret "
+        "may be released. A missing secret moves on to the next candidate; "
+        "if none supplies a password the caller raises rather than "
+        "proceeding."
     ),
     ("config.py", "_read_config_bundle"): (
         "A parse failure here is not discarded: returning None hands the file "
@@ -1315,14 +1318,7 @@ JUSTIFIED_SWALLOWS = {
 #: to pretend they are fine, and an entry here is a promise that the issue
 #: exists. The stale-entry test below covers this dict too, so a fix removes
 #: the entry rather than leaving a lie behind.
-TRACKED_DEFECTS = {
-    ("notebook_magic_config.py", "load_config_from_file"): (
-        "Returns {} for any failure to read a configuration file, so an "
-        "unreadable file is indistinguishable from an empty one. Tracked as "
-        "https://github.com/ContextLab/clustrix/issues/168 and deliberately "
-        "not fixed here."
-    ),
-}
+TRACKED_DEFECTS = {}
 
 #: What this lint cannot see. Each one is asserted below, in
 #: ``test_the_lint_admits_what_it_cannot_see``, so the list is executable

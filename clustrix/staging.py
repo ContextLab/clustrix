@@ -116,6 +116,8 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
+from .credential_release import huggingface_client_kwargs
+
 logger = logging.getLogger(__name__)
 
 #: Repo, under the caller's namespace, holding staged data packages.
@@ -439,7 +441,7 @@ def _hf_api(config):
             "the remote store. Install it with `pip install huggingface_hub`, "
             "or build packages with force_local=True."
         ) from exc
-    return HfApi(token=_hf_token(config))
+    return HfApi(token=_hf_token(config), **huggingface_client_kwargs())
 
 
 def _hf_repo(config) -> str:
@@ -708,6 +710,7 @@ class DataPackage:
             filename=f"{self.path_in_repo}/files/{entry.relpath}",
             repo_type="dataset",
             token=_hf_token(cfg),
+            **huggingface_client_kwargs(),
         )
         with open(cached, "rb") as handle:
             return handle.read()
@@ -1443,7 +1446,11 @@ def _read_manifest(api, repo_id: str, path: str, config) -> Dict[str, Any]:
 
     try:
         local = hf_hub_download(
-            repo_id=repo_id, filename=path, repo_type="dataset", token=_hf_token(config)
+            repo_id=repo_id,
+            filename=path,
+            repo_type="dataset",
+            token=_hf_token(config),
+            **huggingface_client_kwargs(),
         )
         with open(local) as handle:
             raw = json.load(handle)

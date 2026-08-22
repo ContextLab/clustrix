@@ -210,7 +210,12 @@ shared scratch path (as above) both work; `/tmp` does not.
 
 Clustrix reads `config.yml`, `config.yaml` or `config.json` from `~/.clustrix`,
 then `clustrix.yml`/`.yaml`/`.json` from the current directory, and stops at the
-first one it finds. Setting `CLUSTRIX_CONFIG_DIR` moves the first of those
+first one it finds. A file found in the current directory is announced with a
+warning and is **not** trusted with credentials: a password stored in
+`~/.clustrix/.env` without an `SSH_HOST` of its own is not sent to a
+`cluster_host` that a working-directory file chose, because `git clone && cd`
+is enough for a repository to choose one. Set `SSH_HOST` in the credential
+file, or put the host in `~/.clustrix/config.yml`, to use both together. Setting `CLUSTRIX_CONFIG_DIR` moves the first of those
 locations somewhere else, which matters in containers and CI images where
 `$HOME` is not writable or not persistent, on machines shared by several
 projects, and in tests -- without it, the widget's "Save" button writes into

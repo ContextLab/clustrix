@@ -242,7 +242,7 @@ def isolate_home():
 
 
 @pytest.fixture(autouse=True)
-def isolate_config_dir():
+def isolate_config_dir(isolate_home):
     """Point clustrix's config directory at a throwaway for the whole run.
 
     Function-scoped, not session-scoped. A single directory shared by the
@@ -258,17 +258,27 @@ def isolate_config_dir():
     it, and a stray test_config.yml dropped into the repository root. Tests
     that chdir into a tmpdir do not help, because the save path is derived
     from the config directory rather than the working directory.
+
+    It is ``$HOME/.clustrix`` inside the isolated home rather than a
+    directory of its own, because that is where a real user's configuration
+    directory is, and clustrix now tells the two apart: a config directory
+    named by ``CLUSTRIX_CONFIG_DIR`` *somewhere else* is not trusted to
+    choose which host receives a stored credential (see
+    ``clustrix.config.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR``). Pointing the
+    variable at an unrelated tmpdir made every test run in a configuration
+    no real user is in.
     """
-    with tempfile.TemporaryDirectory(prefix="clustrix-test-config-") as tmp:
-        previous = os.environ.get(CONFIG_DIR_ENV_VAR)
-        os.environ[CONFIG_DIR_ENV_VAR] = tmp
-        try:
-            yield tmp
-        finally:
-            if previous is None:
-                os.environ.pop(CONFIG_DIR_ENV_VAR, None)
-            else:
-                os.environ[CONFIG_DIR_ENV_VAR] = previous
+    tmp = str(pathlib.Path(isolate_home) / ".clustrix")
+    os.makedirs(tmp, mode=0o700, exist_ok=True)
+    previous = os.environ.get(CONFIG_DIR_ENV_VAR)
+    os.environ[CONFIG_DIR_ENV_VAR] = tmp
+    try:
+        yield tmp
+    finally:
+        if previous is None:
+            os.environ.pop(CONFIG_DIR_ENV_VAR, None)
+        else:
+            os.environ[CONFIG_DIR_ENV_VAR] = previous
 
 
 @pytest.fixture(autouse=True)
@@ -303,6 +313,15 @@ def reset_config():
     config_module._config = config_object
     for name, value in before.items():
         setattr(config_object, name, value)
+
+    # The record of which hostnames an untrusted configuration file has
+    # named is process-global and deliberately append-only -- a public "this
+    # host is fine now" call would be the laundering route it exists to
+    # close. It is still per-*process* state that one test can leave behind
+    # for another, exactly like the singleton above, so the fixture that
+    # already undoes process state reaches in and clears it. There is no
+    # production caller of this and there must not be one.
+    config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES.clear()
 
     # Lazily-created module singletons cache the config directory at the moment
     # they are first constructed. With a per-test config directory, one built

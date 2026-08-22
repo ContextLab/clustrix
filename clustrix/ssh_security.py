@@ -34,12 +34,25 @@ from typing import Optional
 import paramiko
 from paramiko.hostkeys import HostKeyEntry
 
-from .config import write_text_securely
+from .config import config_source_is_trusted, get_config_source, write_text_securely
 
 logger = logging.getLogger(__name__)
 
 #: The only values accepted for ``ClusterConfig.ssh_host_key_policy``.
 VALID_HOST_KEY_POLICIES = ("reject", "auto_add")
+
+#: The policy that *weakens* verification. Asking for the strict one is
+#: always allowed -- a claim of distrust costs nothing to believe -- but
+#: asking for this one turns host key checking off for a host, persistently
+#: and globally, and so is a security decision in exactly the sense a
+#: credential release is. See :func:`host_key_policy_name`.
+WEAKENING_HOST_KEY_POLICY = "auto_add"
+
+#: How OpenSSH spells each of those policies in ``StrictHostKeyChecking``.
+#: ``yes`` refuses a host whose key is not already in ``known_hosts``;
+#: ``accept-new`` trusts it on first contact and records it, which is what
+#: :class:`AppendUnknownHostKeyPolicy` does on the paramiko side.
+OPENSSH_STRICT_HOST_KEY_CHECKING = {"reject": "yes", "auto_add": "accept-new"}
 
 
 class HostKeyVerificationError(paramiko.SSHException):
@@ -215,6 +228,120 @@ def _load_known_hosts(client: paramiko.SSHClient) -> None:
         client.load_host_keys(str(user_known_hosts))
 
 
+def host_key_policy_name(config: Optional[object] = None) -> str:
+    """The validated ``ssh_host_key_policy`` that applies to ``config``.
+
+    Split out of :func:`configure_host_key_policy` because paramiko is not
+    the only thing in clustrix that opens an SSH connection:
+    ``ssh_utils.deploy_public_key`` shells out to ``ssh-copy-id``, and that
+    subprocess used to hardcode ``StrictHostKeyChecking=accept-new`` --
+    silently applying the deliberate opt-out to every user, including the
+    default ``reject``. Two readings of the same setting drift, so there is
+    one reading and both callers use it.
+
+    **A weakening may only come from a source the user chose.**
+    ``ssh_host_key_policy`` is an ordinary declared field, so a
+    ``./clustrix.yml`` in a cloned repository sets it as easily as it sets
+    ``cluster_host`` -- and setting it to ``auto_add`` is the whole of what
+    an attacker needs. Measured before this check existed, with a
+    working-directory file naming a host and ``ssh_host_key_policy:
+    auto_add`` and **no credential of any kind**: the credential gate
+    refused (``GATE REFUSES: True``) and ``deploy_public_key`` returned
+    ``True`` anyway, with the server logging two ``('victim',
+    'publickey')`` authentications -- an identity out of the user's
+    ``~/.ssh/config`` (see :func:`clustrix.ssh_utils.deploy_public_key`)
+    getting past a host key barrier this setting had removed.
+
+    The damage does not end with the process. ``auto_add`` *persists*:
+    that run wrote 8 entries into the user's global ``known_hosts``, and a
+    second, entirely fresh interpreter -- no attacker file present, the
+    default ``reject`` policy in force -- then found the attacker's host
+    already trusted for all three host key algorithms. Nothing clears
+    that.
+
+    So this follows the rule the provenance record already uses: a claim of
+    *distrust* is safe to believe from anybody, and a claim of *trust* is
+    what an attacker would write. ``reject`` is honoured whatever said it;
+    ``auto_add`` is honoured only from a configuration
+    :func:`clustrix.config.config_source_is_trusted` vouches for, and is
+    otherwise downgraded to ``reject`` with a warning naming the file. A
+    mapping carries no provenance record at all -- it is a bag of values,
+    not an object a loader stamped -- so it cannot license a weakening
+    either; that is the same fail-closed reading
+    :func:`clustrix.config.get_config_source` gives an object that lost its
+    stamp.
+
+    Args:
+        config: A ``ClusterConfig``, a mapping carrying an
+            ``"ssh_host_key_policy"`` key (the notebook widget hands its
+            configuration over as a dict), or ``None``. ``None`` and a
+            missing key both mean the secure default, ``"reject"``.
+
+    Raises:
+        ValueError: if the value is neither ``"reject"`` nor ``"auto_add"``.
+    """
+    if isinstance(config, Mapping):
+        policy_name = config.get("ssh_host_key_policy") or "reject"
+    else:
+        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
+    if policy_name not in VALID_HOST_KEY_POLICIES:
+        raise ValueError(
+            f"Invalid ssh_host_key_policy={policy_name!r}. "
+            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
+        )
+    if policy_name == WEAKENING_HOST_KEY_POLICY and not may_weaken_host_key_checking(
+        config
+    ):
+        logger.warning(
+            "Ignoring ssh_host_key_policy=%r for %r: turning host key "
+            "verification off is a security decision, and this "
+            "configuration did not come from anywhere you chose (its "
+            "provenance is %r). Host keys will be verified. If this really "
+            "is your own setting, move it into your clustrix configuration "
+            "directory, pass it to configure(), or name the file with "
+            "load_config(path).",
+            policy_name,
+            getattr(config, "cluster_host", None)
+            or (config.get("cluster_host") if isinstance(config, Mapping) else None),
+            (
+                "none (a mapping carries no provenance)"
+                if isinstance(config, Mapping)
+                else get_config_source(config)
+            ),
+        )
+        return "reject"
+    return policy_name
+
+
+def may_weaken_host_key_checking(config: Optional[object] = None) -> bool:
+    """Whether ``config`` is entitled to turn host key verification off.
+
+    Separate from :func:`host_key_policy_name` so that the question has a
+    name and can be asked about, and so the answer is one expression rather
+    than one per caller -- which is how ``ssh_host_key_policy`` came to be
+    obeyed by ``add_host_key``, by the ``ssh-copy-id`` subprocess and by
+    every paramiko connection without any of them asking who set it.
+
+    A mapping is refused because it has no provenance to read, not because
+    mappings are suspect: :func:`clustrix.config.config_source_is_trusted`
+    reads an attribute a loader stamps on a ``ClusterConfig``, and a dict
+    never went through one.
+    """
+    if config is None or isinstance(config, Mapping):
+        return False
+    return config_source_is_trusted(config)
+
+
+def openssh_strict_host_key_checking(config: Optional[object] = None) -> str:
+    """``StrictHostKeyChecking`` value for an OpenSSH subprocess.
+
+    The one translation of :func:`host_key_policy_name` into OpenSSH's
+    vocabulary, so a ``ssh``/``ssh-copy-id`` invocation cannot end up more
+    permissive than the paramiko connections beside it.
+    """
+    return OPENSSH_STRICT_HOST_KEY_CHECKING[host_key_policy_name(config)]
+
+
 def configure_host_key_policy(
     client: paramiko.SSHClient, config: Optional[object] = None
 ) -> None:
@@ -240,19 +367,7 @@ def configure_host_key_policy(
     """
     _load_known_hosts(client)
 
-    # The notebook widget carries its configuration as a plain dict rather
-    # than a ClusterConfig, so accept either. Reading it here keeps every
-    # call site on the one policy decision instead of each one inventing a
-    # way to hand its own shape over.
-    if isinstance(config, Mapping):
-        policy_name = config.get("ssh_host_key_policy") or "reject"
-    else:
-        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
-    if policy_name not in VALID_HOST_KEY_POLICIES:
-        raise ValueError(
-            f"Invalid ssh_host_key_policy={policy_name!r}. "
-            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
-        )
+    policy_name = host_key_policy_name(config)
 
     if policy_name == "auto_add":
         logger.warning(

@@ -9,7 +9,6 @@ For credential management, please use:
 - clustrix.cli_credentials for command-line credential management
 """
 
-import os
 import logging
 from typing import Dict, Optional
 
@@ -75,7 +74,7 @@ class SecureCredentialManager:
 
 
 class ValidationCredentials:
-    """HuggingFace credentials for external service validation, from the environment.
+    """HuggingFace credentials for external service validation.
 
     HuggingFace only. There used to be a ``get_ssh_credentials`` here that
     returned ``None`` unconditionally, which is worse than not having one:
@@ -85,11 +84,56 @@ class ValidationCredentials:
     """
 
     def __init__(self):
-        logger.info("Using environment variable fallback for validation credentials")
+        logger.info("Using the clustrix credential manager for validation credentials")
 
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
-        """Get HuggingFace credentials from environment variables."""
-        token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
-        if token:
-            return {"token": token, "username": os.getenv("HUGGINGFACE_USERNAME", "")}
-        return None
+        """Get HuggingFace credentials from every supported source.
+
+        This read ``os.environ`` directly, which worked only by accident:
+        some earlier lookup in the same process called ``load_dotenv`` and
+        exported ``~/.clustrix/.env`` into the environment, so a token that
+        lived *only* in that file appeared to be an environment variable.
+        Removing that process-wide export (issue #153) made the accident
+        visible as a regression -- ``tests/real_world/test_credential_access.py``
+        and ``scripts/debug_huggingface_auth.py`` both stopped finding a
+        token they were correctly configured to have.
+
+        Going through
+        :func:`clustrix.credential_release.release_credential` fixes it
+        properly rather than by re-exporting: that is the supported lookup,
+        it consults the environment *and* ``~/.clustrix/.env``, and it
+        honours the ``HUGGINGFACE_*``/``HF_*`` aliases from one table so the
+        two sources cannot disagree about which names count.
+
+        The recipient is ``huggingface.co``, and it is a
+        :meth:`~clustrix.credential_release.CredentialTarget.fixed_service`
+        because no configuration file can move it: unlike ``cluster_host``,
+        nothing untrusted can have chosen who receives this token.
+
+        That was not true while it was written here, and route 13b is why:
+        the *decision* named ``huggingface.co``, but every client built
+        around the released token was ``HfApi(token=...)`` with no
+        ``endpoint=``, which ``huggingface_hub`` fills in from
+        ``$HF_ENDPOINT``. An inherited environment variable chose where the
+        token actually went. It is true now because
+        :func:`clustrix.credential_release.huggingface_client_kwargs` pins
+        the client to the host the gate decided about.
+        """
+        from .credential_release import (
+            CredentialTarget,
+            describe_credential,
+            release_credential,
+        )
+
+        target = CredentialTarget.fixed_service(
+            "huggingface.co",
+            why="the HuggingFace Hub API, which is compiled in rather than configured",
+        )
+        release = release_credential(target, provider="huggingface")
+        if not release.token:
+            return None
+        return {
+            "token": release.token,
+            # Kept as "" rather than absent: every caller indexes it.
+            "username": describe_credential("huggingface").username,
+        }

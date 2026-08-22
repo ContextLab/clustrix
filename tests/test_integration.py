@@ -249,7 +249,15 @@ class TestIntegration:
         assert config.default_cores == 16
         assert config.default_memory == "32GB"
         assert config.module_loads == ["python/3.9", "gcc/11.2"]
-        assert config.environment_variables == {"OMP_NUM_THREADS": "16"}
+        # Rewritten, not relaxed. This asserted that OMP_NUM_THREADS came
+        # back, which encoded the rule that each environment_variables
+        # entry is judged by its key name -- the rule that let
+        # SSH_PASSPHRASE, GITHUB_PAT and a DATABASE_URL carrying a password
+        # through. Those names and values are the user's, so clustrix
+        # cannot classify them and no longer tries: the mapping is withheld
+        # from a default save and returns empty on load. Use
+        # save_to_file(include_secrets=True) to persist it deliberately.
+        assert config.environment_variables == {}
 
     def test_local_execution_fallback(self):
         """Test that functions execute locally when no cluster is configured."""

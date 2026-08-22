@@ -5,6 +5,19 @@ import sys
 from unittest.mock import Mock, patch, MagicMock
 import pytest
 
+try:  # The interpreter may be built without Tk; see TestGetPasswordGui.
+    import tkinter  # noqa: F401
+
+    TKINTER_AVAILABLE = True
+except ImportError:  # pragma: no cover - depends on the interpreter build
+    TKINTER_AVAILABLE = False
+
+from clustrix.config import (
+    CONFIG_SOURCE_WORKING_DIRECTORY,
+    ClusterConfig,
+    record_discovered_hostname,
+)
+from clustrix.credential_release import CredentialTarget
 from clustrix.auth_fallbacks import (
     detect_environment,
     get_password_gui,
@@ -75,7 +88,32 @@ except Exception:  # pragma: no cover - depends on how CPython was built
     reason="this interpreter has no _tkinter, so tkinter.Tk cannot be patched",
 )
 class TestGetPasswordGui:
-    """Test GUI password retrieval."""
+    """Test GUI password retrieval.
+
+    ``@patch("tkinter.Tk")`` has to *import* tkinter to patch it, so on a
+    Python built without Tk -- which is ordinary: the Homebrew and
+    python.org builds differ on it, and slim container images drop it --
+    these hard-failed with ``ModuleNotFoundError`` instead of skipping. The
+    code under test imports tkinter lazily inside the function and falls
+    back to the ipywidgets prompt on ``ImportError``, so it degrades
+    gracefully on exactly the interpreters where its tests did not. The
+    third test below covers that fallback and does not need Tk itself, but
+    it patches ``tkinter.Tk`` to *raise* ImportError, which still requires
+    the module to be importable.
+
+    ``pytest.importorskip`` in the class body would skip the whole *module*
+    -- 31 unrelated tests -- because the Skipped it raises escapes during
+    collection of the file. A class-scoped ``pytestmark`` skips these three
+    and nothing else. The probe is a real import rather than
+    ``find_spec("tkinter")``: the package directory is present on an
+    interpreter built without Tk, and it is the ``_tkinter`` extension
+    underneath it that is missing, so only actually importing it answers the
+    question -- which is the same thing the code under test does.
+    """
+
+    pytestmark = pytest.mark.skipif(
+        not TKINTER_AVAILABLE, reason="Python built without Tk (tkinter)"
+    )
 
     @patch("tkinter.Tk")
     @patch("tkinter.simpledialog.askstring")
@@ -165,6 +203,15 @@ class TestGetPasswordWidget:
         assert result is None
 
 
+def _a_target(hostname="example.com", username="testuser"):
+    """The recipient every one of these calls now has to name."""
+    return CredentialTarget(
+        hostname=hostname,
+        username=username,
+        described_as=f"{hostname}, in a test",
+    )
+
+
 class TestGetClusterPassword:
     """Test cluster password retrieval."""
 
@@ -175,7 +222,7 @@ class TestGetClusterPassword:
 
         mock_userdata = Mock()
         mock_userdata.get.side_effect = lambda key: {
-            "CLUSTER_PASSWORD_example.com": "colab_password"
+            "CLUSTER_PASSWORD_EXAMPLE_COM": "colab_password"
         }.get(key)
 
         # Create a mock colab module
@@ -189,7 +236,7 @@ class TestGetClusterPassword:
         with patch.dict(
             sys.modules, {"google": mock_google, "google.colab": mock_colab}
         ):
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result == "colab_password"
 
@@ -223,7 +270,7 @@ class TestGetClusterPassword:
         with patch.dict(
             sys.modules, {"google": mock_google, "google.colab": mock_colab}
         ):
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result == "found_password"
 
@@ -236,7 +283,7 @@ class TestGetClusterPassword:
         with patch.dict(sys.modules, {}, clear=False):
             if "google.colab" in sys.modules:
                 del sys.modules["google.colab"]
-            result = get_cluster_password("example.com", "testuser")
+            result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -246,7 +293,7 @@ class TestGetClusterPassword:
         """Test password retrieval from environment variables."""
         mock_detect.return_value = "cli"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "env_password"
 
@@ -257,7 +304,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "notebook"
         mock_gui.return_value = "gui_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "gui_password"
         mock_gui.assert_called_once_with("Password for testuser@example.com")
@@ -273,7 +320,7 @@ class TestGetClusterPassword:
         mock_gui.return_value = None
         mock_widget.return_value = "widget_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "widget_password"
         mock_widget.assert_called_once_with("Password for testuser@example.com")
@@ -285,7 +332,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.return_value = "cli_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "cli_password"
         mock_getpass.assert_called_once_with("Password for testuser@example.com: ")
@@ -299,7 +346,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.side_effect = KeyboardInterrupt()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -310,7 +357,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "cli"
         mock_getpass.side_effect = EOFError()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -321,7 +368,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "script"
         mock_input.return_value = "script_password"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result == "script_password"
         mock_input.assert_called_once_with("Password for testuser@example.com: ")
@@ -335,7 +382,7 @@ class TestGetClusterPassword:
         mock_detect.return_value = "script"
         mock_input.side_effect = KeyboardInterrupt()
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 
@@ -344,7 +391,7 @@ class TestGetClusterPassword:
         """Test password retrieval in unknown environment."""
         mock_detect.return_value = "unknown"
 
-        result = get_cluster_password("example.com", "testuser")
+        result = get_cluster_password(_a_target())
 
         assert result is None
 

@@ -15,7 +15,9 @@ import pytest
 
 pytest.importorskip("ipywidgets")
 
-from clustrix.config import ClusterConfig  # noqa: E402
+from dataclasses import asdict  # noqa: E402
+
+from clustrix.config import ClusterConfig, configure  # noqa: E402
 from clustrix.modern_notebook_widget import ModernClustrixWidget  # noqa: E402
 from clustrix.profile_manager import ProfileManager  # noqa: E402
 
@@ -36,7 +38,7 @@ def isolated_profile_store(tmp_path, monkeypatch):
     # the package. Now it is true everywhere.
     from clustrix.config import get_config
 
-    get_config().__dict__.update(ClusterConfig().__dict__)
+    configure(**asdict(ClusterConfig()))
 
 
 def _profile_manager_init(directory):

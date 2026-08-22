@@ -92,18 +92,30 @@ class TestWhatReachesDisk:
         for name, entry in saved.items():
             assert "password" not in entry, name
 
-    def test_a_secret_inside_environment_variables_is_dropped(self):
-        """The field name is innocuous; the entries inside it are not."""
+    def test_environment_variables_are_withheld_whole(self):
+        """The field name is innocuous and the entries cannot be judged.
+
+        **Rewritten, not relaxed.** This used to assert that
+        ``OMP_NUM_THREADS`` survived while ``AWS_SECRET_ACCESS_KEY`` was
+        dropped -- i.e. that each entry is judged by its key name. Measured
+        against user-chosen names that rule fails: ``SSH_PASSPHRASE`` and
+        ``GITHUB_PAT`` match nothing, a ``DATABASE_URL`` carries its
+        password where no key name can see it, and ``USE_PASSWORD`` was
+        *exempted* by the ``^use_`` rule written for the boolean field
+        ``use_env_password``. Both the names and the values here are the
+        user's, so clustrix cannot classify them and no longer guesses.
+        ``tests/unit/test_widget_save_withholds_unnamed_secrets.py`` is the
+        value-level proof.
+        """
         widget = _configured_widget()
         widget.env_vars_field.value = (
-            '{"OMP_NUM_THREADS": "4", "AWS_SECRET_ACCESS_KEY": "<redacted>"}'
+            '{"OMP_NUM_THREADS": "4", "SSH_PASSPHRASE": "<redacted>"}'
         )
         widget.configs = {"with-credentials": widget._save_config_from_widgets()}
 
         _save(widget, "envvars.yml")
 
-        env_vars = _saved("envvars.yml")["environment_variables"]
-        assert env_vars == {"OMP_NUM_THREADS": "4"}
+        assert "environment_variables" not in _saved("envvars.yml")
 
     def test_the_ordinary_settings_still_round_trip(self):
         """The redaction must not be a general loss of the user's work."""
@@ -170,11 +182,30 @@ class TestTheDroppedKeyDiff:
     def test_a_removed_field_is_named(self):
         assert _dropped_keys({"a": 1, "password": "x"}, {"a": 1}) == {"password"}
 
-    def test_a_removed_mapping_entry_is_named(self):
-        before = {"environment_variables": {"OMP_NUM_THREADS": "4", "API_KEY": "x"}}
-        after = {"environment_variables": {"OMP_NUM_THREADS": "4"}}
+    def test_a_removed_mapping_is_named_by_its_field(self):
+        """Rewritten: entries are no longer filtered one at a time.
 
-        assert _dropped_keys(before, after) == {"API_KEY"}
+        This asserted that ``API_KEY`` was named individually, which only
+        made sense while ``environment_variables`` was being filtered entry
+        by entry on key names. The whole mapping is withheld now, so the
+        field is what the user has to be told about.
+        """
+        before = {"environment_variables": {"OMP_NUM_THREADS": "4", "API_KEY": "x"}}
+        after: dict = {}
+
+        assert _dropped_keys(before, after) == {"environment_variables"}
+
+    def test_a_key_the_format_does_not_define_is_named(self):
+        """The widget carries whatever a loaded file contained.
+
+        Those keys are dropped by the allowlist, and dropping something the
+        user can see in their file without saying so is the surprise this
+        notice exists to prevent.
+        """
+        before = {"cluster_type": "ssh", "aws_secret_access_key": "x"}
+        after = {"cluster_type": "ssh"}
+
+        assert _dropped_keys(before, after) == {"aws_secret_access_key"}
 
     def test_nothing_removed_is_reported_as_nothing(self):
         assert _dropped_keys({"a": 1}, {"a": 1}) == set()

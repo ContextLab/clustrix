@@ -242,13 +242,52 @@ class GitHubActionsCredentialSource(CredentialSource):
 class FlexibleCredentialManager:
     """Main credential manager with automatic .env file creation and multiple sources."""
 
+    #: Where the sources actually live. Name-mangled rather than merely
+    #: underscored because the readable name is a *property* with a frame
+    #: check on it, and a check whose storage sits beside it under an
+    #: equally guessable name is decoration.
+    __sources: List[CredentialSource]
+
+    @property
+    def _sources(self) -> List[CredentialSource]:
+        """The configured credential sources. Store-internal.
+
+        A secret-bearing surface in its own right: every element answers
+        ``get_credentials(provider)`` with the password in it, and these
+        particular elements are the ones pointing at ``~/.clustrix/.env``,
+        so reaching them is reaching the file without having to know where
+        it is. ``get_credential_manager()._sources[0].get_credentials("ssh")``
+        returned the password with no recipient named and no frame judged --
+        which is the same door ``_stored_credential`` was, and an underscore
+        was already found to be an insufficient lock for that one.
+
+        So the same lock: :func:`clustrix.credential_release.assert_called_from`,
+        which admits only :data:`~clustrix.credential_release.SOURCE_READERS`
+        of this module. It is always on and makes no reference to tests.
+        Constructing a :class:`DotEnvCredentialSource` over a path of your
+        own is untouched and is not a bypass -- a caller that already holds
+        the path can read the file with ``open``. What this guards is the
+        *manager's* list.
+        """
+        from .credential_release import SOURCE_READERS, STORE_MODULE, assert_called_from
+
+        assert_called_from(STORE_MODULE, SOURCE_READERS)
+        return self.__sources
+
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize credential manager with automatic setup."""
         self.config_dir = config_dir or get_config_dir()
         self.env_file = self.config_dir / ".env"
 
-        # Initialize credential sources in priority order
-        self.sources = [
+        # The credential sources, in priority order. **Private**, because a
+        # source is a store: ``mgr.sources[0].get_credentials("ssh")``
+        # returned the password with no recipient named and no gate
+        # consulted, which is the whole defect
+        # ``_ensure_credential_unchecked`` was privatised to close. Making
+        # the *method* private while leaving the objects it reads reachable
+        # through a public attribute closed the door and left the window
+        # open.
+        self.__sources = [
             DotEnvCredentialSource(self.env_file),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
@@ -319,67 +358,37 @@ class FlexibleCredentialManager:
 # 5. Use 'clustrix credentials edit' to safely edit this file
 """
 
-    def load_credentials_optional(
-        self, provider: Optional[str] = None
-    ) -> Dict[str, Dict[str, str]]:
-        """Load available credentials from all sources.
+    def _ensure_credential_unchecked(self, provider: str) -> Optional[Dict[str, str]]:
+        """The stored credential for ``provider``, secrets and all.
 
-        Args:
-            provider: Specific provider to load, or None for all providers
+        **Unchecked** is the whole name: this returns the bytes with no idea
+        who is about to receive them. Deciding that is
+        :func:`clustrix.credential_release.release_credential`, whose first
+        positional parameter is the recipient, and this raises for anybody
+        else -- see :func:`clustrix.credential_release.assert_called_from`.
 
-        Returns:
-            Dictionary mapping provider names to their credentials
+        The guard is always on. It makes no reference to tests and behaves
+        identically whether or not pytest is running, so it is a fact about
+        which module may obtain a secret rather than production code knowing
+        it is under test. It costs one frame lookup on a path that already
+        reads a file off disk, and it means an eighth route written the old
+        way raises on its first run rather than at review.
+
+        This used to be ``ensure_credential``, public, with a module-level
+        convenience function beside it. Both were how a caller obtained the
+        cluster password without saying who for.
         """
-        credentials = {}
+        from .credential_release import (
+            GATE_MODULE,
+            STORE_CALLERS,
+            assert_called_from,
+        )
 
-        if provider:
-            # Load credentials for specific provider
-            for source in self.sources:
-                try:
-                    creds = source.get_credentials(provider)
-                    if creds:
-                        credentials[provider] = creds
-                        logger.debug(
-                            f"Loaded {provider} credentials from {source.__class__.__name__}"
-                        )
-                        break  # Use first successful source
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to load {provider} from {source.__class__.__name__}: {e}"
-                    )
-        else:
-            # Load all available credentials
-            all_providers = ["ssh", "huggingface"]
+        assert_called_from(GATE_MODULE, STORE_CALLERS)
 
-            for prov in all_providers:
-                for source in self.sources:
-                    try:
-                        creds = source.get_credentials(prov)
-                        if creds and prov not in credentials:
-                            credentials[prov] = creds
-                            logger.debug(
-                                f"Loaded {prov} credentials from {source.__class__.__name__}"
-                            )
-                            break  # Use first successful source
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to load {prov} from {source.__class__.__name__}: {e}"
-                        )
-
-        return credentials
-
-    def ensure_credential(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials for a specific provider with detailed feedback.
-
-        Args:
-            provider: Provider name (ssh, huggingface, local)
-
-        Returns:
-            Credentials dictionary or None if not available
-        """
         logger.debug(f"Looking up {provider} credentials...")
 
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
 
             try:
@@ -422,10 +431,41 @@ class FlexibleCredentialManager:
         missing = []
 
         for provider in required:
-            if not self.ensure_credential(provider):
+            if not self._configured_fields(provider)[1]:
                 missing.append(provider)
 
         return missing
+
+    def _configured_fields(self, provider: str) -> tuple:
+        """``(source name, field names)`` for ``provider``; no values.
+
+        "Is something configured, and where did it come from" never needed
+        the secret, so the status paths ask this instead of the gate. Field
+        *names* only -- ``["host", "username", "password"]`` says a password
+        is configured without being one.
+        """
+        for source in self._sources:
+            try:
+                if not source.is_available():
+                    continue
+                credentials = source.get_credentials(provider)
+                if credentials:
+                    return source.__class__.__name__, sorted(credentials)
+            except Exception as e:
+                # Log and continue: this loop only attributes credentials to
+                # a source, so a source that blows up mid-attribution leaves
+                # "no credentials" -- which later checks report properly.
+                # Saying which source blew up is the difference between a
+                # diagnosable status report and a shrug.
+                logger.warning(
+                    "Credential source %s failed while attributing %s "
+                    "credentials (%s).",
+                    source.__class__.__name__,
+                    provider,
+                    e,
+                )
+                continue
+        return None, []
 
     def list_available_providers(self) -> Dict[str, str]:
         """List all providers with available credentials and their sources.
@@ -436,7 +476,7 @@ class FlexibleCredentialManager:
         available = {}
 
         for provider in ["ssh", "huggingface"]:
-            for source in self.sources:
+            for source in self._sources:
                 try:
                     if source.is_available() and source.get_credentials(provider):
                         available[provider] = source.__class__.__name__
@@ -475,7 +515,7 @@ class FlexibleCredentialManager:
         }
 
         # Check each source
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
             try:
                 source_status: Dict[str, Any] = {
@@ -491,51 +531,21 @@ class FlexibleCredentialManager:
                 }
                 status["sources"][source_name] = error_status
 
-        # Check each provider
+        # Check each provider. Field *names* and the source that answered --
+        # never a value, because this is printed by a status command.
         providers = [
             "ssh",
             "huggingface",
             "local",
         ]
         for provider in providers:
-            credentials = self.ensure_credential(provider)
-            if credentials:
-                # Find which source provided the credentials
-                source_name = "unknown"
-                for source in self.sources:
-                    try:
-                        if source.is_available() and source.get_credentials(provider):
-                            source_name = source.__class__.__name__
-                            break
-                    except Exception as e:
-                        # Log and continue: the credentials are already in
-                        # hand, so this loop only attributes them to a source
-                        # and "unknown" remains a correct answer. Saying which
-                        # source blew up on the way to that answer is the
-                        # difference between a diagnosable status report and a
-                        # shrug.
-                        logger.warning(
-                            "Credential source %s failed while attributing %s "
-                            "credentials (%s).",
-                            source.__class__.__name__,
-                            provider,
-                            e,
-                        )
-                        continue
-
-                provider_status: Dict[str, Any] = {
-                    "available": True,
-                    "source": source_name,
-                    "fields": list(credentials.keys()),
-                }
-                status["providers"][provider] = provider_status
-            else:
-                empty_status: Dict[str, Any] = {
-                    "available": False,
-                    "source": None,
-                    "fields": [],
-                }
-                status["providers"][provider] = empty_status
+            source_name, field_names = self._configured_fields(provider)
+            provider_status: Dict[str, Any] = {
+                "available": bool(field_names),
+                "source": source_name if field_names else None,
+                "fields": field_names,
+            }
+            status["providers"][provider] = provider_status
 
         return status
 
@@ -553,20 +563,6 @@ def get_credential_manager() -> FlexibleCredentialManager:
 
 
 # Convenience functions for common credential operations
-def load_credentials_optional(
-    provider: Optional[str] = None,
-) -> Dict[str, Dict[str, str]]:
-    """Load available credentials from all sources."""
-    manager = get_credential_manager()
-    return manager.load_credentials_optional(provider)
-
-
-def ensure_credential(provider: str) -> Optional[Dict[str, str]]:
-    """Get credentials for a specific provider with fallbacks."""
-    manager = get_credential_manager()
-    return manager.ensure_credential(provider)
-
-
 def get_missing_providers(required: List[str]) -> List[str]:
     """Identify which required providers are missing credentials."""
     manager = get_credential_manager()

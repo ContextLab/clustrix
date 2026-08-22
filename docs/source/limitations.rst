@@ -689,7 +689,12 @@ What to do about it on Windows:
       icacls "%USERPROFILE%\.clustrix" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"
 
   Set ``CLUSTRIX_CONFIG_DIR`` if you want that directory to be somewhere other
-  than ``%USERPROFILE%\.clustrix``.
+  than ``%USERPROFILE%\.clustrix``. Note that a config directory named by that
+  variable is not trusted to choose which host receives a *stored* credential,
+  and neither is a ``profiles.yml`` found under it -- see :ref:`the search
+  order <configuration>`. When you move it, authorise the host by setting
+  ``SSH_HOST`` in the credential file; handing the same hostname back through
+  ``configure`` or ``load_config`` does not lift the refusal.
 * Treat a saved clustrix config on Windows as you would any other unprotected
   file: do not put it on a shared drive, and do not commit it.
 

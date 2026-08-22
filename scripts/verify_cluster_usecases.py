@@ -52,7 +52,6 @@ from clustrix import cluster, configure  # noqa: E402
 from clustrix.config import (  # noqa: E402
     ClusterConfig,
     SECRET_FIELDS,
-    _config,
     get_config,
 )
 from mypkg.mathutils import SCALE, Widget, triple  # noqa: E402
@@ -683,7 +682,7 @@ def run_target(key: str, case_names: List[str]) -> Dict[str, Any]:
     print(f"TARGET: {label}")
     print("=" * 78)
 
-    _config.__dict__.update(ClusterConfig().__dict__)
+    configure(**asdict(ClusterConfig()))
     try:
         where = setup()
     except Exception as e:  # noqa: BLE001

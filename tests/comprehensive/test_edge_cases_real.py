@@ -926,15 +926,38 @@ class TestPlatformSpecificEdgeCases:
         assert result_cr["line_count"] >= 1
 
 
+def _run_every_test_method(test_class):
+    """Run every ``test_*`` method on ``test_class``; return what failed.
+
+    Extracted from the aggregate below so that the aggregate's own reporting
+    can be exercised against a method that really fails -- see
+    ``test_the_suite_runner_reports_a_failing_method``. Without that, a
+    runner that silently counts nothing looks exactly like a passing suite.
+    """
+    failures = []
+    passed = 0
+    for method_name in sorted(
+        name for name in dir(test_class) if name.startswith("test_")
+    ):
+        try:
+            getattr(test_class, method_name)()
+        except Exception as exc:
+            failures.append((method_name, f"{type(exc).__name__}: {exc}"))
+        else:
+            passed += 1
+    return passed, failures
+
+
 def test_comprehensive_edge_case_suite():
-    """
-    Run comprehensive edge case test suite.
+    """Every edge-case class in this module, run as one aggregate.
 
-    This validates clustrix behavior across numerous edge cases.
+    **This used to be a test that could not fail.** It caught every
+    exception, counted them, and finished with ``return total_failed == 0``.
+    pytest reports a *returned value* as a pass -- the return value is not
+    an assertion and is never inspected -- so the function reported green
+    with any number of broken edge cases behind it, and it is in the CI
+    selection. It asserts now, and names every failure.
     """
-    print("🔍 Running Comprehensive Edge Case Test Suite")
-    print("=" * 60)
-
     test_categories = {
         "Serialization": TestSerializationEdgeCases(),
         "Resource Limits": TestResourceLimitEdgeCases(),
@@ -944,63 +967,43 @@ def test_comprehensive_edge_case_suite():
         "Platform Specific": TestPlatformSpecificEdgeCases(),
     }
 
-    results = {}
-
+    total_passed = 0
+    reported = []
     for category_name, test_class in test_categories.items():
-        print(f"\n📋 Testing {category_name} Edge Cases...")
-
-        passed = 0
-        failed = 0
-
-        # Get all test methods
-        test_methods = [
-            method for method in dir(test_class) if method.startswith("test_")
+        passed, failures = _run_every_test_method(test_class)
+        total_passed += passed
+        reported += [
+            f"{category_name}.{method}: {reason}" for method, reason in failures
         ]
 
-        for method_name in test_methods:
-            try:
-                method = getattr(test_class, method_name)
-                print(f"  • {method_name}...", end=" ")
+    assert total_passed > 0, "no edge-case methods ran at all"
+    assert not reported, "edge cases are not handled correctly:\n  " + "\n  ".join(
+        reported
+    )
 
-                method()
 
-                print("✅")
-                passed += 1
+def test_the_suite_runner_reports_a_failing_method():
+    """The aggregate above is only worth anything if a failure reaches it.
 
-            except Exception as e:
-                print(f"❌ ({e})")
-                failed += 1
+    A runner that swallows exceptions and reports nothing is
+    indistinguishable from a passing suite, which is precisely the state
+    this file was in.
+    """
 
-        results[category_name] = {
-            "passed": passed,
-            "failed": failed,
-            "total": passed + failed,
-        }
+    class OneBroken:
+        def test_fine(self):
+            pass
 
-    # Print summary
-    print("\n" + "=" * 60)
-    print("EDGE CASE TEST SUMMARY")
-    print("=" * 60)
+        def test_broken(self):
+            raise ValueError("deliberate")
 
-    total_passed = sum(r["passed"] for r in results.values())
-    total_failed = sum(r["failed"] for r in results.values())
-    total_tests = sum(r["total"] for r in results.values())
+    passed, failures = _run_every_test_method(OneBroken())
 
-    for category, result in results.items():
-        status = "✅" if result["failed"] == 0 else "⚠️"
-        print(f"{status} {category}: {result['passed']}/{result['total']} passed")
-
-    print(f"\n📊 Overall: {total_passed}/{total_tests} passed")
-
-    if total_failed == 0:
-        print("✨ All edge cases handled correctly!")
-    else:
-        print(f"⚠️  {total_failed} edge cases need attention")
-
-    return total_failed == 0
+    assert passed == 1
+    assert failures == [("test_broken", "ValueError: deliberate")]
 
 
 if __name__ == "__main__":
-    # Run comprehensive test suite
-    success = test_comprehensive_edge_case_suite()
-    sys.exit(0 if success else 1)
+    import pytest as _pytest
+
+    raise SystemExit(_pytest.main([__file__, "-v"]))

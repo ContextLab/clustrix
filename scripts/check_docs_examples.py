@@ -64,10 +64,41 @@ Inside a docstring, three things count as a Python example:
   than coverage. Write ``.. code-block:: python`` to have any other block
   checked.
 
-Known limit: expected doctest output (the ``want`` after a ``>>>`` line) is
-not compared. Blocks are executed and must not raise, which is the same
-contract every ``.rst`` block is held to. Use ``python -m doctest <file>`` to
-check the outputs themselves.
+Notebooks under ``docs/source`` are published documentation too -- nbsphinx
+renders them into the same site -- and until #166 not one of their cells was
+looked at. They are discovered by the same walk that finds the ``.rst`` and
+``.md`` files, so a notebook added tomorrow is covered tomorrow, and each one
+is handled as a unit:
+
+- Every ordinary code cell is compiled, and every module/name it imports is
+  checked against the real installed package, exactly as an ``.rst`` block is.
+  Keyword arguments passed to ``clustrix`` callables are checked against the
+  real package too, which is what catches a parameter the package has since
+  removed (``@cluster(queue=...)``, #158).
+- A notebook is executed end to end, in a clean kernel, only when it is
+  genuinely self-contained: no cell marked ``# cluster-required``, and no
+  unmarked cell that would reach a real host or a paid provider. Anything else
+  is verified statically and never run.
+- An unmarked cell that *would* reach a host is a failure, not a silent skip.
+  Marking it ``# cluster-required`` -- the same convention the ``.rst`` blocks
+  use -- is the fix.
+
+Known limits, stated rather than papered over:
+
+- Expected doctest output (the ``want`` after a ``>>>`` line) is not compared.
+  Blocks are executed and must not raise, which is the same contract every
+  ``.rst`` block is held to. Use ``python -m doctest <file>`` to check the
+  outputs themselves.
+- A notebook's stored output is compared to a fresh run by *shape*, not by
+  text: stored tracebacks, an execution-count sequence that is not one clean
+  top-to-bottom run, and a change in which kinds of output a cell produces all
+  fail. The literal text is not compared, because timings, hostnames, temp
+  paths, ``os.cpu_count()``, ``multiprocessing.get_start_method()`` and object
+  addresses all legitimately differ between two correct runs on two machines,
+  and masking the numbers still leaves ``Darwin``/``Linux`` and
+  ``spawn``/``fork`` differing. A check that fails on a correct notebook gets
+  switched off, and this project already has three guards that were disabled
+  or worked around because they misfired.
 
 Usage::
 
@@ -106,12 +137,23 @@ class CodeBlock:
     source_file: Path
     line_no: int
     content: str
+    #: Notebook cells are addressed by cell index, not by line number.
+    cell_index: Optional[int] = None
+    #: Anything the extractor had to do to the source to make it Python --
+    #: stripping an IPython magic, say. Reported, never hidden.
+    note: str = ""
+
+    @property
+    def where(self) -> str:
+        if self.cell_index is not None:
+            return f"cell {self.cell_index}"
+        return f"line {self.line_no}"
 
 
 @dataclass
 class TargetFile:
     path: Path
-    kind: str  # "md", "rst" or "py" (docstrings)
+    kind: str  # "md", "rst", "ipynb" or "py" (docstrings)
     section_start: Optional[str] = None  # restrict extraction to a section
     section_end: Optional[str] = None
     module: Optional[str] = None  # importable name, for kind == "py"
@@ -124,7 +166,7 @@ class TargetFile:
 @dataclass
 class Result:
     block: CodeBlock
-    mode: str  # "runnable" or "cluster-required"
+    mode: str  # "runnable", "cluster-required" or "output"
     passed: bool
     detail: str = ""
 
@@ -291,6 +333,8 @@ def extract_blocks(target: TargetFile) -> List[CodeBlock]:
         return extract_markdown_blocks(target)
     if target.kind == "py":
         return extract_docstring_blocks(target)
+    if target.kind == "ipynb":
+        return extract_notebook_blocks(target)
     return extract_rst_blocks(target)
 
 
@@ -312,16 +356,16 @@ def _is_ours(module_name: str) -> bool:
     return module_name == "clustrix" or module_name.startswith("clustrix.")
 
 
-def verify_static(block: CodeBlock) -> Result:
+def verify_static(block: CodeBlock, mode: str = "cluster-required") -> Result:
     try:
         compile(block.content, f"{block.source_file}:{block.line_no}", "exec")
     except SyntaxError as e:
-        return Result(block, "cluster-required", False, f"SyntaxError: {e}")
+        return Result(block, mode, False, f"SyntaxError: {e}")
 
     try:
         tree = ast.parse(block.content)
     except SyntaxError as e:
-        return Result(block, "cluster-required", False, f"SyntaxError: {e}")
+        return Result(block, mode, False, f"SyntaxError: {e}")
 
     problems = []
     skipped = []
@@ -363,12 +407,129 @@ def verify_static(block: CodeBlock) -> Result:
                         f"{alias.name!r} does not exist on {module_name}"
                     )
 
+    problems.extend(check_clustrix_call_keywords(tree))
+
     if problems:
-        return Result(block, "cluster-required", False, "; ".join(problems))
+        return Result(block, mode, False, "; ".join(problems))
     detail = "syntax + imports OK (not executed)"
     if skipped:
         detail += f"; not installed here, unchecked: {', '.join(sorted(set(skipped)))}"
-    return Result(block, "cluster-required", True, detail)
+    if block.note:
+        detail += f"; {block.note}"
+    return Result(block, mode, True, detail)
+
+
+# ---------------------------------------------------------------------------
+# Keyword-argument verification against the real package
+# ---------------------------------------------------------------------------
+
+#: ``@cluster`` and ``configure`` both take ``**kwargs``, so a keyword the
+#: package has removed is not a ``TypeError`` -- it is accepted and quietly
+#: does nothing (``@cluster(queue=...)``, #158) or is rejected by a validator
+#: (``configure``). Neither shows up in a signature, so the checker asks the
+#: real package instead of keeping its own copy of the answer: it replays the
+#: call site's keyword *names* against the installed clustrix and reports
+#: whatever clustrix says about them. No mock, no second source of truth.
+_CLUSTRIX_KEYWORD_PROBES = ("cluster", "configure")
+
+
+def _called_name(func: ast.expr) -> Optional[str]:
+    """The trailing identifier of a call target: ``a.b.c(...)`` -> ``"c"``."""
+    if isinstance(func, ast.Name):
+        return func.id
+    if isinstance(func, ast.Attribute):
+        return func.attr
+    return None
+
+
+def _probe_cluster_keywords(names: List[str]) -> List[str]:
+    """Ask the real ``@cluster`` which of these keyword names it recognises."""
+    import logging
+
+    import clustrix
+
+    captured: List[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record):  # pragma: no cover - trivial
+            captured.append(record.getMessage())
+
+    def _probe():
+        return None
+
+    # The probe calls a trivial local function, never the example's own code,
+    # and it does so with the configuration pinned to local execution. Without
+    # the pin it inherited whatever the surrounding page had already
+    # configured -- and on ``ssh_setup.rst`` that was a real host, so the
+    # keyword check opened an SSH connection. Pin, probe, restore.
+    from clustrix.config import configure, get_config
+
+    config = get_config()
+    saved = (config.cluster_type, config.cluster_host)
+    handler = _Capture()
+    logger = logging.getLogger("clustrix")
+    previous_level = logger.level
+    logger.addHandler(handler)
+    logger.setLevel(logging.WARNING)
+    try:
+        configure(cluster_type="local", cluster_host=None)
+        clustrix.cluster(**{name: None for name in names})(_probe)()
+    except TypeError as exc:
+        return [f"@cluster({', '.join(names)}): {exc}"]
+    finally:
+        configure(cluster_type=saved[0], cluster_host=saved[1])
+        logger.removeHandler(handler)
+        logger.setLevel(previous_level)
+
+    # Only the unrecognised-option report. clustrix has other "has no effect"
+    # warnings -- a stale ``default_queue`` in the developer's own config file
+    # emits one -- and reporting those here would blame the documentation for
+    # the machine it was checked on.
+    return [message for message in captured if "unrecognised option" in message]
+
+
+def _probe_configure_keywords(names: List[str]) -> List[str]:
+    """Ask the real ``configure()`` which of these keyword names it accepts.
+
+    Each name is replayed with the value the live config already holds, so a
+    name clustrix accepts is a no-op write and a name it does not accept
+    raises exactly the error a reader running the cell would see.
+    """
+    from clustrix.config import configure, get_config
+
+    config = get_config()
+    problems = []
+    for name in names:
+        try:
+            configure(**{name: getattr(config, name, None)})
+        except Exception as exc:
+            problems.append(f"configure({name}=...): {exc}")
+    return problems
+
+
+def check_clustrix_call_keywords(tree: ast.AST) -> List[str]:
+    """Every keyword a call site passes to a clustrix callable, verified.
+
+    Only calls whose trailing identifier names a real clustrix callable are
+    probed; the resolution is deliberately by name, because that is how a
+    reader reads the page -- ``@cluster(...)`` means clustrix's decorator on
+    every documentation page in this repository.
+    """
+    problems: List[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _called_name(node.func)
+        if name not in _CLUSTRIX_KEYWORD_PROBES:
+            continue
+        keywords = [kw.arg for kw in node.keywords if kw.arg is not None]
+        if not keywords:
+            continue
+        if name == "cluster":
+            problems.extend(_probe_cluster_keywords(keywords))
+        else:
+            problems.extend(_probe_configure_keywords(keywords))
+    return problems
 
 
 # ---------------------------------------------------------------------------
@@ -443,13 +604,491 @@ def run_block(block: CodeBlock, namespace: dict, scratch_dir: Path) -> Result:
 
 
 # ---------------------------------------------------------------------------
+# Notebooks
+# ---------------------------------------------------------------------------
+
+
+#: A notebook cell gets the same budget a prose example does, times four: a
+#: tutorial cell legitimately runs a benchmark. The subprocess timeout around
+#: the whole file is still the guarantee -- see FILE_TIMEOUT_SECONDS.
+NOTEBOOK_CELL_TIMEOUT_SECONDS = 120
+
+#: Whole-notebook budget. Larger than FILE_TIMEOUT_SECONDS because a notebook
+#: is many cells and one of them is allowed to be a benchmark.
+NOTEBOOK_TIMEOUT_SECONDS = 600
+
+#: The kernel is named and built here rather than borrowed from whatever
+#: ``python3`` kernelspec happens to be installed. Borrowing it ran the
+#: notebooks against an interpreter that did not have clustrix at all, and
+#: every cell "failed" with ModuleNotFoundError -- a checker that reports a
+#: broken environment as broken documentation is worse than no checker.
+NOTEBOOK_KERNEL_NAME = "clustrix-docs-check"
+
+CELL_MAGIC_RE = re.compile(r"^\s*%%(\S+)")
+LINE_MAGIC_RE = re.compile(r"^(\s*)[%!]\S.*$")
+
+#: Cell magics whose body clustrix itself runs as Python (see
+#: ``notebook_magic_core.remote``), so the body is real, checkable code.
+CLUSTRIX_CELL_MAGICS = {"remote", "clusterfy"}
+
+#: Calls that reach a real machine or a paid provider the moment they run. A
+#: cell containing one is never executed; it must be marked
+#: ``# cluster-required`` so that its intent is on the page, not inferred.
+#:
+#: Constructing a ``ClusterExecutor`` is deliberately NOT on this list --
+#: ``__init__`` builds sub-managers and returns, and ``complete_api_demo``
+#: builds two of them purely to print their methods. Listing it cost that
+#: notebook every one of its eighteen executed cells for no safety gain, which
+#: is the failure mode this whole check has to avoid.
+REMOTE_ACTION_CALLS = {
+    "setup_ssh_keys",
+    "setup_ssh_keys_with_fallback",
+    "connect",
+    "_execute_command",
+    "submit_job",
+}
+
+
+def _cell_to_python(source: str) -> tuple[str, str]:
+    """Return (checkable Python, note) for one notebook cell's source.
+
+    IPython magics and shell escapes are not Python and ``compile()`` rejects
+    them. They are removed rather than guessed at, and what was removed is
+    returned so it is reported instead of silently dropped.
+    """
+    lines = source.split("\n")
+    notes: List[str] = []
+
+    first_index = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first_index is not None:
+        cell_magic = CELL_MAGIC_RE.match(lines[first_index])
+        if cell_magic:
+            magic_name = cell_magic.group(1)
+            if magic_name in CLUSTRIX_CELL_MAGICS:
+                notes.append(f"%%{magic_name} body checked as Python")
+                lines = lines[first_index + 1 :]
+            else:
+                return "", (
+                    f"cell magic %%{magic_name}: its body is not necessarily "
+                    f"Python and is NOT verified"
+                )
+
+    stripped = 0
+    rewritten = []
+    for line in lines:
+        line_magic = LINE_MAGIC_RE.match(line)
+        if line_magic:
+            rewritten.append(f"{line_magic.group(1)}pass")
+            stripped += 1
+        else:
+            rewritten.append(line)
+    if stripped:
+        notes.append(f"{stripped} IPython magic/shell line(s) not verified")
+
+    return "\n".join(rewritten) + "\n", "; ".join(notes)
+
+
+#: Magics and escapes that change the machine rather than demonstrate the
+#: library. nbclient runs a cell's *original* source, so the ``pass`` the
+#: extractor substitutes for compilation would not stop a real ``!pip
+#: install`` from running -- a notebook containing one is not executed at all.
+#: Ordinary line magics (``%time``, ``%matplotlib``) are left alone: they are
+#: safe, they are common, and refusing them would cost real coverage.
+SHELL_ESCAPE_RE = re.compile(r"^\s*!")
+INSTALLER_MAGIC_RE = re.compile(r"^\s*%(pip|conda)\b")
+
+
+def _unsafe_magic_reason(source: str) -> Optional[str]:
+    """Why this cell must not be handed to a kernel, or None."""
+    lines = source.split("\n")
+    for line in lines:
+        if SHELL_ESCAPE_RE.match(line):
+            return f"runs a shell command ({line.strip()[:40]!r})"
+        if INSTALLER_MAGIC_RE.match(line):
+            return f"installs packages ({line.strip()[:40]!r})"
+    first_index = next((i for i, line in enumerate(lines) if line.strip()), None)
+    if first_index is None:
+        return None
+    cell_magic = CELL_MAGIC_RE.match(lines[first_index])
+    if cell_magic and cell_magic.group(1) not in CLUSTRIX_CELL_MAGICS:
+        return f"uses the %%{cell_magic.group(1)} cell magic"
+    return None
+
+
+def _read_notebook(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
+def _cell_source(cell: dict) -> str:
+    source = cell.get("source", "")
+    return "".join(source) if isinstance(source, list) else source
+
+
+def extract_notebook_blocks(target: TargetFile) -> List[CodeBlock]:
+    """One block per non-empty code cell, in document order."""
+    blocks: List[CodeBlock] = []
+    for index, cell in enumerate(_read_notebook(target.path).get("cells", [])):
+        if cell.get("cell_type") != "code":
+            continue
+        source = _cell_source(cell)
+        if not source.strip():
+            continue
+        content, note = _cell_to_python(source)
+        blocks.append(
+            CodeBlock(
+                target.path,
+                index,
+                content,
+                cell_index=index,
+                note=note,
+            )
+        )
+    return blocks
+
+
+def _remote_action_reason(block: CodeBlock) -> Optional[str]:
+    """Why this cell would reach a real host, or None if it would not."""
+    try:
+        tree = ast.parse(block.content)
+    except SyntaxError:
+        return None  # reported by verify_static instead
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = _called_name(node.func)
+        if name in REMOTE_ACTION_CALLS:
+            return f"calls {name}(), which connects to a real host"
+        if name != "configure":
+            continue
+        for keyword in node.keywords:
+            value = keyword.value
+            is_none = isinstance(value, ast.Constant) and value.value is None
+            if keyword.arg == "cluster_host" and not is_none:
+                return (
+                    "calls configure(cluster_host=...), which points every "
+                    "later cell at a real host"
+                )
+            if (
+                keyword.arg == "cluster_type"
+                and isinstance(value, ast.Constant)
+                and value.value != "local"
+            ):
+                return (
+                    f"calls configure(cluster_type={value.value!r}), which is "
+                    f"not local execution"
+                )
+    return None
+
+
+def _is_cluster_required(block: CodeBlock) -> bool:
+    lines = block.content.strip().splitlines()
+    return bool(lines) and bool(CLUSTER_REQUIRED_RE.match(lines[0]))
+
+
+def _write_kernelspec(root: Path) -> None:
+    """A kernelspec that runs *this* interpreter, so the package under test wins."""
+    spec_dir = root / "kernels" / NOTEBOOK_KERNEL_NAME
+    spec_dir.mkdir(parents=True, exist_ok=True)
+    (spec_dir / "kernel.json").write_text(
+        json.dumps(
+            {
+                "argv": [
+                    sys.executable,
+                    "-m",
+                    "ipykernel_launcher",
+                    "-f",
+                    "{connection_file}",
+                ],
+                "display_name": NOTEBOOK_KERNEL_NAME,
+                "language": "python",
+            }
+        )
+    )
+
+
+def _execute_notebook(path: Path) -> tuple:
+    """Run a notebook in a clean kernel; return (executed copy, failure or None).
+
+    The kernel gets an empty ``CLUSTRIX_CONFIG_DIR``. Without it the notebooks
+    pick up whatever is in the developer's ``~/.clustrix/``: one of them
+    printed ``Cluster type: slurm`` on this machine and ``local`` in CI, from
+    the same source.
+    """
+    import nbformat
+    from nbclient import NotebookClient
+
+    notebook = nbformat.read(str(path), as_version=4)
+    with tempfile.TemporaryDirectory(prefix="clustrix_nb_jupyter_") as jupyter_root:
+        with tempfile.TemporaryDirectory(prefix="clustrix_nb_run_") as workdir:
+            with tempfile.TemporaryDirectory(prefix="clustrix_nb_cfg_") as config_dir:
+                _write_kernelspec(Path(jupyter_root))
+                os.environ["JUPYTER_PATH"] = jupyter_root
+                os.environ["CLUSTRIX_CONFIG_DIR"] = config_dir
+                client = NotebookClient(
+                    notebook,
+                    timeout=NOTEBOOK_CELL_TIMEOUT_SECONDS,
+                    kernel_name=NOTEBOOK_KERNEL_NAME,
+                    allow_errors=True,
+                    resources={"metadata": {"path": workdir}},
+                )
+                try:
+                    client.execute()
+                except Exception as exc:
+                    # A cell that outruns its budget, or a kernel that dies,
+                    # aborts the run. Report it as a failure of this notebook
+                    # rather than letting it escape and be reported as "the
+                    # checker subprocess failed", which says nothing useful.
+                    return notebook, f"{type(exc).__name__}: {exc}"
+    return notebook, None
+
+
+def _output_shape(outputs) -> List[str]:
+    """What kinds of output a cell produced, with stream chunking collapsed.
+
+    A kernel is free to split one ``print`` run across several stream
+    messages, so the count of stream outputs is noise; which *kinds* of output
+    a cell produces is not.
+    """
+    shape: List[str] = []
+    for output in outputs:
+        kind = output.get("output_type")
+        key = f"stream:{output.get('name')}" if kind == "stream" else str(kind)
+        if shape and shape[-1] == key and kind == "stream":
+            continue
+        shape.append(key)
+    return shape
+
+
+def _stored_output_problems(path: Path) -> List[tuple[int, str]]:
+    """Staleness a notebook's *stored* output shows on its own, without running.
+
+    Two signals, both of which are facts about the file rather than
+    comparisons against a second run, so neither can differ between machines.
+    """
+    problems: List[tuple[int, str]] = []
+    cells = [
+        (index, cell)
+        for index, cell in enumerate(_read_notebook(path).get("cells", []))
+        if cell.get("cell_type") == "code" and _cell_source(cell).strip()
+    ]
+
+    for index, cell in cells:
+        for output in cell.get("outputs", []):
+            if output.get("output_type") == "error":
+                problems.append(
+                    (
+                        index,
+                        f"stored output is a traceback "
+                        f"({output.get('ename')}: {output.get('evalue')}); the "
+                        f"published page shows this cell failing",
+                    )
+                )
+
+    if not any(cell.get("outputs") for _, cell in cells):
+        # Nothing is claimed, so nothing can be stale.
+        return problems
+
+    counts = [cell.get("execution_count") for _, cell in cells]
+    if counts != list(range(1, len(counts) + 1)):
+        problems.append(
+            (
+                cells[0][0] if cells else 0,
+                f"stored output did not come from one clean top-to-bottom run: "
+                f"execution counts are {counts}, expected "
+                f"{list(range(1, len(counts) + 1))}. Restart the kernel, run "
+                f"all, and save",
+            )
+        )
+    return problems
+
+
+def _stale_output_problems(path: Path, executed) -> List[tuple[int, str]]:
+    """Stored output versus a fresh run, compared by shape (see module docstring)."""
+    stored = {
+        index: cell
+        for index, cell in enumerate(_read_notebook(path).get("cells", []))
+        if cell.get("cell_type") == "code" and _cell_source(cell).strip()
+    }
+    if not any(cell.get("outputs") for cell in stored.values()):
+        return []
+
+    problems: List[tuple[int, str]] = []
+    for index, cell in stored.items():
+        fresh_cell = executed.cells[index]
+        was = _output_shape(cell.get("outputs", []))
+        now = _output_shape(fresh_cell.get("outputs", []))
+        if was != now:
+            problems.append(
+                (
+                    index,
+                    f"stored output is stale: the notebook ships {was or 'no'} "
+                    f"output for this cell, a fresh run produces "
+                    f"{now or 'none'}",
+                )
+            )
+    return problems
+
+
+def _ordered(results: List[Result], summary: Result) -> List[Result]:
+    """Notebook-level verdict first, then per-cell results in document order."""
+    results.sort(key=lambda r: (r.block.cell_index or 0))
+    return [summary] + results
+
+
+def check_notebook(target: TargetFile, blocks: List[CodeBlock]) -> List[Result]:
+    """Compile every cell; execute the whole notebook when that is safe."""
+    results: List[Result] = []
+    by_cell = {block.cell_index: block for block in blocks}
+    first_block = blocks[0] if blocks else CodeBlock(target.path, 0, "", cell_index=0)
+
+    def attach(cell_index: Optional[int], mode: str, passed: bool, detail: str) -> None:
+        block = (
+            by_cell.get(cell_index, first_block)
+            if cell_index is not None
+            else first_block
+        )
+        results.append(Result(block, mode, passed, detail))
+
+    static = [verify_static(block) for block in blocks]
+
+    raw = {
+        index: _cell_source(cell)
+        for index, cell in enumerate(_read_notebook(target.path).get("cells", []))
+    }
+    unsafe_magic = [
+        (block, reason)
+        for block in blocks
+        if (reason := _unsafe_magic_reason(raw.get(block.cell_index, ""))) is not None
+    ]
+
+    marked = [block for block in blocks if _is_cluster_required(block)]
+    unmarked_remote = [
+        (block, reason)
+        for block in blocks
+        if not _is_cluster_required(block)
+        and (reason := _remote_action_reason(block)) is not None
+    ]
+    broken = [result for result in static if not result.passed]
+
+    reasons = []
+    if target.never_execute:
+        reasons.append("inventory only")
+    if marked:
+        cells = ", ".join(str(block.cell_index) for block in marked)
+        reasons.append(
+            f"cell(s) {cells} are marked # cluster-required, so a run would "
+            f"skip state every later cell depends on"
+        )
+    if unmarked_remote:
+        reasons.append(
+            f"{len(unmarked_remote)} unmarked cell(s) would reach a real host"
+        )
+    if unsafe_magic:
+        cells = ", ".join(str(block.cell_index) for block, _ in unsafe_magic)
+        reasons.append(
+            f"cell(s) {cells} would change this machine rather than demonstrate "
+            f"the library ({unsafe_magic[0][1]})"
+        )
+    if broken:
+        reasons.append(f"{len(broken)} cell(s) do not compile or reference dead API")
+
+    for block, reason in unmarked_remote:
+        attach(
+            block.cell_index,
+            "cluster-required",
+            False,
+            f"{reason}, but the cell is not marked. Add a "
+            f"'# cluster-required' first line so it is verified statically "
+            f"instead of run",
+        )
+
+    if reasons:
+        if not (target.never_execute or marked or unmarked_remote or unsafe_magic):
+            # Held back only because something in it does not compile or
+            # names dead API -- nothing to do with a cluster. Say that.
+            for result in static:
+                result.mode = "static"
+        results.extend(static)
+        for cell_index, detail in _stored_output_problems(target.path):
+            attach(cell_index, "output", False, detail)
+        return _ordered(
+            results,
+            Result(
+                first_block,
+                "cluster-required",
+                True,
+                f"notebook not executed: {'; '.join(reasons)}",
+            ),
+        )
+
+    executed, failure = _execute_notebook(target.path)
+    if failure is not None:
+        results.extend(static)
+        for cell_index, detail in _stored_output_problems(target.path):
+            attach(cell_index, "output", False, detail)
+        return _ordered(
+            results,
+            Result(
+                first_block,
+                "runnable",
+                False,
+                f"notebook did not run to completion: {failure}. A cell that "
+                f"cannot finish inside {NOTEBOOK_CELL_TIMEOUT_SECONDS}s is "
+                f"either not an example or needs marking # cluster-required",
+            ),
+        )
+
+    for block in blocks:
+        cell = executed.cells[block.cell_index]
+        errors = [
+            output
+            for output in cell.get("outputs", [])
+            if output.get("output_type") == "error"
+        ]
+        if errors:
+            error = errors[0]
+            attach(
+                block.cell_index,
+                "runnable",
+                False,
+                f"{error.get('ename')}: {error.get('evalue')}",
+            )
+        else:
+            detail = "executed OK in a clean kernel"
+            if block.note:
+                detail += f"; {block.note}"
+            attach(block.cell_index, "runnable", True, detail)
+
+    for cell_index, detail in _stored_output_problems(target.path):
+        attach(cell_index, "output", False, detail)
+    for cell_index, detail in _stale_output_problems(target.path, executed):
+        attach(cell_index, "output", False, detail)
+
+    return _ordered(
+        results,
+        Result(
+            first_block,
+            "runnable",
+            True,
+            f"notebook executed end to end in a clean kernel "
+            f"({len(blocks)} cell(s))",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
 
 
-def check_file(target: TargetFile) -> List[Result]:
+def check_file(
+    target: TargetFile, blocks: Optional[List[CodeBlock]] = None
+) -> List[Result]:
     never_execute = target.never_execute
-    blocks = extract_blocks(target)
+    if blocks is None:
+        blocks = extract_blocks(target)
+    if target.kind == "ipynb":
+        return check_notebook(target, blocks)
     results: List[Result] = []
 
     # A prose file's blocks share one namespace: they read as one session, and
@@ -494,8 +1133,15 @@ def check_file(target: TargetFile) -> List[Result]:
 #: relative to the repository root.
 _SECTION_BOUNDS: dict = {}
 
-#: Directories under docs/ that are build output or vendored, not sources.
-_SKIP_DIRS = {"build", "_build", "_static", "_templates"}
+#: Directories under docs/ that are build output, checkpoints or vendored,
+#: not sources.
+_SKIP_DIRS = {"build", "_build", "_static", "_templates", ".ipynb_checkpoints"}
+
+#: Suffix -> TargetFile.kind. Notebooks are here rather than in a list of
+#: their own for the reason the module docstring gives: the seven notebooks
+#: this project publishes went unchecked because discovery walked for ``.rst``
+#: and ``.md`` and stopped there.
+_PROSE_SUFFIXES = {".rst": "rst", ".md": "md", ".ipynb": "ipynb"}
 
 
 def discover_targets() -> List[TargetFile]:
@@ -597,7 +1243,7 @@ def _discover_under(scan_root: Path) -> List[TargetFile]:
     if not scan_root.exists():
         return found
     for path in sorted(scan_root.rglob("*")):
-        if path.suffix not in (".rst", ".md"):
+        if path.suffix not in _PROSE_SUFFIXES:
             continue
         if any(part in _SKIP_DIRS for part in path.relative_to(REPO_ROOT).parts):
             continue
@@ -606,7 +1252,7 @@ def _discover_under(scan_root: Path) -> List[TargetFile]:
         found.append(
             TargetFile(
                 path,
-                "rst" if path.suffix == ".rst" else "md",
+                _PROSE_SUFFIXES[path.suffix],
                 section_start=start,
                 section_end=end,
             )
@@ -622,6 +1268,35 @@ def _discover_under(scan_root: Path) -> List[TargetFile]:
 FILE_TIMEOUT_SECONDS = 120
 
 
+def _timeout_for(target: TargetFile) -> int:
+    return NOTEBOOK_TIMEOUT_SECONDS if target.kind == "ipynb" else FILE_TIMEOUT_SECONDS
+
+
+def _run_child(payload: str, timeout: int) -> tuple[str, str]:
+    """Run the child in its own process group and kill the whole group on timeout.
+
+    A notebook's kernel is a grandchild of this process. Killing only the
+    direct child would leave the kernel running and holding whatever the
+    hanging cell was waiting on.
+    """
+    process = subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--check-one", payload],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        return process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):  # pragma: no cover
+            process.kill()
+        process.communicate()
+        raise
+
+
 def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
     """Run one file's checks in a child process, so a hang cannot spread."""
     payload = json.dumps(
@@ -634,13 +1309,9 @@ def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
             "never_execute": target.never_execute,
         }
     )
+    timeout = _timeout_for(target)
     try:
-        completed = subprocess.run(
-            [sys.executable, str(Path(__file__).resolve()), "--check-one", payload],
-            capture_output=True,
-            text=True,
-            timeout=FILE_TIMEOUT_SECONDS,
-        )
+        stdout, stderr = _run_child(payload, timeout)
     except subprocess.TimeoutExpired:
         blocks = extract_blocks(target)
         return [
@@ -648,7 +1319,7 @@ def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
                 b,
                 "runnable",
                 False,
-                f"file exceeded {FILE_TIMEOUT_SECONDS}s; an example is most "
+                f"file exceeded {timeout}s; an example is most "
                 f"likely waiting on a network call and needs # cluster-required",
             )
             for b in blocks
@@ -657,27 +1328,34 @@ def _check_file_in_subprocess(target: TargetFile) -> List[Result]:
                 CodeBlock(target.path, 0, ""),
                 "runnable",
                 False,
-                f"file exceeded {FILE_TIMEOUT_SECONDS}s",
+                f"file exceeded {timeout}s",
             )
         ]
 
     blocks = extract_blocks(target)
     try:
-        decoded = json.loads(completed.stdout.strip().splitlines()[-1])
+        decoded = json.loads(stdout.strip().splitlines()[-1])
     except Exception:
         return [
             Result(
                 b,
                 "runnable",
                 False,
-                f"checker subprocess failed: {completed.stderr.strip()[-200:]}",
+                f"checker subprocess failed: {stderr.strip()[-200:]}",
             )
             for b in blocks
+        ] or [
+            Result(
+                CodeBlock(target.path, 0, ""),
+                "runnable",
+                False,
+                f"checker subprocess failed: {stderr.strip()[-200:]}",
+            )
         ]
     return [
-        Result(blocks[d["index"]], d["mode"], d["passed"], d["detail"])
+        Result(blocks[d["block"]], d["mode"], d["passed"], d["detail"])
         for d in decoded
-        if d["index"] < len(blocks)
+        if 0 <= d["block"] < len(blocks)
     ]
 
 
@@ -692,17 +1370,19 @@ def _check_one_entry(payload: str) -> int:
         module=spec.get("module"),
         never_execute=spec.get("never_execute", False),
     )
-    results = check_file(target)
+    blocks = extract_blocks(target)
+    index_of = {id(block): i for i, block in enumerate(blocks)}
+    results = check_file(target, blocks)
     print(
         json.dumps(
             [
                 {
-                    "index": i,
+                    "block": index_of.get(id(r.block), 0),
                     "mode": r.mode,
                     "passed": r.passed,
                     "detail": r.detail,
                 }
-                for i, r in enumerate(results)
+                for r in results
             ]
         )
     )
@@ -723,23 +1403,29 @@ def main() -> int:
         results = _check_file_in_subprocess(target)
         all_results.extend(results)
         rel = target.path.relative_to(REPO_ROOT)
-        label = f"{rel} (docstrings)" if target.kind == "py" else str(rel)
-        print(f"\n=== {label} ({len(results)} block(s)) ===")
+        suffix = {"py": " (docstrings)", "ipynb": " (notebook)"}.get(target.kind, "")
+        unit = "cell" if target.kind == "ipynb" else "block"
+        print(f"\n=== {rel}{suffix} ({len(results)} {unit} check(s)) ===")
         for r in results:
             status = "PASS" if r.passed else "FAIL"
-            tag = "[cluster-required]" if r.mode == "cluster-required" else "[runnable]"
-            print(f"  {status} {tag} line {r.block.line_no}: {r.detail}")
+            tag = f"[{r.mode}]"
+            print(f"  {status} {tag} {r.block.where}: {r.detail}")
 
     total = len(all_results)
     passed = sum(1 for r in all_results if r.passed)
     failed = total - passed
     runnable = sum(1 for r in all_results if r.mode == "runnable")
-    cluster_required = total - runnable
+    output_checks = sum(1 for r in all_results if r.mode == "output")
+    static_only = sum(1 for r in all_results if r.mode == "static")
+    cluster_required = total - runnable - output_checks - static_only
+    notebooks = sum(1 for t in targets if t.kind == "ipynb" and t.path.exists())
 
     print(
-        f"\n{total} block(s) checked: {passed} passed, {failed} failed "
+        f"\n{total} check(s) over {len(targets)} file(s), {notebooks} of them "
+        f"notebooks: {passed} passed, {failed} failed "
         f"({runnable} executed for real, {cluster_required} statically verified "
-        f"as cluster/network-required)."
+        f"as cluster/network-required, {static_only} statically verified for "
+        f"another reason, {output_checks} stored-output check(s))."
     )
 
     return 1 if failed else 0

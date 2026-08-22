@@ -59,6 +59,199 @@ an explicit load replaces the configuration and supersedes the search.
 Note item 4: a ``clustrix.yml`` in the current working directory is picked up
 automatically, at first use. Changing directory afterwards does not reload it.
 
+.. warning::
+
+   **Items 4-6 are not trusted with your credentials.** Nobody chooses a
+   working-directory configuration file by being in the directory --
+   ``git clone`` followed by ``cd`` is the whole of what it takes for a
+   repository to supply one, and it usually wins outright, because
+   ``~/.clustrix/clustrix.yml`` is not in this list at all (``config.yml``
+   is). Adopting one therefore emits a ``UserWarning`` naming the file, and
+   a credential stored in ``~/.clustrix/.env`` that does not name a host of
+   its own is **not** offered to a ``cluster_host`` that came from one.
+
+   Nothing else changes: every non-credential setting in a project-local
+   ``clustrix.yml`` takes effect as before. Two things make the credential
+   available again, and they are the only two:
+
+   - Set ``SSH_HOST`` in the credential file (``~/.clustrix/.env``) to the
+     host that may receive the secret. That is you naming the recipient, in
+     a file only you can write, and it is checked before provenance is --
+     so it works whatever the hostname's provenance turns out to be.
+   - Move the settings into ``~/.clustrix/config.yml``, delete the
+     working-directory file, unset ``CLUSTRIX_CONFIG_DIR`` if it is set,
+     and start a new process.
+
+   Both remedies name ``~/.clustrix`` rather than ``<config dir>``. The
+   placeholder is right for *where clustrix looks*, and wrong here: under a
+   ``CLUSTRIX_CONFIG_DIR`` redirect it stands for a directory somebody else
+   chose, so a sentence about authorising a host would be pointing at a
+   file the redirector controls. Quickstart says ``~/.clustrix/.env`` for
+   the same reason.
+
+   ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
+   that list, however obvious they look. See the next paragraph.
+
+   **Items 1-3 are trusted only while ``<config dir>`` is ``~/.clustrix``.**
+   The reason to trust them is that putting a file in your own
+   ``~/.clustrix`` is something you did; that reason does not survive the
+   *directory* being named by ``CLUSTRIX_CONFIG_DIR``, because an
+   environment variable is inherited from whatever started the process and a
+   repository-shipped ``.envrc``, ``Makefile`` or devcontainer definition
+   sets one for every command run inside the checkout. A redirected config
+   directory therefore behaves like items 4-6: the settings apply, a
+   ``UserWarning`` names the file, and a hostless stored credential is not
+   offered to a ``cluster_host`` it named. The redirect itself is unchanged
+   and still what you want in a container or on a shared machine; to
+   authorise a host from one, use either of the two remedies above.
+
+   **Provenance follows the hostname, not the object, and it is permanent
+   within the process.** Once an untrusted file has named a ``cluster_host``,
+   rebuilding a config around that same hostname does not make it your
+   choice -- ``dataclasses.replace(config, ...)``,
+   ``configure(**asdict(config))`` (which is what the notebook widget's
+   *Apply* button does) and any other round trip all leave it untrusted.
+   Handing a value back through a function is not evidence that anyone chose
+   it.
+
+   That is why typing ``configure(cluster_host="the-same-host")`` yourself
+   does not lift the refusal either, even though you really did type it:
+   the widget's *Apply* button makes that exact call, with that exact
+   hostname, on a config it read out of the file. The two are the same call.
+   Clearing the record for one would clear it for the other, which is the
+   laundering route this rule exists to close, so the record is never
+   cleared and there is no API to clear it. ``load_config(path)`` on the
+   offending file is the same story: naming a path you did not write is not
+   choosing a host.
+
+   **In the** ``%%clusterfy`` **widget, only the host field lifts it.** The
+   widget remembers which of the configurations in its dropdown it found on
+   disk and which hostname each of those files named, so rearranging them
+   changes nothing: renaming a configuration in the name box, copying it with
+   the *+* button, saving it into your own configuration directory or pasting
+   over it in the *Load* box all keep the refusal, because none of them is
+   you choosing who receives your password. Typing your own hostname over the
+   host field does lift it -- for that hostname -- because a host is only
+   refused by a file that actually named it.
+
+   Pasting is the one worth stating precisely, because it is the user
+   typing: the refusal survives a paste that *keeps* the hostname the found
+   file named, and a paste that changes the hostname is you naming a host,
+   which lifts it for that host exactly as the host field does.
+
+   **Saving is where that has to survive a restart.** *Save configuration*
+   writes into ``~/.clustrix``, and that is a directory the widget infers
+   trust from when it looks for configurations next time -- so without care,
+   pressing Save would promote a configuration a repository shipped to one
+   you chose, one session later, with nothing left on disk to say otherwise.
+   It is also not only the configuration you selected: a save writes every
+   configuration in the dropdown, verbatim, including ones you never opened.
+
+   So the widget writes the source down beside the configurations, under a
+   top-level ``config_sources`` key, and reads it back the next time. It
+   behaves exactly like the profile store's record below: it can only ever
+   *lower* trust -- a file claiming ``runtime`` for its own configurations is
+   ignored -- so a project's configuration you deliberately keep is kept,
+   along with the reason it is not handed your credential.
+
+   Typing your own hostname over the host field before saving is recorded
+   the same way it is applied: nothing is written for that entry, because
+   the file no longer names the host it came with, and the next session
+   treats it as yours. Any other entry the save carries along is unaffected
+   and still records where it came from.
+
+   **Every writer of a configuration file does this, not only the widget.**
+   ``ClusterConfig.save_to_file(path)``, ``clustrix.save_config(path)``,
+   ``clustrix config --config-file <path>`` and
+   ``ProfileManager.export_profile(name, path)`` all write the same key, for
+   the same reason: any of them can be pointed at ``~/.clustrix/config.yml``
+   from inside a cloned repository, and what a save writes is a credential
+   decision one restart later. In the flat single-configuration file those
+   write, the key holds the source directly::
+
+       cluster_type: ssh
+       cluster_host: cluster.example.edu
+       username: researcher
+       config_sources: working-directory
+
+   Reading such a file -- by the automatic search, ``load_config(path)``,
+   ``ClusterConfig.load_from_file(path)`` or ``import_profile(path)`` -- says
+   so and refuses the credential, and the automatic search names the file and
+   the line to delete if the settings are in fact yours.
+
+   **To adopt a project's configuration on purpose**, do what
+   ``clustrix`` already tells you to do for a working-directory file: put
+   the settings into ``~/.clustrix/config.yml`` *yourself* and start a new
+   process. A file you wrote records nothing, and a file that records
+   nothing is yours -- which is the whole difference between moving a
+   configuration and pressing a button that moves it for you. If you would
+   rather keep the file where it is, ``SSH_HOST=<host>`` in the credential
+   file is authorisation for that one host, as always.
+
+   The cost is a refusal when a ``./clustrix.yml`` names the host you were
+   going to use anyway. Those two cases are genuinely indistinguishable, so
+   the refusal is the safe half of the pair, and the two remedies above are
+   the way out: ``SSH_HOST`` is authorisation no round trip can manufacture,
+   and a new process starts with an empty record.
+
+   **A saved profile remembers where it came from.** That record is
+   per-process, but the notebook widget's profile store is not. Seven of its
+   operations write ``<config dir>/profiles/profiles.yml`` as a side effect
+   -- creating, cloning, renaming, removing or saving a profile, importing
+   one, and merely *switching* which is active -- so a profile read out of a
+   bundle a repository shipped ends up inside your own configuration
+   directory, where re-deriving its provenance from the file's location
+   would call it yours. Clustrix therefore writes the source down beside
+   each profile and restores it with them: an untrusted profile stays
+   untrusted across restarts, and carries the same refusal. A recorded
+   source can only ever *lower* trust -- a bundle claiming ``runtime`` for
+   its own profiles is ignored -- so a project-local profile you deliberately
+   keep is kept, along with the reason it is not handed your credential.
+   Deleting the profile and starting a new process is what clears it.
+
+   **Upgrading from a version that did not record this.** A profile store
+   written before clustrix recorded provenance says nothing about where its
+   profiles came from, and clustrix does not guess. It used to: it worked out
+   the source from where the store now sat, which is ``~/.clustrix``, which
+   is trusted -- so the rule above protected nobody whose store had already
+   been written into. Silence now fails closed.
+
+   What you see the first time you open such a store is a warning naming the
+   profiles concerned, and, if you go on to use one with a stored credential
+   that names no host, a refusal explaining the same thing. Nothing is
+   deleted, every profile still loads and every other way of connecting --
+   SSH keys, a credential that names its host, ``configure()`` in your own
+   Python -- is unaffected.
+
+   Two things clear it. ``SSH_HOST=<host>`` in the credential file is
+   authorisation for that one host, as always. Or, once you have looked at
+   the list in the warning and recognise every profile on it:
+
+   .. code-block:: python
+
+      import clustrix
+      clustrix.adopt_profile_store()   # then start a new process
+
+   That records, for each profile the store had no answer for, that you named
+   the store yourself -- the same thing passing a path to
+   ``ProfileManager.load_from_file`` has always meant. It is not a way to
+   grant trust: a profile the store *does* record as untrusted is left
+   exactly as it is, however often you run it. Look at the list first; a
+   profile you do not recognise is the thing this is protecting you from.
+
+   **What ``load_config(path)`` does and does not mean.** It is trusted:
+   it is a call in your own Python naming a file, it is not reachable by
+   handing a config back through a function, and distrusting *relative*
+   paths would be theatre, since
+   ``load_config(os.path.abspath("clustrix.yml"))`` is the same act. What
+   it is not is a check on the file's contents. Clustrix cannot tell a
+   configuration file you wrote from one that arrived with a checkout, so
+   ``load_config`` on a repository-shipped file trusts that repository's
+   ``cluster_host`` -- and it does so whether or not the automatic search
+   would also have found it, which it does not when the file is named
+   anything but ``clustrix.{yml,yaml,json}`` or you are running from
+   another directory. Point ``load_config`` at files you wrote.
+
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not
 re-exported at the package top level -- replaces the instance wholesale from a
@@ -120,7 +313,10 @@ password. ``FlexibleCredentialManager`` -- the fallback used when neither
 ``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``, ``SSH_PORT``, ``HF_TOKEN`` (or
 ``HUGGINGFACE_TOKEN``), ``HUGGINGFACE_USERNAME`` and ``HF_USERNAME``, from a
 ``.env`` file or from the process environment, and switches to its CI source
-when ``GITHUB_ACTIONS`` is ``"true"``. The HuggingFace backend reads
+when ``GITHUB_ACTIONS`` is ``"true"``. A stored SSH credential goes to one
+host and no other: if it sets ``SSH_HOST``, that host must be the one being
+connected to; if it does not, ``cluster_host`` must have come from a source
+you chose (see the warning above). The HuggingFace backend reads
 ``HF_TOKEN`` directly as well, and honours ``HF_HOME`` when locating the token
 that ``hf auth login`` cached. The key-setup helper in ``auth_fallbacks`` has
 its own list: ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
@@ -233,6 +429,8 @@ Connection and authentication
      - ``"reject"`` refuses an unknown host key and prints the ``ssh-keyscan``
        command to add it. ``"auto_add"`` trusts unknown keys -- insecure, and
        never the default. Any other value raises at construction time.
+       ``"auto_add"`` is honoured **only from a configuration you chose**;
+       see :ref:`untrusted-security-settings` below.
    * - ``ssh_connect_timeout``
      - ``30``
      - Seconds paramiko waits to connect. The OS default is minutes, which
@@ -259,6 +457,37 @@ Connection and authentication
 
    Invalid ssh_host_key_policy='yolo'. Valid values are 'reject' (default,
    secure) or 'auto_add' (insecure, trusts unknown host keys automatically).
+
+
+.. _untrusted-security-settings:
+
+Settings an untrusted configuration may not make
+------------------------------------------------
+
+Clustrix already refuses to hand a stored credential to a ``cluster_host``
+that came from somewhere nobody chose -- a ``./clustrix.yml`` that arrived
+with a ``git clone``, or a directory ``$CLUSTRIX_CONFIG_DIR`` was pointed
+at. Two other settings aim a secret just as directly, so they follow the
+same rule:
+
+``ssh_host_key_policy``
+   ``"auto_add"`` turns host key verification off. That is what stops a
+   machine-in-the-middle, and it is *persistent*: the key is appended to
+   your ``~/.ssh/known_hosts``, so the host stays trusted for every later
+   process on the machine, clustrix's and your own ``ssh`` alike. From an
+   untrusted configuration the value is ignored, host keys are verified,
+   and a warning names the file. ``"reject"`` is always honoured -- a
+   configuration asking for *more* checking costs nothing to believe.
+
+``hf_image``
+   A staged HuggingFace job hands ``CLUSTRIX_HF_TOKEN`` to its container as
+   a job secret, so naming the image is naming who receives your account
+   token. From an untrusted configuration the compiled-in default image is
+   used instead, with a warning.
+
+In both cases the fix is the same as for a refused credential: move the
+setting into ``~/.clustrix/config.yml``, pass it to ``configure()``, or name
+the file yourself with ``load_config(path)``.
 
 
 Resources
@@ -525,7 +754,8 @@ HuggingFace Jobs (``cluster_type="huggingface"``)
    * - ``hf_image``
      - ``None`` -> ``python:<your minor>-slim``
      - Must match your local Python minor version, because dill payloads carry
-       CPython bytecode.
+       CPython bytecode. Honoured **only from a configuration you chose**; see
+       :ref:`untrusted-security-settings` below.
    * - ``hf_job_timeout``
      - ``None`` -> ``"30m"``
      - Job timeout. Per-call override: ``@cluster(hf_timeout="2h")``.
@@ -672,8 +902,9 @@ A worked configuration
        return torch.load(dataset_path).mean().item()
 
 The same thing as a file, loadable with
-``from clustrix.config import load_config; load_config("clustrix.yml")``, or
-picked up automatically if it sits in the working directory:
+``from clustrix.config import load_config; load_config("my-cluster.yml")``.
+Named ``clustrix.yml`` it is also picked up automatically when it sits in the
+working directory -- along with the credential restriction described above:
 
 .. code-block:: yaml
 

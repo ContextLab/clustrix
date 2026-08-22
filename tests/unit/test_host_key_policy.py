@@ -13,6 +13,7 @@ handshake behaves correctly -- a mock could not catch a regression here.
 
 import contextlib
 import os
+import shutil
 import socket
 import threading
 import time
@@ -24,10 +25,15 @@ import pytest
 from clustrix.config import ClusterConfig
 from clustrix.ssh_security import (
     HostKeyVerificationError,
+    OPENSSH_STRICT_HOST_KEY_CHECKING,
     RejectUnknownHostKeyPolicy,
     VALID_HOST_KEY_POLICIES,
     configure_host_key_policy,
+    host_key_policy_name,
+    openssh_strict_host_key_checking,
+    user_known_hosts_path,
 )
+from tests.ssh_server import LocalSSHServer
 
 
 class _AuthRejectingServer(paramiko.ServerInterface):
@@ -330,3 +336,190 @@ def test_auto_add_persists_the_key_it_accepted(real_ssh_server, tmp_path):
     )
     recorded = known_hosts.read_text()
     assert f"[127.0.0.1]:{real_ssh_server.port}" in recorded
+
+
+# ---------------------------------------------------------------------------
+# The OpenSSH subprocess obeys the same policy as the paramiko clients.
+#
+# ``ssh_utils.deploy_public_key`` shells out to ``ssh-copy-id`` *before* it
+# reaches paramiko, and that subprocess used to (a) hardcode
+# ``StrictHostKeyChecking=accept-new``, silently applying the deliberate
+# ``auto_add`` opt-out to every user, and (b) be preceded by an
+# unconditional ``add_host_key`` -- an ``ssh-keyscan`` whose output is
+# appended to the user's real ``known_hosts``, permanently marking a host
+# named by a working-directory ``clustrix.yml`` as verified for every future
+# connection this machine makes.
+#
+# **Stated limit.** These tests say what clustrix does with the policy it is
+# given. They do not say where the policy came from: ``ssh_host_key_policy``
+# is an ordinary declared field, so a configuration file the user did not
+# choose can still set it to ``auto_add`` and get the weak policy for the
+# host it names. That is the same shape as route 10 (``key_file`` in an
+# untrusted file) and is not addressed here; it is recorded so the gap is
+# not silent.
+# ---------------------------------------------------------------------------
+
+
+def _a_key_pair_to_deploy(tmp_path):
+    """A real private/public pair, the shape ``setup_ssh_keys`` produces.
+
+    ``ssh-copy-id -i x.pub`` refuses to start unless the matching private
+    half is readable, so a ``.pub`` on its own would exercise nothing.
+    Synthetic and thrown away with ``tmp_path``.
+    """
+    key = paramiko.RSAKey.generate(2048)
+    private = tmp_path / "id_rsa_clustrix_victim"
+    key.write_private_key_file(str(private))
+    private.chmod(0o600)
+    public = tmp_path / "id_rsa_clustrix_victim.pub"
+    public.write_text(f"ssh-rsa {key.get_base64()} clustrix\n", encoding="utf-8")
+    return key, public
+
+
+@pytest.mark.parametrize(
+    "policy, expected",
+    [
+        ("reject", "StrictHostKeyChecking=yes"),
+        ("auto_add", "StrictHostKeyChecking=accept-new"),
+    ],
+)
+def test_ssh_copy_id_is_invoked_with_the_configured_host_key_policy(
+    policy, expected, tmp_path, monkeypatch
+):
+    """The real argv, read from the process that was really executed.
+
+    A ``ssh-copy-id`` earlier on ``PATH`` records the arguments it is handed
+    and exits non-zero. Nothing in clustrix is patched: it resolves the name
+    the way it always does and execs what it finds, so this is the argv
+    OpenSSH would have received -- not a restatement of the source.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    if shutil.which("ssh-copy-id") is None:
+        pytest.skip("ssh-copy-id is not installed; there is no argv to observe")
+
+    recording = tmp_path / "argv"
+    shim_dir = tmp_path / "bin"
+    shim_dir.mkdir()
+    shim = shim_dir / "ssh-copy-id"
+    shim.write_text(
+        "#!/bin/sh\n" f'printf "%s\\n" "$@" > {recording}\n' "exit 1\n",
+        encoding="utf-8",
+    )
+    shim.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{shim_dir}{os.pathsep}{os.environ['PATH']}")
+
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    config = ClusterConfig(
+        cluster_type="ssh",
+        cluster_host="127.0.0.1",
+        cluster_port=1,
+        username="victim",
+        ssh_host_key_policy=policy,
+    )
+
+    with contextlib.suppress(Exception):
+        deploy_public_key("127.0.0.1", "victim", str(public), 1, None, config=config)
+
+    argv = recording.read_text(encoding="utf-8").splitlines()
+    assert expected in argv, argv
+    # The known_hosts the Python half reads, not the one OpenSSH would pick
+    # out of the passwd database.
+    assert f"UserKnownHostsFile={user_known_hosts_path()}" in argv, argv
+
+
+def test_key_deployment_does_not_silently_mark_a_new_host_as_verified(
+    tmp_path, monkeypatch
+):
+    """Defect: ``add_host_key`` ran unconditionally, ``reject`` or not.
+
+    RED before the fix: ``known_hosts`` went from 0 bytes to the server's
+    three host keys, so the host counted as verified for every later
+    connection -- including the paramiko paths route 13 had just gated.
+    """
+    from clustrix.ssh_utils import deploy_public_key
+
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    known_hosts = user_known_hosts_path()
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    known_hosts.write_text("", encoding="utf-8")
+    before = known_hosts.read_bytes()
+
+    root = tmp_path / "server-root"
+    root.mkdir()
+    with LocalSSHServer(root=str(root), password=None) as server:
+        config = ClusterConfig(
+            cluster_type="ssh",
+            cluster_host=server.host,
+            cluster_port=server.port,
+            username="victim",
+        )
+        assert config.ssh_host_key_policy == "reject"
+        with contextlib.suppress(Exception):
+            deploy_public_key(
+                server.host, "victim", str(public), server.port, None, config=config
+            )
+
+    assert known_hosts.read_bytes() == before, (
+        "deploying a key auto-accepted the host's key under the default "
+        "reject policy, which marks the host verified for every future "
+        "connection: " + known_hosts.read_text(encoding="utf-8")
+    )
+
+
+def test_auto_add_still_records_the_host_key_it_was_told_to_trust(
+    tmp_path, monkeypatch
+):
+    """The opt-out keeps working; it is only no longer taken for the user."""
+    from clustrix.ssh_utils import deploy_public_key
+
+    _, public = _a_key_pair_to_deploy(tmp_path)
+    known_hosts = user_known_hosts_path()
+    known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    known_hosts.write_text("", encoding="utf-8")
+
+    root = tmp_path / "server-root"
+    root.mkdir()
+    with LocalSSHServer(root=str(root), password=None) as server:
+        config = ClusterConfig(
+            cluster_type="ssh",
+            cluster_host=server.host,
+            cluster_port=server.port,
+            username="victim",
+            ssh_host_key_policy="auto_add",
+        )
+        with contextlib.suppress(Exception):
+            deploy_public_key(
+                server.host, "victim", str(public), server.port, None, config=config
+            )
+        recorded = known_hosts.read_text(encoding="utf-8")
+
+    assert recorded.strip(), "auto_add recorded no host key at all"
+    assert any(
+        key.get_base64() in recorded for key in server.host_keys()
+    ), "auto_add recorded something that is not this server's host key"
+
+
+def test_the_openssh_spelling_of_every_policy_is_defined():
+    """A new policy value cannot be added without deciding its ssh spelling."""
+    assert set(OPENSSH_STRICT_HOST_KEY_CHECKING) == set(VALID_HOST_KEY_POLICIES)
+    assert openssh_strict_host_key_checking(ClusterConfig()) == "yes"
+    assert (
+        openssh_strict_host_key_checking(ClusterConfig(ssh_host_key_policy="auto_add"))
+        == "accept-new"
+    )
+    assert openssh_strict_host_key_checking(None) == "yes"
+    # The widget's dict shape, and the same validation as the paramiko side.
+    #
+    # This line asserted ``== "auto_add"`` and that assertion was wrong, so
+    # it is rewritten deliberately rather than relaxed. A weakening of host
+    # key verification may only come from a source the user chose, and a
+    # mapping carries no provenance record at all -- it is a bag of values
+    # that no loader stamped, so ``config_source_is_trusted`` has nothing to
+    # read and the fail-closed answer is the only available one. ``reject``
+    # from a mapping still means ``reject``; validation is unchanged, which
+    # is what the ``pytest.raises`` below is about.
+    assert host_key_policy_name({"ssh_host_key_policy": "auto_add"}) == "reject"
+    assert host_key_policy_name({"ssh_host_key_policy": "reject"}) == "reject"
+    with pytest.raises(ValueError, match="Invalid ssh_host_key_policy"):
+        openssh_strict_host_key_checking({"ssh_host_key_policy": "accept-new"})

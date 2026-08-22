@@ -103,26 +103,34 @@ class TestConfigFileOperations:
         assert files == []
 
     def test_load_config_invalid_yaml(self):
-        """Test loading invalid YAML file."""
+        """A named file that will not parse raises; a discovered one is skipped.
+
+        This asserted ``== {}`` for the named call. That was the defect issue
+        #168 names: {} is also the answer for a file holding no
+        configurations, so malformed YAML was indistinguishable from an empty
+        profile. Rewritten deliberately, not relaxed.
+        """
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
             f.write("invalid: yaml: content: [")
             temp_path = Path(f.name)
 
         try:
-            config = load_config_from_file(temp_path)
-            assert config == {}
+            with pytest.raises(yaml.YAMLError):
+                load_config_from_file(temp_path)
+            assert load_config_from_file(temp_path, discovered=True) == {}
         finally:
             temp_path.unlink()
 
     def test_load_config_invalid_json(self):
-        """Test loading invalid JSON file."""
+        """Same rewrite as the YAML case above, for JSON."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             f.write('{"invalid": json content')
             temp_path = Path(f.name)
 
         try:
-            config = load_config_from_file(temp_path)
-            assert config == {}
+            with pytest.raises(json.JSONDecodeError):
+                load_config_from_file(temp_path)
+            assert load_config_from_file(temp_path, discovered=True) == {}
         finally:
             temp_path.unlink()
 
@@ -142,9 +150,12 @@ class TestConfigFileOperations:
             temp_path.unlink()
 
     def test_load_config_file_not_found(self):
-        """Test loading nonexistent file."""
-        config = load_config_from_file(Path("/nonexistent/file.yml"))
-        assert config == {}
+        """A named path that does not exist raises, as ``load_config`` does."""
+        with pytest.raises(FileNotFoundError):
+            load_config_from_file(Path("/nonexistent/file.yml"))
+        assert (
+            load_config_from_file(Path("/nonexistent/file.yml"), discovered=True) == {}
+        )
 
 
 class TestValidationExtended:
@@ -745,14 +756,15 @@ class TestFileOperationEdgeCases:
             assert files == []
 
     def test_config_loading_with_encoding_issues(self):
-        """Test config loading with encoding issues."""
+        """Undecodable bytes are a read failure, not an empty configuration."""
         with tempfile.NamedTemporaryFile(mode="wb", suffix=".yml", delete=False) as f:
             # Write non-UTF-8 content
             f.write(b"\xff\xfe\x00\x00invalid encoding")
             temp_path = Path(f.name)
 
         try:
-            config = load_config_from_file(temp_path)
-            assert config == {}
+            with pytest.raises(UnicodeDecodeError):
+                load_config_from_file(temp_path)
+            assert load_config_from_file(temp_path, discovered=True) == {}
         finally:
             temp_path.unlink()

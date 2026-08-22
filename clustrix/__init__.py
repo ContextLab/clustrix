@@ -52,7 +52,7 @@ from .staging import (
     delete_data_package,
     materialize_packages,
 )
-from .profile_manager import ProfileManager
+from .profile_manager import ProfileManager, adopt_profile_store
 from .modern_notebook_widget import (
     ModernClustrixWidget,
     create_modern_cluster_widget,
@@ -111,6 +111,7 @@ __all__ = [
     "delete_data_package",
     "materialize_packages",
     "ProfileManager",
+    "adopt_profile_store",
     "ModernClustrixWidget",
     "create_modern_cluster_widget",
     "display_modern_widget",

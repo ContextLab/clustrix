@@ -6,15 +6,21 @@ a comprehensive interface for configuring and managing cluster settings in
 Jupyter notebooks.
 """
 
+import copy
 import logging
 import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from .notebook_magic_config import (
+    CONFIG_SOURCES_KEY,
     DEFAULT_CONFIGS,
+    config_name_from_document,
+    config_source_for_detected_file,
+    config_source_for_saved_entry,
     detect_config_files,
     load_config_from_file,
+    recorded_config_source,
     validate_ip_address,
     validate_hostname,
 )
@@ -30,13 +36,24 @@ except ImportError:
 
 from .config import (
     SUPPORTED_CLUSTER_TYPES,
+    ClusterConfig,
+    UNTRUSTED_CONFIG_SOURCES,
     configure,
+    get_config,
     get_config_dir,
+    normalize_hostname,
+    record_discovered_hostname,
+    set_config_source,
     split_config_kwargs,
     strip_secret_fields,
     validate_cluster_type,
     write_text_securely,
 )
+
+# The one gate. The connectivity test is a connection, so it asks the same
+# question ``executor_connections`` and ``filesystem`` ask, of the same
+# function -- see ``_config_under_test``.
+from .credential_release import CredentialTarget, release_credential
 
 # The one implementation of "create each level 0700"; see its docstring for
 # why ``mkdir(parents=True, mode=0o700)`` is not the same thing. Imported
@@ -94,16 +111,15 @@ MIGRATED_PROFILE_KEYS = {"queue": "default_partition", "ssh_key_path": "key_file
 def _dropped_keys(before: Dict[str, Any], after: Dict[str, Any]) -> set:
     """Names present in ``before`` that ``strip_secret_fields`` removed.
 
-    Both the whole-field cases and the entries inside a secret-bearing
-    mapping, so that an ``AWS_SECRET_ACCESS_KEY`` dropped out of
-    ``environment_variables`` is named too and not silently lost.
+    Every dropped key is named, whatever the reason it was dropped -- a
+    declared credential field, a field whose values clustrix cannot
+    classify, or a key the configuration file format does not define. The
+    widget's ``self.configs`` holds whatever a previously saved file
+    contained, so the third case is not hypothetical, and a key silently
+    vanishing from a file the user just saved is the surprise this notice
+    exists to prevent.
     """
-    names = {key for key in before if key not in after}
-    for key, value in before.items():
-        surviving = after.get(key)
-        if isinstance(value, dict) and isinstance(surviving, dict):
-            names |= {inner for inner in value if inner not in surviving}
-    return names
+    return {key for key in before if key not in after}
 
 
 class EnhancedClusterConfigWidget:
@@ -132,26 +148,90 @@ class EnhancedClusterConfigWidget:
         self._create_widgets()
 
     def _initialize_configs(self):
-        """Initialize configurations from defaults and detected files."""
-        # Start with default configurations
-        self.configs = DEFAULT_CONFIGS.copy()
+        """Initialize configurations from defaults and detected files.
+
+        ``detect_config_files`` globs the *working directory* as well as the
+        configuration directories, and for two names -- ``config.yml`` and
+        ``config.yaml`` -- that the automatic search does not look at at all.
+        So a file a cloned repository ships is picked up here, tainted by
+        nothing and announced by nothing, and lands in ``self.configs`` as a
+        plain dict. Where each one was found is recorded alongside it so that
+        Apply can say so; without that the dict reached ``configure()``
+        indistinguishable from something the user typed, and the cluster
+        password went to whoever the repository named.
+
+        Where it was found is not the whole answer, though, because Save
+        moves files: a configuration this widget wrote into the
+        configuration directory says so in the file itself, and that record
+        may only ever lower the verdict this computes from the location. See
+        :data:`~clustrix.notebook_magic_config.CONFIG_SOURCES_KEY` for route
+        12, which is what happens when it does not.
+        """
+        # Start with default configurations. A *deep* copy: ``.copy()`` is
+        # shallow, so the inner dicts were the module-level templates
+        # themselves and every edit reached through them. Renaming a
+        # built-in configuration wrote ``name`` into
+        # ``notebook_magic_config.DEFAULT_CONFIGS``, and every widget
+        # created afterwards in the same kernel started from the mutated
+        # template -- with a name that reloaded a different configuration
+        # over the user's edits. Found by two of this module's own tests
+        # interfering with each other.
+        self.configs = copy.deepcopy(DEFAULT_CONFIGS)
+        # Where each file-derived config was found. Only written here: a
+        # config the user builds or saves during the session is their own.
+        self.config_source_map: Dict[str, str] = {}
+        # And *which hostname* that file named, normalised. The source alone
+        # is not enough to condemn what Apply is holding: see
+        # ``_discovered_source_for``.
+        self.config_source_host_map: Dict[str, str] = {}
         # Detect and load configuration files
         self.config_files = detect_config_files()
         for config_file in self.config_files:
-            file_configs = load_config_from_file(config_file)
+            source = config_source_for_detected_file(config_file)
+            # ``discovered``: nobody named this file, the scan above found it.
+            # An unreadable one must not take the widget down, and must not
+            # pass for an empty one either -- see ``load_config_from_file``.
+            file_configs = load_config_from_file(config_file, discovered=True)
             if isinstance(file_configs, dict):
+                # Provenance the file carries about its own entries, removed
+                # before anything else looks at the mapping: it is clustrix's
+                # record, never a configuration, and leaving it in would put
+                # a configuration called ``config_sources`` in the dropdown.
+                recorded = file_configs.pop(CONFIG_SOURCES_KEY, None)
                 # Handle both single config and multiple configs in file
                 if "cluster_type" in file_configs:
                     # Single config - use filename as config name
                     config_name = config_file.stem
+                    record_discovered_hostname(file_configs.get("cluster_host"), source)
                     self.configs[config_name] = file_configs
                     self.config_file_map[config_name] = config_file
+                    self.config_source_map[config_name] = config_source_for_saved_entry(
+                        source, recorded_config_source(recorded, config_name)
+                    )
+                    self.config_source_host_map[config_name] = normalize_hostname(
+                        file_configs.get("cluster_host")
+                    )
                 else:
                     # Multiple configs
-                    for name, config in file_configs.items():
+                    for raw_name, config in file_configs.items():
+                        # A YAML key is not always a string, and a name that
+                        # is not one cannot be sorted against the others. See
+                        # ``config_name_from_document``.
+                        name = config_name_from_document(raw_name)
                         if isinstance(config, dict):
+                            record_discovered_hostname(
+                                config.get("cluster_host"), source
+                            )
                             self.configs[name] = config
                             self.config_file_map[name] = config_file
+                            self.config_source_map[name] = (
+                                config_source_for_saved_entry(
+                                    source, recorded_config_source(recorded, name)
+                                )
+                            )
+                            self.config_source_host_map[name] = normalize_hostname(
+                                config.get("cluster_host")
+                            )
 
     def _create_widgets(self):
         """Create the enhanced widget interface."""
@@ -321,8 +401,103 @@ class EnhancedClusterConfigWidget:
             self.config_dropdown.value = options[0]
             self._load_config_to_widgets(options[0])
 
+    #: Every mapping keyed by configuration *name*. A rename moves the
+    #: configuration between keys, so each of these has to move with it or
+    #: it describes a name that no longer exists -- and, worse, stops
+    #: describing the configuration it was about. Named once because the
+    #: cost of the list going stale is a security hole: see
+    #: ``_rename_config_metadata``.
+    _NAME_KEYED_MAPS = (
+        "config_file_map",
+        "config_source_map",
+        "config_source_host_map",
+    )
+
+    def _rename_config_metadata(self, old_name: str, new_name: str) -> None:
+        """Move the sidecars for ``old_name`` onto ``new_name``.
+
+        ``_on_config_name_change`` re-keyed ``self.configs`` and nothing
+        else, so renaming a configuration the widget had found on disk left
+        ``config_source_map`` describing a name that no longer existed.
+        ``_discovered_source_for`` looks that name up and got nothing, so
+        Apply stamped no provenance and ``configure()``'s ``runtime`` stood:
+        selecting a repository's ``./config.yml`` and typing a name into the
+        name box -- without touching the host -- was enough to have the
+        cluster password sent to the host that file named. Renaming is not
+        choosing a hostname.
+
+        An absent entry is *removed* from ``new_name`` rather than left
+        alone, so the sidecars track ``self.configs`` exactly in both
+        directions. Renaming a configuration the user built onto the name of
+        one that came off a disk must not leave the disk's provenance
+        attached to it either.
+        """
+        for attr in self._NAME_KEYED_MAPS:
+            mapping = getattr(self, attr)
+            if old_name in mapping:
+                mapping[new_name] = mapping.pop(old_name)
+            else:
+                mapping.pop(new_name, None)
+
+    def _carry_config_provenance(
+        self,
+        name: str,
+        source: Optional[str],
+        config_data: Dict[str, Any],
+    ) -> None:
+        """Attach ``source`` to ``name``, or make sure nothing is attached.
+
+        ``source`` is what :meth:`_discovered_source_for` said about the
+        fields in ``config_data`` *before* they were copied under a new name.
+        A non-``None`` answer already means the host in those fields is the
+        host the file named, so the host recorded here is that same host.
+
+        The ``else`` branch is what the user typing their own hostname
+        reaches, and it *clears* rather than leaves alone -- the same
+        both-directions rule as :meth:`_rename_config_metadata`, so the two
+        maps track ``self.configs`` exactly however this is called and a name
+        can never end up carrying a file's provenance over fields that file
+        never described.
+        """
+        if source:
+            self.config_source_map[name] = source
+            self.config_source_host_map[name] = normalize_hostname(
+                config_data.get("cluster_host")
+            )
+        else:
+            self.config_source_map.pop(name, None)
+            self.config_source_host_map.pop(name, None)
+
+    def _forget_config_metadata(self, name: str) -> None:
+        """Drop the sidecars for a configuration that is going away."""
+        for attr in self._NAME_KEYED_MAPS:
+            getattr(self, attr).pop(name, None)
+
     def _on_config_name_change(self, change):
-        """Handle changes to the config name field."""
+        """Handle changes to the config name field.
+
+        **A rename onto a name another configuration holds is refused.** That
+        is decided, not defaulted -- issue #171 offered refuse, ask and
+        auto-suffix, and the two rejected options lose to how this handler is
+        actually reached. It is a ``Text`` observer, so it fires on the
+        keystream: a modal question has nowhere to appear and would arrive
+        once per character, and auto-suffixing would silently name a
+        configuration something the user never typed, which is the same
+        "accepted the instruction, did something else, reported success"
+        shape as the overwrite it replaces. Refusing invents nothing and
+        destroys nothing.
+
+        The refusal deliberately leaves the box holding what was typed and
+        ``current_config_name`` where it was, rather than resetting the
+        field. Resetting it would fight the keystream -- a user typing
+        "SSH Remote Server 2" passes through the taken name on the way -- and
+        because the selection does not move, the next keystroke that reaches a
+        free name still renames the configuration they were editing.
+
+        Nothing keyed by the name moves on the refused path either: the
+        sidecars ``_rename_config_metadata`` maintains describe
+        ``self.configs``, which is exactly what a refusal leaves alone.
+        """
         new_name = change["new"].strip()
         if not new_name:
             return
@@ -332,10 +507,26 @@ class EnhancedClusterConfigWidget:
             and self.current_config_name in self.configs
             and new_name != self.current_config_name
         ):
-            # Rename the configuration
+            if new_name in self.configs:
+                # Overwriting here destroyed the occupant in silence, and a
+                # profile is the only place its ``password`` and ``hf_token``
+                # live -- ``save_to_file`` omits both -- so there was no way
+                # back from it.
+                with self.status_output:
+                    self.status_output.clear_output()
+                    print(
+                        f"❌ Cannot rename '{self.current_config_name}' to "
+                        f"'{new_name}': another configuration already has "
+                        "that name. Choose a different name, or delete "
+                        f"'{new_name}' first."
+                    )
+                return
+            # Rename the configuration, and everything else keyed by its
+            # name along with it -- see ``_rename_config_metadata``.
             old_config = self.configs.pop(self.current_config_name)
             old_config["name"] = new_name
             self.configs[new_name] = old_config
+            self._rename_config_metadata(self.current_config_name, new_name)
             self.current_config_name = new_name
             self._update_config_dropdown()
 
@@ -818,11 +1009,39 @@ class EnhancedClusterConfigWidget:
                 config_name = f"{base_name} {counter}"
                 counter += 1
 
-            # Save current widget state as new config
+            # Save current widget state as new config.
+            #
+            # The provenance of those *live fields* has to be read while
+            # ``current_config_name`` still names the configuration they came
+            # from -- ``_discovered_source_for`` keys off it -- and then
+            # carried onto the new name. Copying moved the fields and left
+            # the sidecars behind, so ``_discovered_source_for`` returned
+            # ``None`` under the new name and Apply's ``configure()`` stamped
+            # ``runtime``: selecting a repository's ``./config.yml`` and
+            # pressing "+" was enough to have the cluster password sent to
+            # the host that file named. Measured on the wire. Copying a
+            # configuration is not choosing a hostname, exactly as renaming
+            # one is not (see ``_rename_config_metadata``).
+            #
+            # ``config_file_map`` deliberately does *not* come along,
+            # because the copy is a new configuration that no file holds.
+            #
+            # The earlier reason given here -- that the map "decides which
+            # entries a save writes back, not who may receive a credential"
+            # -- was wrong, and route 12 is what falsifies it: what a save
+            # writes, and under what name, *is* a credential decision one
+            # restart later. So the exclusion rests on the fact rather than
+            # on the category. It is inert today as well, since the names
+            # generated here can never collide with ``DEFAULT_CONFIGS`` and
+            # that collision is the only thing the map decides -- but
+            # "inert today" is how routes 11 and 12 both started, so it is
+            # pinned by a test rather than by this comment.
             config_data = self._save_config_from_widgets()
+            discovered_source = self._discovered_source_for(config_data)
             config_data["name"] = config_name
             self.configs[config_name] = config_data
             self.current_config_name = config_name
+            self._carry_config_provenance(config_name, discovered_source, config_data)
 
             # Update UI
             self.config_name.value = config_name
@@ -842,15 +1061,66 @@ class EnhancedClusterConfigWidget:
             if self.current_config_name and self.current_config_name in self.configs:
                 deleted_name = self.current_config_name
                 del self.configs[self.current_config_name]
-                # Remove from file map if it exists
-                if self.current_config_name in self.config_file_map:
-                    del self.config_file_map[self.current_config_name]
+                # And everything keyed by its name: leaving the provenance
+                # behind would attach a deleted file's source to whatever is
+                # created under that name next.
+                self._forget_config_metadata(self.current_config_name)
                 # Select a different configuration
                 remaining_configs = list(self.configs.keys())
                 if remaining_configs:
                     self._load_config_to_widgets(remaining_configs[0])
                 self._update_config_dropdown()
                 print(f"✅ Deleted configuration: '{deleted_name}'")
+
+    def _discovered_source_for(self, config_data: Dict[str, Any]) -> Optional[str]:
+        """The provenance Apply may stamp on ``config_data``, or ``None``.
+
+        ``config_source_map`` is keyed by configuration *name*, but Apply
+        stamps ``_save_config_from_widgets()`` -- the **live** fields. Those
+        stop being the same thing the moment the user edits one, and the
+        difference is not cosmetic: with an attacker's ``./config.yml``
+        present, a user who selected it, typed *their own* hostname over the
+        host field and pressed Apply had their own cluster recorded in
+        ``clustrix.config._HOSTS_NAMED_BY_UNTRUSTED_SOURCES``. That record has
+        no way back -- it is deliberately proof against ``configure()``, since
+        Apply *is* a ``configure()`` call -- so one keystroke cost them their
+        cluster for the life of the kernel.
+
+        The rule the false-refusal work established is the fix: **a hostname
+        is only condemned by a source that actually named it.** So the
+        discovered source applies only while the host in the widget is still
+        the host that file gave, compared with the one normaliser
+        (:func:`clustrix.config.normalize_hostname`) so that case and a
+        trailing dot cannot be used to slip past it.
+
+        Editing any *other* field -- cores, memory, the working directory --
+        leaves the hostname untouched and so leaves the refusal in place,
+        which is right: it is the host that receives the credential.
+        """
+        return self._source_still_naming_host(
+            self.current_config_name or "", config_data
+        )
+
+    def _source_still_naming_host(
+        self, name: str, config_data: Dict[str, Any]
+    ) -> Optional[str]:
+        """``name``'s discovered source, while it still names *this* host.
+
+        The rule :meth:`_discovered_source_for` documents, stated once so
+        that it can be asked about a configuration other than the selected
+        one. ``_record_discovered_sources`` needs exactly that: a save writes
+        every entry in the dropdown, and each of them has to be judged
+        against the host it is *being written with*, not against the host it
+        arrived with.
+        """
+        source = self.config_source_map.get(name)
+        if not source:
+            return None
+        if normalize_hostname(
+            config_data.get("cluster_host")
+        ) != self.config_source_host_map.get(name, ""):
+            return None
+        return source
 
     def _on_apply_config(self, button):
         """Apply the current configuration."""
@@ -879,24 +1149,15 @@ class EnhancedClusterConfigWidget:
                 # Update the config in our dictionary
                 if self.current_config_name:
                     self.configs[self.current_config_name] = config_data
-                # Apply to Clustrix. ``configure()`` rejects any keyword
-                # that is not a ClusterConfig field, and a profile carries at
-                # least one that is not -- its own ``name`` -- so splatting the
-                # profile straight in made Apply fail every single time (#165).
-                #
-                # ``reset_fields``: _save_config_from_widgets drops empty
-                # values so a blank box cannot overwrite a setting with "",
-                # which also meant a box the user *cleared* said nothing and
-                # the previous profile's value stayed live -- a run configured
-                # as ``local`` carrying the last cluster's host and username.
-                # Seeding this widget's own fields with their defaults first
-                # makes clearing a control mean clearing the setting.
                 settings, unrecognised = split_config_kwargs(
                     config_data,
                     PROFILE_BOOKKEEPING_KEYS,
                     reset_fields=WIDGET_MANAGED_FIELDS,
                 )
                 configure(**settings)
+                discovered_source = self._discovered_source_for(config_data)
+                if discovered_source:
+                    set_config_source(get_config(), discovered_source)
                 print("✅ Configuration applied successfully!")
                 if unrecognised:
                     # Not dropped quietly: a key nobody recognises is a
@@ -958,9 +1219,65 @@ class EnhancedClusterConfigWidget:
                 "will not survive a restart. They still work for the rest of "
                 "this session. To supply a password without writing it to "
                 "disk, set password_env_var to the name of an environment "
-                "variable holding it."
+                "variable holding it. environment_variables is withheld for "
+                "the same reason: its names and values are yours, so clustrix "
+                "cannot tell a setting from a token and does not guess -- set "
+                "them in the shell that starts the notebook instead."
             )
         return redacted
+
+    def _record_discovered_sources(
+        self, save_data: Dict[str, Any], single_config: bool
+    ) -> Dict[str, Any]:
+        """Write the untrusted sources into the file, or leave it unchanged.
+
+        Route 12. Save writes into :func:`get_config_dir`, and
+        :func:`detect_config_files` infers trust from that directory, so
+        pressing Save promoted a configuration a repository shipped to one
+        the user chose -- not in this session, where every sidecar stayed
+        correct, but in the next one, where the only evidence left was where
+        the file now sat. See
+        :data:`~clustrix.notebook_magic_config.CONFIG_SOURCES_KEY`.
+
+        Only untrusted sources are written. A trusted one would be re-derived
+        identically from the file's own location, and a record that could
+        raise trust is the laundering route this is here to close -- so the
+        key never carries one, and
+        :func:`~clustrix.notebook_magic_config.config_source_for_saved_entry`
+        would ignore it if it did.
+
+        And only while the source still names the host being written, which
+        is :meth:`_source_still_naming_host` -- the same rule Apply applies
+        in :meth:`_discovered_source_for`. Keying off ``config_source_map``
+        alone made the two disagree across the restart: typing your own
+        hostname over a found configuration applied as ``runtime`` in the
+        session and came back ``working-directory`` in the next one, because
+        the write side condemned a host the file had never named. That errs
+        safe, so it was a wrong answer rather than a leak; a hostname is only
+        condemned by a source that actually named it, on both sides of the
+        process boundary or on neither.
+
+        The single-configuration shape has no room for a sibling key without
+        the record becoming a configuration field, so a save that has
+        something to record uses the nested shape instead. That is the
+        widget's own other shape and it reads both; the flat one is reserved
+        for files that record nothing, which is every file a user writes by
+        hand.
+        """
+        if single_config and self.current_config_name:
+            entries = {self.current_config_name: save_data}
+        else:
+            entries = dict(save_data)
+        recorded = {}
+        for name in sorted(entries):
+            source = self._source_still_naming_host(name, entries[name])
+            if source in UNTRUSTED_CONFIG_SOURCES:
+                recorded[name] = source
+        if not recorded:
+            return save_data
+        if single_config and self.current_config_name:
+            save_data = {self.current_config_name: save_data}
+        return {**save_data, CONFIG_SOURCES_KEY: recorded}
 
     def _on_save_config(self, button):
         """Save configuration to file."""
@@ -1023,6 +1340,9 @@ class EnhancedClusterConfigWidget:
                 import yaml
 
                 save_data = self._redact_for_save(save_data, bool(single_config))
+                save_data = self._record_discovered_sources(
+                    save_data, bool(single_config)
+                )
                 write_text_securely(
                     file_path,
                     yaml.dump(save_data, default_flow_style=False, sort_keys=False),
@@ -1105,24 +1425,39 @@ class EnhancedClusterConfigWidget:
                 # Check if this is a single config or multiple configs
                 if "cluster_type" in data:
                     # Single configuration
-                    config_name = data.get("name", "Loaded Configuration")
+                    config_name = config_name_from_document(
+                        data.get("name", "Loaded Configuration")
+                    )
                     self.configs[config_name] = data
                     self.current_config_name = config_name
                     self._load_config_to_widgets(config_name)
                     self._update_config_dropdown()
                     print(f"✅ Loaded configuration: '{config_name}'")
                 else:
-                    # Multiple configurations
+                    # Multiple configurations. The first *loaded* one is
+                    # selected, not the first key of the pasted document:
+                    # a document whose first entry is not a configuration --
+                    # a comment key, a version marker, a typo -- left
+                    # ``current_config_name`` naming something that is not in
+                    # ``self.configs`` at all. ``_load_config_to_widgets``
+                    # returns early on a name it does not know, so nothing
+                    # corrected it until ``_update_config_dropdown`` happened
+                    # to select something else. That self-heal is a
+                    # coincidence of ordering, and every leak in this file so
+                    # far has been a name and the thing keyed by it
+                    # disagreeing.
                     loaded_count = 0
-                    for name, config in data.items():
+                    first_config = None
+                    for raw_name, config in data.items():
+                        name = config_name_from_document(raw_name)
                         if isinstance(config, dict) and "cluster_type" in config:
                             config["name"] = name
                             self.configs[name] = config
                             loaded_count += 1
+                            if first_config is None:
+                                first_config = name
 
-                    if loaded_count > 0:
-                        # Load the first configuration
-                        first_config = next(iter(data.keys()))
+                    if first_config is not None:
                         self.current_config_name = first_config
                         self._load_config_to_widgets(first_config)
                         self._update_config_dropdown()
@@ -1174,6 +1509,46 @@ class EnhancedClusterConfigWidget:
             return True, ""
         return False, os.strerror(result)
 
+    def _config_under_test(self, config: Dict[str, Any]) -> ClusterConfig:
+        """The widget's fields as a real ``ClusterConfig``, for the gate to judge.
+
+        The gate's subject is a ``ClusterConfig``: ``CredentialTarget`` is
+        built from one and every provenance rule is derived from one. This
+        widget carries a dict of form fields instead, and that difference is
+        the whole reason the connectivity test was the last unconverted call
+        site. Building the object here is what keeps it on the *single* rule;
+        a second, weaker copy of the rule written to fit the dict is how the
+        two would drift, and a rule that has drifted is one that no longer
+        decides anything.
+
+        Only the fields the decision and the connection actually use, and
+        deliberately not ``configure(**config)``: applying the form is a
+        different act from asking a question about it -- it writes the live
+        configuration -- and the widget re-emits keys (``name``, ``queue``,
+        ``ssh_key_path``) that are not settings at all. ``ssh_key_path`` is
+        this widget's spelling of ``key_file``, which is the field the gate
+        and the connection both know.
+
+        Provenance is recorded the same way Apply records it, from the same
+        map: a profile the widget *found* in a file is not a profile the user
+        typed, however many times it is copied between a dict and an object.
+        That is belt and braces over the hostname record
+        ``_initialize_configs`` already wrote -- that record is keyed by the
+        name, outranks any object, and is what actually refuses here -- but a
+        config built out of a file should say so rather than rely on it.
+        """
+        cluster_config = ClusterConfig(
+            cluster_host=config.get("cluster_host"),
+            username=config.get("username") or "",
+            cluster_port=config.get("cluster_port", 22),
+            key_file=config.get("ssh_key_path") or None,
+            password=config.get("password") or None,
+        )
+        discovered_source = self.config_source_map.get(self.current_config_name or "")
+        if discovered_source:
+            set_config_source(cluster_config, discovered_source)
+        return cluster_config
+
     def _test_ssh_connectivity(self, config, timeout=10):
         """Test SSH connectivity with provided credentials."""
         try:
@@ -1190,15 +1565,55 @@ class EnhancedClusterConfigWidget:
                 "username": config.get("username"),
                 "port": config.get("cluster_port", 22),
                 "timeout": timeout,
+                # Paramiko searches ``~/.ssh`` and the ssh-agent by itself
+                # unless told not to, and this left both at their defaults:
+                # pressing "Test" in a notebook opened inside a cloned
+                # repository authenticated to the host that repository named,
+                # with the victim's own ``~/.ssh/id_rsa``, on a form carrying
+                # no credential at all. That is route 13, and it is the same
+                # rule as the other four call sites, so the gate answers it
+                # and this one does not. Off until it says otherwise.
+                "look_for_keys": False,
+                "allow_agent": False,
             }
 
-            # Add authentication
-            if config.get("password"):
-                connect_params["password"] = config["password"]
-            elif config.get("key_file"):
-                key_path = Path(config["key_file"]).expanduser()
+            cluster_config = self._config_under_test(config)
+            try:
+                target = CredentialTarget.for_config(cluster_config)
+            except ValueError as exc:
+                # A half-filled form names nobody to decide about, so there
+                # is nothing to test and nothing to offer. Reported rather
+                # than raised -- the user is still typing -- and reported
+                # *instead of* connecting, because "no host yet" must not
+                # read as "no restriction".
+                return False, str(exc)
+
+            # The same sources and the same precedence as the execution and
+            # filesystem paths: ``config-field`` first keeps this button's
+            # own fields ahead of a stored credential, and puts them behind
+            # the rule.
+            release = release_credential(
+                target,
+                provider="ssh",
+                config=cluster_config,
+                sources=("config-field", "stored-credential", "environment"),
+            )
+            connect_params["look_for_keys"] = release.local_identities
+            connect_params["allow_agent"] = release.local_identities
+            if release.refusal is not None:
+                logger.warning(
+                    "Not using a stored SSH credential for %s: %s.",
+                    cluster_config.cluster_host,
+                    release.refusal,
+                )
+            elif release.key_path:
+                key_path = Path(release.key_path).expanduser()
                 if key_path.exists():
                     connect_params["key_filename"] = str(key_path)
+                connect_params["look_for_keys"] = False
+            elif release.password:
+                connect_params["password"] = release.password
+                connect_params["look_for_keys"] = False
 
             ssh_client.connect(**connect_params)
 
