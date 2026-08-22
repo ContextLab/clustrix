@@ -390,25 +390,37 @@ result = compute_statistics(test_data)
         with open(bad_yaml, "w") as f:
             f.write("invalid: yaml: content: [")
 
-        # load_config_from_file is the widget's tolerant loader and returns {}
-        # by design (see its docstring); load_config is the one that raises.
-        assert load_config_from_file(str(bad_yaml)) == {}
+        # Both loaders raise for a file the caller *named*. This assertion
+        # used to read ``load_config_from_file(...) == {}`` and cited the
+        # then-docstring's "tolerant loader" contract; that contract was the
+        # defect (issue #168), because {} is also the answer for a file that
+        # holds no configurations, so the user was told nothing. The tolerant
+        # behaviour survives only for a file the widget *discovered*, and
+        # only with the reason logged -- see
+        # tests/unit/test_named_config_file_is_not_empty.py.
+        with pytest.raises(Exception):
+            load_config_from_file(str(bad_yaml))
         with pytest.raises(Exception):
             load_config(str(bad_yaml))
+        assert load_config_from_file(str(bad_yaml), discovered=True) == {}
 
         # Test malformed JSON
         bad_json = temp_config_dir / "bad.json"
         with open(bad_json, "w") as f:
             f.write('{"invalid": json content}')
 
-        assert load_config_from_file(str(bad_json)) == {}
+        with pytest.raises(Exception):
+            load_config_from_file(str(bad_json))
         with pytest.raises(Exception):
             load_config(str(bad_json))
+        assert load_config_from_file(str(bad_json), discovered=True) == {}
 
         # Test non-existent file
-        assert load_config_from_file("/nonexistent/config.yml") == {}
+        with pytest.raises(FileNotFoundError):
+            load_config_from_file("/nonexistent/config.yml")
         with pytest.raises(FileNotFoundError):
             load_config("/nonexistent/config.yml")
+        assert load_config_from_file("/nonexistent/config.yml", discovered=True) == {}
 
 
 class TestNotebookMagicIntegrationWorkflows:

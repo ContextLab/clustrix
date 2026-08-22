@@ -273,13 +273,23 @@ class ClusterConfig:
         (see ``UNCLASSIFIABLE_FIELDS``). Pass ``include_secrets=True`` to
         write all of it anyway, e.g. for a config file you deliberately keep
         out of version control.
-        """
-        config_path_obj = Path(config_path)
-        config_data = asdict(self)
-        if not include_secrets:
-            config_data = strip_secret_fields(config_data)
 
-        write_config_file_securely(config_path_obj, config_data)
+        **The source this configuration came from is written down too**, and
+        only when it is an untrusted one. Route 12 was the widget's Save
+        laundering a repository's configuration into ``~/.clustrix``; this
+        method is the second writer of exactly the same file, and its
+        precondition is only that the caller names the destination --
+        ``clustrix config --config-file ~/.clustrix/config.yml`` inside a
+        cloned repository, or ``get_config().save_to_file(...)``. What a save
+        writes IS a credential decision one restart later, so the record is a
+        property of the write path rather than of one button. See
+        :data:`CONFIG_SOURCES_KEY` for the key and
+        :func:`config_source_for_saved_entry` for the downgrade-only rule
+        that stops it becoming a laundering route in its own right.
+        """
+        write_config_file_securely(
+            Path(config_path), config_document(self, include_secrets=include_secrets)
+        )
 
     @classmethod
     def load_from_file(cls, config_path: str) -> "ClusterConfig":
@@ -330,17 +340,30 @@ class ClusterConfig:
         and the declaration is what any other ``ClusterConfig`` built from
         this file's content gets -- including ones built by code this calls.
 
+        A file may also carry clustrix's own earlier record of where it came
+        from, under :data:`CONFIG_SOURCES_KEY`. That record is clustrix's
+        bookkeeping rather than a declared field, so it is removed before
+        validation -- leaving it in would reject every file either writer
+        produced -- and it may only *lower* the source the caller established,
+        never raise it: see :func:`config_source_for_saved_entry`.
+
         ``origin`` names the file in error messages and is cosmetic;
         ``source`` is the security-relevant one.
         """
+        # Work on a copy: the mapping belongs to the caller, and removing the
+        # bookkeeping key from the caller's dict would make a second load of
+        # the same content validate differently than the first.
+        content = dict(mapping)
+        recorded = content.pop(CONFIG_SOURCES_KEY, None)
+        effective = config_source_for_saved_entry(source, recorded)
         where = origin or f"the {source} configuration"
-        _validate_config_mapping(mapping, where)
-        with config_built_from_file(source):
-            config = cls(**mapping)
+        _validate_config_mapping(content, where)
+        with config_built_from_file(effective):
+            config = cls(**content)
         # The loader opened the file, so it -- unlike ``__post_init__``,
         # which infers -- may write the hostname into the process-wide
         # record. See ``set_config_source``.
-        set_config_source(config, source)
+        set_config_source(config, effective)
         return config
 
 
@@ -655,6 +678,41 @@ def strip_secret_fields(config_data: dict) -> dict:
     }
 
 
+def config_document(config: "ClusterConfig", include_secrets: bool = False) -> dict:
+    """The document ``config`` is written to disk as.
+
+    One answer to "what does a configuration look like in a file", so that a
+    second writer cannot quietly disagree with the first. Both halves of it
+    are security properties and both were learned the hard way:
+
+    * **What may be written.** :func:`strip_secret_fields` -- passwords,
+      tokens and every mapping field whose values clustrix cannot classify
+      are left out unless ``include_secrets``.
+    * **Where it came from.** :data:`CONFIG_SOURCES_KEY`, and only when the
+      source is an untrusted one. Route 12 was the notebook widget's Save
+      copying a repository's configuration into ``~/.clustrix`` and the next
+      process reading it back as the user's own; ``ClusterConfig.save_to_file``
+      and ``ProfileManager.export_profile`` write the same file to a path the
+      caller names, which is a weaker precondition for the same laundering.
+      What a save writes IS a credential decision one restart later, so the
+      record belongs to the write path rather than to any one caller.
+
+    A *trusted* source is deliberately not recorded. It would be re-derived
+    identically from the file's own location, and a record that could raise
+    trust is exactly the laundering route the key exists to close -- see
+    :func:`config_source_for_saved_entry`, which ignores one. Absence
+    therefore keeps meaning "a human wrote this file", which is what keeps a
+    hand-written ``~/.clustrix/config.yml`` trusted.
+    """
+    config_data = asdict(config)
+    if not include_secrets:
+        config_data = strip_secret_fields(config_data)
+    source = get_config_source(config)
+    if source in UNTRUSTED_CONFIG_SOURCES:
+        config_data[CONFIG_SOURCES_KEY] = source
+    return config_data
+
+
 def write_text_securely(path: Path, text: str, *, append: bool = False) -> None:
     """Write ``text`` to ``path`` without ever exposing it to other users.
 
@@ -856,6 +914,43 @@ CONFIG_SOURCE_WORKING_DIRECTORY = "working-directory"
 #: redirected file is adopted says exactly that.
 CONFIG_SOURCE_REDIRECTED_CONFIG_DIR = "redirected-config-dir"
 
+#: A profile restored from a store that never recorded where its profiles
+#: came from. **Not trusted**, and it is a statement of *ignorance* rather
+#: than of provenance -- which is exactly why it is a source of its own
+#: rather than being folded into ``redirected-config-dir``.
+#:
+#: Provenance began to be written into the profile store only once
+#: ``profile_manager.PROFILE_SOURCES_KEY`` existed. Every store written
+#: before that says nothing, and ``ProfileManager._persist()`` fires from
+#: seven mutators -- one of them merely selecting a profile -- so a bundle a
+#: repository shipped had already been copied into ``~/.clustrix`` and was
+#: indistinguishable there from a profile the user built. Resolving that
+#: silence to "wherever the file now sits" is what made the fix protect
+#: nobody who was already affected: it re-derived ``user-config-dir``,
+#: trusted, and released the credential.
+#:
+#: So silence fails closed, which is the same rule
+#: :func:`get_config_source` applies to a config carrying no record at all.
+#: Two things follow from it being *ignorance*:
+#:
+#: * it does not taint the hostname process-wide. ``set_config_source`` is
+#:   passed ``record_host=False`` for it, for the reason that parameter
+#:   exists -- the source was inferred, not read -- and a permanent record
+#:   would leave a user whose only offence is an old store unable to use
+#:   their own cluster from anywhere in the process, and unable to undo it.
+#: * it is *replaceable*, unlike a recorded untrusted source. A store
+#:   recording this value is read as silence again rather than as a verdict,
+#:   so naming the store to ``ProfileManager.load_from_file`` -- the user
+#:   saying "these profiles are mine" about a file they identified -- still
+#:   resolves it, and the store then records a real answer.
+#:
+#: What it does not do is undo the laundering that already happened: a
+#: profile a repository put in a pre-fix store can still be re-trusted by an
+#: explicit ``configure()`` naming its host. Nothing in the file can tell us
+#: it was not the user's, and inventing certainty either way would be worse
+#: than saying so.
+CONFIG_SOURCE_UNRECORDED_PROVENANCE = "unrecorded-provenance"
+
 #: The sources that count as "the user configured this". Everything not
 #: listed is untrusted, so a source nobody has thought of yet fails closed.
 TRUSTED_CONFIG_SOURCES = frozenset(
@@ -873,12 +968,135 @@ UNTRUSTED_CONFIG_SOURCES = frozenset(
     {
         CONFIG_SOURCE_WORKING_DIRECTORY,
         CONFIG_SOURCE_REDIRECTED_CONFIG_DIR,
+        CONFIG_SOURCE_UNRECORDED_PROVENANCE,
     }
 )
 
 #: Every source there is. A new one has to be added here *and* decided about
 #: above, so it cannot become trusted by being forgotten.
 CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | UNTRUSTED_CONFIG_SOURCES
+
+
+#: Top-level key in a saved configuration file recording the source the
+#: configuration carried when it was written -- per configuration name in
+#: the widget's multi-configuration shape, and as a bare string in the
+#: flat single-configuration file ``ClusterConfig.save_to_file`` writes.
+#:
+#: Route 12. ``_on_save_config`` writes into :func:`get_config_dir`, and
+#: :func:`detect_config_files` infers trust from exactly that directory. So
+#: pressing Save on a configuration the widget had *found* in a cloned
+#: repository copied it to ``~/.clustrix/config.yml``, and the next session's
+#: widget re-derived the source from where the file now was --
+#: ``user-config-dir``, trusted -- and released the credential. The in-memory
+#: invariant held the whole time: every sidecar was still valid when Save
+#: returned, and the laundering happened on disk, one restart later.
+#:
+#: The precondition is attacker-controlled, because the filename comes from
+#: the configuration's own ``name``: ``""`` and ``Config`` both save as
+#: ``config.yml`` and ``clustrix`` saves as ``clustrix.yml``, all three of
+#: which :func:`detect_config_files` looks for. And a save writes *every*
+#: configuration in the dropdown, including ones the user never selected and
+#: never looked at, verbatim -- so a repository shipping a second entry rides
+#: along with the one the user meant to keep.
+#:
+#: This is the same defect ``profile_manager.PROFILE_SOURCES_KEY`` closes for
+#: the profile store, and it takes the same answer for the same reason:
+#: persist the source rather than refuse to persist the configuration, so a
+#: user who deliberately keeps a project-local configuration keeps it -- and
+#: keeps the refusal that goes with it. Preserving the configuration and *why
+#: it is refused* is the honest pair.
+CONFIG_SOURCES_KEY = "config_sources"
+
+
+def config_name_from_document(key: Any) -> str:
+    """The configuration name a key in a parsed YAML/JSON mapping stands for.
+
+    A configuration name is a *string* everywhere clustrix uses one: it is a
+    dropdown option, it is sorted against other names, and it is the key the
+    provenance record is looked up under. A YAML key is not always a string.
+    YAML 1.1 resolves ``on:``, ``off:``, ``yes:`` and ``no:`` to booleans,
+    ``null:`` to ``None`` and ``2:`` to an int, so a configuration file
+    containing any of them handed the widget a ``self.configs`` whose keys
+    could not be compared with each other -- ``sorted()`` raised
+    ``TypeError: '<' not supported between instances of 'str' and 'bool'``
+    and the widget failed at construction, or Save failed outright and the
+    user lost the configuration they had just edited. A file that does this
+    can be shipped by a cloned repository, so it is a denial of service with
+    an attacker-controlled precondition, and it is fixed here -- at the one
+    boundary where document keys become names -- rather than by teaching
+    each ``sorted()`` call to tolerate mixed types.
+
+    Coercing rather than dropping the entry is deliberate: dropping would
+    silently lose a configuration the user can see in their own file, and
+    ``str(True)`` at least says what YAML actually made of what they wrote.
+    """
+    return key if isinstance(key, str) else str(key)
+
+
+def recorded_config_source(recorded: Any, name: str) -> Any:
+    """The source ``name``'s entry claims, out of a whole file's record.
+
+    The record is written by clustrix and read back from a file anybody may
+    have edited, so its *shape* is untrusted too. A record that is not a
+    mapping is not a record about ``name`` in particular; it is an
+    unrecognised value, and every entry in the file inherits it so that
+    :func:`config_source_for_saved_entry` can fail it closed. Returning
+    ``None`` there would let a one-character edit -- ``config_sources: x`` --
+    erase the record for every configuration in the file.
+    """
+    if recorded is None:
+        return None
+    if isinstance(recorded, dict):
+        # Through the same coercion the configuration names themselves went
+        # through, or a record written under ``on:`` would not be found under
+        # the name ``"True"`` that the configuration ended up with -- and a
+        # missing record reads as absence, which is *trusted*.
+        return {
+            config_name_from_document(key): value for key, value in recorded.items()
+        }.get(name)
+    return recorded
+
+
+def config_source_for_saved_entry(file_source: str, recorded: Any) -> str:
+    """The source a saved configuration gets: ``file_source``, or worse.
+
+    A persisted source may only ever *downgrade*, exactly as in
+    :func:`clustrix.profile_manager._restored_profile_source`. That asymmetry
+    is the whole security property and it is what makes writing the source
+    down safe at all: if a file could raise its own trust by saying so, this
+    key would be the laundering route it exists to close.
+
+    So:
+
+    * an untrusted recorded source is believed, whatever the file's location
+      says. A configuration that came out of a working directory stays from a
+      working directory after Save copies it into ``~/.clustrix``.
+    * a *trusted* recorded source is ignored and the file's own location
+      stands, so a repository cannot promote a configuration it ships by
+      writing ``explicit-file`` beside it.
+    * anything clustrix does not recognise -- a truncated file, a hand-edited
+      one, an attacker's invention -- is treated as a redirect rather than
+      raised on. Refusing to load would cost the user every configuration in
+      the file; refusing to *trust* costs one credential release.
+
+    **Absence is trusted here, and that is the deliberate difference from the
+    profile store.** A profile store is only ever written by clustrix, so
+    silence there means a version that did not record and has to fail closed.
+    A configuration file is a file *users write by hand* -- moving settings
+    into ``~/.clustrix/config.yml`` is the remedy ``_load_default_config``'s
+    own warning names -- so silence here means "a human put this here", which
+    is the trusted case and must stay trusted. That is also what keeps an
+    explicit adoption available: the widget records the source when *it*
+    moves a configuration, and a user who moves one themselves records
+    nothing and is believed.
+    """
+    if recorded is None:
+        return file_source
+    if not isinstance(recorded, str) or recorded not in CONFIG_SOURCES:
+        return CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
+    if recorded in UNTRUSTED_CONFIG_SOURCES:
+        return recorded
+    return file_source
 
 
 def normalize_hostname(hostname: object) -> str:
@@ -1335,8 +1553,31 @@ def load_config(config_path: str) -> None:
     """
     Load configuration from a file (JSON or YAML).
 
+    ``explicit-file``: the caller named the path, and naming a path is the
+    choice the automatic search does not have. A provenance record in the
+    file itself can only lower that, never raise it -- see
+    :func:`config_source_for_saved_entry`.
+
     Args:
         config_path: Path to configuration file
+    """
+    _load_config_file(config_path, CONFIG_SOURCE_EXPLICIT_FILE)
+
+
+def _load_config_file(config_path: str, file_source: str) -> str:
+    """Read ``config_path`` into the live config and return its source.
+
+    One reader for both doors, because they must agree about the provenance
+    record: :func:`load_config`, where the caller named the path, and
+    :func:`_load_default_config`, where clustrix found the file by searching
+    the standard locations. ``file_source`` is what the *location* says; the
+    return value is what the file gets after its own record has been allowed
+    to downgrade it.
+
+    The record is read here for the return value;
+    :meth:`ClusterConfig.from_file_content` applies it again when building,
+    which is harmless -- popping a key that is no longer there -- and keeps
+    every other loader of raw bytes behind the same rule.
     """
     global _config
 
@@ -1356,12 +1597,17 @@ def load_config(config_path: str) -> None:
             f"(parsed as {type(config_data).__name__})."
         )
 
-    # The caller named this path, so the caller chose it. The search of the
-    # standard locations overwrites this with what it actually found; see
-    # ``_load_default_config``.
-    _config = ClusterConfig.from_file_content(
-        config_data, CONFIG_SOURCE_EXPLICIT_FILE, origin=str(config_path)
+    # Where the file is, unless the file itself records somewhere worse.
+    # ``from_file_content`` performs the same computation before it stamps
+    # the object; this copy decides what the *search* is told so that an
+    # adopted working-directory file is announced as what it really is.
+    effective = config_source_for_saved_entry(
+        file_source, config_data.get(CONFIG_SOURCES_KEY)
     )
+    _config = ClusterConfig.from_file_content(
+        config_data, effective, origin=str(config_path)
+    )
+    return effective
 
 
 def save_config(config_path: str, include_secrets: bool = False) -> None:
@@ -1524,21 +1770,40 @@ def _load_default_config():
     for path, source in candidates:
         if path.exists():
             try:
-                # Declared around the whole read, not just stamped after it.
-                # ``load_config`` declares ``explicit-file`` for its own
-                # construction -- the caller named the path, from its point of
-                # view -- and that inner declaration rightly wins for the
-                # object it builds, which this then corrects below. But the
-                # inner declaration is *trusted*, so without this outer one
-                # nothing goes into ``_UNTRUSTED_LOADS_IN_FLIGHT`` and the
-                # thread guard gave the working-directory and redirected
-                # searches -- the two reads it exists for -- no cover at all.
+                # Declared around the whole read as well as inside it.
+                # ``_load_config_file`` declares the source it computes for
+                # the object it builds, and that inner declaration rightly
+                # wins for that object; this outer one is what puts the read
+                # into ``_UNTRUSTED_LOADS_IN_FLIGHT`` for its whole duration,
+                # without which the thread guard gave the working-directory
+                # and redirected searches -- the two reads it exists for --
+                # no cover at all.
                 with config_built_from_file(source):
-                    load_config(str(path))
+                    # The location is only half the answer: a file that
+                    # records having come from somewhere untrusted is
+                    # believed over where it now sits, which is what stops a
+                    # save into ~/.clustrix promoting what it copied. The two
+                    # are kept apart because the messages below are about the
+                    # *location*, and telling a user to remove a file from
+                    # their working directory when it is in ~/.clustrix sends
+                    # them after the wrong file.
+                    effective = _load_config_file(str(path), source)
             except Exception:
                 continue
-            set_config_source(_config, source)
-            if source == CONFIG_SOURCE_WORKING_DIRECTORY:
+            if effective != source:
+                warnings.warn(
+                    f"clustrix is treating the configuration file {path} as "
+                    f"{effective} rather than {source}, because the file "
+                    f"records having been copied there from somewhere nobody "
+                    f"chose. Stored credentials are NOT offered to a "
+                    f"cluster_host chosen this way. If these settings are "
+                    f"yours, remove the "
+                    f"'{CONFIG_SOURCES_KEY}' line from {path} -- a file you "
+                    f"wrote records nothing, and a file that records nothing "
+                    f"is yours -- and start a new process.",
+                    stacklevel=2,
+                )
+            elif source == CONFIG_SOURCE_WORKING_DIRECTORY:
                 warnings.warn(
                     f"clustrix adopted the configuration file {path} because "
                     f"it is in the current working directory, not because "
