@@ -29,6 +29,49 @@ from dataclasses import dataclass, asdict, fields
 logger = logging.getLogger(__name__)
 
 
+#: Fields that are accepted, stored, and read by nothing (#161). They are
+#: leftovers of the automatic-GPU machinery whose execution path was deleted;
+#: removing them outright would break every saved configuration that carries
+#: one, so they follow the #158 precedent instead -- accepted, stored, and
+#: announced when set. The message says why each is dead, because "no effect"
+#: without a reason reads as a bug in the caller.
+DEAD_BUT_ACCEPTED_FIELDS: Dict[str, str] = {
+    "max_gpu_parallel_jobs": (
+        "the automatic GPU fan-out it bounded was deleted -- it fabricated "
+        "results and never ran your function"
+    ),
+    "gpu_detection_enabled": (
+        "GPU detection only fed the deleted automatic GPU fan-out"
+    ),
+    "gpu_memory_fraction": (
+        "nothing divides GPU memory; the fan-out that used to was deleted"
+    ),
+    "local_parallel_threshold": (
+        "local parallelism is decided by picklability and I/O markers, not "
+        "by an iteration threshold"
+    ),
+    "auto_gpu_packages": "nothing auto-installs CUDA packages any more",
+    "prefer_gpu_execution": (
+        "backend choice is exactly what cluster_type says; nothing prefers"
+    ),
+    "cache_credentials": (
+        "credentials are read from their sources on demand; there is no "
+        "cache to switch off"
+    ),
+    "cuda_version_preference": (
+        "the remote environment replicates yours; no CUDA pinning exists"
+    ),
+    "gpu_requirements": (
+        "resource requests go through @cluster(...) keywords; this field is "
+        "read by nothing"
+    ),
+    "credential_cache_ttl": "there is no credential cache to expire",
+    "rapids_ecosystem": (
+        "nothing installs or detects RAPIDS; the field was aspirational"
+    ),
+}
+
+
 @dataclass
 class ClusterConfig:
     """Configuration settings for cluster execution."""
@@ -226,6 +269,8 @@ class ClusterConfig:
         if self.venv_post_install_commands is None:
             self.venv_post_install_commands = []
 
+        self._warn_about_dead_fields()
+
         if self.ssh_host_key_policy not in ("reject", "auto_add"):
             raise ValueError(
                 f"Invalid ssh_host_key_policy={self.ssh_host_key_policy!r}. "
@@ -274,6 +319,25 @@ class ClusterConfig:
         # back, and only the loader that opened the file can make it -- which
         # it does, explicitly. See ``_HOSTS_NAMED_BY_UNTRUSTED_SOURCES``.
         set_config_source(self, _source_being_read(), record_host=False)
+
+    def _warn_about_dead_fields(self) -> None:
+        """Announce every dead-but-accepted field set to a non-default value.
+
+        Accepted and stored, so old configuration files keep loading; read by
+        nothing, so setting one is a claim the run will not honour (#161).
+        Defaults stay silent: an unset field is not a claim.
+        """
+        for name, why in DEAD_BUT_ACCEPTED_FIELDS.items():
+            value = getattr(self, name)
+            default = _DEAD_FIELD_DEFAULTS.get(name)
+            if value == default:
+                continue
+            warnings.warn(
+                f"ClusterConfig({name}={value!r}) has no effect: {why}. "
+                f"The field is accepted so old configuration files keep "
+                f"loading, and will be removed in a future release.",
+                stacklevel=3,
+            )
 
     def save_to_file(self, config_path: str, include_secrets: bool = False) -> None:
         """Save this configuration instance to a file.
@@ -513,6 +577,15 @@ def _validate_config_mapping(mapping: Mapping[str, Any], origin: str) -> None:
         validate_conda_env_name(
             mapping["conda_env_name"], source=f"{origin}: conda_env_name"
         )
+
+
+#: Defaults for :data:`DEAD_BUT_ACCEPTED_FIELDS`, read from the dataclass
+#: definition once so the comparison cannot drift from it.
+_DEAD_FIELD_DEFAULTS: Dict[str, Any] = {
+    f.name: f.default
+    for f in fields(ClusterConfig)
+    if f.name in DEAD_BUT_ACCEPTED_FIELDS
+}
 
 
 def validate_cluster_type(cluster_type: str, source: str = "cluster_type") -> None:

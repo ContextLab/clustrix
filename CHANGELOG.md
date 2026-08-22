@@ -101,6 +101,15 @@ Landed last on the merge train, after this draft was first written:
   raised `ConfigFileError` on its profile names at first use. The search now
   detects the bundle shape, declines to adopt any of them, says so naming the
   file and the profiles, and keeps looking (#159, merge decision (a)).
+- **Eleven `ClusterConfig` fields are accepted and read by nothing — and now
+  say so when you set one** (#161): `max_gpu_parallel_jobs`,
+  `gpu_detection_enabled`, `gpu_memory_fraction`, `local_parallel_threshold`,
+  `auto_gpu_packages`, `prefer_gpu_execution`, `cache_credentials`,
+  `cuda_version_preference`, `gpu_requirements`, `credential_cache_ttl` and
+  `rapids_ecosystem` are leftovers of the automatic-GPU machinery whose
+  execution path was deleted. They stay accepted so old configuration files
+  keep loading, and each warns with its own reason instead of being silently
+  absorbed (#158's precedent). Defaults stay silent.
 
 Some entries below describe defects in backends that this same release then
 removed (see **Removed — unverified backends**). They are kept because the
