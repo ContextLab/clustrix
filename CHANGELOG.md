@@ -67,6 +67,41 @@ backend.
 
 ### Fixed — correctness
 
+Landed last on the merge train, after this draft was first written:
+
+- **A malformed configuration file you explicitly chose reported as empty**
+  (#168). The widget's Load answered `{}` for any read failure — path typo,
+  permissions problem, malformed YAML — which is also the answer for a file
+  holding nothing, so the widget offered a blank profile as if your settings
+  were in force. A named file now raises like `clustrix.config.load_config`
+  does for the same file; only *discovered* files are skipped, and their
+  reason is logged rather than discarded.
+- **Renaming a profile onto an existing name silently destroyed that other
+  profile** (#171) — no warning, no undo; the occupant's host, username and
+  key file were gone. The rename is refused and names both profiles. The
+  refusal deliberately does not reset the name box (it observes the
+  keystream), so it can show a name the profile does not hold until you type
+  again — recorded here as a known limitation rather than filed separately;
+  there is no data loss either way.
+- **`detect_gpu_capabilities` reported a GPU as available when it could not
+  parse `nvidia-smi`'s output** (#172). `gpu_available` was set before
+  parsing, so a driver that added a column or emitted a warning line produced
+  "GPU available" with an empty device list — observed as real harm when a
+  job was routed to a host whose driver output the parser could not read.
+  Availability now follows parsed devices, and the `/proc` fallback fixture
+  holds what the driver really writes.
+- **Docs-only pull requests could not merge** (#169): branch protection
+  requires the `CI Status` check, but `fast_ci.yml` is path-filtered and never
+  runs for docs-only changes. The status-check job now reports success
+  without running the suite for such PRs instead of being absent, and three
+  more ways to silence a required check are closed alongside.
+- **Pressing the widget's Save bricked the next `import clustrix`.** The
+  widget writes a bundle of named profiles into the same standard locations
+  the automatic search reads flat configurations from; strict loading then
+  raised `ConfigFileError` on its profile names at first use. The search now
+  detects the bundle shape, declines to adopt any of them, says so naming the
+  file and the profiles, and keeps looking (#159, merge decision (a)).
+
 Some entries below describe defects in backends that this same release then
 removed (see **Removed — unverified backends**). They are kept because the
 defects were real and the record matters; they are not claims that those
