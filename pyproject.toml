@@ -97,6 +97,10 @@ dev = [
     # passes -- an environment gap masquerading as a code failure.
     "nbformat>=5.7",
     "nbclient>=0.7",
+    # nbclient launches kernels via ipykernel; without it the kernel dies
+    # before replying to kernel_info and every notebook check reports
+    # "Kernel died" instead of running.
+    "ipykernel>=6.0",
     # tests/comprehensive/test_edge_cases_real.py::test_memory_string_formats
     # imports psutil inside the function it submits, and that test is not
     # marked real_world, so it runs in the ordinary CI selection. Nothing else
