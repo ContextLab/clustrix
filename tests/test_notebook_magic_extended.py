@@ -757,7 +757,8 @@ class TestFileOperationEdgeCases:
 
     def test_config_loading_with_encoding_issues(self):
         if sys.platform == "win32":
-            self.skipTest(
+            # Not a unittest.TestCase: pytest.skip is the mechanism here.
+            pytest.skip(
                 "writes NUL and invalid-encoding bytes; Windows text mode "
                 "mangles them before the YAML reader sees them"
             )
