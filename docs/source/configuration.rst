@@ -92,7 +92,8 @@ automatically, at first use. Changing directory afterwards does not reload it.
    ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
    that list, however obvious they look. See the next paragraph.
 
-   **Items 1-3 are trusted only while ``<config dir>`` is ``~/.clustrix``.**
+   **Items 1-3 are trusted only while** ``<config dir>`` **is**
+   ``~/.clustrix``.**
    The reason to trust them is that putting a file in your own
    ``~/.clustrix`` is something you did; that reason does not survive the
    *directory* being named by ``CLUSTRIX_CONFIG_DIR``, because an
@@ -239,7 +240,7 @@ automatically, at first use. Changing directory afterwards does not reload it.
    exactly as it is, however often you run it. Look at the list first; a
    profile you do not recognise is the thing this is protecting you from.
 
-   **What ``load_config(path)`` does and does not mean.** It is trusted:
+   **What** ``load_config(path)`` **does and does not mean.** It is trusted:
    it is a call in your own Python naming a file, it is not reachable by
    handing a config back through a function, and distrusting *relative*
    paths would be theatre, since

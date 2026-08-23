@@ -496,12 +496,16 @@ class TestTheEmittedShellActuallyWorks:
             (stub_bin / "conda").chmod(0o755)
             env["PATH"] = f"{stub_bin}:{path}"
         env.update(env_extra or {})
-        return subprocess.run(
+        result = subprocess.run(
             ["bash", str(script_path)],
             capture_output=True,
             text=True,
             env=env,
         )
+        # The failure diagnostics read these off the result; a
+        # CompletedProcess carries no kwargs of its own.
+        result.env_used = env
+        return result
 
     @pytest.mark.parametrize("location", ["miniconda3", "anaconda3", "miniforge3"])
     def test_a_conda_in_a_usual_home_location_is_found_and_sourced(
@@ -516,8 +520,8 @@ class TestTheEmittedShellActuallyWorks:
             # not explain, so a failure carries everything the discovery
             # block saw.
             f"SOURCED mismatch\n"
-            f"  PATH     : {result.kwargs['env']['PATH']}\n"
-            f"  HOME     : {result.kwargs['env']['HOME']}\n"
+            f"  PATH     : {result.env_used['PATH']}\n"
+            f"  HOME     : {result.env_used['HOME']}\n"
             f"  conda.sh : exists={conda_sh.exists()} "
             f"mode={oct(conda_sh.stat().st_mode)}\n"
             f"  rc       : {result.returncode}\n"
