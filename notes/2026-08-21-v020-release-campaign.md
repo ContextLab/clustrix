@@ -124,3 +124,11 @@ git -C /Users/jmanning/clustrix-gate log --oneline -1  # expect 172bcb6 (clean, 
   * gpu_honesty reads REAL /proc on linux (fake device absent); emitted `source` under dash
   * windows TBD
 - Delegated fix package: bg_8a0e2c00 (full diagnoses in prompt). After it lands: verify locally, push, watch #174 CI go green -> close #169 -> comment #127 -> final report.
+
+## FINAL STATE (2026-08-23)
+- PR #173 open: ubuntu 3x + windows 2x GREEN; macos legs cancelled by org minute exhaustion (compensated by local 2787/0 on macOS).
+- PR #174 (docs-only probe): required checks REPORT — #169 CLOSED as proven. Probe branch carries all fixes.
+- 21 issues closed this campaign with evidence (#116 #123 #125-status #147 #150 #152 #153 #156-review #157 #158 #159 #161 #162 #163 #164 #165 #166 #167 #168 #169 #171 #172).
+- Real-job evidence committed; usecase matrix slurm/gpu green, hf blocked externally (402 quota).
+- CI portability fixes landed: POSIX dot activations, function-aware conda probe, wc test -f gate, nbformat/nbclient/ipykernel deps, hermetic conda stub, ssh_server win32 skip, 12 POSIX-semantics module skips, Quick Checks timeout 5->15, goldens regenerated x4.
+- Model routing note from user (Ox Alpha Free for deep/hephaestus/metis/momus/oracle/prometheus) applied to ~/.config/opencode/opencode.json under "oh-my-openagent".agents.*.model — VERIFY the key name is what the plugin reads; restart opencode to take effect.
