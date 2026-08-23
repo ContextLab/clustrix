@@ -508,10 +508,22 @@ class TestTheEmittedShellActuallyWorks:
         self, tmp_path, location
     ):
         home = tmp_path / "home"
-        _install_conda_sh(home / location, marker=location)
+        conda_sh = _install_conda_sh(home / location, marker=location)
         result = self._run(tmp_path, home)
-        assert result.returncode == 0, result.stderr
-        assert f"SOURCED={location}" in result.stdout
+        assert f"SOURCED={location}" in result.stdout, (
+            # Diagnose in place: one runner image shipped a conda under
+            # /usr/bin that defeated the stub in ways the stdout alone could
+            # not explain, so a failure carries everything the discovery
+            # block saw.
+            f"SOURCED mismatch\n"
+            f"  PATH     : {result.kwargs['env']['PATH']}\n"
+            f"  HOME     : {result.kwargs['env']['HOME']}\n"
+            f"  conda.sh : exists={conda_sh.exists()} "
+            f"mode={oct(conda_sh.stat().st_mode)}\n"
+            f"  rc       : {result.returncode}\n"
+            f"  stdout   : {result.stdout!r}\n"
+            f"  stderr   : {result.stderr!r}"
+        )
 
     def test_nothing_found_stops_the_job_with_a_diagnosable_message(self, tmp_path):
         import os
