@@ -195,6 +195,7 @@ Table of Contents
    api/config
    api/notebook_magic
    api/local_executor
+   api/public_api
 
 .. _supported-cluster-types:
 
