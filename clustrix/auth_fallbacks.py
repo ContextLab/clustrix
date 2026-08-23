@@ -5,11 +5,22 @@ This module provides password fallback functionality when SSH key authentication
 with environment-specific handling for different execution contexts.
 """
 
-import os
 import sys
 import getpass
-from typing import Optional, Dict, Any
+from typing import TYPE_CHECKING, Optional, Dict, Any
 import logging
+
+from .credential_release import (
+    HOSTLESS_PASSWORD_VARIABLES,
+    HOST_NAMED_PASSWORD_VARIABLES,
+    CredentialTarget,
+    environment_password_variable,
+    hostless_secret_refusal,
+    release_credential,
+)
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from .config import ClusterConfig
 
 logger = logging.getLogger(__name__)
 
@@ -104,13 +115,82 @@ def get_password_widget(prompt: str) -> Optional[str]:
         return None
 
 
-def get_cluster_password(hostname: str, username: str) -> Optional[str]:
+def _colab_password(
+    target: CredentialTarget, config: Optional["ClusterConfig"]
+) -> Optional[str]:
+    """A Colab userdata secret for ``target``, or ``None``.
+
+    Colab's store is not one clustrix keeps, so it cannot go through
+    ``release_credential``'s branches -- but it is the same two kinds of
+    name, and it gets the same two rules. The host-named keys are the user
+    naming the host that may have the secret. The generic ``CLUSTER_PASSWORD``
+    names no host, so it is rule 2, asked of the one definition of that rule.
     """
-    Get cluster password with environment-specific fallbacks.
+    try:
+        from google.colab import userdata  # type: ignore[import-not-found]
+    except ImportError:
+        logger.debug("google.colab not available")
+        return None
+
+    named = [
+        environment_password_variable(template, target.hostname)
+        for template in HOST_NAMED_PASSWORD_VARIABLES
+    ]
+    for key in named:
+        try:
+            password = userdata.get(key)
+        except Exception:
+            continue
+        if password:
+            logger.info(f"Retrieved password from Colab secrets: {key}")
+            return password
+
+    for key in HOSTLESS_PASSWORD_VARIABLES:
+        try:
+            password = userdata.get(key)
+        except Exception:
+            continue
+        if not password:
+            continue
+        refusal = hostless_secret_refusal(target, config)
+        if refusal:
+            logger.warning(
+                "Colab secret %s was not offered to %s: %s",
+                key,
+                target.hostname,
+                refusal,
+            )
+            return None
+        logger.info(f"Retrieved password from Colab secrets: {key}")
+        return password
+    return None
+
+
+def get_cluster_password(
+    target: CredentialTarget, *, config: Optional["ClusterConfig"] = None
+) -> Optional[str]:
+    """A password for ``target``, asked of the gate before the user.
+
+    **Route 9 was an unconverted call site, not an argument.** This took a
+    bare ``hostname`` and scanned five environment variables for it, two of
+    which -- ``CLUSTRIX_DEFAULT_PASSWORD`` and ``CLUSTER_PASSWORD`` -- name
+    no host at all, and handed whatever it found to whatever hostname it was
+    passed. On the ``setup_auth_with_fallback`` path that hostname is
+    ``config.cluster_host``, so a cloned repository's ``clustrix.yml``
+    collected the user's default cluster password while
+    ``release_credential`` was refusing that same host in the same process.
+    Lock 3 could never have caught it: it read ``os.environ`` directly and
+    never touched the store.
+
+    So it takes a recipient, like everything else that hands out a secret,
+    and the environment branch is ``release_credential``'s with the source
+    narrowed to it. What is left here is the interactive prompt, which is a
+    person reading the hostname and deciding.
 
     Args:
-        hostname: Cluster hostname
-        username: Username for authentication
+        target: who is about to receive the password.
+        config: the configuration ``target`` was built from, which is what
+            provenance is derived from.
 
     Returns:
         Password string or None if not available
@@ -119,46 +199,27 @@ def get_cluster_password(hostname: str, username: str) -> Optional[str]:
 
     # 1. Colab environment - use secrets
     if env == "colab":
-        try:
-            from google.colab import userdata
-
-            # Try multiple key formats
-            key_variants = [
-                f"CLUSTER_PASSWORD_{hostname}",
-                f'CLUSTRIX_PASSWORD_{hostname.upper().replace(".", "_")}',
-                f'{hostname.upper().replace(".", "_")}_PASSWORD',
-                "CLUSTER_PASSWORD",  # Generic fallback
-            ]
-
-            for key in key_variants:
-                try:
-                    password = userdata.get(key)
-                    if password:
-                        logger.info(f"Retrieved password from Colab secrets: {key}")
-                        return password
-                except Exception:
-                    continue
-
-        except ImportError:
-            logger.debug("google.colab not available")
-
-    # 2. Local environment - check environment variables
-    env_vars = [
-        f'CLUSTRIX_PASSWORD_{hostname.upper().replace(".", "_")}',
-        f'CLUSTER_PASSWORD_{hostname.upper().replace(".", "_")}',
-        f'{hostname.upper().replace(".", "_")}_PASSWORD',
-        "CLUSTRIX_DEFAULT_PASSWORD",
-        "CLUSTER_PASSWORD",
-    ]
-
-    for var in env_vars:
-        password = os.getenv(var)
+        password = _colab_password(target, config)
         if password:
-            logger.info(f"Retrieved password from environment variable: {var}")
             return password
 
+    # 2. The environment, through the one gate.
+    release = release_credential(
+        target,
+        provider="ssh",
+        config=config,
+        sources=("fallback-environment",),
+    )
+    if release.password:
+        logger.info("Retrieved password from the environment for %s", target.hostname)
+        return release.password
+    if release.refusal:
+        logger.warning(
+            "No environment password for %s: %s", target.hostname, release.refusal
+        )
+
     # 3. Interactive fallbacks based on environment
-    prompt = f"Password for {username}@{hostname}"
+    prompt = f"Password for {target.username}@{target.hostname}"
 
     if env == "notebook":
         # GUI popup for notebook environments
@@ -250,7 +311,17 @@ def setup_auth_with_fallback(config, setup_ssh_keys_func, **kwargs) -> Dict[str,
     # If SSH key setup failed or no password provided, try password fallback
     logger.info("SSH key setup failed or incomplete, attempting password fallback")
 
-    fallback_password = get_cluster_password(config.cluster_host, config.username)
+    try:
+        target = CredentialTarget.for_config(config)
+    except ValueError as exc:
+        logger.warning("No password fallback is possible: %s", exc)
+        return {
+            "success": False,
+            "error": f"SSH key setup failed and no credential target exists: {exc}",
+            "details": {"fallback_attempted": True, "fallback_available": False},
+        }
+
+    fallback_password = get_cluster_password(target, config=config)
 
     if fallback_password:
         logger.info("Password retrieved via fallback method, retrying SSH key setup")

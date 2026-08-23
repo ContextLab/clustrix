@@ -7,6 +7,11 @@ false claim that it had been migrated to ``scripts/aws/`` -- that directory
 never existed until this file. See GitHub issue #95. The original source
 was recovered from git history (``git show b9c836f^:cleanup_test_resources.py``).
 
+Clustrix does not create AWS resources -- there is no AWS backend and no
+provisioner in the package. This is standalone operator tooling for an
+account that already holds clustrix-tagged networking, run by hand when
+something that should have been torn down is still on the bill.
+
 WHAT THIS DELETES
 ------------------
 NAT gateways, their Elastic IPs, subnets, non-default security groups,
@@ -23,9 +28,9 @@ SAFETY
 IDENTIFICATION / TAGGING CONVENTION
 ------------------------------------
 A VPC is only eligible for cleanup if it carries the tag
-``clustrix:managed=true``. This is the exact tag that
-``clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner`` applies
-to every VPC it creates (see ``clustrix/kubernetes/aws_provisioner.py``).
+``clustrix:managed=true``. That tag is the whole of the identification: it
+is what marks a VPC as clustrix's to delete, and a VPC without it is out of
+scope no matter what else is true of it.
 NAT gateways, subnets, security groups, route tables, and internet gateways
 are only deleted when they belong to such a tagged VPC. Untagged VPCs --
 including the account's default VPC and anything created by hand or by
@@ -33,10 +38,15 @@ another tool -- are never touched, no matter what they are named.
 
 CREDENTIALS
 -----------
-AWS credentials are loaded via ``clustrix.credential_manager.
-FlexibleCredentialManager`` (environment variables or ``~/.clustrix/.env``).
-If no credentials are found, this script exits immediately with an error --
-it never silently falls back to boto3's default credential chain.
+AWS credentials come from boto3's own credential chain: the ``AWS_*``
+environment variables, ``~/.aws/credentials``, or an instance profile. If it
+resolves nothing, this script exits immediately with an error rather than
+letting a call fail somewhere deeper.
+
+This used to ask ``clustrix.credential_manager`` for provider ``"aws"``,
+which has never existed in ``PROVIDER_ENV_NAMES`` -- the lookup always
+returned ``None``, so the script could never authenticate at all. AWS keys
+are also not something clustrix should be holding: it has no AWS backend.
 
 Usage:
     python scripts/aws/cleanup_resources.py [--region REGION] [--execute]
@@ -44,8 +54,6 @@ Usage:
 
 import argparse
 import sys
-
-from clustrix.credential_manager import FlexibleCredentialManager
 
 MANAGED_TAG_KEY = "clustrix:managed"
 MANAGED_TAG_VALUE = "true"
@@ -68,11 +76,9 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
             "Delete NAT gateways, VPCs, and their dependent networking "
-            "resources that were created by Clustrix's AWS EKS provisioner. "
-            "Defaults to a DRY RUN that only prints what would be deleted. "
-            f"Only ever touches VPCs tagged {MANAGED_TAG_KEY}="
-            f"{MANAGED_TAG_VALUE} (the tag clustrix.kubernetes."
-            "aws_provisioner applies to every VPC it creates) -- nothing "
+            "resources tagged as Clustrix-managed. Defaults to a DRY RUN "
+            "that only prints what would be deleted. Only ever touches "
+            f"VPCs tagged {MANAGED_TAG_KEY}={MANAGED_TAG_VALUE} -- nothing "
             "else is ever deleted, regardless of naming."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -112,24 +118,23 @@ def get_ec2_client(region: str):
             "        are the only thing in the project that needs it.)"
         )
 
-    manager = FlexibleCredentialManager()
-    creds = manager.ensure_credential("aws")
-    if (
-        not creds
-        or not creds.get("access_key_id")
-        or not creds.get("secret_access_key")
-    ):
+    # boto3's own credential chain, deliberately. This used to ask the
+    # clustrix credential manager for provider "aws", which has never been
+    # in PROVIDER_ENV_NAMES -- the lookup always returned None, so this
+    # script could never authenticate at all. Standard AWS environment
+    # variables, ~/.aws/credentials and instance profiles are what an
+    # operator running cleanup tooling already has, and going through the
+    # SDK's chain also keeps AWS keys out of clustrix's credential surface.
+    if boto3.Session().get_credentials() is None:
         print(
             "ERROR: No AWS credentials found. Set AWS_ACCESS_KEY_ID and "
-            "AWS_SECRET_ACCESS_KEY, or configure them in ~/.clustrix/.env, "
-            "before running this script.",
+            "AWS_SECRET_ACCESS_KEY, or configure a profile with `aws "
+            "configure`, before running this script.",
             file=sys.stderr,
         )
         raise SystemExit(1)
     return boto3.client(
         "ec2",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
 

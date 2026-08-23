@@ -107,16 +107,15 @@ Messages you are likely to see
 
 The job produced a result or error file that carries no HMAC. Loading a pickle
 executes code, so clustrix refuses rather than trusting a file from a remote
-host. This is expected if you are pointing a new clustrix at a job submitted by
-an older one; it is a genuine warning sign otherwise. See
-:doc:`execution_model`.
+host. Treat it as a warning sign: a result that should have been signed at
+submission was not. See :doc:`execution_model`.
 
 **"No result-signing key is recorded for Job ... "**
 
-The submitting process no longer has the key. Keys live in memory for the life
-of the submitting process only, so a *different* process cannot collect a job's
-result -- including a fresh interpreter after you restarted your notebook. Job
-results are not portable across processes.
+This process does not hold the key. Keys live in memory for the life of the
+submitting process only, so a *different* process cannot collect a job's result
+-- and a fresh interpreter after a notebook restart is a different process.
+Job results are not portable across processes.
 
 **"Host key verification failed for '<host>' ..."**
 
@@ -124,7 +123,10 @@ The host is not in your ``known_hosts``. This is the default and it is
 deliberate. The message contains the exact ``ssh-keyscan`` command to add it.
 The alternative, ``ssh_host_key_policy="auto_add"``, trusts any key and is what
 makes machine-in-the-middle attacks possible; choose it knowingly or not at
-all.
+all. It also writes: on that policy clustrix creates ``~/.ssh/known_hosts`` if
+it is absent -- directory ``0700``, file ``0600`` -- so that the key it accepts
+is actually recorded and the *second* connection to that host is verified
+rather than re-accepted. ``reject`` never creates anything.
 
 **"This function uses package(s) that cannot be installed on the cluster: ..."**
 
@@ -146,6 +148,18 @@ has its own ``/tmp``, so an environment built on the login node
 simply is not there at run time. Use a home directory or shared scratch. The
 default (``~/.clustrix/jobs``) is already safe; this bites people who set
 ``/tmp/...`` deliberately.
+
+**The call has not returned and the job is still queued**
+
+A scheduler backend blocks in a poll loop, and that loop has a deadline:
+``job_wait_timeout``, 24 hours by default. On expiry you get a
+``TimeoutError`` naming the job's last known status and the remote directory
+its files are in. The job is deliberately **not** cancelled -- it may still be
+queued, and cancelling someone's allocation because the client got bored is
+not that function's decision -- so the result can still be collected by hand
+from the directory the message names. Raise ``job_wait_timeout`` for a queue
+that legitimately runs longer, or set it to ``None`` to wait indefinitely.
+``job_poll_interval`` (30 seconds) controls how often the loop asks.
 
 **Parallelization silently did not happen**
 

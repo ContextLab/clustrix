@@ -14,6 +14,8 @@ from clustrix.credential_manager import (
     get_credential_manager,
 )
 from clustrix.config import get_config_dir
+import clustrix.credential_manager as credential_manager_module
+from clustrix.credential_release import describe_credential
 
 
 class TestDotEnvCredentialSource:
@@ -141,18 +143,35 @@ class TestEnvironmentCredentialSource:
         assert creds["port"] == "22"
 
     def test_get_credentials_no_env_vars(self):
-        """Test that minimal credentials return only defaults."""
+        """Nothing configured must be reported as nothing configured.
+
+        The assertion here used to be ``ssh_creds == {"port": "22"}``, and
+        that was the bug rather than the specification: ``SSH_PORT`` was
+        looked up with a ``"22"`` default, so the filtered dictionary was
+        never empty and ``ensure_credential("ssh")`` could never be
+        ``None``. Every caller that tests for ``None`` to mean "not
+        configured" -- ``auth_methods.FlexibleCredentialAuth``,
+        ``executor_connections`` -- therefore never saw it, and matched a
+        blank host against the host it was asked to connect to. The default
+        port now applies only to a credential set that already holds
+        something real.
+        """
         with patch.dict(os.environ, {}, clear=True):
             source = EnvironmentCredentialSource()
 
-            # SSH has a default port
-            ssh_creds = source.get_credentials("ssh")
-            assert ssh_creds == {"port": "22"}
+            assert source.get_credentials("ssh") is None
 
             # HuggingFace has no defaults, so with nothing in the environment
             # every field filters out and the whole provider returns None.
             hf_creds = source.get_credentials("huggingface")
             assert hf_creds is None
+
+    def test_the_default_port_still_applies_to_a_real_credential(self):
+        """The default must not have been removed, only narrowed."""
+        with patch.dict(os.environ, {"SSH_HOST": "cluster.example.edu"}, clear=True):
+            creds = EnvironmentCredentialSource().get_credentials("ssh")
+
+        assert creds == {"host": "cluster.example.edu", "port": "22"}
 
     @patch.dict(
         os.environ,
@@ -239,7 +258,20 @@ class TestFlexibleCredentialManager:
             # integration -- use only .env, environment vars, and GitHub
             # secrets"); this assertion is stale from before that removal
             # (Issue #114).
-            assert len(manager.sources) == 3
+            #
+            # Asked through ``get_credential_status`` rather than by reading
+            # ``manager._sources``, which is now behind a frame check --
+            # reaching the manager's own sources is reaching
+            # ``~/.clustrix/.env`` without having to know where it is, and
+            # that was the last ungated way to the password. The status
+            # report names them, so this asserts *more* than the count it
+            # replaces and none of it is a secret.
+            named = manager.get_credential_status()["sources"]
+            assert set(named) == {
+                "DotEnvCredentialSource",
+                "EnvironmentCredentialSource",
+                "GitHubActionsCredentialSource",
+            }
 
     def test_env_file_creation(self):
         """Test that .env file is created automatically."""
@@ -257,8 +289,15 @@ class TestFlexibleCredentialManager:
                     manager.env_file.stat().st_mode & 0o777 == 0o600
                 )  # Secure permissions
 
-    def test_ensure_credential_success(self):
-        """Test successful credential retrieval."""
+    def test_credential_retrieval_success(self):
+        """Successful retrieval, asked for the way callers must now ask.
+
+        ``ensure_credential`` was public and took no recipient; it is
+        ``_ensure_credential_unchecked`` and raises for anyone but the gate
+        (issue #167). The supported questions are "what is configured"
+        (:func:`describe_credential`, no secret) and "may this host have it"
+        (:func:`release_credential`, recipient first).
+        """
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)
 
@@ -269,24 +308,105 @@ class TestFlexibleCredentialManager:
                 "SSH_HOST=cluster.example.edu\nSSH_USERNAME=researcher\n"
             )
 
-            with patch.dict(os.environ, {}, clear=True):
-                manager = FlexibleCredentialManager(config_dir)
-                creds = manager.ensure_credential("ssh")
+            with patch.dict(
+                os.environ, {"CLUSTRIX_CONFIG_DIR": str(config_dir)}, clear=True
+            ):
+                credential_manager_module._credential_manager = None
+                described = describe_credential("ssh")
 
-                assert creds is not None
-                assert creds["host"] == "cluster.example.edu"
-                assert creds["username"] == "researcher"
+                assert described.available
+                assert described.host == "cluster.example.edu"
+                assert described.username == "researcher"
 
-    def test_ensure_credential_not_found(self):
+    def test_credential_retrieval_not_found(self):
         """Test credential retrieval when credentials don't exist."""
         with tempfile.TemporaryDirectory() as temp_dir:
             config_dir = Path(temp_dir)
 
             with patch.dict(os.environ, {}, clear=True):
                 manager = FlexibleCredentialManager(config_dir)
-                creds = manager.ensure_credential("nonexistent")
 
-                assert creds is None
+                assert manager._configured_fields("nonexistent") == (None, [])
+
+    def test_the_store_refuses_a_caller_that_is_not_the_gate(self):
+        """Lock 3, live rather than decorative.
+
+        This test module is not ``clustrix.credential_release``, so the
+        store raises. That is what makes an eighth route fail on its first
+        run instead of at review.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            with pytest.raises(RuntimeError) as raised:
+                manager._ensure_credential_unchecked("ssh")
+
+            assert "release_credential" in str(raised.value)
+
+    def test_the_sources_are_not_reachable_through_a_public_attribute(self):
+        """Lock 1, at the level the store actually is.
+
+        ``_ensure_credential_unchecked`` was privatised and the sources it
+        reads were left on ``mgr.sources``, so
+        ``mgr.sources[0].get_credentials("ssh")`` still returned the
+        password with no recipient named and no gate consulted. Closing the
+        door and leaving the window open is not closing anything.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert not hasattr(manager, "sources")
+
+    def test_the_managers_own_sources_are_behind_the_same_frame_check(self):
+        """And an underscore alone is not that check.
+
+        ``_stored_credential`` was judged a public store with an underscore
+        on it, because importing it and calling it worked. The same standard
+        applied here: ``get_credential_manager()._sources[0].get_credentials("ssh")``
+        returned the password with no target named and no frame judged.
+
+        The frame check is always on and makes no reference to tests -- this
+        module is simply not one of
+        ``clustrix.credential_release.SOURCE_READERS``, which is the same
+        reason ``_ensure_credential_unchecked`` refuses it above.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            with pytest.raises(RuntimeError) as raised:
+                manager._sources[0].get_credentials("ssh")
+
+            assert "release_credential" in str(raised.value)
+            assert __name__ in str(raised.value)
+
+    def test_the_store_can_still_read_its_own_sources(self):
+        """The lock above is not simply "nothing works".
+
+        ``get_credential_status`` and ``list_available_providers`` walk the
+        same list from inside the store, and must keep doing so: a guard
+        that also blocked the legitimate readers would be indistinguishable
+        from a broken attribute.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert manager.get_credential_status()["sources"]
+            assert manager.list_available_providers() is not None
+
+    def test_there_is_no_public_bulk_credential_loader(self):
+        """``load_credentials_optional`` returned the password, to anyone.
+
+        A public module function *and* a public method, thirty lines above
+        the one that was privatised, with zero callers in the tree. It was
+        deleted rather than renamed: an unused way to obtain a secret
+        without naming a recipient is not a feature with no users, it is a
+        door with no lock.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            manager = FlexibleCredentialManager(Path(temp_dir))
+
+            assert not hasattr(manager, "load_credentials_optional")
+            assert not hasattr(credential_manager_module, "load_credentials_optional")
 
     def test_get_credential_status(self):
         """Test getting comprehensive credential status."""

@@ -200,7 +200,49 @@ def sample_loop_function():
 
 
 @pytest.fixture(autouse=True)
-def isolate_config_dir():
+def isolate_home():
+    """Give every test its own ``$HOME``, so none can touch the real ~/.ssh.
+
+    ``ssh_host_key_policy="auto_add"`` makes paramiko *write* the host key it
+    just accepted into ``~/.ssh/known_hosts``. The in-process test server in
+    ``tests/ssh_server.py`` generates a fresh key per run and binds a new
+    ephemeral port per test, so every one of those writes is a new line that
+    will never match anything again.
+
+    Measured on a developer machine before this fixture existed: 1,191 of the
+    1,223 entries in the real known_hosts were loopback junk from test runs,
+    leaving 32 genuine ones. Two runs at once interleave their appends and
+    corrupt the file, after which unrelated tests fail with ``InvalidHostKey``
+    -- and so does the developer's own ssh.
+
+    Individual test files had begun growing their own ``isolated_home``
+    fixtures. One autouse fixture here covers every test that exists and
+    every test anyone writes later, which is the only version of this that
+    stays true.
+
+    ``USERPROFILE`` is set alongside ``HOME`` because that is what
+    ``Path.home()`` reads on Windows.
+    """
+    with tempfile.TemporaryDirectory(prefix="clustrix-test-home-") as tmp:
+        ssh_dir = os.path.join(tmp, ".ssh")
+        os.makedirs(ssh_dir, exist_ok=True)
+        os.chmod(ssh_dir, 0o700)
+
+        saved = {k: os.environ.get(k) for k in ("HOME", "USERPROFILE")}
+        os.environ["HOME"] = tmp
+        os.environ["USERPROFILE"] = tmp
+        try:
+            yield tmp
+        finally:
+            for key, value in saved.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+
+
+@pytest.fixture(autouse=True)
+def isolate_config_dir(isolate_home):
     """Point clustrix's config directory at a throwaway for the whole run.
 
     Function-scoped, not session-scoped. A single directory shared by the
@@ -216,17 +258,27 @@ def isolate_config_dir():
     it, and a stray test_config.yml dropped into the repository root. Tests
     that chdir into a tmpdir do not help, because the save path is derived
     from the config directory rather than the working directory.
+
+    It is ``$HOME/.clustrix`` inside the isolated home rather than a
+    directory of its own, because that is where a real user's configuration
+    directory is, and clustrix now tells the two apart: a config directory
+    named by ``CLUSTRIX_CONFIG_DIR`` *somewhere else* is not trusted to
+    choose which host receives a stored credential (see
+    ``clustrix.config.CONFIG_SOURCE_REDIRECTED_CONFIG_DIR``). Pointing the
+    variable at an unrelated tmpdir made every test run in a configuration
+    no real user is in.
     """
-    with tempfile.TemporaryDirectory(prefix="clustrix-test-config-") as tmp:
-        previous = os.environ.get(CONFIG_DIR_ENV_VAR)
-        os.environ[CONFIG_DIR_ENV_VAR] = tmp
-        try:
-            yield tmp
-        finally:
-            if previous is None:
-                os.environ.pop(CONFIG_DIR_ENV_VAR, None)
-            else:
-                os.environ[CONFIG_DIR_ENV_VAR] = previous
+    tmp = str(pathlib.Path(isolate_home) / ".clustrix")
+    os.makedirs(tmp, mode=0o700, exist_ok=True)
+    previous = os.environ.get(CONFIG_DIR_ENV_VAR)
+    os.environ[CONFIG_DIR_ENV_VAR] = tmp
+    try:
+        yield tmp
+    finally:
+        if previous is None:
+            os.environ.pop(CONFIG_DIR_ENV_VAR, None)
+        else:
+            os.environ[CONFIG_DIR_ENV_VAR] = previous
 
 
 @pytest.fixture(autouse=True)
@@ -261,6 +313,15 @@ def reset_config():
     config_module._config = config_object
     for name, value in before.items():
         setattr(config_object, name, value)
+
+    # The record of which hostnames an untrusted configuration file has
+    # named is process-global and deliberately append-only -- a public "this
+    # host is fine now" call would be the laundering route it exists to
+    # close. It is still per-*process* state that one test can leave behind
+    # for another, exactly like the singleton above, so the fixture that
+    # already undoes process state reaches in and clears it. There is no
+    # production caller of this and there must not be one.
+    config_module._HOSTS_NAMED_BY_UNTRUSTED_SOURCES.clear()
 
     # Lazily-created module singletons cache the config directory at the moment
     # they are first constructed. With a per-test config directory, one built

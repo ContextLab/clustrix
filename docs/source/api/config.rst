@@ -95,8 +95,8 @@ SSH-related ones. It then reads, via ``clustrix/credential_manager.py``:
 Only the ``SSH_*`` variables can affect *this* connection. Everything else
 your ``.env`` happens to define is put into the process environment as a side
 effect of loading the whole file, and matters only if something else later
-reads it. In particular, cloud-provider and Kubernetes credentials no longer
-select any execution backend: those backends were removed in v0.2.0, see
+reads it. Cloud-provider and Kubernetes credentials in particular select no
+execution backend, because Clustrix has none for them; see
 :ref:`removed-backends`.
 
 **The optional SSH-key-setup helper.** ``setup_ssh_keys_with_fallback()``
@@ -119,7 +119,8 @@ above:
   ``~/.cache/huggingface/token``.
 - the variable *named by* ``password_env_var`` -- read for the SSH password
   when ``use_env_password`` is ``True``. The name is configurable, so there is
-  no fixed variable to document here; see ``ClusterConfig.get_env_password``.
+  no fixed variable to document here; the value is read (and gated) by
+  ``clustrix.credential_release.release_credential``.
 
 ``CLUSTRIX_CONFIG_DIR``
    Overrides the directory clustrix reads and writes user configuration in,
@@ -155,8 +156,8 @@ Cluster Settings
   same tuple for their cluster-type choices, so it is never possible for one
   of them to offer a backend the other (or ``ClusterExecutor``) cannot
   actually run. ``pbs``, ``sge``, ``kubernetes`` and the cloud VM providers
-  are not in the set: they were removed in v0.2.0 and now raise
-  ``ValueError: Unsupported cluster type``. See :ref:`removed-backends`.
+  are not in the set, and naming one raises a ``ValueError`` that says so and
+  points at its tracking issue. See :ref:`removed-backends`.
 - ``cluster_type="local"`` runs the function on the submitting machine via
   ``LocalJobManager`` (see :doc:`local_executor`) instead of talking to a
   scheduler at all -- there is no host, no SSH connection, and
@@ -173,7 +174,11 @@ Cluster Settings
   connection and reports the exact ``ssh-keyscan`` command to add it.
   ``"auto_add"`` trusts unknown host keys automatically -- insecure
   (vulnerable to machine-in-the-middle attacks) and never the default; it
-  has to be chosen deliberately. See ``clustrix.ssh_security``.
+  has to be chosen deliberately, **by you**: set in a configuration clustrix
+  merely discovered (a ``./clustrix.yml``, or a redirected
+  ``$CLUSTRIX_CONFIG_DIR``) the value is ignored and warned about, because
+  the weakening is a security decision and it persists in your
+  ``known_hosts``. See ``clustrix.ssh_security``.
 
 Paths
 ~~~~~
@@ -189,7 +194,16 @@ Paths
   but nothing in clustrix reads it -- setting it has no effect. It is listed
   here only so that a configuration file containing it is not mistaken for a
   file that does something.
-- ``conda_env_name``: Conda environment to activate on the cluster
+- ``conda_env_name``: An existing conda environment on the cluster to run
+  jobs in, by **name** -- a path (a ``conda run -p`` prefix environment) is
+  refused. It replaces the replicated execution environment and takes
+  precedence over it, and with ``use_two_venv=False`` that replication is
+  skipped entirely; see :doc:`../configuration` for how conda is located
+  inside the job, for what counts as a name, and for the Python
+  minor-version check the generated script makes before it runs anything.
+  The name is validated where you set it -- ``configure()``, the constructor
+  and a configuration file all refuse a path -- rather than at submission,
+  when the job directory and the pickle are already on the cluster.
 - ``venv_setup_timeout``: Seconds allowed for remote virtualenv creation
   (default: 300)
 
@@ -211,7 +225,10 @@ Used when ``cluster_type='huggingface'``:
 - ``hf_image``: Container image. Defaults to ``python:<your minor version>-slim``,
   because dill payloads carry CPython bytecode and are not portable across
   minor versions. Overriding this with a mismatched Python is the most likely
-  way to get an "unknown opcode" failure.
+  way to get an "unknown opcode" failure. Like ``ssh_host_key_policy``, an
+  override is honoured only from a configuration you chose: a staged job
+  hands ``CLUSTRIX_HF_TOKEN`` to the image as a job secret, so naming the
+  image names who receives your account token.
 - ``hf_job_timeout``: Job timeout passed to the HF API (default: ``30m``)
 - ``hf_allow_gpu_flavors``: Must be ``True`` before any flavor whose name does
   not begin with ``cpu-`` is accepted. GPU flavors bill by the second.

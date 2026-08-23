@@ -25,6 +25,7 @@ from tests.real_world.credential_manager import (
     require_test_username,
 )
 import paramiko
+from clustrix.ssh_security import configure_host_key_policy
 
 
 class SSHPackagingValidator:
@@ -45,7 +46,7 @@ class SSHPackagingValidator:
         """Set up SSH connection."""
         try:
             self.ssh_client = paramiko.SSHClient()
-            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(self.ssh_client, self.ssh_config)
 
             self.ssh_client.connect(
                 hostname=self.ssh_config.cluster_host,

@@ -1,8 +1,11 @@
 # AWS Resource Management Scripts
 
-Utilities for cleaning up AWS resources left behind by Clustrix's EKS
-provisioner (`clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner`),
-used during development and real-world testing of AWS/EKS functionality.
+Standalone operator tooling for removing EKS clusters, VPCs and IAM roles
+left behind by earlier AWS experimentation. Clustrix itself creates no AWS
+resources -- it ships no AWS backend and imports no boto3 -- so nothing here
+is part of running a job. These scripts exist because the resources exist,
+and a stranded NAT gateway bills by the hour whether or not anything still
+uses it.
 
 Restored from `cleanup_test_resources.py` and `destroy_cluster.py`, which
 were deleted from the repository root by commit `b9c836f` ("Issue #72:
@@ -29,9 +32,8 @@ report what they would delete.
 * **Print before delete.** Every resource under consideration is printed
   with its AWS region and resource id, in both dry-run and `--execute`
   mode, before any delete call is made.
-* **Positive identification only.** Both scripts only act on resources
-  tagged (or, for IAM roles, named) exactly as
-  `clustrix.kubernetes.aws_provisioner` creates them:
+* **Positive identification only.** Both scripts act only on resources
+  carrying these exact tags, or for IAM roles these exact names:
   * VPCs/EKS clusters: tag `clustrix:managed=true` (`destroy_cluster.py`
     additionally requires `clustrix:cluster=<cluster_name>`).
   * IAM roles: exact names `clustrix-eks-cluster-role-<cluster_name>` and

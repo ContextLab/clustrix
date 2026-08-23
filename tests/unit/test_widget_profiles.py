@@ -15,7 +15,9 @@ import pytest
 
 pytest.importorskip("ipywidgets")
 
-from clustrix.config import ClusterConfig  # noqa: E402
+from dataclasses import asdict  # noqa: E402
+
+from clustrix.config import ClusterConfig, configure  # noqa: E402
 from clustrix.modern_notebook_widget import ModernClustrixWidget  # noqa: E402
 from clustrix.profile_manager import ProfileManager  # noqa: E402
 
@@ -27,9 +29,16 @@ def isolated_profile_store(tmp_path, monkeypatch):
     monkeypatch.setattr(
         ProfileManager, "__init__", _profile_manager_init(tmp_path / "profiles")
     )
-    from clustrix.config import _config
+    # get_config(), not `from clustrix.config import _config`. Binding the
+    # singleton by name is the one thing that would make deferring the
+    # standard-location search to first use unsafe: a by-name importer can
+    # hold the object as it stood *before* the search ran. Nothing in the
+    # package does it, and this fixture was the only place in the tests that
+    # did, which made the claim in clustrix/config.py true only when scoped to
+    # the package. Now it is true everywhere.
+    from clustrix.config import get_config
 
-    _config.__dict__.update(ClusterConfig().__dict__)
+    configure(**asdict(ClusterConfig()))
 
 
 def _profile_manager_init(directory):
@@ -430,8 +439,20 @@ class TestOpeningTheWidgetIsSafe:
         assert ModernClustrixWidget() is not None
 
     def test_it_does_not_overwrite_a_saved_current_configuration(self, tmp_path):
-        """That profile can hold a token the live config does not, and losing
-        it to merely opening the widget is the worst kind of surprise."""
+        """That profile holds settings the live config does not, and losing
+        them to merely opening the widget is the worst kind of surprise.
+
+        The marker used to be ``hf_token``. It cannot be any more:
+        ``ProfileManager.save_to_file`` now drops credential-bearing fields
+        on the way to disk, deliberately and with no opt-in, because
+        ``_persist()`` fires from seven mutators and nobody asked for a
+        password to be written out world-readable in plaintext. A token
+        therefore no longer survives a restart *by design*, which is
+        asserted directly below rather than left implicit here.
+        ``hf_namespace`` is the same shape of setting without being a
+        secret, so it still pins what this test is actually about: opening
+        the widget must not clobber a saved profile.
+        """
         import clustrix
         from clustrix.profile_manager import ProfileManager as PM
 
@@ -439,15 +460,39 @@ class TestOpeningTheWidgetIsSafe:
         first = PM(config_dir=store)
         first.save_profile(
             "Current configuration",
-            ClusterConfig(cluster_type="huggingface", hf_token="MYTOKEN"),
+            ClusterConfig(cluster_type="huggingface", hf_namespace="my-org"),
         )
 
         clustrix.configure(cluster_type="local", default_cores=4)
         ModernClustrixWidget(profile_manager=PM(config_dir=store))
 
+        reopened = PM(config_dir=store).load_profile("Current configuration")
+        assert reopened.hf_namespace == "my-org"
+        assert reopened.cluster_type == "huggingface"
+
+    def test_a_token_lives_for_the_session_but_never_reaches_disk(self, tmp_path):
+        """The deliberate consequence of the rule above, pinned both ways.
+
+        Dropping the secret would be a silent surprise if the token stopped
+        working immediately, so this checks the trade is what was intended:
+        usable for the whole session, absent from the file.
+        """
+        from clustrix.profile_manager import ProfileManager as PM
+
+        store = tmp_path / "store"
+        manager = PM(config_dir=str(store))
+        manager.save_profile(
+            "Current configuration",
+            ClusterConfig(cluster_type="huggingface", hf_token="MYTOKEN"),
+        )
+
+        assert manager.load_profile("Current configuration").hf_token == "MYTOKEN"
+
+        on_disk = (store / PM.STORE_FILENAME).read_text(encoding="utf-8")
+        assert "MYTOKEN" not in on_disk
         assert (
-            PM(config_dir=store).load_profile("Current configuration").hf_token
-            == "MYTOKEN"
+            PM(config_dir=str(store)).load_profile("Current configuration").hf_token
+            is None
         )
 
 

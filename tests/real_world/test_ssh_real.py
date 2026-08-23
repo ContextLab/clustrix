@@ -4,8 +4,11 @@ Real-world SSH tests for Clustrix.
 These tests use actual SSH connections to verify that our
 SSH handling code works correctly with real SSH servers.
 
-Note: These tests require SSH server access. By default, they test
-against localhost with the current user's SSH keys.
+Note: These tests require SSH server access. Nothing is assumed by default:
+with no SSH target configured they skip. Several of them are localhost-only
+and additionally skip unless the configured host *is* localhost -- which now
+means the developer asked for localhost, rather than a default that pointed
+the suite at their own machine.
 """
 
 import os
@@ -26,6 +29,8 @@ from clustrix.ssh_utils import (
 from clustrix.config import ClusterConfig
 from clustrix.filesystem import ClusterFilesystem
 from tests.real_world import TempResourceManager, credentials, test_manager
+from tests.real_world.credential_manager import credential_setup_hint
+from clustrix.ssh_security import configure_host_key_policy
 
 
 @pytest.mark.real_world
@@ -37,7 +42,7 @@ class TestRealSSHOperations:
         """Get SSH configuration for testing."""
         ssh_creds = credentials.get_ssh_credentials()
         if not ssh_creds:
-            pytest.skip("No SSH credentials available for testing")
+            pytest.skip(f"No SSH credentials configured. {credential_setup_hint()}")
         return ssh_creds
 
     def test_ssh_key_discovery_real(self):
@@ -100,7 +105,7 @@ class TestRealSSHOperations:
         try:
             # Create SSH client
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             # Attempt connection
             if ssh_config.get("private_key_path"):
@@ -146,7 +151,7 @@ class TestRealSSHOperations:
             try:
                 # Create SSH client
                 client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_host_key_policy(client)
 
                 # Connect
                 if ssh_config.get("private_key_path"):
@@ -330,7 +335,7 @@ Host localhost
         try:
             # Create SSH client with short timeout
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             # Try to connect to non-existent host with timeout
             with pytest.raises((paramiko.SSHException, OSError, TimeoutError)):
@@ -355,7 +360,7 @@ Host localhost
             # Create multiple SSH connections
             for i in range(3):
                 client = paramiko.SSHClient()
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                configure_host_key_policy(client)
 
                 if ssh_config.get("private_key_path"):
                     client.connect(
@@ -401,7 +406,7 @@ Host localhost
             start_time = time.time()
 
             client = paramiko.SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            configure_host_key_policy(client)
 
             if ssh_config.get("private_key_path"):
                 client.connect(

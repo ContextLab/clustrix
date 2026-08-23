@@ -272,7 +272,20 @@ class SafeRangeEvaluator(ast.NodeVisitor):
                 else:
                     self.safe = False
 
-            except Exception:
+            except (TypeError, ValueError, OverflowError, RecursionError) as exc:
+                # Narrowed to match the sibling handler in _evaluate_binop,
+                # and for the same reason: ``safe = False`` is a correct
+                # answer to give the caller for these (the loop runs whole,
+                # unchunked), but it is the *only* answer this handler can
+                # give, so anything else raised in here -- a bug in the
+                # evaluator -- was being laundered into "this bound is not
+                # statically known" and never seen by anyone.
+                logger.debug(
+                    "Could not fold the range() at line %s (%s); its bounds "
+                    "will be treated as unknown.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 self.safe = False
         else:
             self.safe = False
@@ -329,7 +342,15 @@ class SafeRangeEvaluator(ast.NodeVisitor):
                 return left // right if right != 0 else None
             else:
                 return None
-        except Exception:
+        except (TypeError, ValueError, OverflowError) as exc:
+            # Narrowed from `except Exception`. These three are what constant
+            # folding on two operands can actually raise, and None -- "this
+            # bound is not statically known" -- is a correct answer to give
+            # the caller for them: it falls back to the generic iteration
+            # estimate and refuses to chunk the loop. Anything else raised in
+            # here would be a bug in this evaluator, and used to be reported
+            # as an unknown bound rather than as itself.
+            logger.debug("Could not fold a constant loop bound: %s", exc)
             return None
 
 
@@ -530,7 +551,13 @@ class LoopDetector(ast.NodeVisitor):
                 else:
                     # Fallback for older Python versions
                     iterable_str = _ast_to_string(node.iter)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Could not render the iterable of the loop at line %s (%s); "
+                    "it will be reported as 'unknown'.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 iterable_str = "unknown"
 
             # Analyze dependencies
@@ -564,8 +591,28 @@ class LoopDetector(ast.NodeVisitor):
                 dependencies=final_dependencies,
             )
 
-        except Exception as e:
-            logger.debug(f"Error analyzing for loop: {e}")
+        except RecursionError as exc:
+            # Narrowed from `except Exception`, which nullified every
+            # narrowing underneath it. SafeRangeEvaluator's handlers were
+            # narrowed so that a bug in the evaluator propagates instead of
+            # being reported as "this bound is not statically known" -- and
+            # then this handler turned the propagated bug into `return None`,
+            # i.e. into `find_parallelizable_loops(...) == []`, which is the
+            # same lie one frame further out. Measured: the raise never
+            # reached a caller.
+            #
+            # RecursionError is what is genuinely expected here: the
+            # dependency analyzer and the range evaluator are ast.NodeVisitors
+            # and a deeply nested loop body can exhaust the interpreter's
+            # recursion limit. "This loop is not analyzable" is a correct
+            # answer for that -- the loop runs whole, sequentially, which is
+            # always right. Nothing else raised in here is.
+            logger.warning(
+                "Gave up analyzing the for loop at line %s (%s); it will not "
+                "be parallelized.",
+                getattr(node, "lineno", "?"),
+                exc,
+            )
             return None
 
     def _analyze_while_loop(self, node) -> Optional[LoopInfo]:
@@ -577,7 +624,13 @@ class LoopDetector(ast.NodeVisitor):
                     condition_str = ast.unparse(node.test)
                 else:
                     condition_str = _ast_to_string(node.test)
-            except Exception:
+            except Exception as exc:
+                logger.debug(
+                    "Could not render the condition of the while loop at line "
+                    "%s (%s); it will be reported as 'unknown'.",
+                    getattr(node, "lineno", "?"),
+                    exc,
+                )
                 condition_str = "unknown"
 
             # Analyze dependencies
@@ -592,8 +645,14 @@ class LoopDetector(ast.NodeVisitor):
                 dependencies=dep_analyzer.reads,
             )
 
-        except Exception as e:
-            logger.debug(f"Error analyzing while loop: {e}")
+        except RecursionError as exc:
+            # Narrowed for the reason given in _analyze_for_loop.
+            logger.warning(
+                "Gave up analyzing the while loop at line %s (%s); it will "
+                "not be parallelized.",
+                getattr(node, "lineno", "?"),
+                exc,
+            )
             return None
 
 
@@ -614,52 +673,86 @@ def detect_loops_in_function(
     if kwargs is None:
         kwargs = {}
 
+    # Only the source acquisition is guarded, and only against the failures
+    # that acquisition really has. It used to be one `try` around this whole
+    # function ending in `except Exception: return []`, and that handler sat
+    # over every narrowed handler underneath it -- the argument binding just
+    # below, and SafeRangeEvaluator's two -- so narrowing them changed
+    # nothing a caller could observe: a bug raised in the evaluator came back
+    # out of find_parallelizable_loops as [], "this function has no
+    # parallelizable loops". Measured. That is issue #123's own defect class
+    # inside a fix for it, so the outer handler is now as narrow as the
+    # inner ones.
     try:
         # inspect.getsource() returns the source exactly as it appears in the
         # file, including any leading indentation from enclosing scopes
         # (methods, closures defined inside a function, etc.). ast.parse()
-        # rejects an indented module-level statement with IndentationError,
-        # which the broad except below swallows -- so without dedenting,
-        # loop detection silently returns [] ("no loops") for every function
-        # that is not defined at column 0, which in practice means most
-        # methods and nested/closure functions never get analyzed at all.
+        # rejects an indented module-level statement with IndentationError --
+        # a SyntaxError subclass, caught here -- so without dedenting, loop
+        # detection silently returns [] ("no loops") for every function that
+        # is not defined at column 0, which in practice means most methods
+        # and nested/closure functions never get analyzed at all.
         source = textwrap.dedent(inspect.getsource(func))
         tree = ast.parse(source)
-
-        # Build local variables context
-        local_vars: Dict[str, Any] = {}
-
-        # Add function arguments to context
-        try:
-            sig = inspect.signature(func)
-            bound_args = sig.bind_partial(*args, **kwargs)
-            bound_args.apply_defaults()
-            local_vars.update(bound_args.arguments)
-        except Exception:
-            pass
-
-        detector = LoopDetector(local_vars)
-
-        # Use the visitor's own traversal (visit_For/visit_While) rather than
-        # a manual ast.walk() that called `_analyze_for_loop`/
-        # `_analyze_while_loop` directly. Calling those private methods
-        # bypasses the current_level bookkeeping that visit_For/visit_While
-        # maintain, so every loop -- regardless of actual nesting depth --
-        # came out with nested_level == -1. That silently defeated
-        # find_parallelizable_loops's `nested_level <= max_nesting_level`
-        # filter (a loop of any depth passes -1 <= 1) and made
-        # LoopInfo.estimate_parallelization_benefit's and
-        # suggest_parallelization_strategy's nesting-aware branches dead
-        # code. detector.visit(tree) still finds loops anywhere in the
-        # function (generic_visit recurses through ifs/trys/etc. to reach
-        # them) while tracking depth correctly.
-        detector.visit(tree)
-
-        return detector.loops
-
-    except Exception as e:
-        logger.debug(f"Loop detection failed for {func.__name__}: {e}")
+    except (OSError, TypeError, SyntaxError) as exc:
+        # OSError: the source is not on disk (a REPL, exec'd code, a frozen
+        # module). TypeError: `func` is not something with source at all.
+        # SyntaxError: the file parses under a newer grammar than this
+        # interpreter. All three are ordinary and none is recoverable, and []
+        # -- "no parallelizable loops found" -- is a correct answer for them:
+        # the function ships as-is and runs whole. CLAUDE.md documents this
+        # as the one thing that needs source.
+        logger.debug(
+            "Loop detection skipped for %s: %s",
+            getattr(func, "__name__", func),
+            exc,
+        )
         return []
+
+    # Build local variables context
+    local_vars: Dict[str, Any] = {}
+
+    # Add function arguments to context
+    try:
+        sig = inspect.signature(func)
+        bound_args = sig.bind_partial(*args, **kwargs)
+        bound_args.apply_defaults()
+        local_vars.update(bound_args.arguments)
+    except (TypeError, ValueError) as exc:
+        # Narrowed from `except Exception`, and no longer silent. These
+        # are what signature()/bind_partial() raise. Losing the argument
+        # values is not fatal -- the loops are still detected, they just
+        # cannot have `range(n)` resolved from a parameter, so they are
+        # reported with unknown bounds and run sequentially. That is a
+        # correct answer, but it is also the difference between a
+        # parallelized submission and a serial one, so it is worth a line
+        # in the log rather than none.
+        logger.warning(
+            "Could not bind arguments of %s for loop analysis (%s); loop "
+            "bounds that depend on them will not be resolved and those "
+            "loops will not be parallelized.",
+            getattr(func, "__name__", func),
+            exc,
+        )
+
+    detector = LoopDetector(local_vars)
+
+    # Use the visitor's own traversal (visit_For/visit_While) rather than
+    # a manual ast.walk() that called `_analyze_for_loop`/
+    # `_analyze_while_loop` directly. Calling those private methods
+    # bypasses the current_level bookkeeping that visit_For/visit_While
+    # maintain, so every loop -- regardless of actual nesting depth --
+    # came out with nested_level == -1. That silently defeated
+    # find_parallelizable_loops's `nested_level <= max_nesting_level`
+    # filter (a loop of any depth passes -1 <= 1) and made
+    # LoopInfo.estimate_parallelization_benefit's and
+    # suggest_parallelization_strategy's nesting-aware branches dead
+    # code. detector.visit(tree) still finds loops anywhere in the
+    # function (generic_visit recurses through ifs/trys/etc. to reach
+    # them) while tracking depth correctly.
+    detector.visit(tree)
+
+    return detector.loops
 
 
 def find_parallelizable_loops(

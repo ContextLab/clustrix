@@ -27,7 +27,19 @@ class StuckSchedulerManager(SchedulerManager):
         return "running"
 
 
-def _stuck_executor(**config_kwargs) -> ClusterExecutor:
+class UnmeasurableSchedulerManager(SchedulerManager):
+    """A scheduler the client cannot see -- the real ``"unknown"`` case.
+
+    ``check_job_status`` returns ``"unknown"`` when it could not take the
+    measurement it decides on, e.g. ``wc -l job.err`` produced nothing
+    parseable. See ``executor_scheduler_status.py``.
+    """
+
+    def check_job_status(self, job_id: str) -> str:
+        return "unknown"
+
+
+def _stuck_executor(manager_class=StuckSchedulerManager, **config_kwargs):
     config = ClusterConfig(
         cluster_type="slurm",
         cluster_host="hpc.example.invalid",
@@ -36,9 +48,7 @@ def _stuck_executor(**config_kwargs) -> ClusterExecutor:
         **config_kwargs,
     )
     executor = ClusterExecutor(config)
-    executor.scheduler_manager = StuckSchedulerManager(
-        config, executor.connection_manager
-    )
+    executor.scheduler_manager = manager_class(config, executor.connection_manager)
     executor.scheduler_manager.active_jobs["job_1"] = {
         "remote_dir": "/scratch/someone/.clustrix/jobs/job_1",
     }
@@ -65,6 +75,49 @@ def test_a_job_that_never_finishes_raises_instead_of_hanging():
     assert "running" in message
     assert "/scratch/someone/.clustrix/jobs/job_1" in message
     assert "NOT been cancelled" in message
+
+
+def test_an_unmeasurable_status_times_out_saying_so(caplog):
+    """ "unknown" must not read like "running" when the wait runs out.
+
+    Moving the unmeasurable case off ``"running"`` (issue #123) changed no
+    control flow: ``_wait_for_scheduler_result`` polls on ``"unknown"``
+    exactly as it polled on ``"running"``, and both run to the deadline. So
+    the *only* place the distinction can reach the person waiting is this
+    message, and if it does not appear there the rename bought nothing at all.
+
+    The two outcomes call for different next steps -- wait longer, versus go
+    and look at the scheduler because the client has lost sight of the job --
+    and a message that says only "last known status was 'unknown'" does not
+    tell anyone that.
+    """
+    executor = _stuck_executor(
+        manager_class=UnmeasurableSchedulerManager, job_wait_timeout=2
+    )
+
+    with pytest.raises(TimeoutError) as excinfo:
+        executor._wait_for_scheduler_result("job_1")
+
+    message = str(excinfo.value)
+    assert "'unknown'" in message
+    assert "not a synonym for 'still running'" in message, message
+    assert "lost sight of it" in message, message
+    # The rest of the message is unchanged: it is an addition, not a swap.
+    assert "job_wait_timeout" in message
+    assert "NOT been cancelled" in message
+
+
+def test_an_ordinary_slow_job_is_not_accused_of_being_unmeasurable():
+    """The other half: the extra sentence must not appear for a real status."""
+    executor = _stuck_executor(job_wait_timeout=2)
+
+    with pytest.raises(TimeoutError) as excinfo:
+        executor._wait_for_scheduler_result("job_1")
+
+    message = str(excinfo.value)
+    assert "'running'" in message
+    assert "not a synonym" not in message, message
+    assert "lost sight of it" not in message, message
 
 
 def test_the_default_is_finite():

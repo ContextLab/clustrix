@@ -6,6 +6,7 @@ import pytest
 import paramiko
 import time
 from tests.real_world import credentials
+from clustrix.ssh_security import configure_host_key_policy
 
 
 @pytest.mark.real_world
@@ -17,7 +18,7 @@ def test_check_slurm_job_logs():
 
     # Connect via SSH
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     ssh_client.connect(
         hostname=slurm_cluster_creds["host"],

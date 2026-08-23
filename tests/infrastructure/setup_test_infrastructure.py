@@ -102,13 +102,17 @@ class TestInfrastructureSetup:
             print("✅ SSH keys generated")
 
     def wait_for_services(self):
-        """Wait for all services to be healthy."""
+        """Wait for all services to be healthy.
+
+        Only the SSH server is polled, because it is the only service
+        anything connects to: `localhost:2222` appears in three
+        comprehensive test modules, while the MinIO, PostgreSQL and Redis
+        checks that used to be here waited on containers no test ever
+        opened a socket to (issue #150).
+        """
         print("⏳ Waiting for services to be ready...")
 
         services = {
-            "MinIO": ("http://localhost:9000/minio/health/live", 30),
-            "PostgreSQL": ("pg_isready -h localhost -p 5432 -U clustrix", 30),
-            "Redis": ("redis-cli -h localhost -p 6379 ping", 20),
             "SSH": ("ssh -p 2222 testuser@localhost echo test", 30),
         }
 
@@ -116,26 +120,14 @@ class TestInfrastructureSetup:
             start = time.time()
             while time.time() - start < timeout:
                 try:
-                    if "http" in check_cmd:
-                        import requests
-
-                        response = requests.get(check_cmd, timeout=2)
-                        if response.status_code == 200:
-                            print(f"  ✅ {service} is ready")
-                            break
-                    else:
-                        result = subprocess.run(
-                            (
-                                check_cmd.split()
-                                if not "|" in check_cmd
-                                else ["bash", "-c", check_cmd]
-                            ),
-                            capture_output=True,
-                            timeout=2,
-                        )
-                        if result.returncode == 0:
-                            print(f"  ✅ {service} is ready")
-                            break
+                    result = subprocess.run(
+                        check_cmd.split(),
+                        capture_output=True,
+                        timeout=2,
+                    )
+                    if result.returncode == 0:
+                        print(f"  ✅ {service} is ready")
+                        break
                 except:
                     pass
 
@@ -154,20 +146,6 @@ class TestInfrastructureSetup:
                     "password": "testpass",
                     "key_file": str(self.infrastructure_dir / "test_keys" / "id_rsa"),
                 },
-                "minio": {
-                    "endpoint": "localhost:9000",
-                    "access_key": "minioadmin",
-                    "secret_key": "minioadmin",
-                    "buckets": ["test-bucket", "results-bucket"],
-                },
-                "postgres": {
-                    "host": "localhost",
-                    "port": 5432,
-                    "database": "clustrix_test",
-                    "username": "clustrix",
-                    "password": "testpass",
-                },
-                "redis": {"host": "localhost", "port": 6379},
             }
         }
 
@@ -186,16 +164,6 @@ class TestInfrastructureSetup:
             f.write("export TEST_SSH_USER=testuser\n")
             f.write("export TEST_SSH_PASS=testpass\n")
             f.write(f"export TEST_SSH_KEY={self.infrastructure_dir}/test_keys/id_rsa\n")
-            f.write("export TEST_MINIO_ENDPOINT=localhost:9000\n")
-            f.write("export TEST_MINIO_ACCESS_KEY=minioadmin\n")
-            f.write("export TEST_MINIO_SECRET_KEY=minioadmin\n")
-            f.write("export TEST_POSTGRES_HOST=localhost\n")
-            f.write("export TEST_POSTGRES_PORT=5432\n")
-            f.write("export TEST_POSTGRES_DB=clustrix_test\n")
-            f.write("export TEST_POSTGRES_USER=clustrix\n")
-            f.write("export TEST_POSTGRES_PASS=testpass\n")
-            f.write("export TEST_REDIS_HOST=localhost\n")
-            f.write("export TEST_REDIS_PORT=6379\n")
 
         print(f"✅ Environment file saved to {env_file}")
         print(f"\nTo use the test environment, run:")
@@ -219,9 +187,6 @@ class TestInfrastructureSetup:
         print("\n✨ Test infrastructure setup complete!")
         print("\nServices available:")
         print("  • SSH Server: ssh -p 2222 testuser@localhost")
-        print("  • MinIO (S3): http://localhost:9001 (admin/admin)")
-        print("  • PostgreSQL: psql -h localhost -U clustrix clustrix_test")
-        print("  • Redis: redis-cli -h localhost")
 
         return True
 

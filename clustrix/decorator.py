@@ -1,13 +1,15 @@
 import functools
 import inspect
 import logging
+import os
 import threading
-from typing import Any, Callable, Optional, Dict, List
+from dataclasses import fields
+from typing import Any, Callable, NamedTuple, Optional, Dict, List
 
-from .config import get_config
+from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
-from .local_executor import create_local_executor
+from .local_executor import create_local_executor, is_worker_count
 from .loop_analysis import find_parallelizable_loops
 from .utils import detect_loops, serialize_function
 
@@ -17,6 +19,41 @@ logger = logging.getLogger(__name__)
 #: never have a ``cluster_host``.
 HOSTLESS_CLUSTER_TYPES = frozenset({"huggingface"})
 
+#: ``ClusterConfig.default_cores`` as shipped. A value the user never touched
+#: is a resource default rather than an instruction, so it is not reported when
+#: a local route cannot use it; a value they set is (#152). Read off the
+#: dataclass so the two cannot drift apart.
+SHIPPED_DEFAULT_CORES = next(
+    f.default for f in fields(ClusterConfig) if f.name == "default_cores"
+)
+
+#: How many times one ``(where, because)`` reason may be spoken while
+#: ``_warning_reaches_someone`` is unable to confirm that anybody heard it.
+#: The gate answers "no" for a filter it refuses to run (see there), and a
+#: reason it cannot confirm is therefore never marked delivered -- which
+#: without a cap means one message per call, in exactly the tight local loop
+#: the throttle exists to protect. Three is enough to be noticed in a scrolling
+#: log and few enough not to become the noise it is warning about.
+UNCONFIRMED_REPEAT_LIMIT = 3
+
+#: Recorded against a reason whose message the gate could vouch for. Distinct
+#: from any repeat count, which counts up from zero.
+_HEARD = -1
+
+
+class _CoreRequest(NamedTuple):
+    """A worker count the caller asked for, and where they wrote it.
+
+    ``reported`` records, per ``(where, because)`` pair this decorated
+    function has complained about, how many times it has been said: ``_HEARD``
+    once a listener was confirmed, otherwise the number of unconfirmed
+    repeats so far. See ``_warn_cores_unused``.
+    """
+
+    value: int
+    where: str
+    reported: Dict[tuple, int]
+
 
 def cluster(
     _func: Optional[Callable] = None,
@@ -25,7 +62,6 @@ def cluster(
     memory: Optional[str] = None,
     time: Optional[str] = None,
     partition: Optional[str] = None,
-    queue: Optional[str] = None,
     parallel: Optional[bool] = None,
     auto_gpu_parallel: Optional[bool] = None,
     environment: Optional[str] = None,
@@ -40,14 +76,18 @@ def cluster(
         memory: Memory to request (e.g., "8GB")
         time: Time limit (e.g., "01:00:00")
         partition: Cluster partition to use
-        queue: Queue to submit to
         parallel: Whether to parallelize loops automatically
         auto_gpu_parallel: NO EFFECT. The client-side GPU path it selected
             never called the decorated function -- it ran a fixed torch
             program per GPU and returned the traces of random matrices as
             the result -- so it was deleted. Passing this warns.
             Parallelize across GPUs inside your own function instead.
-        environment: Conda environment name
+        environment: Name of a conda environment that already exists on
+            the cluster. The function is executed in it -- it replaces
+            the *execution* environment clustrix would otherwise
+            replicate, and takes precedence over that replication;
+            clustrix's own serialization environment is unaffected.
+            Falls back to ``config.conda_env_name``.
         async_submit: Whether to submit jobs asynchronously (non-blocking)
         **kwargs: Additional job parameters
 
@@ -56,7 +96,32 @@ def cluster(
         If async_submit=True, returns AsyncJobResult for non-blocking execution
     """
 
+    # A core count that is not a positive integer is a caller error, and it
+    # used to be absorbed rather than reported: ``cores=0`` fell through
+    # ``cores or config.default_cores`` and silently became the default, while
+    # ``cores=-2`` reached ``ProcessPoolExecutor``, whose "max_workers must be
+    # greater than 0" was swallowed by the sequential fallback -- so the job
+    # ran on one core, and not even the cores warning fired (#152). ``True``
+    # was a third silent absorption: ``bool`` subclasses ``int``, so it passed
+    # the type check and became a request for one worker while ``False`` was
+    # refused -- see ``is_worker_count``.
+    if cores is not None and not is_worker_count(cores):
+        detail = "cores must be a positive integer."
+        if isinstance(cores, bool):
+            detail = (
+                "cores must be a positive integer, and a bool is not one -- "
+                "whatever Python's type hierarchy says."
+            )
+        raise ValueError(
+            f"@cluster(cores={cores!r}) is not a usable worker count: {detail}"
+        )
+
     def decorator(func: Callable) -> Callable:
+
+        # One record per decorated function of the (request, reason) pairs
+        # already reported and how often, so a call in a loop does not repeat
+        # itself. See ``_warn_cores_unused``.
+        cores_reported: Dict[tuple, int] = {}
 
         @functools.wraps(func)
         def wrapper(*args, **func_kwargs):
@@ -68,8 +133,13 @@ def cluster(
                 "memory": memory or config.default_memory,
                 "time": time or config.default_time,
                 "partition": partition or config.default_partition,
-                "queue": queue or config.default_queue,
-                "environment": environment or config.conda_env_name,
+                # The per-call value only. `resolve_named_environment` falls
+                # back to `config.conda_env_name` itself, and folding the
+                # fallback in here erased the difference between "the caller
+                # asked for this environment" and "an old configuration file
+                # still names it" -- which is exactly the difference the
+                # migration notice for that field is about (#164).
+                "environment": environment,
             }
 
             # Per-job overrides the backends read off job_config. hf_jobs.py
@@ -99,6 +169,22 @@ def cluster(
                     ", ".join(sorted(passthrough_params)),
                 )
 
+            # #158: ``default_queue`` outlived its only consumers. ``queue``
+            # was the PBS and SGE spelling of what SLURM calls a partition, and
+            # both of those backends are gone, so nothing on the execution path
+            # has read it since. ``@cluster(queue=...)`` is no longer a
+            # parameter at all -- it now lands in ``**kwargs`` and is reported
+            # by the warning above -- but a value left behind in a config file
+            # or a saved widget profile still has to say that it does nothing.
+            stale_queue = getattr(config, "default_queue", None)
+            if stale_queue:
+                logger.warning(
+                    "ClusterConfig.default_queue=%r has no effect: no backend "
+                    "reads it. SLURM takes a partition, so set default_partition "
+                    "or @cluster(partition=...) instead.",
+                    stale_queue,
+                )
+
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
 
@@ -106,6 +192,31 @@ def cluster(
             should_parallelize = (
                 parallel if parallel is not None else config.auto_parallel
             )
+
+            use_async = (
+                async_submit
+                if async_submit is not None
+                else getattr(config, "async_submit", False)
+            )
+
+            # #152: ``cores`` asks for N workers. Three routes run the function
+            # exactly once on this machine, where there is no second unit of
+            # work to give a second worker, and the number was simply dropped:
+            # the plain local path, the async local path (one job on a thread),
+            # and ``cluster_type="local"``, which reaches LocalJobManager.
+            requested = _requested_cores(cores, config, cores_reported)
+            if execution_mode == "local" and (use_async or not should_parallelize):
+                _warn_cores_unused(
+                    requested,
+                    "the local backend runs the decorated function once, in "
+                    "this process" + (", on a worker thread" if use_async else ""),
+                )
+            elif execution_mode == "remote" and config.cluster_type == "local":
+                _warn_cores_unused(
+                    requested,
+                    'cluster_type "local" runs the submitted function here '
+                    "as a single unit of work",
+                )
 
             # ``auto_gpu_parallel`` no longer does anything. The path it
             # switched on returned the traces of random matrices instead of
@@ -125,12 +236,6 @@ def cluster(
                 )
 
             if execution_mode == "local":
-                use_async = (
-                    async_submit
-                    if async_submit is not None
-                    else getattr(config, "async_submit", False)
-                )
-
                 if use_async:
                     # Async local execution
                     async_executor = _shared_async_executor(config)
@@ -138,17 +243,14 @@ def cluster(
                         func, args, func_kwargs, job_config
                     )
                 elif should_parallelize:
-                    return _execute_local_parallel(func, args, func_kwargs, job_config)
+                    return _execute_local_parallel(
+                        func, args, func_kwargs, job_config, requested=requested
+                    )
                 else:
                     # Execute locally without parallelization
                     return func(*args, **func_kwargs)
             else:
                 # Remote execution
-                use_async = (
-                    async_submit
-                    if async_submit is not None
-                    else getattr(config, "async_submit", False)
-                )
                 if use_async:
                     # Async execution
                     async_executor = _shared_async_executor(config)
@@ -183,7 +285,6 @@ def cluster(
             "memory": memory,
             "time": time,
             "partition": partition,
-            "queue": queue,
             "parallel": parallel,
             "auto_gpu_parallel": auto_gpu_parallel,
             "environment": environment,
@@ -426,26 +527,212 @@ def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) ->
     return "remote"
 
 
+def _requested_cores(
+    cores: Optional[int], config, reported: Dict[tuple, int]
+) -> Optional[_CoreRequest]:
+    """The worker count the caller asked for, and where they asked for it.
+
+    Two places count as asking. ``@cluster(cores=N)`` is the obvious one. A
+    ``default_cores`` the user set with ``configure()`` is the other: it was
+    previously treated as never worth reporting, on the grounds that the
+    shipped default of 4 would then fire a warning on every local call. That
+    reasoning holds for the shipped value and only for it -- someone who wrote
+    ``configure(default_cores=8)`` and got one core in silence has exactly the
+    complaint #152 is about. So the shipped value is compared against, not
+    assumed: only a changed one is an instruction.
+    """
+    if cores is not None:
+        return _CoreRequest(cores, f"@cluster(cores={cores})", reported)
+    default = getattr(config, "default_cores", None)
+    if default is not None and default != SHIPPED_DEFAULT_CORES:
+        return _CoreRequest(default, f"configure(default_cores={default})", reported)
+    return None
+
+
+def _warning_reaches_someone() -> bool:
+    """Whether a ``logger.warning`` issued right now would actually be emitted.
+
+    ``isEnabledFor`` is only half the question. The other half is whether any
+    handler will do anything with the record, and the standard library's own
+    idiom for a quiet library makes the two answers disagree: with
+    ``logging.getLogger("clustrix").addHandler(logging.NullHandler())`` and no
+    handler configured above it, the level test passes, ``callHandlers`` finds
+    the null handler, and *because it found one* it does not fall back to
+    ``logging.lastResort``. Nothing is emitted. Spending the one-per-reason
+    budget there rebuilds exactly the silence the budget was added to prevent
+    (#152): zero warnings delivered, and then permanent silence once the caller
+    wires up a handler that would have shown them.
+
+    This walks the chain ``Logger.callHandlers`` walks and asks the same
+    questions of it, so the two cannot disagree.
+
+    **Filters are the one question this cannot answer, so it declines to
+    guess.** ``Logger.handle`` runs this logger's own filters before
+    ``callHandlers``, and ``Handler.handle`` runs each handler's filters before
+    ``emit``; either can drop the record. A filter is arbitrary caller code
+    that takes a ``LogRecord``, so the only way to learn its verdict is to
+    build the record and run it -- and running it here would run it twice for
+    every message that does get logged. That is not free: a filter that counts,
+    rate-limits, de-duplicates or mutates the record would see double, and a
+    rate-limiting filter would have its own budget spent by the very check that
+    exists to protect a budget. So a filter that stands between this record and
+    a handler makes the answer "no": the reason stays unreported and speaks
+    again next time. That direction is deliberate. Being wrong towards *False*
+    costs a repeated message; being wrong towards *True* spends the one message
+    on a record nothing received, which is #152's silence rebuilt inside the
+    fix for it (see ``_warn_cores_unused``). Only filters on this logger and on
+    the handlers themselves count -- ``callHandlers`` never consults an
+    ancestor logger's filters, so neither does this.
+    """
+    if not logger.isEnabledFor(logging.WARNING):
+        return False
+
+    if logger.filters:
+        return False
+
+    current: Optional[logging.Logger] = logger
+    found_a_handler = False
+    while current is not None:
+        for handler in current.handlers:
+            found_a_handler = True
+            if (
+                handler.level <= logging.WARNING
+                and not handler.filters
+                and not isinstance(handler, logging.NullHandler)
+            ):
+                return True
+        if not current.propagate:
+            break
+        current = current.parent
+
+    if found_a_handler:
+        # Handlers exist, none of them will emit this, and their existence is
+        # what stops ``lastResort`` from stepping in.
+        return False
+
+    last_resort = logging.lastResort
+    return (
+        last_resort is not None
+        and last_resort.level <= logging.WARNING
+        and not last_resort.filters
+    )
+
+
+def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
+    """Say out loud that a requested worker count is being discarded.
+
+    ``@cluster(cores=8)`` reads as "use eight workers". On every local route
+    that runs the function once there is nothing to hand a second worker, and
+    the number used to be dropped in silence -- the shape of defect this
+    project keeps finding (#152). The caller gets one message naming the
+    single condition under which ``cores`` does change local behaviour.
+
+    A request of 1 is not a request for a second worker, so nothing is said
+    about it: one worker is what every one of these routes already provides.
+
+    Each ``(where, because)`` pair is reported **once per decorated function**
+    once a listener has been confirmed for it (and at most
+    ``UNCONFIRMED_REPEAT_LIMIT`` times before that; see below).
+    The point of the message is to tell the caller something they did not know;
+    repeating it on every iteration of their loop is how a warning gets
+    filtered out mentally, and the local path is exactly where a decorated
+    function gets called in a tight loop. A different request -- a
+    ``configure(default_cores=...)`` changed between calls, say -- is a
+    different pair and speaks again, and every separately decorated function
+    starts with its own empty record.
+
+    The budget is spent at **delivery**, not at the attempt. Recording the key
+    unconditionally meant that a first call made before the caller had turned
+    warnings on burned the single message on a record nothing was listening
+    for, and the fifty calls after ``logging.basicConfig()`` were then silent:
+    zero warnings delivered, which is #152's silence rebuilt by the fix for it.
+    ``_warning_reaches_someone`` asks the whole of that question -- see there
+    for why the level test alone is only half of it.
+
+    A reason the gate could not vouch for is spoken again -- but not forever.
+    The gate answers "no" to any filter it declines to run, so a filter that
+    in fact passes the record leaves the caller hearing the message while the
+    budget stays unspent; the reason is then said again on the next call, and
+    the next, which is the tight local loop this throttle exists to protect
+    with the throttle switched off. So an unconfirmed reason is spoken
+    ``UNCONFIRMED_REPEAT_LIMIT`` times and then left alone. The cap can only
+    ever remove *repeats*: the first delivery is made before any counting can
+    stop it, and a confirmed listener arriving later -- the filter removed,
+    ``basicConfig`` called -- takes the ``_warning_reaches_someone`` branch,
+    which the cap does not guard. The failure this fix exists to prevent is
+    silence, and the cap cannot cause it.
+
+    The number of keys is not bounded, and deliberately. A key is a pair of
+    short strings, and a new one only appears when the caller changes what they
+    asked for between calls; the pathological case is a loop that calls
+    ``configure(default_cores=k)`` with a fresh ``k`` every iteration, which
+    retains one small tuple per distinct ``k``. Capping that would mean either
+    dropping keys -- and a dropped key speaks again, which is the repetition
+    the throttle exists to stop -- or refusing to report a genuinely new
+    request. Neither trade is worth a few hundred bytes.
+    """
+    if request is None or request.value <= 1:
+        return
+    key = (request.where, because)
+    spoken = request.reported.get(key, 0)
+    if spoken == _HEARD:
+        return
+    if _warning_reaches_someone():
+        request.reported[key] = _HEARD
+    elif spoken >= UNCONFIRMED_REPEAT_LIMIT:
+        return
+    else:
+        request.reported[key] = spoken + 1
+    logger.warning(
+        "%s has no effect here: %s. Locally, cores bounds the worker pool only "
+        "when parallel=True finds a parallelizable loop and the function "
+        "accepts the matching _parallel_<var> keyword -- and even there it is "
+        "an upper bound, not a promise that many workers will be busy.",
+        request.where,
+        because,
+    )
+
+
 def _execute_local_parallel(
-    func: Callable, args: tuple, kwargs: dict, job_config: dict
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    job_config: dict,
+    requested: Optional[_CoreRequest] = None,
 ) -> Any:
     """
     Execute function locally with parallelization.
+
+    This is the one local route where ``cores`` changes what happens: it sizes
+    the worker pool and, through it, the number of work chunks. What it does
+    *not* do is create parallelism on its own. The pool is a bound -- the work
+    is a queue, and a chunk that costs microseconds can be pulled by the first
+    worker to reach it before its siblings have finished starting, so a run
+    with ``cores=8`` may still be observed doing its work in fewer than eight
+    processes. Wider is available; wider is not guaranteed.
 
     Args:
         func: Function to execute
         args: Function arguments
         kwargs: Function keyword arguments
         job_config: Job configuration
+        requested: What the caller asked for and where, or ``None`` if they
+            asked for nothing. ``job_config["cores"]`` cannot answer that -- it
+            has already been merged with ``config.default_cores`` -- and every
+            route out of this function that declines to split the work
+            discards the request (#152).
 
     Returns:
         Function result
     """
+    name = getattr(func, "__name__", repr(func))
+
     # Find parallelizable loops
     parallelizable_loops = find_parallelizable_loops(func, args, kwargs)
 
     if not parallelizable_loops:
         # No parallelizable loops found, execute normally
+        _warn_cores_unused(requested, f"no parallelizable loop was found in {name}")
         return func(*args, **kwargs)
 
     # Use the first parallelizable loop
@@ -460,10 +747,15 @@ def _execute_local_parallel(
     try:
         with local_executor:
             # Create work chunks for the loop
-            work_chunks = _create_local_work_chunks(func, args, kwargs, loop_info)
+            work_chunks = _create_local_work_chunks(
+                func, args, kwargs, loop_info, local_executor.max_workers
+            )
 
             if not work_chunks:
                 # Fallback to normal execution
+                _warn_cores_unused(
+                    requested, f"the work in {name} was not split into chunks"
+                )
                 return func(*args, **kwargs)
 
             # Execute in parallel
@@ -484,11 +776,18 @@ def _execute_local_parallel(
         logger.warning(
             f"Local parallel execution failed, falling back to sequential: {e}"
         )
+        _warn_cores_unused(
+            requested, f"parallel execution of {name} fell back to sequential"
+        )
         return func(*args, **kwargs)
 
 
 def _create_local_work_chunks(
-    func: Callable, args: tuple, kwargs: dict, loop_info
+    func: Callable,
+    args: tuple,
+    kwargs: dict,
+    loop_info,
+    max_workers: Optional[int] = None,
 ) -> List[Dict]:
     """
     Create work chunks for local parallel execution.
@@ -498,6 +797,8 @@ def _create_local_work_chunks(
         args: Function arguments
         kwargs: Function keyword arguments
         loop_info: Information about the loop to parallelize
+        max_workers: How many workers the pool will have. ``None`` means the
+            caller does not know, and the machine's width is used instead.
 
     Returns:
         List of work chunks
@@ -545,11 +846,14 @@ def _create_local_work_chunks(
         )
         return []
 
-    # Determine chunk size (aim for reasonable number of chunks)
-    import os
-
-    max_chunks = (os.cpu_count() or 1) * 2  # Allow some oversubscription
-    chunk_size = max(1, len(loop_range) // max_chunks)
+    # Aim for two chunks per worker: one each leaves nothing to pick up when
+    # they finish at different times. The count follows the pool the caller
+    # asked for, not the machine. Deriving it from ``os.cpu_count()`` capped
+    # every run at the machine's width, so on a two-core box
+    # ``@cluster(cores=16)`` produced four chunks and twelve of the sixteen
+    # workers it sized had nothing they could ever pull (#152).
+    workers = max_workers or os.cpu_count() or 1
+    chunk_size = max(1, len(loop_range) // (workers * 2))
 
     # Create chunks
     for i in range(0, len(loop_range), chunk_size):

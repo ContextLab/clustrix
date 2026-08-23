@@ -126,7 +126,7 @@ class TestCondaVersusVirtualenv:
     def test_virtualenv_mode_activates_the_right_environments(self):
         lines = generate_two_venv_execution_commands(*PLAIN)
         text = "\n".join(lines)
-        assert "source /remote/job/venv1_serialization/bin/activate" in text
+        assert ". /remote/job/venv1_serialization/bin/activate" in text
         assert "/remote/job/venv2_execution/bin/python -c " in text
 
     def test_virtualenv_mode_deactivates_between_stages(self):
@@ -162,7 +162,7 @@ class TestEveryBackendRunsTheSameBody:
             config.venv_info = {
                 "conda_env1_name": "e1",
                 "conda_env2_name": "e2",
-                "conda_setup_prefix": "source /opt/conda/etc/profile.d/conda.sh",
+                "conda_setup_prefix": ". /opt/conda/etc/profile.d/conda.sh",
             }
         return create_job_script(
             scheduler,
@@ -189,7 +189,7 @@ class TestEveryBackendRunsTheSameBody:
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
     def test_every_backend_sources_conda(self, scheduler):
         script = self._script(scheduler, two_venv=True)
-        assert "source /opt/conda/etc/profile.d/conda.sh" in script
+        assert ". /opt/conda/etc/profile.d/conda.sh" in script
 
     @pytest.mark.parametrize("scheduler", SCHEDULERS)
     def test_every_backend_signs_its_result(self, scheduler):

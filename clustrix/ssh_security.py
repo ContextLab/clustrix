@@ -17,7 +17,10 @@ default): host keys are checked against the system and user
 :class:`HostKeyVerificationError` with the exact ``ssh-keyscan`` command
 needed to add it. Opting into the old, insecure "trust everything"
 behavior requires setting ``ssh_host_key_policy="auto_add"`` on
-``ClusterConfig`` explicitly -- it is never the default.
+``ClusterConfig`` explicitly -- it is never the default. Even then, the key
+is *appended* to ``known_hosts`` by :class:`AppendUnknownHostKeyPolicy`
+rather than persisted the way ``paramiko.AutoAddPolicy`` does it, which is
+by rewriting the whole file (issue #157).
 """
 
 import base64
@@ -29,11 +32,27 @@ from pathlib import Path
 from typing import Optional
 
 import paramiko
+from paramiko.hostkeys import HostKeyEntry
+
+from .config import config_source_is_trusted, get_config_source, write_text_securely
 
 logger = logging.getLogger(__name__)
 
 #: The only values accepted for ``ClusterConfig.ssh_host_key_policy``.
 VALID_HOST_KEY_POLICIES = ("reject", "auto_add")
+
+#: The policy that *weakens* verification. Asking for the strict one is
+#: always allowed -- a claim of distrust costs nothing to believe -- but
+#: asking for this one turns host key checking off for a host, persistently
+#: and globally, and so is a security decision in exactly the sense a
+#: credential release is. See :func:`host_key_policy_name`.
+WEAKENING_HOST_KEY_POLICY = "auto_add"
+
+#: How OpenSSH spells each of those policies in ``StrictHostKeyChecking``.
+#: ``yes`` refuses a host whose key is not already in ``known_hosts``;
+#: ``accept-new`` trusts it on first contact and records it, which is what
+#: :class:`AppendUnknownHostKeyPolicy` does on the paramiko side.
+OPENSSH_STRICT_HOST_KEY_CHECKING = {"reject": "yes", "auto_add": "accept-new"}
 
 
 class HostKeyVerificationError(paramiko.SSHException):
@@ -86,12 +105,241 @@ class RejectUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
         )
 
 
+class AppendUnknownHostKeyPolicy(paramiko.MissingHostKeyPolicy):
+    """Trust an unknown host key and *append* it to ``known_hosts``.
+
+    Installed by ``ssh_host_key_policy="auto_add"`` in place of paramiko's
+    own ``AutoAddPolicy``, which cannot be used here: its
+    ``missing_host_key`` calls ``client.save_host_keys(filename)``, and
+    that method reloads the file and then opens it ``"w"`` -- truncate --
+    and re-emits every entry from paramiko's in-memory model. Accepting one
+    key therefore rewrites the user's entire file. Three things follow, all
+    of them measured rather than argued (issue #157):
+
+    * **Content paramiko cannot round-trip is destroyed.** Comments, blank
+      lines, one line naming several hosts, and any key type paramiko has
+      no parser for (``sk-ssh-ed25519@openssh.com``, which OpenSSH itself
+      reads) do not come back out. Nothing fails at the time.
+    * **Concurrent writers interleave.** Twelve threads adding at once
+      corrupted the file in 10 runs out of 10, leaving NUL runs and
+      half-written base64 in the middle of unrelated entries.
+    * **An interrupted rewrite truncates**, losing everything past the cut.
+
+    Once one line is cut mid-base64, ``paramiko.HostKeys.load`` raises
+    ``InvalidHostKey`` on it, so *every later* connection fails -- the
+    user's own ``ssh`` included, to hosts that had nothing to do with
+    clustrix.
+
+    A new host key is one new line, so this appends that line and touches
+    nothing else. It is what ``ssh-keyscan host >> ~/.ssh/known_hosts``
+    does, and what the ``reject`` policy's own error message tells the user
+    to run.
+
+    **What this does not protect against.** A single ``O_APPEND`` write of
+    one short line is atomic against other appenders on a local
+    filesystem, which is why concurrent adds cannot interleave and a crash
+    cannot leave half a line. It is *not* a lock, and it makes no claim
+    about NFS, where ``O_APPEND`` is not honoured. It cannot defend the
+    file against another tool that rewrites it wholesale -- ``ssh-keygen
+    -R`` does exactly that -- it only guarantees clustrix is not one of
+    them. And appending never removes anything, so a host whose key
+    genuinely changed keeps its stale line; that is not a regression,
+    because paramiko raises ``BadHostKeyException`` for a known host with a
+    changed key without ever consulting this policy, and ``auto_add`` never
+    had a say in it.
+    """
+
+    def missing_host_key(
+        self, client: paramiko.SSHClient, hostname: str, key: paramiko.PKey
+    ) -> None:
+        line = HostKeyEntry([hostname], key).to_line()
+        if line is None:  # pragma: no cover - paramiko sets valid=True in __init__
+            raise paramiko.SSHException(
+                f"Cannot record the host key offered by '{hostname}': paramiko "
+                f"produced no known_hosts line for a {key.get_name()} key."
+            )
+
+        # In-memory first, so the rest of *this* process recognises the host
+        # even if the file write fails and raises.
+        client.get_host_keys().add(hostname, key.get_name(), key)
+
+        known_hosts = user_known_hosts_path()
+        # OpenSSH's own modes for a directory it creates before first
+        # contact. write_text_securely creates the file itself at 0600.
+        known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        # append=True is the mode write_text_securely documents for exactly
+        # this file: it appends with a single O_APPEND write, does not
+        # follow-and-chmod (known_hosts is commonly a symlink into a
+        # dotfiles repo), and leaves the mode of a file it did not create
+        # alone.
+        write_text_securely(known_hosts, line, append=True)
+        logger.warning(
+            "Trusted the unverified host key %s offered by %s and appended it "
+            "to %s.",
+            _fingerprint(key),
+            hostname,
+            known_hosts,
+        )
+
+
+def user_known_hosts_path() -> Path:
+    """The known_hosts file clustrix reads and writes.
+
+    Derived from ``$HOME`` so a test, a container or a relocated home can
+    redirect it. Every OpenSSH *subprocess* must be handed this path
+    explicitly with ``-o UserKnownHostsFile=``: OpenSSH resolves ``~`` from
+    the passwd database rather than the environment, so without that the
+    Python side of clustrix verifies against one file while ssh appends to
+    another.
+
+    This is the single definition. ``ssh_utils`` imports it rather than
+    recomputing the path, because two copies of a rule like this drift and
+    the drift is invisible until the two disagree on a machine where the
+    passwd home and ``$HOME`` differ.
+    """
+    return Path(os.path.expanduser("~")) / ".ssh" / "known_hosts"
+
+
 def _load_known_hosts(client: paramiko.SSHClient) -> None:
-    """Load system and user known_hosts files into the client."""
+    """Load system and user known_hosts files into the client.
+
+    The second call looks redundant -- ``load_system_host_keys(None)`` already
+    reads ``~/.ssh/known_hosts`` -- and it is not. The two land in different
+    places inside paramiko:
+
+    * ``load_system_host_keys`` fills ``_system_host_keys``, which is consulted
+      when verifying and **never written back**.
+    * ``load_host_keys`` fills ``_host_keys``, which is what
+      ``client.get_host_keys()`` returns and what
+      :class:`AppendUnknownHostKeyPolicy` adds to, so that a host accepted
+      earlier in this process is recognised later in it.
+
+    It also sets paramiko's ``_host_keys_filename``, which used to be the
+    load-bearing part: ``paramiko.AutoAddPolicy`` persists a key only when
+    that attribute is set, and it persists it by rewriting the whole file.
+    Nothing calls ``save_host_keys`` any more (issue #157), so the attribute
+    is now incidental -- but the call still is not redundant, because
+    ``get_host_keys()`` would otherwise be empty. Covered by
+    ``tests/unit/test_host_key_policy.py::test_user_known_hosts_file_is_actually_loaded``.
+    """
     client.load_system_host_keys()
-    user_known_hosts = Path(os.path.expanduser("~/.ssh/known_hosts"))
+    user_known_hosts = user_known_hosts_path()
     if user_known_hosts.exists():
         client.load_host_keys(str(user_known_hosts))
+
+
+def host_key_policy_name(config: Optional[object] = None) -> str:
+    """The validated ``ssh_host_key_policy`` that applies to ``config``.
+
+    Split out of :func:`configure_host_key_policy` because paramiko is not
+    the only thing in clustrix that opens an SSH connection:
+    ``ssh_utils.deploy_public_key`` shells out to ``ssh-copy-id``, and that
+    subprocess used to hardcode ``StrictHostKeyChecking=accept-new`` --
+    silently applying the deliberate opt-out to every user, including the
+    default ``reject``. Two readings of the same setting drift, so there is
+    one reading and both callers use it.
+
+    **A weakening may only come from a source the user chose.**
+    ``ssh_host_key_policy`` is an ordinary declared field, so a
+    ``./clustrix.yml`` in a cloned repository sets it as easily as it sets
+    ``cluster_host`` -- and setting it to ``auto_add`` is the whole of what
+    an attacker needs. Measured before this check existed, with a
+    working-directory file naming a host and ``ssh_host_key_policy:
+    auto_add`` and **no credential of any kind**: the credential gate
+    refused (``GATE REFUSES: True``) and ``deploy_public_key`` returned
+    ``True`` anyway, with the server logging two ``('victim',
+    'publickey')`` authentications -- an identity out of the user's
+    ``~/.ssh/config`` (see :func:`clustrix.ssh_utils.deploy_public_key`)
+    getting past a host key barrier this setting had removed.
+
+    The damage does not end with the process. ``auto_add`` *persists*:
+    that run wrote 8 entries into the user's global ``known_hosts``, and a
+    second, entirely fresh interpreter -- no attacker file present, the
+    default ``reject`` policy in force -- then found the attacker's host
+    already trusted for all three host key algorithms. Nothing clears
+    that.
+
+    So this follows the rule the provenance record already uses: a claim of
+    *distrust* is safe to believe from anybody, and a claim of *trust* is
+    what an attacker would write. ``reject`` is honoured whatever said it;
+    ``auto_add`` is honoured only from a configuration
+    :func:`clustrix.config.config_source_is_trusted` vouches for, and is
+    otherwise downgraded to ``reject`` with a warning naming the file. A
+    mapping carries no provenance record at all -- it is a bag of values,
+    not an object a loader stamped -- so it cannot license a weakening
+    either; that is the same fail-closed reading
+    :func:`clustrix.config.get_config_source` gives an object that lost its
+    stamp.
+
+    Args:
+        config: A ``ClusterConfig``, a mapping carrying an
+            ``"ssh_host_key_policy"`` key (the notebook widget hands its
+            configuration over as a dict), or ``None``. ``None`` and a
+            missing key both mean the secure default, ``"reject"``.
+
+    Raises:
+        ValueError: if the value is neither ``"reject"`` nor ``"auto_add"``.
+    """
+    if isinstance(config, Mapping):
+        policy_name = config.get("ssh_host_key_policy") or "reject"
+    else:
+        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
+    if policy_name not in VALID_HOST_KEY_POLICIES:
+        raise ValueError(
+            f"Invalid ssh_host_key_policy={policy_name!r}. "
+            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
+        )
+    if policy_name == WEAKENING_HOST_KEY_POLICY and not may_weaken_host_key_checking(
+        config
+    ):
+        logger.warning(
+            "Ignoring ssh_host_key_policy=%r for %r: turning host key "
+            "verification off is a security decision, and this "
+            "configuration did not come from anywhere you chose (its "
+            "provenance is %r). Host keys will be verified. If this really "
+            "is your own setting, move it into your clustrix configuration "
+            "directory, pass it to configure(), or name the file with "
+            "load_config(path).",
+            policy_name,
+            getattr(config, "cluster_host", None)
+            or (config.get("cluster_host") if isinstance(config, Mapping) else None),
+            (
+                "none (a mapping carries no provenance)"
+                if isinstance(config, Mapping)
+                else get_config_source(config)
+            ),
+        )
+        return "reject"
+    return policy_name
+
+
+def may_weaken_host_key_checking(config: Optional[object] = None) -> bool:
+    """Whether ``config`` is entitled to turn host key verification off.
+
+    Separate from :func:`host_key_policy_name` so that the question has a
+    name and can be asked about, and so the answer is one expression rather
+    than one per caller -- which is how ``ssh_host_key_policy`` came to be
+    obeyed by ``add_host_key``, by the ``ssh-copy-id`` subprocess and by
+    every paramiko connection without any of them asking who set it.
+
+    A mapping is refused because it has no provenance to read, not because
+    mappings are suspect: :func:`clustrix.config.config_source_is_trusted`
+    reads an attribute a loader stamps on a ``ClusterConfig``, and a dict
+    never went through one.
+    """
+    if config is None or isinstance(config, Mapping):
+        return False
+    return config_source_is_trusted(config)
+
+
+def openssh_strict_host_key_checking(config: Optional[object] = None) -> str:
+    """``StrictHostKeyChecking`` value for an OpenSSH subprocess.
+
+    The one translation of :func:`host_key_policy_name` into OpenSSH's
+    vocabulary, so a ``ssh``/``ssh-copy-id`` invocation cannot end up more
+    permissive than the paramiko connections beside it.
+    """
+    return OPENSSH_STRICT_HOST_KEY_CHECKING[host_key_policy_name(config)]
 
 
 def configure_host_key_policy(
@@ -119,19 +367,7 @@ def configure_host_key_policy(
     """
     _load_known_hosts(client)
 
-    # The notebook widget carries its configuration as a plain dict rather
-    # than a ClusterConfig, so accept either. Reading it here keeps every
-    # call site on the one policy decision instead of each one inventing a
-    # way to hand its own shape over.
-    if isinstance(config, Mapping):
-        policy_name = config.get("ssh_host_key_policy") or "reject"
-    else:
-        policy_name = getattr(config, "ssh_host_key_policy", None) or "reject"
-    if policy_name not in VALID_HOST_KEY_POLICIES:
-        raise ValueError(
-            f"Invalid ssh_host_key_policy={policy_name!r}. "
-            f"Valid values are {VALID_HOST_KEY_POLICIES!r}."
-        )
+    policy_name = host_key_policy_name(config)
 
     if policy_name == "auto_add":
         logger.warning(
@@ -141,6 +377,14 @@ def configure_host_key_policy(
             "deliberate first contact with a host you already trust "
             "out-of-band."
         )
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        # Not paramiko.AutoAddPolicy: that one persists the key it accepted
+        # by rewriting the user's entire known_hosts, which loses content it
+        # cannot round-trip and corrupts the file outright under a concurrent
+        # writer or an interrupted write. AppendUnknownHostKeyPolicy adds the
+        # one new line instead, and creates the file and its 0700 directory
+        # itself if they do not exist yet -- so, unlike the paramiko policy,
+        # it does not silently persist nothing on a machine that has never
+        # had a ~/.ssh/known_hosts. See issue #157 and the class docstring.
+        client.set_missing_host_key_policy(AppendUnknownHostKeyPolicy())
     else:
         client.set_missing_host_key_policy(RejectUnknownHostKeyPolicy())

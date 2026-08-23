@@ -43,8 +43,8 @@ everything you left out:
 .. code-block:: text
 
    {'cores': 8, 'memory': '16GB', 'time': None, 'partition': None,
-    'queue': None, 'parallel': None, 'auto_gpu_parallel': None,
-    'environment': None, 'async_submit': None}
+    'parallel': None, 'auto_gpu_parallel': None, 'environment': None,
+    'async_submit': None}
 
 The consequence is that **configuration order does not matter**. Decorating
 before ``clustrix.configure()`` is fine; the wrapper calls ``get_config()`` on
@@ -88,8 +88,8 @@ Steps 7--10 differ per backend; see :ref:`per-backend-divergence`.
 Step 2: resource resolution
 ---------------------------
 
-Each of ``cores``, ``memory``, ``time``, ``partition``, ``queue`` and
-``environment`` falls back to a configuration default when the decorator left
+Each of ``cores``, ``memory``, ``time``, ``partition`` and ``environment``
+falls back to a configuration default when the decorator left
 it as ``None``:
 
 ===============  =============================
@@ -99,13 +99,22 @@ Decorator arg    Config fallback
 ``memory``       ``default_memory`` (``"8GB"``)
 ``time``         ``default_time`` (``"01:00:00"``)
 ``partition``    ``default_partition`` (None)
-``queue``        ``default_queue`` (None)
 ``environment``  ``conda_env_name`` (None)
 ===============  =============================
 
-The fallback is written as ``cores or config.default_cores``, so ``cores=0``
-also falls back. Any resource key still missing when a job script is generated
-is filled in again by ``resolve_job_resources``.
+The fallback is written as ``cores or config.default_cores``. ``cores`` is
+validated before that merge: anything other than a positive integer raises
+``ValueError`` at decoration time, so ``cores=0``, ``cores=-2`` and
+``cores=True`` are rejected rather than absorbed -- the last of those because
+``bool`` subclasses ``int`` and would otherwise be read as one worker. Any resource key still missing when a job script is
+generated is filled in again by ``resolve_job_resources``.
+
+``queue`` is not a decorator parameter. ``@cluster(queue=...)`` lands in
+``**kwargs`` and is reported as an unrecognized option. ``ClusterConfig``
+still carries ``default_queue`` so that older configuration files and saved
+widget profiles keep loading, but no backend reads it; a non-empty value
+warns on every call. Use ``default_partition`` or ``@cluster(partition=...)``
+on SLURM.
 
 Memory strings are rewritten per scheduler by ``normalize_memory``:
 
@@ -257,7 +266,8 @@ requirement map and reported separately by
 A ``name @ file:///.../work`` line from conda is **not** one of these: conda
 records the build directory it compiled from, but the artifact landed in
 site-packages like any other wheel and ``name==version`` reinstalls it.
-Dropping those used to remove about a third of a conda environment.
+Treating those as unreproducible would strip roughly a third of a conda
+environment out of the mirrored requirement set for no reason.
 
 If your function reaches into one of those packages, submission is refused
 immediately, naming the package:
@@ -465,11 +475,11 @@ For every SSH-reachable backend, ``_stage_job_directory`` does this:
    because SFTP does not expand ``~`` and would create a directory literally
    named ``~``).
 2. ``mkdir -p`` the parent, then ``mkdir -m 700`` the job directory itself.
-   The exclusive create is deliberate: ``mkdir -p`` succeeds on a directory
-   somebody else already owns, and job directory names used to be fully
-   predictable, so on a world-writable work directory an attacker could
-   pre-create the directory and receive the signing key into it.
-   Names are now ``job_<unix-time>_<8 hex chars>``.
+   The exclusive create is deliberate. ``mkdir -p`` succeeds on a directory
+   somebody else already owns, so on a world-writable work directory an
+   attacker who could predict the name would pre-create the directory and
+   receive the signing key into it. Names are ``job_<unix-time>_<8 hex
+   chars>``, and the hex is what makes them unpredictable.
 3. Write a fresh 64-hex-character key to ``.clustrix_result_key`` with mode
    0600, **over SFTP** -- writing it with ``printf ... > file`` would put the
    secret in a remote command line, readable from ``ps`` by any user on the
@@ -669,10 +679,9 @@ Backend              How the flow differs
 ===================  ==================================================================
 
 ``pbs``, ``sge``, ``kubernetes`` and the ``provider="aws"|"gcp"|"azure"|"lambda"``
-cloud VM path are **not in this table and not currently supported**. They were
-removed in v0.2.0 because none of them had ever been shown to run a job end to
-end. They are planned for a future release; see :ref:`removed-backends` for the
-tracking issues.
+cloud VM path are **not in this table and not supported**. Clustrix has no
+dispatch for them; naming one raises a ``ValueError``. Each is planned for a
+future release; see :ref:`removed-backends` for the tracking issues.
 
 Two things every backend does share: the payload produced by
 ``serialize_function``, and the rule that results are dill-serialized and

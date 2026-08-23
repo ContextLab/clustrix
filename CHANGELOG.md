@@ -14,7 +14,102 @@ The first release in which `@cluster` demonstrably runs a function on remote
 compute and returns the right answer. Before this, it never had — on any
 backend.
 
+### Security — one gate for every credential release
+
+- **A stored credential could reach a host you never named, by seven separate
+  routes.** Issue #167 was reported as one leak and closed as seven, one at a
+  time. Seven call sites for one decision is not a bug with instances; it is a
+  decision with no home. All of them now go through
+  `clustrix.credential_release.release_credential(target)`, whose first
+  positional parameter is the recipient: a frozen `CredentialTarget` naming the
+  hostname, the username, and who chose the hostname. A target that names
+  nobody cannot be constructed, a release carries a secret or a refusal but
+  never both and never neither, and
+  `FlexibleCredentialManager._ensure_credential_unchecked` raises for any
+  caller that is not the gate.
+
+- **`ClusterConfig.get_env_password()` is removed.** It read
+  `os.environ[password_env_var]` with no host check and no provenance check,
+  and `validation.py` fed the result straight into
+  `paramiko.connect(hostname=config.cluster_host)`. With a working-directory
+  `clustrix.yml` the whole method was the repository's: the file names
+  `password_env_var` as well as `cluster_host`. **This is a user-visible
+  behaviour change**: `clustrix credentials`/validation now reports a refusal,
+  rather than "✅ Environment variable X contains password", for a
+  `cluster_host` that came from a source you did not choose. The refusal names
+  the remedy.
+
+- **The interactive password prompt no longer offers to persist an untrusted
+  host.** It offered to write `SSH_HOST=<whatever cluster_host says>` plus the
+  password you had just typed into `~/.clustrix/.env` — manufacturing a
+  permanent authorisation, in every future process, for a host a file had
+  chosen.
+
+- **`ConnectionManager.setup_ssh_connection` now honours `password_env_var`**,
+  which it never did, under exactly the same two rules as every other source.
+
+- **`ClusterConfig.from_file_content(mapping, source)`** is the only supported
+  way to build a config out of parsed file bytes. Provenance is a required
+  argument rather than something each loader must remember to declare, and
+  because it is an argument it survives being handed to another thread.
+
+- **`clustrix credentials test` never worked for SSH.** It passed the
+  lower-case field names the credential resolver emits to a helper that indexes
+  `SSH_HOST`/`SSH_USERNAME`/…, so every run raised `KeyError` inside that
+  helper's own `try` block and reported "invalid or inaccessible" for
+  credentials that were fine.
+
+- **`scripts/aws/` could never authenticate.** They asked the clustrix
+  credential manager for provider `"aws"`, which has never existed in
+  `PROVIDER_ENV_NAMES`, so the lookup always returned `None`. They use boto3's
+  own credential chain now, which also keeps AWS keys out of clustrix's
+  credential surface entirely.
+
 ### Fixed — correctness
+
+Landed last on the merge train, after this draft was first written:
+
+- **A malformed configuration file you explicitly chose reported as empty**
+  (#168). The widget's Load answered `{}` for any read failure — path typo,
+  permissions problem, malformed YAML — which is also the answer for a file
+  holding nothing, so the widget offered a blank profile as if your settings
+  were in force. A named file now raises like `clustrix.config.load_config`
+  does for the same file; only *discovered* files are skipped, and their
+  reason is logged rather than discarded.
+- **Renaming a profile onto an existing name silently destroyed that other
+  profile** (#171) — no warning, no undo; the occupant's host, username and
+  key file were gone. The rename is refused and names both profiles. The
+  refusal deliberately does not reset the name box (it observes the
+  keystream), so it can show a name the profile does not hold until you type
+  again — recorded here as a known limitation rather than filed separately;
+  there is no data loss either way.
+- **`detect_gpu_capabilities` reported a GPU as available when it could not
+  parse `nvidia-smi`'s output** (#172). `gpu_available` was set before
+  parsing, so a driver that added a column or emitted a warning line produced
+  "GPU available" with an empty device list — observed as real harm when a
+  job was routed to a host whose driver output the parser could not read.
+  Availability now follows parsed devices, and the `/proc` fallback fixture
+  holds what the driver really writes.
+- **Docs-only pull requests could not merge** (#169): branch protection
+  requires the `CI Status` check, but `fast_ci.yml` is path-filtered and never
+  runs for docs-only changes. The status-check job now reports success
+  without running the suite for such PRs instead of being absent, and three
+  more ways to silence a required check are closed alongside.
+- **Pressing the widget's Save bricked the next `import clustrix`.** The
+  widget writes a bundle of named profiles into the same standard locations
+  the automatic search reads flat configurations from; strict loading then
+  raised `ConfigFileError` on its profile names at first use. The search now
+  detects the bundle shape, declines to adopt any of them, says so naming the
+  file and the profiles, and keeps looking (#159, merge decision (a)).
+- **Eleven `ClusterConfig` fields are accepted and read by nothing — and now
+  say so when you set one** (#161): `max_gpu_parallel_jobs`,
+  `gpu_detection_enabled`, `gpu_memory_fraction`, `local_parallel_threshold`,
+  `auto_gpu_packages`, `prefer_gpu_execution`, `cache_credentials`,
+  `cuda_version_preference`, `gpu_requirements`, `credential_cache_ttl` and
+  `rapids_ecosystem` are leftovers of the automatic-GPU machinery whose
+  execution path was deleted. They stay accepted so old configuration files
+  keep loading, and each warns with its own reason instead of being silently
+  absorbed (#158's precedent). Defaults stay silent.
 
 Some entries below describe defects in backends that this same release then
 removed (see **Removed — unverified backends**). They are kept because the

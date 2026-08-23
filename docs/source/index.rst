@@ -50,26 +50,38 @@ Start here
 - :ref:`removed-backends` -- if you are looking for PBS, SGE, Kubernetes or a
   cloud VM provider, start here.
 
-Features
---------
+What it does
+------------
 
-- **Simple Decorator Interface**: Just add ``@cluster`` to any function
-- **Function Packaging**: your function is serialized by value with dill and
+- **One decorator.** ``@cluster`` on a function is the whole interface.
+- **Function packaging.** Your function is serialized by value with dill and
   cloudpickle, so closures, nested functions and project-local modules travel
-  with it -- source code is not required
-- **Interactive Jupyter Widget**: ``%%remote`` magic command with GUI configuration manager
-- **Multiple Cluster Backends**: SLURM, SSH, HuggingFace Jobs and local
-  execution. Every backend Clustrix ships has been run end to end -- see
-  :ref:`supported-cluster-types`.
-- **Unified Filesystem Utilities**: Work with files seamlessly across local and remote clusters
-- **Shared Storage Optimization**: Automatic detection and optimization for HPC shared filesystems
-- **Automatic Dependency Management**: Captures and replicates your exact Python environment
-- **Loop Parallelization**: distributes a loop across nodes when its body has
-  no dependencies between iterations. The analysis is deliberately
-  conservative and declines most real loops -- see :doc:`limitations`
-- **Local Parallelization**: Multi-core execution for development and testing
-- **Flexible Configuration**: Easy setup with config files or the interactive widget
-- **Error Handling**: Comprehensive error reporting and job monitoring
+  with it. Source code is not required.
+- **Four backends**: SLURM, SSH, HuggingFace Jobs and local execution. Each has
+  been run end to end -- see :ref:`supported-cluster-types`.
+- **Environment replication.** The remote environment is rebuilt from your
+  local ``pip freeze``.
+- **Read-only filesystem utilities.** ``cluster_ls``, ``cluster_glob``,
+  ``cluster_stat`` and their siblings work against a local path or a remote one
+  through the same call. They inspect; they do not transfer.
+- **Shared-storage detection.** A worker that already shares your filesystem
+  is detected, so the payload is not copied across a network that does not
+  need it.
+- **Loop parallelization.** A loop whose body carries no dependency between
+  iterations can be distributed across nodes. The analysis is deliberately
+  conservative and declines most real loops -- see :doc:`limitations`.
+- **A Jupyter widget.** ``%%remote`` opens a configuration panel in the
+  notebook.
+- **Errors that reach you.** A remote traceback is re-raised in your own
+  process rather than left in a log file on the cluster.
+
+Two things that sound like features and are not. ``@cluster(cores=N)`` does not
+split an ordinary local function across N workers: it runs once in your own
+process, and Clustrix warns that the number was discarded whenever you asked
+for more than one core. Loop parallelization is on by default, so nothing has
+to be switched on: ``cores`` sizes a local pool only when the loop analysis
+finds a supported loop *and* the function accepts the matching chunk argument.
+Clustrix also does not move your data -- see :doc:`introduction`.
 
 Jupyter Notebook Integration
 ----------------------------
@@ -82,11 +94,11 @@ Clustrix registers an IPython magic that opens a configuration widget:
 
 Importing ``clustrix`` registers the magic but does **not** display the widget.
 A library should not inject UI as a side effect of being imported, so the
-widget is shown on demand: run ``%%remote`` in a cell, or call
+widget appears on demand: run ``%%remote`` in a cell, or call
 ``clustrix.notebook_magic.display_config_widget()``. Setting
-``CLUSTRIX_AUTO_WIDGET=1`` restores the old display-on-import behaviour.
+``CLUSTRIX_AUTO_WIDGET=1`` makes it display on import instead.
 
-``%%clusterfy`` still works as a deprecated alias and emits a
+``%%clusterfy`` is an alias for ``%%remote``. It works, and it emits a
 ``DeprecationWarning``.
 
 Interactive Configuration Widget
@@ -127,8 +139,8 @@ The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
   ticked before one is accepted.
 - ``local`` needs no connection settings at all.
 
-There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries.
-Those backends were removed in v0.2.0; see :ref:`removed-backends`.
+There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries,
+because Clustrix does not support those backends; see :ref:`removed-backends`.
 
 Table of Contents
 -----------------
@@ -147,6 +159,7 @@ Table of Contents
 
    execution_model
    configuration
+   data_packages
    ssh_setup
    limitations
    troubleshooting
@@ -163,6 +176,7 @@ Table of Contents
    :maxdepth: 2
    :caption: Interactive Notebooks
 
+   notebooks/local_parallel_comparison
    notebooks/filesystem_tutorial
    notebooks/cluster_config_example
    notebooks/complete_api_demo
@@ -181,6 +195,7 @@ Table of Contents
    api/config
    api/notebook_magic
    api/local_executor
+   api/public_api
 
 .. _supported-cluster-types:
 
@@ -204,22 +219,22 @@ the notebook widget offer. There are no others.
 +--------------------+-------------------+--------------------------------------------------+
 | ``huggingface``    | Verified          | HuggingFace Jobs. A real job ran in a container. |
 +--------------------+-------------------+--------------------------------------------------+
-| ``local``          | Works             | Local processes; used for development and the    |
-|                    |                   | fast tests.                                      |
+| ``local``          | Works             | Runs in the calling process. Used for            |
+|                    |                   | development and the fast tests.                  |
 +--------------------+-------------------+--------------------------------------------------+
 
-Note that ``cluster_type='huggingface'`` means HuggingFace *Jobs*. The separate
-HuggingFace *Spaces* provider was removed in v0.2.0 along with the other
-unverified backends; see :ref:`removed-backends`.
+``cluster_type='huggingface'`` means HuggingFace *Jobs*. There is no
+HuggingFace *Spaces* provider; see :ref:`removed-backends`.
 
 .. _removed-backends-pointer:
 
-**Backends that were removed**
+**Backends Clustrix does not support**
 
-PBS, SGE, Kubernetes, AWS, GCP, Azure and Lambda Cloud were implemented but
-never shown to run a job end to end, and were removed in v0.2.0 rather than
-shipped as if they worked. The cost-monitoring and cloud pricing APIs went with
-them. Each has a tracking issue and is planned for a future release --
+PBS, SGE, Kubernetes, AWS, GCP, Azure and Lambda Cloud are absent, and so are
+the cost-monitoring and cloud pricing APIs that served them. Clustrix does not
+claim a backend it has not run a real job on, and none of these has one.
+Setting ``cluster_type`` to any of those names raises a ``ValueError`` naming
+the backend and its tracking issue. Each is planned for a future release;
 :ref:`removed-backends` has the details and the links.
 
 **Evidence**

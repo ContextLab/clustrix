@@ -1,9 +1,15 @@
 """Unified authentication management with fallback support."""
 
+import logging
 from typing import Optional, List, Dict, Any
 
-from .config import ClusterConfig
+from .config import TRUSTED_CONFIG_SOURCES, ClusterConfig
 from .credential_manager import get_credential_manager
+from .credential_release import (
+    CredentialTarget,
+    derived_provenance,
+    release_credential,
+)
 from .auth_methods import (
     AuthMethod,
     AuthResult,
@@ -15,6 +21,8 @@ from .auth_methods import (
     detect_environment,
     is_colab,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class AuthenticationManager:
@@ -144,11 +152,49 @@ class AuthenticationManager:
         return methods
 
     def _offer_credential_storage(self, password: str):
-        """Offer to store credentials in .env file."""
+        """Offer to store credentials in .env file -- for a host you chose.
+
+        Route 7 of issue #167, and the only one on the *write* side. This
+        offered to write ``SSH_HOST=<whatever cluster_host says>`` plus the
+        password the user had just typed into ``~/.clustrix/.env``. The user
+        is shown the hostname first, so it was never a silent leak -- but a
+        ``./clustrix.yml`` names ``cluster_host``, and a credential file
+        naming a host *exactly* is rule 1 of the release rules: it is
+        released unconditionally, in every future process, forever. The
+        taint model is per-process and append-only; this route wrote around
+        it, onto disk, into the one file every remedy text tells the user to
+        trust.
+
+        So a write is a release decision too, and it is refused for a host
+        nobody chose. The remedy is the one that actually works: move the
+        host somewhere you chose, and run this again.
+        """
         hostname = self.config.cluster_host
         username = self.config.username
 
         if not hostname or not username:
+            return
+
+        try:
+            target = CredentialTarget.for_config(self.config)
+        except ValueError as exc:
+            print(f"   ⚠️  Not storing the credential: {exc}")
+            return
+
+        provenance = derived_provenance(self.config, target.hostname)
+        if provenance not in TRUSTED_CONFIG_SOURCES:
+            print(
+                f"   ⚠️  Not storing these credentials in ~/.clustrix/.env: "
+                f"cluster_host={hostname!r} came from {provenance} -- "
+                f"a file chosen by where this process runs or by an "
+                f"inherited environment variable, not by you. Writing "
+                f"SSH_HOST={hostname!r} there would authorise that host "
+                f"permanently, in every future process, which is a stronger "
+                f"statement than the one you just made by typing a password "
+                f"once. Move the host into the clustrix configuration "
+                f"directory (config.yml), remove the file it came from, "
+                f"start a new process, and this offer will be made again."
+            )
             return
 
         # Offer to store in .env file
@@ -176,9 +222,17 @@ class AuthenticationManager:
                 )
                 root.destroy()
                 return result
-            except Exception:
-                # Fall back to terminal
-                pass
+            except Exception as exc:
+                # Log and continue: the terminal prompt below asks the user the
+                # same question and gets the same answer, so the caller still
+                # gets a correct result -- this is a choice of interface, not a
+                # lost instruction. Debug rather than warning for that reason:
+                # a notebook with no display reaches here every single time.
+                logger.debug(
+                    "No GUI available for the credential-storage prompt (%s); "
+                    "asking on the terminal instead.",
+                    exc,
+                )
 
         if env_type in ["cli", "script"] or env_type == "notebook":
             # Use terminal prompt
@@ -230,19 +284,34 @@ class AuthenticationManager:
 
         print("🔍 Validating authentication configuration...")
 
-        # Check environment variable if enabled
+        # Check environment variable if enabled.
+        #
+        # "Is it set" is not the question the user needs answered -- an
+        # environment password that is set but would never be released to
+        # this ``cluster_host`` is not a working configuration, and reporting
+        # it as one is how route 6 stayed invisible. So this asks the gate
+        # the same question the connection path asks.
         if self.config.use_env_password:
-            env_password = self.config.get_env_password()
-            results["env_var_set"] = env_password is not None
-
-            if env_password:
-                print(
-                    f"   ✅ Environment variable ${self.config.password_env_var} is set"
-                )
+            try:
+                target = CredentialTarget.for_config(self.config)
+            except ValueError as exc:
+                print(f"   ❌ {exc}")
+                results["env_var_set"] = False
             else:
-                print(
-                    f"   ❌ Environment variable ${self.config.password_env_var} not set"
+                release = release_credential(
+                    target,
+                    provider="ssh",
+                    config=self.config,
+                    sources=("environment",),
                 )
+                results["env_var_set"] = bool(release)
+                if release:
+                    print(
+                        f"   ✅ Environment variable "
+                        f"${self.config.password_env_var} is set"
+                    )
+                else:
+                    print(f"   ❌ {release.refusal}")
 
         # Check SSH keys
         ssh_method = SSHKeyAuthMethod(self.config)

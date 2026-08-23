@@ -12,17 +12,29 @@ below would document every class and function twice.
 Overview
 --------
 
-The dependency analysis module provides automatic detection and analysis of function dependencies for the packaging system. This enables seamless remote execution of locally-defined functions with their complete dependency context.
+This module reads a function's source with ``ast`` and reports what the
+function refers to: its imports, the other user-defined functions it calls, any
+``cluster_*`` filesystem calls it makes, the file paths it appears to touch,
+and its loops.
 
-Key Features
-------------
+.. warning::
 
-- **AST-Based Analysis**: Uses Python's Abstract Syntax Tree for accurate dependency detection
-- **Import Detection**: Identifies all import statements and their usage patterns
-- **Local Function Detection**: Finds calls to user-defined functions in the same scope
-- **Filesystem Call Detection**: Identifies cluster filesystem operations for proper setup
-- **File Reference Analysis**: Detects file operations and data dependencies
-- **Loop Analysis**: Analyzes loops for automatic parallelization opportunities
+   This module exists to serve :doc:`file_packaging`, and nothing in the
+   execution path calls either of them. Serialization for a real job goes
+   through :func:`clustrix.utils.serialize_function` instead. The page you are
+   reading documents a component you may call directly.
+
+Two properties are worth knowing before you rely on the file-reference
+results. The analysis reads *source text*, so a function whose source cannot
+be read -- one defined in a REPL, a notebook cell, or by ``exec`` -- yields
+nothing. And path detection is partly heuristic: any string constant that
+contains a path separator and ends in one of a fixed list of extensions is
+recorded as a file reference, whether or not it is one. A literal
+``"s3://bucket/notes.log"`` is reported as a local file.
+
+The loop analysis used by ``@cluster(parallel=True)`` is a different module,
+:mod:`clustrix.loop_analysis`; :doc:`../limitations` describes how narrow it
+is.
 
 Core Components
 ---------------
@@ -341,7 +353,7 @@ The dependency analysis is automatically used by the file packaging system:
         csv_files = cluster_find("*.csv", "data/")
         return len(csv_files)
 
-    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.edu")
+    config = ClusterConfig(cluster_type="slurm", cluster_host="cluster.example.edu")
     
     # Dependency analysis happens automatically during packaging
     package_info = package_function_for_execution(

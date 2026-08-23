@@ -4,13 +4,16 @@ Configuration
 =============
 
 Every setting Clustrix has lives on one dataclass, ``clustrix.config.ClusterConfig``,
-and there is exactly one instance of it per process. This page lists every
-field that changes behaviour, says what it actually does and what its real
-default is, and -- just as importantly -- says which fields currently do
-nothing.
+and there is exactly one instance of it per process. This page covers all of
+the fields on that dataclass: what each one actually does, what its real
+default is, and -- for the ones that read like settings but change nothing --
+that it is inert.
 
-Defaults quoted here were read out of the dataclass, not out of an older
-version of this document.
+Defaults quoted here were read out of the dataclass rather than out of an
+older version of this document, and the field list was checked the same way.
+Concretely, every name returned by ``dataclasses.fields(ClusterConfig)``
+appears somewhere below, either with an effect or in the table of fields that
+have none.
 
 .. contents:: On this page
    :local:
@@ -20,8 +23,10 @@ version of this document.
 Where configuration comes from
 ------------------------------
 
-**At import.** ``import clustrix`` calls ``_load_default_config()``, which
-tries these paths in order and stops at the first one that loads:
+**On first use.** ``import clustrix`` reads no files. The first call that
+actually needs the configuration -- ``get_config()``, ``configure()``,
+``save_config()``, or anything inside clustrix that reaches them -- triggers a
+one-time search of these paths, in order, stopping at the first that exists:
 
 1. ``<config dir>/config.yml``
 2. ``<config dir>/config.yaml``
@@ -31,11 +36,222 @@ tries these paths in order and stops at the first one that loads:
 6. ``./clustrix.json``
 
 ``<config dir>`` is ``~/.clustrix``, unless ``CLUSTRIX_CONFIG_DIR`` is set, in
-which case it is that (expanded). A file that raises while loading is skipped
-silently and the search continues.
+which case it is that (expanded).
+
+The search used to run at import, which meant importing the library read your
+home directory and your working directory before you had asked it for
+anything, and an unreadable ``~/.clustrix`` made ``import clustrix`` raise
+``PermissionError``. It is deferred so that neither happens. The singleton
+itself is still built at import; only the file read moved.
+
+A candidate that **cannot be examined at all** -- an unreadable directory, a
+dead automount -- is logged at ``WARNING`` and the search moves on to the next
+one.
+
+A candidate that **is found and then fails to load** -- malformed YAML, a
+misspelled setting -- raises ``clustrix.config.ConfigFileError``. It used to be
+skipped in silence, which left the process running on built-in defaults while
+you believed your file was in force; a ``cluster_host`` that never took effect
+means the job runs somewhere other than where you said. Fix the file, move it
+aside, or call ``clustrix.config.load_config(path)`` with a different one --
+an explicit load replaces the configuration and supersedes the search.
 
 Note item 4: a ``clustrix.yml`` in the current working directory is picked up
-automatically. Changing directory does not reload it.
+automatically, at first use. Changing directory afterwards does not reload it.
+
+.. warning::
+
+   **Items 4-6 are not trusted with your credentials.** Nobody chooses a
+   working-directory configuration file by being in the directory --
+   ``git clone`` followed by ``cd`` is the whole of what it takes for a
+   repository to supply one, and it usually wins outright, because
+   ``~/.clustrix/clustrix.yml`` is not in this list at all (``config.yml``
+   is). Adopting one therefore emits a ``UserWarning`` naming the file, and
+   a credential stored in ``~/.clustrix/.env`` that does not name a host of
+   its own is **not** offered to a ``cluster_host`` that came from one.
+
+   Nothing else changes: every non-credential setting in a project-local
+   ``clustrix.yml`` takes effect as before. Two things make the credential
+   available again, and they are the only two:
+
+   - Set ``SSH_HOST`` in the credential file (``~/.clustrix/.env``) to the
+     host that may receive the secret. That is you naming the recipient, in
+     a file only you can write, and it is checked before provenance is --
+     so it works whatever the hostname's provenance turns out to be.
+   - Move the settings into ``~/.clustrix/config.yml``, delete the
+     working-directory file, unset ``CLUSTRIX_CONFIG_DIR`` if it is set,
+     and start a new process.
+
+   Both remedies name ``~/.clustrix`` rather than ``<config dir>``. The
+   placeholder is right for *where clustrix looks*, and wrong here: under a
+   ``CLUSTRIX_CONFIG_DIR`` redirect it stands for a directory somebody else
+   chose, so a sentence about authorising a host would be pointing at a
+   file the redirector controls. Quickstart says ``~/.clustrix/.env`` for
+   the same reason.
+
+   ``configure(cluster_host=...)`` and ``load_config(path)`` are **not** on
+   that list, however obvious they look. See the next paragraph.
+
+   **Items 1-3 are trusted only while** ``<config dir>`` **is**
+   ``~/.clustrix``.**
+   The reason to trust them is that putting a file in your own
+   ``~/.clustrix`` is something you did; that reason does not survive the
+   *directory* being named by ``CLUSTRIX_CONFIG_DIR``, because an
+   environment variable is inherited from whatever started the process and a
+   repository-shipped ``.envrc``, ``Makefile`` or devcontainer definition
+   sets one for every command run inside the checkout. A redirected config
+   directory therefore behaves like items 4-6: the settings apply, a
+   ``UserWarning`` names the file, and a hostless stored credential is not
+   offered to a ``cluster_host`` it named. The redirect itself is unchanged
+   and still what you want in a container or on a shared machine; to
+   authorise a host from one, use either of the two remedies above.
+
+   **Provenance follows the hostname, not the object, and it is permanent
+   within the process.** Once an untrusted file has named a ``cluster_host``,
+   rebuilding a config around that same hostname does not make it your
+   choice -- ``dataclasses.replace(config, ...)``,
+   ``configure(**asdict(config))`` (which is what the notebook widget's
+   *Apply* button does) and any other round trip all leave it untrusted.
+   Handing a value back through a function is not evidence that anyone chose
+   it.
+
+   That is why typing ``configure(cluster_host="the-same-host")`` yourself
+   does not lift the refusal either, even though you really did type it:
+   the widget's *Apply* button makes that exact call, with that exact
+   hostname, on a config it read out of the file. The two are the same call.
+   Clearing the record for one would clear it for the other, which is the
+   laundering route this rule exists to close, so the record is never
+   cleared and there is no API to clear it. ``load_config(path)`` on the
+   offending file is the same story: naming a path you did not write is not
+   choosing a host.
+
+   **In the** ``%%clusterfy`` **widget, only the host field lifts it.** The
+   widget remembers which of the configurations in its dropdown it found on
+   disk and which hostname each of those files named, so rearranging them
+   changes nothing: renaming a configuration in the name box, copying it with
+   the *+* button, saving it into your own configuration directory or pasting
+   over it in the *Load* box all keep the refusal, because none of them is
+   you choosing who receives your password. Typing your own hostname over the
+   host field does lift it -- for that hostname -- because a host is only
+   refused by a file that actually named it.
+
+   Pasting is the one worth stating precisely, because it is the user
+   typing: the refusal survives a paste that *keeps* the hostname the found
+   file named, and a paste that changes the hostname is you naming a host,
+   which lifts it for that host exactly as the host field does.
+
+   **Saving is where that has to survive a restart.** *Save configuration*
+   writes into ``~/.clustrix``, and that is a directory the widget infers
+   trust from when it looks for configurations next time -- so without care,
+   pressing Save would promote a configuration a repository shipped to one
+   you chose, one session later, with nothing left on disk to say otherwise.
+   It is also not only the configuration you selected: a save writes every
+   configuration in the dropdown, verbatim, including ones you never opened.
+
+   So the widget writes the source down beside the configurations, under a
+   top-level ``config_sources`` key, and reads it back the next time. It
+   behaves exactly like the profile store's record below: it can only ever
+   *lower* trust -- a file claiming ``runtime`` for its own configurations is
+   ignored -- so a project's configuration you deliberately keep is kept,
+   along with the reason it is not handed your credential.
+
+   Typing your own hostname over the host field before saving is recorded
+   the same way it is applied: nothing is written for that entry, because
+   the file no longer names the host it came with, and the next session
+   treats it as yours. Any other entry the save carries along is unaffected
+   and still records where it came from.
+
+   **Every writer of a configuration file does this, not only the widget.**
+   ``ClusterConfig.save_to_file(path)``, ``clustrix.save_config(path)``,
+   ``clustrix config --config-file <path>`` and
+   ``ProfileManager.export_profile(name, path)`` all write the same key, for
+   the same reason: any of them can be pointed at ``~/.clustrix/config.yml``
+   from inside a cloned repository, and what a save writes is a credential
+   decision one restart later. In the flat single-configuration file those
+   write, the key holds the source directly::
+
+       cluster_type: ssh
+       cluster_host: cluster.example.edu
+       username: researcher
+       config_sources: working-directory
+
+   Reading such a file -- by the automatic search, ``load_config(path)``,
+   ``ClusterConfig.load_from_file(path)`` or ``import_profile(path)`` -- says
+   so and refuses the credential, and the automatic search names the file and
+   the line to delete if the settings are in fact yours.
+
+   **To adopt a project's configuration on purpose**, do what
+   ``clustrix`` already tells you to do for a working-directory file: put
+   the settings into ``~/.clustrix/config.yml`` *yourself* and start a new
+   process. A file you wrote records nothing, and a file that records
+   nothing is yours -- which is the whole difference between moving a
+   configuration and pressing a button that moves it for you. If you would
+   rather keep the file where it is, ``SSH_HOST=<host>`` in the credential
+   file is authorisation for that one host, as always.
+
+   The cost is a refusal when a ``./clustrix.yml`` names the host you were
+   going to use anyway. Those two cases are genuinely indistinguishable, so
+   the refusal is the safe half of the pair, and the two remedies above are
+   the way out: ``SSH_HOST`` is authorisation no round trip can manufacture,
+   and a new process starts with an empty record.
+
+   **A saved profile remembers where it came from.** That record is
+   per-process, but the notebook widget's profile store is not. Seven of its
+   operations write ``<config dir>/profiles/profiles.yml`` as a side effect
+   -- creating, cloning, renaming, removing or saving a profile, importing
+   one, and merely *switching* which is active -- so a profile read out of a
+   bundle a repository shipped ends up inside your own configuration
+   directory, where re-deriving its provenance from the file's location
+   would call it yours. Clustrix therefore writes the source down beside
+   each profile and restores it with them: an untrusted profile stays
+   untrusted across restarts, and carries the same refusal. A recorded
+   source can only ever *lower* trust -- a bundle claiming ``runtime`` for
+   its own profiles is ignored -- so a project-local profile you deliberately
+   keep is kept, along with the reason it is not handed your credential.
+   Deleting the profile and starting a new process is what clears it.
+
+   **Upgrading from a version that did not record this.** A profile store
+   written before clustrix recorded provenance says nothing about where its
+   profiles came from, and clustrix does not guess. It used to: it worked out
+   the source from where the store now sat, which is ``~/.clustrix``, which
+   is trusted -- so the rule above protected nobody whose store had already
+   been written into. Silence now fails closed.
+
+   What you see the first time you open such a store is a warning naming the
+   profiles concerned, and, if you go on to use one with a stored credential
+   that names no host, a refusal explaining the same thing. Nothing is
+   deleted, every profile still loads and every other way of connecting --
+   SSH keys, a credential that names its host, ``configure()`` in your own
+   Python -- is unaffected.
+
+   Two things clear it. ``SSH_HOST=<host>`` in the credential file is
+   authorisation for that one host, as always. Or, once you have looked at
+   the list in the warning and recognise every profile on it:
+
+   .. code-block:: python
+
+      import clustrix
+      clustrix.adopt_profile_store()   # then start a new process
+
+   That records, for each profile the store had no answer for, that you named
+   the store yourself -- the same thing passing a path to
+   ``ProfileManager.load_from_file`` has always meant. It is not a way to
+   grant trust: a profile the store *does* record as untrusted is left
+   exactly as it is, however often you run it. Look at the list first; a
+   profile you do not recognise is the thing this is protecting you from.
+
+   **What** ``load_config(path)`` **does and does not mean.** It is trusted:
+   it is a call in your own Python naming a file, it is not reachable by
+   handing a config back through a function, and distrusting *relative*
+   paths would be theatre, since
+   ``load_config(os.path.abspath("clustrix.yml"))`` is the same act. What
+   it is not is a check on the file's contents. Clustrix cannot tell a
+   configuration file you wrote from one that arrived with a checkout, so
+   ``load_config`` on a repository-shipped file trusts that repository's
+   ``cluster_host`` -- and it does so whether or not the automatic search
+   would also have found it, which it does not when the file is named
+   anything but ``clustrix.{yml,yaml,json}`` or you are running from
+   another directory. Point ``load_config`` at files you wrote.
 
 **At runtime.** ``clustrix.configure(**kwargs)`` sets fields on the existing
 instance. ``load_config(path)`` -- imported from ``clustrix.config``, not
@@ -62,24 +278,67 @@ file. Both reject unknown names rather than accepting them silently:
    ValueError: bad.yml contains unknown setting(s): cleanup_remote_files
    (did you mean cleanup_on_success?)
 
-**Per call.** Six settings can be overridden on the decorator: ``cores``,
-``memory``, ``time``, ``partition``, ``queue`` and ``environment``. Everything
-else is configuration-only, with the exception of the pass-through extras
-listed under :ref:`decorator-extras`.
+**Per call.** Five settings can be overridden on the decorator: ``cores``,
+``memory``, ``time``, ``partition`` and ``environment``. Everything else is
+configuration-only, with the exception of the pass-through extras listed under
+:ref:`decorator-extras`. The removed ``queue`` spelling now arrives as an
+unrecognized extra and produces a warning; use ``partition`` for SLURM.
 
 **Effective precedence**
 
-1. ``@cluster(...)`` arguments (the six above, plus the extras).
+1. ``@cluster(...)`` arguments (the five above, plus the extras).
 2. ``clustrix.configure()`` / direct attribute assignment.
-3. The configuration file found at import.
+3. The configuration file found by the first-use search.
 4. Dataclass defaults.
 
-There is **no** general environment-variable layer. Only three environment
-variables are read at all: ``CLUSTRIX_CONFIG_DIR`` (where to look for config),
-``CLUSTRIX_AUTO_WIDGET`` (display the notebook widget on import), and whatever
-name you put in ``password_env_var``. Documentation elsewhere that lists
-"environment variables" as a general precedence level is describing something
-the code does not do.
+There is **no** general environment-variable layer. Nothing reads a
+``CLUSTRIX_<FIELD>`` variable, and no environment variable assigns to a field
+on ``ClusterConfig``. Documentation elsewhere that lists "environment
+variables" as a general precedence level is describing something the code does
+not do.
+
+Clustrix does read the environment for other purposes. Those uses group as
+follows, and not one of them writes to a configuration field.
+
+*Where configuration lives.* ``CLUSTRIX_CONFIG_DIR`` chooses the directory
+searched on first use and written by ``save_config``. It is read at the moment
+of the search, not at import, so setting it after ``import clustrix`` but
+before the first ``get_config()`` still takes effect.
+
+*What happens on import.* ``CLUSTRIX_AUTO_WIDGET`` displays the notebook
+widget when clustrix is imported.
+
+*Credentials.* Whatever name you put in ``password_env_var`` supplies an SSH
+password. ``FlexibleCredentialManager`` -- the fallback used when neither
+``key_file`` nor ``password`` is set -- reads ``SSH_HOST``, ``SSH_USERNAME``,
+``SSH_PASSWORD``, ``SSH_PRIVATE_KEY_PATH``, ``SSH_PORT``, ``HF_TOKEN`` (or
+``HUGGINGFACE_TOKEN``), ``HUGGINGFACE_USERNAME`` and ``HF_USERNAME``, from a
+``.env`` file or from the process environment, and switches to its CI source
+when ``GITHUB_ACTIONS`` is ``"true"``. A stored SSH credential goes to one
+host and no other: if it sets ``SSH_HOST``, that host must be the one being
+connected to; if it does not, ``cluster_host`` must have come from a source
+you chose (see the warning above). The HuggingFace backend reads
+``HF_TOKEN`` directly as well, and honours ``HF_HOME`` when locating the token
+that ``hf auth login`` cached. The key-setup helper in ``auth_fallbacks`` has
+its own list: ``CLUSTRIX_PASSWORD_<HOST>``, ``CLUSTER_PASSWORD_<HOST>``,
+``<HOST>_PASSWORD``, ``CLUSTRIX_DEFAULT_PASSWORD`` and ``CLUSTER_PASSWORD``,
+with the host name upper-cased and its dots turned into underscores. All of
+these hand a credential to the authentication path; none of them writes to
+``ClusterConfig``.
+
+*Variables clustrix sets for its own remote code.* ``CLUSTRIX_PACKAGES``,
+``CLUSTRIX_PAYLOAD``, ``CLUSTRIX_PAYLOAD_REPO``, ``CLUSTRIX_PAYLOAD_FILE`` and
+``CLUSTRIX_HMAC_KEY`` are written into the HuggingFace container by the
+submitter and read back by the program running inside it;
+``CLUSTRIX_ORIGINAL_CWD`` plays the same role for a packaged remote job. In
+other words, these are an internal channel between the two halves of one
+submission, and you do not set them yourself.
+
+Separately, ``clustrix.validation`` -- a diagnostic helper, not part of
+execution -- takes its target hosts from ``CLUSTRIX_VALIDATION_SSH_HOST``,
+``CLUSTRIX_VALIDATION_SSH_NAME``, ``CLUSTRIX_VALIDATION_SLURM_HOST`` and
+``CLUSTRIX_VALIDATION_SLURM_NAME``. With none of them set it reports that it
+has nothing to check.
 
 Reading and saving
 ~~~~~~~~~~~~~~~~~~
@@ -121,12 +380,13 @@ Choosing a backend
    * - ``cluster_type``
      - ``"slurm"``
      - One of ``local``, ``ssh``, ``slurm``, ``huggingface``
-       (``SUPPORTED_CLUSTER_TYPES``). Anything else raises
-       ``ValueError: Unsupported cluster type: ...`` at submit time. Note the
-       default is ``slurm``, but with no ``cluster_host`` set the decorator
-       still runs locally -- see :ref:`execution-model`. PBS, SGE, Kubernetes
-       and the cloud VM providers were removed in v0.2.0; see
-       :ref:`removed-backends`.
+       (``SUPPORTED_CLUSTER_TYPES``). Anything else raises a ``ValueError``
+       that names the supported set. Note the default is ``slurm``, but with
+       no ``cluster_host`` set the decorator still runs locally -- see
+       :ref:`execution-model`. PBS, SGE, Kubernetes and the cloud VM providers
+       are not supported; see :ref:`removed-backends`. This is a
+       *configuration* setting and not a ``@cluster`` keyword: passing
+       ``@cluster(cluster_type=...)`` warns and has no effect.
    * - ``cluster_host``
      - ``None``
      - The SSH host. **Its absence is what makes execution local** for every
@@ -170,13 +430,17 @@ Connection and authentication
      - ``"reject"`` refuses an unknown host key and prints the ``ssh-keyscan``
        command to add it. ``"auto_add"`` trusts unknown keys -- insecure, and
        never the default. Any other value raises at construction time.
+       ``"auto_add"`` is honoured **only from a configuration you chose**;
+       see :ref:`untrusted-security-settings` below.
    * - ``ssh_connect_timeout``
      - ``30``
      - Seconds paramiko waits to connect. The OS default is minutes, which
        turns an unreachable host into a hang rather than an error.
    * - ``ssh_port``
      - ``22``
-     - Read by ``auth_manager`` only. The executor uses ``cluster_port``.
+     - Read by ``auth_manager``, and by ``validate_cluster_auth`` in
+       ``clustrix.validation`` -- the connection test behind the notebook
+       widget's password check. The executor uses ``cluster_port``.
    * - ``api_key``
      - ``None``
      - Generic API key used by the credential/auth helpers.
@@ -194,6 +458,37 @@ Connection and authentication
 
    Invalid ssh_host_key_policy='yolo'. Valid values are 'reject' (default,
    secure) or 'auto_add' (insecure, trusts unknown host keys automatically).
+
+
+.. _untrusted-security-settings:
+
+Settings an untrusted configuration may not make
+------------------------------------------------
+
+Clustrix already refuses to hand a stored credential to a ``cluster_host``
+that came from somewhere nobody chose -- a ``./clustrix.yml`` that arrived
+with a ``git clone``, or a directory ``$CLUSTRIX_CONFIG_DIR`` was pointed
+at. Two other settings aim a secret just as directly, so they follow the
+same rule:
+
+``ssh_host_key_policy``
+   ``"auto_add"`` turns host key verification off. That is what stops a
+   machine-in-the-middle, and it is *persistent*: the key is appended to
+   your ``~/.ssh/known_hosts``, so the host stays trusted for every later
+   process on the machine, clustrix's and your own ``ssh`` alike. From an
+   untrusted configuration the value is ignored, host keys are verified,
+   and a warning names the file. ``"reject"`` is always honoured -- a
+   configuration asking for *more* checking costs nothing to believe.
+
+``hf_image``
+   A staged HuggingFace job hands ``CLUSTRIX_HF_TOKEN`` to its container as
+   a job secret, so naming the image is naming who receives your account
+   token. From an untrusted configuration the compiled-in default image is
+   used instead, with a warning.
+
+In both cases the fix is the same as for a refused credential: move the
+setting into ``~/.clustrix/config.yml``, pass it to ``configure()``, or name
+the file yourself with ``load_config(path)``.
 
 
 Resources
@@ -246,19 +541,97 @@ Paths and the remote environment
      - Base directory for the *filesystem utilities* when operating locally.
        Defaults to the current working directory. Does not affect job
        execution.
+   * - ``local_cache_dir``
+     - ``"~/.clustrix/cache"``
+     - Where a staged data package lands when it is materialized without an
+       explicit destination: the files go under
+       ``<local_cache_dir>/data-packages/<package id>``. That same
+       subdirectory is the only thing ``DataPackage.delete`` clears out
+       locally -- never the cache directory above it, and never the originals
+       you packaged.
    * - ``python_executable``
      - ``"python"``
      - Command used to create the single-venv fallback and to run the job
        script. Note that many systems have no ``python``, only ``python3``;
        ``resolve_remote_python`` probes for a working interpreter rather than
-       trusting this blindly.
+       trusting this blindly. If the probe itself cannot be run -- a dropped
+       SSH transport, a closed session -- it raises saying so, rather than
+       reporting that the remote host has no matching interpreter: that would
+       be a claim about a machine clustrix never managed to ask.
    * - ``package_manager``
      - ``"pip"``
      - ``"pip"``, ``"uv"`` (``uv pip``), ``"conda"``, or ``"auto"`` (uv, then
        conda, then pip). Applies to the single-venv fallback path.
    * - ``conda_env_name``
      - ``None``
-     - Passed through as the job's ``environment``.
+     - Names a conda environment that **already exists on the cluster**. The
+       job's function is then executed there, with ``conda run -n <name>``:
+       the name replaces the *execution* environment clustrix would otherwise
+       replicate from your local one, and takes precedence over that
+       replication. Clustrix's own serialization environment (VENV1 in
+       :ref:`two-venv`) is never replaced. ``@cluster(environment=...)`` is
+       the per-call spelling and wins over this field.
+
+       Because a batch job runs under a non-login shell, conda is not
+       initialised there, so the generated script makes ``conda`` usable
+       first. A conda that already works -- one your site puts on ``PATH``,
+       or one a ``module load`` in ``module_loads`` brings in -- is used as
+       it stands and nothing is sourced over it. Otherwise the script uses
+       the location measured over SSH when environment replication ran, and
+       failing that searches, in order, ``$CONDA_PREFIX``, ``conda info
+       --base``, ``~/miniconda3``, ``~/anaconda3``, ``~/miniforge3``,
+       ``/opt/conda``, ``/usr/local/miniconda3`` and
+       ``/usr/local/anaconda3``. A site that keeps conda somewhere else, or
+       behind a module, is not discoverable by that search: put its
+       initialisation in ``module_loads`` or ``pre_execution_commands``,
+       which run earlier in the same script. If none of it works the job
+       stops with a message naming the environment and the places searched,
+       rather than with ``conda: command not found``.
+
+       With ``use_two_venv=False`` -- the combination this field is really
+       for -- clustrix no longer replicates your local environment onto the
+       cluster before the job. The generated script never activates what that
+       replication builds, so building it only made every submission slower.
+       With ``use_two_venv=True`` the replication still runs, because
+       clustrix's serialization environment comes out of it; the job logs a
+       warning saying the execution half of it was built for nothing.
+
+       **What counts as a name.** conda's rules, not clustrix's: no ``/``, no
+       whitespace, no ``:`` and no ``#``. Non-ASCII names such as
+       ``análisis`` or ``环境`` are fine, as are ``env(1)``, ``my~env`` and
+       ``a&b``. Four more characters are refused than conda refuses --
+       ``'``, ``"``, ``$``, ``\`` and a backtick -- because the name is
+       written into the generated shell script. A leading ``-`` is refused
+       (it would parse as an option to ``conda run``), and so is anything
+       longer than 255 characters.
+
+       **The environment has to be on your Python minor version.** dill and
+       cloudpickle embed CPython bytecode, and that bytecode cannot be loaded
+       by a different minor version -- a function pickled under 3.12 and
+       opened under 3.11 fails inside the unpickler with an error that names
+       neither the environment nor the version. Clustrix pins the
+       environments it builds itself, but it cannot see inside one you named,
+       and it does not know where conda is on the compute node until the job
+       gets there. So the generated script asks: before anything else runs,
+       it compares the environment's ``sys.version_info[:2]`` with the
+       submitting interpreter's and stops the job with a message naming both
+       versions if they differ. Point ``conda_env_name`` at an environment
+       built on the same minor version you submit from, or submit from a
+       matching one.
+
+       **Prefix environments are not supported.** conda can address an
+       environment by path with ``conda run -p /path/to/env``; clustrix only
+       ever emits ``-n``, so a path here is refused when you set it rather
+       than accepted and then failed on the compute node with the job already
+       queued. Give the name ``conda env list`` shows.
+
+       This field was accepted and never used before clustrix honoured it
+       (`#164 <https://github.com/ContextLab/clustrix/issues/164>`_), so a
+       value left in an old ``clustrix.yml`` changes behaviour now. The first
+       job that uses it logs a warning saying so. Passing
+       ``@cluster(environment=...)`` explicitly is a decision made today and
+       is not announced, even when it names the same environment as the
+       field.
    * - ``use_two_venv``
      - ``True``
      - Build the two-environment layout described in :ref:`two-venv`. Turning
@@ -336,6 +709,15 @@ Execution behaviour
    * - ``job_poll_interval``
      - ``30``
      - Seconds between status checks while waiting for a scheduler job.
+   * - ``job_wait_timeout``
+     - ``86400``
+     - Seconds to keep polling before giving up on a scheduler job and raising
+       ``TimeoutError``. The job is deliberately **not** cancelled, and the
+       message names the remote directory so the result can still be collected
+       by hand. Set it to ``None`` to wait indefinitely. The default of 24
+       hours is generous because a real queue wait legitimately runs into
+       hours; a job that is held or stuck behind a queue that never clears
+       would otherwise hang the caller with no way out but Ctrl-C.
    * - ``cleanup_on_success``
      - ``True``
      - ``rm -rf`` the remote job directory after a successful collection. A
@@ -373,7 +755,8 @@ HuggingFace Jobs (``cluster_type="huggingface"``)
    * - ``hf_image``
      - ``None`` -> ``python:<your minor>-slim``
      - Must match your local Python minor version, because dill payloads carry
-       CPython bytecode.
+       CPython bytecode. Honoured **only from a configuration you chose**; see
+       :ref:`untrusted-security-settings` below.
    * - ``hf_job_timeout``
      - ``None`` -> ``"30m"``
      - Job timeout. Per-call override: ``@cluster(hf_timeout="2h")``.
@@ -401,40 +784,86 @@ cache), so passing them per call has no effect on this backend.
    hf_allow_gpu_flavors=True to confirm you intend to pay for it; otherwise use
    a CPU flavor (default: cpu-basic).
 
+Data staging
+~~~~~~~~~~~~
+
+These four control ``clustrix.staging``, which moves a directory of input files
+to wherever the function will run. Small packages ride inside the pickled
+payload; larger ones go to a private HuggingFace dataset repo. The size bands
+below decide which, and where the second one stops.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 18 54
+
+   * - Field
+     - Default
+     - Effect
+   * - ``hf_data_repo``
+     - ``None``
+     - Repo that oversized packages are uploaded to. Unset, the repo is
+       ``<namespace>/clustrix-data``, with the namespace taken from
+       ``hf_namespace``, then ``hf_username``, then whatever the token's
+       ``whoami()`` reports. Applies whichever backend you run on: a ``slurm``
+       job with a package too big to inline still stages through HuggingFace.
+   * - ``stage_inline_max_bytes``
+     - ``1048576`` (1 MB)
+     - Packages smaller than this carry their file contents inside the package
+       object, so no remote store is involved and there is nothing to clean up
+       afterwards.
+   * - ``stage_warn_bytes``
+     - ``104857600`` (100 MB)
+     - At or above this, staging logs a warning before starting. A transfer
+       that takes minutes with no output is indistinguishable from a hang.
+   * - ``stage_max_bytes``
+     - ``5368709120`` (5 GB)
+     - At or above this, staging refuses outright and names the largest file.
+       Raise it if you genuinely mean to move that much over the network.
+
+Nothing staged is reclaimed automatically. There is no TTL and no reaper --
+deleting a package is always something you do, through
+``DataPackage.delete``.
+
 Settings that currently have no effect
 --------------------------------------
 
 These fields exist on ``ClusterConfig``, are accepted by ``configure()``, are
 saved and loaded, and are shown by the notebook widget -- but no execution code
-path reads them. They are listed here so you do not tune something that cannot
-change anything.
+path reads them. Setting one to a non-default value now produces a warning
+naming the field and why it is dead (#161); defaults stay silent. They are
+listed here so you do not tune something that cannot change anything.
 
 ============================  ===========================================
 Field                         Status
 ============================  ===========================================
-``gpu_detection_enabled``     Not read. GPU detection runs unconditionally
-                              inside ``enhanced_setup_two_venv_environment``.
-``auto_gpu_packages``         Not read.
-``cuda_version_preference``   Not read.
-``gpu_memory_fraction``       Not read.
-``prefer_gpu_execution``      Not read.
-``gpu_requirements``          Not read.
-``rapids_ecosystem``          Not read.
-``max_gpu_parallel_jobs``     Not read.
-``auto_gpu_parallel``         Not read. It used to select a client-side GPU
-                              path that never called your function -- it ran a
-                              fixed torch program per GPU and returned the
-                              traces of random matrices as your result. That
-                              path was deleted; the field is kept so existing
-                              config files keep loading, and passing it to
-                              ``@cluster`` now warns.
-``local_parallel_threshold``  Not read. Local chunking uses
-                              ``os.cpu_count() * 2`` instead.
-``cache_credentials``         Not read.
-``credential_cache_ttl``      Not read.
-``local_cache_dir``           Not read.
-``hf_hardware``               A Spaces-era field. It survives only as a
-                              fallback for ``hf_flavor``.
+``gpu_detection_enabled``     Not read; warns when set. GPU detection runs
+                              unconditionally inside
+                              ``enhanced_setup_two_venv_environment``.
+``auto_gpu_packages``         Not read; warns when set.
+``cuda_version_preference``   Not read; warns when set.
+``gpu_memory_fraction``       Not read; warns when set.
+``prefer_gpu_execution``      Not read; warns when set.
+``gpu_requirements``          Not read; warns when set.
+``rapids_ecosystem``          Not read; warns when set.
+``max_gpu_parallel_jobs``     Not read; warns when set.
+``auto_gpu_parallel``         Not read. There is no automatic
+                              cross-GPU parallelization; parallelize across
+                              GPUs inside your own function. The field is
+                              accepted so that existing config files keep
+                              loading, and passing it to ``@cluster`` warns.
+``local_parallel_threshold``  Not read; warns when set. Local chunking aims
+                              for two chunks per worker in the pool ``cores``
+                              sized, falling back to ``os.cpu_count()`` when
+                              that is unknown.
+``cache_credentials``         Not read; warns when set.
+``credential_cache_ttl``      Not read; warns when set.
+``default_queue``             Retained so older configuration files and widget
+                              profiles keep loading, but read by no backend.
+                              A non-empty value produces a warning when a
+                              decorated function runs. Use
+                              ``default_partition`` on SLURM.
+``hf_hardware``               Read only as a fallback for ``hf_flavor``.
+                              Set ``hf_flavor``.
 ``venv_info``                 Runtime scratch space, written by clustrix
                               during a submission. Do not set it yourself.
 ============================  ===========================================
@@ -477,8 +906,9 @@ A worked configuration
        return torch.load(dataset_path).mean().item()
 
 The same thing as a file, loadable with
-``from clustrix.config import load_config; load_config("clustrix.yml")``, or
-picked up automatically if it sits in the working directory:
+``from clustrix.config import load_config; load_config("my-cluster.yml")``.
+Named ``clustrix.yml`` it is also picked up automatically when it sits in the
+working directory -- along with the credential restriction described above:
 
 .. code-block:: yaml
 

@@ -9,10 +9,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
 import paramiko
 
-from tests.real_world.credential_manager import require_test_remote_work_dir
+from tests.real_world.credential_manager import (
+    require_cluster_credentials,
+    require_test_remote_work_dir,
+)
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_basic_slurm_submission():
@@ -20,21 +23,17 @@ def test_basic_slurm_submission():
     print("🚀 Basic SLURM Test")
     print("=" * 50)
 
-    # Get credentials
-    creds = ValidationCredentials()
-    slurm_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
+    # Credentials come from ~/.clustrix/.env or the environment; skip loudly
+    # rather than return False, which pytest reports as a pass.
+    slurm_creds = require_cluster_credentials("slurm")
 
-    if not slurm_creds:
-        print("❌ No credentials found")
-        return False
-
-    hostname = slurm_creds.get("hostname")
-    username = slurm_creds.get("username")
+    hostname = slurm_creds["host"]
+    username = slurm_creds["username"]
     password = slurm_creds.get("password")
 
     # Connect via SSH
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh)
 
     try:
         ssh.connect(hostname, username=username, password=password)

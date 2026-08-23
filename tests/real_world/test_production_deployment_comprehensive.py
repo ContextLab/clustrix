@@ -38,25 +38,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_github_credentials() -> Optional[Dict[str, str]]:
-    """Get GitHub credentials from 1Password or environment."""
-    manager = get_credential_manager()
-
-    # Try to get GitHub credentials from credential manager
-    github_creds = None
-    if hasattr(manager, "_op_manager") and manager._op_manager:
-        try:
-            github_token = manager._op_manager.get_credential(
-                "clustrix-github-validation", "token"
-            )
-            if github_token:
-                github_creds = {"token": github_token}
-        except Exception as e:
-            logger.debug(f"Could not get GitHub credentials from 1Password: {e}")
-
-    if github_creds:
-        return github_creds
-
-    # Fallback to environment variables
+    """Get GitHub credentials from the environment."""
     token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
 
     if token:
@@ -66,28 +48,7 @@ def get_github_credentials() -> Optional[Dict[str, str]]:
 
 
 def get_pypi_credentials() -> Optional[Dict[str, str]]:
-    """Get PyPI credentials from 1Password or environment."""
-    manager = get_credential_manager()
-
-    # Try to get PyPI credentials from credential manager
-    pypi_creds = None
-    if hasattr(manager, "_op_manager") and manager._op_manager:
-        try:
-            test_token = manager._op_manager.get_credential(
-                "clustrix-pypi-test-validation", "token"
-            )
-            prod_token = manager._op_manager.get_credential(
-                "clustrix-pypi-validation", "token"
-            )
-            if test_token or prod_token:
-                pypi_creds = {"test_token": test_token, "prod_token": prod_token}
-        except Exception as e:
-            logger.debug(f"Could not get PyPI credentials from 1Password: {e}")
-
-    if pypi_creds:
-        return pypi_creds
-
-    # Fallback to environment variables
+    """Get PyPI credentials from the environment."""
     test_token = os.getenv("PYPI_TEST_TOKEN") or os.getenv("TEST_PYPI_TOKEN")
     prod_token = os.getenv("PYPI_TOKEN") or os.getenv("PYPI_API_TOKEN")
 

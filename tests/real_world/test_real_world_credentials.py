@@ -2,8 +2,8 @@
 """
 Test script to verify real-world credential integration.
 
-This script tests the integration between 1Password (local development)
-and GitHub Actions secrets for real-world testing.
+This script tests credential resolution from ~/.clustrix/.env, exported
+environment variables, and GitHub Actions secrets.
 """
 
 import os
@@ -15,7 +15,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tests.real_world.credential_manager import (
     get_credential_manager,
-    setup_test_credentials,
     print_credential_status,
 )
 
@@ -32,8 +31,6 @@ def test_credential_integration():
     print(
         f"Environment: {'GitHub Actions' if manager.is_github_actions else 'Local Development'}"
     )
-    print(f"1Password Available: {'✅' if manager.is_1password_available() else '❌'}")
-
     # Print credential status
     print_credential_status()
 
@@ -66,35 +63,45 @@ def test_credential_integration():
     return True
 
 
-def test_environment_variable_setup():
-    """Test environment variable setup."""
-    print("\n🌍 Testing Environment Variable Setup")
+def test_credentials_are_not_exported_into_the_environment():
+    """Resolving credentials must leave os.environ alone.
+
+    This function used to call `setup_test_credentials()` and assert that
+    TEST_SSH_PASSWORD and friends had appeared. That export is gone: once
+    #153 wired ~/.clustrix/.env into the lookup, it published the real
+    cluster password to every subprocess of every `pytest tests/` run. The
+    assertion is inverted rather than deleted, so the export cannot come
+    back unnoticed.
+    """
+    print("\n🌍 Checking credentials stay out of the environment")
     print("=" * 40)
 
-    # Set up environment variables
-    setup_test_credentials()
+    manager = get_credential_manager()
+    secrets = []
+    for creds in (
+        manager.get_ssh_credentials(),
+        manager.get_slurm_credentials(),
+    ):
+        if creds and creds.get("password"):
+            secrets.append(creds["password"])
+    hf_creds = manager.get_huggingface_credentials()
+    if hf_creds and hf_creds.get("token"):
+        # An exported HF token was already in the environment before we
+        # asked; only a token that came from the .env file would be new.
+        if hf_creds["token"] not in (
+            os.getenv("HF_TOKEN"),
+            os.getenv("HUGGINGFACE_TOKEN"),
+        ):
+            secrets.append(hf_creds["token"])
 
-    # Check if environment variables were set
-    env_vars_to_check = [
-        "TEST_SSH_HOST",
-        "TEST_SSH_USERNAME",
-        "TEST_SLURM_HOST",
-        "TEST_SLURM_USERNAME",
-        "HUGGINGFACE_TOKEN",
+    leaked = [
+        name
+        for name, value in os.environ.items()
+        if any(secret == value for secret in secrets)
     ]
+    assert not leaked, f"credentials exported into os.environ: {leaked}"
 
-    set_vars = []
-    for var in env_vars_to_check:
-        value = os.getenv(var)
-        if value:
-            set_vars.append(var)
-            print(f"✅ {var}: Set (length: {len(value)})")
-        else:
-            print(f"❌ {var}: Not set")
-
-    print(f"\nEnvironment variables set: {len(set_vars)}/{len(env_vars_to_check)}")
-
-    return len(set_vars) > 0
+    print(f"   ✅ {len(secrets)} resolved secret(s), none in os.environ")
 
 
 def test_github_actions_simulation():
@@ -156,36 +163,6 @@ def test_github_actions_simulation():
                 os.environ.pop(key, None)
 
 
-def test_1password_integration():
-    """Test 1Password integration if available."""
-    print("\n🔑 Testing 1Password Integration")
-    print("=" * 35)
-
-    manager = get_credential_manager()
-
-    if manager.is_1password_available():
-        print("✅ 1Password CLI is available")
-
-        # Test retrieving a credential
-        try:
-            if manager._op_manager:
-                # Try to get a test credential
-                test_cred = manager._op_manager.get_credential(
-                    "clustrix-huggingface-validation", "token"
-                )
-                if test_cred:
-                    print(f"✅ Retrieved HuggingFace token (length: {len(test_cred)})")
-                else:
-                    print("⚠️  HuggingFace credential not found in 1Password")
-                    print("   Make sure 'clustrix-huggingface-validation' item exists")
-        except Exception as e:
-            print(f"❌ Error accessing 1Password: {e}")
-    else:
-        print("❌ 1Password CLI not available")
-        print("   Install with: brew install --cask 1password-cli")
-        print("   Then run: op signin")
-
-
 def main():
     """Main test function."""
     print("🔐 Real-World Credential Integration Test Suite")
@@ -195,19 +172,16 @@ def main():
         # Test credential integration
         test_credential_integration()
 
-        # Test environment variable setup
-        test_environment_variable_setup()
+        # Environment hygiene
+        test_credentials_are_not_exported_into_the_environment()
 
         # Test GitHub Actions simulation
         test_github_actions_simulation()
 
-        # Test 1Password integration
-        test_1password_integration()
-
         print("\n🎉 All credential integration tests completed!")
         print("\n📋 Summary:")
         print("  • Credential manager working correctly")
-        print("  • Environment variable setup functional")
+        print("  • Credentials stay out of os.environ")
         print("  • GitHub Actions simulation successful")
         print("  • Ready for real-world testing")
 

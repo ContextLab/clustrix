@@ -7,25 +7,28 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
 import paramiko
+from clustrix.ssh_security import configure_host_key_policy
+from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
+)
 
 
 def main():
-    # Get credentials
-    creds = ValidationCredentials()
-    cluster_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
+    # Credentials come from ~/.clustrix/.env or the environment.
+    cluster_creds = get_cluster_credentials("slurm")
 
     if not cluster_creds:
-        print("No credentials found")
+        print(f"No SLURM cluster credentials found. {CREDENTIAL_SETUP_HINT}")
         return 1
 
-    hostname = cluster_creds.get("hostname")
-    username = cluster_creds.get("username")
+    hostname = cluster_creds["host"]
+    username = cluster_creds["username"]
     password = cluster_creds.get("password")
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         ssh_client.connect(

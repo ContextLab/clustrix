@@ -60,8 +60,17 @@ docs/build/
 **/clustrix-*.key
 **/*-credentials.json
 **/*-service-account.json
-.env.local
-.env.validation
+# Credential-bearing dotenv files (see #111). `clustrix credentials setup`
+# writes ~/.clustrix/.env, but an operator following the docs can easily end
+# up with one in the working tree, and `git add .` would have committed it.
+.env
+.env.*
+# ...except a checked-in, secret-free example, if one is ever added.
+!.env.example
+# direnv's file. `.env.*` above does not match it -- no dot after "env" --
+# and it routinely holds exported credentials.
+.envrc
+.envrc.*
 **/validation-secrets.json
 **/.op/
 **/op-session-*
@@ -76,3 +85,4 @@ docs/build/
 tests/real_world/screenshots/
 tests/real_world/temp/
 .omc/
+.omo/run-continuation/

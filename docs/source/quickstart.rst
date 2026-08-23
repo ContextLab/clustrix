@@ -52,9 +52,12 @@ do not.
 
 Two things to notice:
 
-- The ``cores``, ``memory`` and ``time`` arguments are accepted and ignored by
-  the local backend. They are there so the *same* decorated function works
-  unchanged against a scheduler.
+- The local backend does not reserve memory or enforce a wall time. An explicit
+  ``cores>1`` also has no effect on an ordinary call, and Clustrix warns that
+  it was discarded. These resource arguments let the same decorated function
+  work unchanged against a scheduler; locally, ``cores`` sizes a worker pool
+  only on the narrow path where the loop analysis finds a supported loop and
+  the function accepts the matching chunk argument.
 - The ``import random`` is **inside** the function body. Do that
   consistently. The remote worker starts a fresh interpreter that has not run
   your module's top-level imports, so anything the body names must either be
@@ -378,10 +381,10 @@ Write the settings once and load them, instead of calling
         default_cores=8,
     )
 
-    save_config("clustrix.yml")
+    save_config("my-cluster.yml")
 
     # ... in another session ...
-    load_config("clustrix.yml")
+    load_config("my-cluster.yml")
     print(get_config().cluster_type, get_config().cluster_host)
 
 Two things the saved file does for you:
@@ -397,8 +400,40 @@ Two things the saved file does for you:
 
 Clustrix also loads a configuration automatically at import time if it finds
 one, checking ``~/.clustrix/config.{yml,yaml,json}`` and then
-``./clustrix.{yml,yaml,json}``. Set ``CLUSTRIX_CONFIG_DIR`` to move the first
-of those. Full details in :doc:`configuration`.
+``./clustrix.{yml,yaml,json}``.
+
+.. warning::
+
+   The file above is deliberately **not** called ``clustrix.yml``. That name
+   in the current working directory is adopted automatically, by whatever
+   directory you happen to be in -- ``git clone`` and ``cd`` is enough for a
+   repository to supply one -- so a ``cluster_host`` it sets is **not**
+   trusted with a stored credential.
+
+   ``load_config(path)`` *is* trusted, because naming a path is a call in
+   your own Python. It is not a check on what is in the file, though:
+   clustrix cannot tell a configuration file you wrote from one that
+   arrived with a checkout, so point it at one you wrote. Note that this
+   applies to any path, not only to ones the automatic search would have
+   found -- ``my-cluster.yml`` above is never picked up automatically, which
+   is exactly why it is a safe name to save under and exactly why
+   ``load_config`` is the only thing that will read it.
+
+   If a ``clustrix.yml`` has already been adopted in this process, the
+   refusal that follows is permanent for that process: calling
+   ``configure(cluster_host=...)`` or ``load_config`` with the same hostname
+   does not lift it, because the notebook widget's *Apply* button makes that
+   same call automatically and clustrix cannot tell the two apart. The two
+   things that do work are setting ``SSH_HOST`` in ``~/.clustrix/.env`` to
+   the host that may receive the secret, or removing the file and starting a
+   new process.
+
+   For settings you want loaded automatically *and* trusted, put them in
+   ``~/.clustrix/config.yml``. Setting ``CLUSTRIX_CONFIG_DIR`` still moves
+   that search, but a directory named by an environment variable is not
+   trusted with credentials either -- an environment variable is inherited
+   from whatever started the process, and neither is a ``profiles.yml``
+   found under a directory it named. :doc:`configuration` has the full rule.
 
 The command line does the same thing:
 
@@ -430,9 +465,9 @@ Which backend should I use?
 Those four are the only ``cluster_type`` values Clustrix accepts, and each one
 has been proven to work against real infrastructure. ``pbs``, ``sge``,
 ``kubernetes`` and the cloud VM providers (AWS / GCP / Azure / Lambda Cloud)
-are **not currently supported** -- they were removed in v0.2.0 because none of
-them had ever been shown to run a job end to end. They are planned for a
-future release; see :ref:`removed-backends` for the tracking issues.
+are **not supported**, and naming one raises a ``ValueError`` that points at
+its tracking issue. Each is planned for a future release; see
+:ref:`removed-backends`.
 
 Where to go next
 ----------------

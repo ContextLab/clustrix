@@ -7,7 +7,19 @@ from typing import Optional, Dict, Any
 from dataclasses import dataclass
 
 from .config import ClusterConfig
-from .credential_manager import get_credential_manager
+
+# ``hostname_matches`` and ``stored_credential_is_for_config`` moved to
+# ``clustrix.credential_release`` unchanged -- same names, same docstrings,
+# same behaviour -- because the decision they encode now has one home rather
+# than four call sites. Re-exported here so that every importer of the names
+# keeps working and there is still exactly one definition of each.
+from .credential_release import (  # noqa: F401
+    CredentialTarget,
+    hostname_matches,
+    describe_stored_credential,
+    release_credential,
+    stored_credential_is_for_config,
+)
 
 
 @dataclass
@@ -104,35 +116,80 @@ class SSHKeyAuthMethod(AuthMethod):
 
 
 class EnvironmentPasswordMethod(AuthMethod):
-    """Environment variable-based password authentication."""
+    """Environment variable-based password authentication.
+
+    Gated by the same rule as every other credential source here, because
+    it was the one that had no gate at all: it read
+    ``os.environ[config.password_env_var]`` and handed it to whoever asked,
+    with no check on ``cluster_host`` and no check on where that host came
+    from. Nothing in-tree connects with its result today -- only
+    ``AuthenticationManager`` reaches it -- so this was a hole waiting for a
+    caller rather than a live leak, which is exactly the moment to close it:
+    verified by asking ``AuthenticationManager`` to authenticate against a
+    host from a ``./clustrix.yml``, which used to get the secret back.
+
+    Note that with a working-directory config the *whole* method is the
+    attacker's: the file names ``password_env_var`` as well as
+    ``cluster_host``, so an ungated version reads an environment variable of
+    the repository's choosing and sends it to a host of the repository's
+    choosing.
+    """
 
     def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
         """Check if environment variable password is configured."""
         return self.config.use_env_password and bool(self.config.password_env_var)
 
     def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
-        """Attempt to get password from environment variable."""
+        """Ask the gate for the environment branch, and report what it said.
+
+        The two checks that used to live here -- rule 2 of
+        ``stored_credential_is_for_config`` and an exact match against
+        ``config.cluster_host`` -- are now inside
+        :func:`clustrix.credential_release.release_credential`, reached with
+        a target that names the recipient. This method is what is left of
+        it: build the target, ask, translate.
+        """
         if not self.config.password_env_var:
             return AuthResult(success=False, error="No environment variable specified")
 
-        password = os.environ.get(self.config.password_env_var)
+        try:
+            target = _target_for(self.config, connection_params)
+        except ValueError as exc:
+            return AuthResult(success=False, error=str(exc))
 
-        if password:
-            return AuthResult(success=True, method="environment", password=password)
-        else:
+        release = release_credential(
+            target, provider="ssh", config=self.config, sources=("environment",)
+        )
+        if release.refusal is not None:
             return AuthResult(
                 success=False,
-                error=f"Environment variable ${self.config.password_env_var} not set",
-                guidance=f"Set password with: export {self.config.password_env_var}='your_password'",
+                error=f"${self.config.password_env_var}: {release.refusal}",
+                guidance=(
+                    f"Set password with: export "
+                    f"{self.config.password_env_var}='your_password', and set "
+                    f"cluster_host to the host you are connecting to."
+                ),
             )
+        return AuthResult(success=True, method="environment", password=release.password)
+
+
+def _target_for(
+    config: ClusterConfig, connection_params: Dict[str, Any]
+) -> CredentialTarget:
+    """The recipient of the connection ``connection_params`` describes.
+
+    The auth chain is driving a connection that need not be
+    ``config.cluster_host`` at all, so the target names what is actually
+    being connected to -- and falls back to the config when the caller gave
+    nothing, which is what ``AuthenticationManager`` does for SSH key setup.
+    """
+    hostname = connection_params.get("hostname") or None
+    username = connection_params.get("username")
+    return CredentialTarget.for_config(config, hostname=hostname, username=username)
 
 
 class FlexibleCredentialAuthMethod(AuthMethod):
     """Flexible credential authentication using the new credential manager."""
-
-    def __init__(self, config: ClusterConfig):
-        super().__init__(config)
-        self.credential_manager = get_credential_manager()
 
     def is_applicable(self, connection_params: Dict[str, Any]) -> bool:
         """Always applicable as the new primary credential source."""
@@ -143,49 +200,67 @@ class FlexibleCredentialAuthMethod(AuthMethod):
         return True
 
     def attempt_auth(self, connection_params: Dict[str, Any]) -> AuthResult:
-        """Attempt authentication using flexible credential manager."""
+        """Hand over a stored credential only if it is stored for *this* host.
+
+        The trust decision -- may a secret go to this host, given who chose
+        it -- belongs to
+        :func:`clustrix.credential_release.release_credential` and is made
+        there. What stays here is the auth chain's *applicability* test: of
+        the credentials that may be released, is this one the credential for
+        this connection? It answers yes only when the stored credential
+        itself names both the host and the username, both non-empty and both
+        equal after normalisation. A stored credential with no username used
+        to match a connection with no username, because ``"" == ""``, which
+        is the same "absent satisfies the test" defect as the hostname case.
+
+        This filter can only *refuse* something the gate allowed; it can
+        never release something the gate refused, so it is not a second
+        trust decision with a second way to be wrong. The comparison it uses
+        is the gate's own :func:`hostname_matches`.
+        """
         hostname = connection_params.get("hostname", "")
         username = connection_params.get("username", "")
 
-        # Try SSH credentials first (most common for clusters)
-        ssh_creds = self.credential_manager.ensure_credential("ssh")
-        if ssh_creds:
-            # Check if the SSH credentials match this connection
-            cred_host = ssh_creds.get("host", "")
-            cred_username = ssh_creds.get("username", "")
+        try:
+            target = _target_for(self.config, connection_params)
+        except ValueError as exc:
+            return AuthResult(success=False, error=str(exc))
 
-            # Match hostname (allow partial matches for flexibility)
-            host_match = (
-                hostname == cred_host
-                or hostname.split(".")[0] == cred_host.split(".")[0]
-                or cred_host in hostname
-                or hostname in cred_host
-            )
-
-            # Match username
-            username_match = username == cred_username
-
+        release = release_credential(
+            target,
+            provider="ssh",
+            config=self.config,
+            sources=("stored-credential",),
+        )
+        if release.refusal is None:
+            stored = describe_stored_credential("ssh")
+            host_match = hostname_matches(hostname, stored.get("host", ""))
+            username_match = bool(username) and username == stored.get("username", "")
             if host_match and username_match:
-                # Return password if available
-                if "password" in ssh_creds:
+                if release.password:
                     return AuthResult(
                         success=True,
                         method="flexible_credential",
-                        password=ssh_creds["password"],
+                        password=release.password,
                     )
-                # Return SSH key path if available
-                elif "private_key_path" in ssh_creds:
+                if release.key_path:
                     return AuthResult(
                         success=True,
                         method="flexible_credential_key",
-                        key_path=ssh_creds["private_key_path"],
+                        key_path=release.key_path,
                     )
 
         # Fallback: return no credentials found (let other methods try)
         return AuthResult(
             success=False,
             error="No matching SSH credentials found in credential manager",
-            guidance="Add SSH credentials using 'clustrix credentials setup' or edit ~/.clustrix/.env",
+            guidance=(
+                "Add SSH credentials using 'clustrix credentials setup' or edit "
+                "~/.clustrix/.env. A stored credential is only offered to the "
+                "host it names, so SSH_HOST and SSH_USERNAME must both be set "
+                "and must match "
+                f"{username or '<username>'}@{hostname or '<hostname>'} exactly."
+            ),
         )
 
 

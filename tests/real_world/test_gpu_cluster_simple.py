@@ -20,7 +20,9 @@ def test_gpu_cluster_basic_gpu_detection():
 
     if not gpu_cluster_creds:
         pytest.skip(
-            "No gpu_cluster credentials available - check 1Password or CLUSTRIX_PASSWORD env var"
+            "No gpu_cluster credentials: set CLUSTRIX_TEST_SSH_HOST and put "
+            "SSH_USERNAME/SSH_PASSWORD in ~/.clustrix/.env (or export "
+            "CLUSTRIX_USERNAME/CLUSTRIX_PASSWORD)"
         )
 
     # Override configuration with actual credentials

@@ -100,7 +100,12 @@ def debug_huggingface_auth():
     try:
         from huggingface_hub import HfApi
 
-        api = HfApi(token=token)
+        from clustrix.credential_release import huggingface_client_kwargs
+
+        # Pinned, like every client in the tree: without ``endpoint=``,
+        # ``huggingface_hub`` reads $HF_ENDPOINT, so an inherited
+        # environment variable would choose where this real token is sent.
+        api = HfApi(token=token, **huggingface_client_kwargs())
 
         print("   Testing HfApi.whoami()...")
         user_info = api.whoami()

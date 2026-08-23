@@ -1,463 +1,305 @@
-# Real-World Testing Documentation
+# Real-World Testing
 
-## Overview
+## What this is
 
-This document describes Clustrix's approach to real-world testing, where we validate functionality against actual external resources rather than relying solely on mock objects.
+Clustrix's real-world tests exercise the code against actual external
+resources — a real SSH daemon, a real scheduler, a real HuggingFace Jobs
+namespace, real files on disk — rather than against stand-ins.
 
-## Philosophy
+## Why
 
-Traditional testing often relies heavily on mocks and stubs to isolate code from external dependencies. While this approach has merit for unit testing, it can miss integration issues and doesn't validate that our code works correctly with real external systems.
+Mocks answer the question "does my code call the API the way I think it
+does?" They cannot answer "does the API behave the way I think it does?" A
+suite that has only ever run against mocks is evidence about the mocks. So the
+project's rule is: a capability is not working until it has been exercised
+against the real thing. Mocks are allowed afterwards, as a cost-control
+measure in CI, using the same call syntax that the real run verified. A mock
+is never a fallback — when the real resource is unavailable the test skips or
+fails, it does not quietly substitute a fake and go green.
 
-Our real-world testing approach:
-- **Validates actual functionality** against real external resources
-- **Catches integration issues** that mocks can't detect
-- **Ensures API compatibility** with actual service responses
-- **Tests real-world performance** characteristics
-- **Maintains cost control** through careful resource management
+## Test categories
 
-## Test Categories
+### Unit tests
 
-### 1. Unit Tests (Existing)
-- Fast execution (< 1 second)
-- No external dependencies
-- Use mocks for isolation
-- Located in `tests/test_*.py`
+Fast, no external dependencies, in `tests/test_*.py` and `tests/unit/`. These
+are what CI runs on every push.
 
-### 2. Real-World Integration Tests (New)
-- Test against actual external resources
-- Validate API compatibility
-- Test file system operations
-- Located in `tests/real_world/`
+### Real-world tests
 
-### 3. Hybrid Tests (New)
-- Combine real operations with mocks
-- Use real resources for primary validation
-- Use mocks for edge cases and error conditions
-- Located in `tests/test_*_hybrid.py`
+Under `tests/real_world/`. Every item collected from that directory is given
+the `real_world` marker automatically by its `conftest.py`, whether or not the
+file applies the decorator. That is deliberate: six files once lacked the
+decorator, so `-m "not real_world"` collected 26 tests capable of real SSH and
+cloud calls. Location in the directory is now sufficient.
 
-## Directory Structure
+### Hybrid tests
+
+`tests/test_filesystem_hybrid.py` uses real files for the primary assertions
+and mocks only the error conditions that are hard to provoke on demand.
+
+## Directory layout
 
 ```
 tests/
 ├── real_world/
-│   ├── __init__.py              # Test infrastructure
-│   ├── conftest.py              # Pytest configuration
-│   ├── test_filesystem_real.py  # Real filesystem tests
-│   ├── test_ssh_real.py         # Real SSH tests
-│   ├── test_cloud_apis_real.py  # Real cloud API tests
-│   ├── test_visual_verification.py # Widget visual tests
-│   └── screenshots/             # Visual verification outputs
-├── test_*_hybrid.py             # Hybrid tests
-└── test_*.py                    # Traditional unit tests
+│   ├── __init__.py                  # test_manager, TempResourceManager, credentials
+│   ├── conftest.py                  # markers, options, automatic real_world marking
+│   ├── credential_manager.py        # credential lookup
+│   ├── cluster_job_validator.py     # job monitoring and validation
+│   ├── cluster_validation/          # cluster job test runner and helpers
+│   ├── test_filesystem_real.py      # real filesystem tests
+│   ├── test_ssh_real.py             # real SSH tests
+│   ├── test_visual_verification.py  # widget visual tests
+│   └── screenshots/                 # visual verification outputs
+├── integration/                     # provisions billable resources; opt-in
+├── unit/
+└── test_*.py
 ```
 
-## Test Infrastructure
+## Test infrastructure
 
 ### RealWorldTestManager
 
-Manages resources and cost control for real-world tests:
+Tracks API call count and estimated spend so a run cannot quietly cost money:
 
 ```python
 from tests.real_world import test_manager
 
-# Check if we can make an API call
 if test_manager.can_make_api_call(estimated_cost=0.01):
-    # Make API call
     result = api_call()
     test_manager.record_api_call(cost=0.01)
 ```
 
+`can_make_api_call` returns `False` once the session has made `daily_limit`
+calls (100 by default) or once the next call would push `current_cost` past
+`cost_limit_usd` ($5.00 by default). Both are set from the command line — see
+below.
+
 ### TempResourceManager
 
-Manages temporary resources during testing:
+A context manager that deletes what it created:
 
 ```python
 from tests.real_world import TempResourceManager
 
 with TempResourceManager() as temp_mgr:
-    # Create temporary files and directories
     temp_file = temp_mgr.create_temp_file("content", ".txt")
     temp_dir = temp_mgr.create_temp_dir()
-    
-    # Use resources
-    # Automatic cleanup when exiting context
+    # everything above is removed on exit
 ```
 
 ### TestCredentials
 
-Manages credentials from environment variables:
+A thin wrapper over `credential_manager.py`:
 
 ```python
 from tests.real_world import credentials
 
-# Get AWS credentials
-aws_creds = credentials.get_aws_credentials()
-if aws_creds:
-    # Use credentials
-    pass
+ssh_creds = credentials.get_ssh_credentials()
+if ssh_creds:
+    ...
 ```
 
-## Environment Variables
+The available lookups are `get_ssh_credentials`, `get_slurm_credentials`,
+`get_huggingface_credentials`, `get_gpu_cluster_credentials`,
+`get_slurm_cluster_credentials`, plus `get_credential_status` and
+`print_credential_status`. There is no cloud-provider lookup, because clustrix
+has no cloud backend to hand credentials to.
 
-Set these environment variables to enable real-world tests:
+## Environment variables
 
-### AWS Testing
-```bash
-export TEST_AWS_ACCESS_KEY="your-access-key"
-export TEST_AWS_SECRET_KEY="your-secret-key"
-export TEST_AWS_REGION="us-east-1"
-```
+See the [Credential Setup Guide](CREDENTIAL_SETUP.md) for the full list. The
+short version, for local runs:
 
-### Azure Testing
-```bash
-export TEST_AZURE_SUBSCRIPTION_ID="your-subscription-id"
-export TEST_AZURE_TENANT_ID="your-tenant-id"
-export TEST_AZURE_CLIENT_ID="your-client-id"
-export TEST_AZURE_CLIENT_SECRET="your-client-secret"
-```
-
-### GCP Testing
-```bash
-export TEST_GCP_PROJECT_ID="your-project-id"
-export TEST_GCP_SERVICE_ACCOUNT_PATH="/path/to/service-account.json"
-```
-
-### SSH Testing
 ```bash
 export TEST_SSH_HOST="localhost"
 export TEST_SSH_USERNAME="$USER"
 export TEST_SSH_PRIVATE_KEY_PATH="$HOME/.ssh/id_rsa"
+
+export TEST_SLURM_HOST="slurm.example.edu"
+export TEST_SLURM_USERNAME="user"
+
+export HF_TOKEN="your-hf-token"
+export HF_USERNAME="your-hf-username"
 ```
 
-## Running Tests
+## Prerequisite: host keys must be in `known_hosts`
 
-### Basic Test Execution
+**Every real-world test that opens an SSH connection fails unless the target
+host's key is already in your `known_hosts`.** This is a hard prerequisite,
+not a recommendation.
+
+SSH connections go through
+`clustrix.ssh_security.configure_host_key_policy()`, whose default policy is
+`"reject"`. An unknown host key raises `HostKeyVerificationError` rather than
+being trusted on sight.
+
+Add each host you intend to test against, once, deliberately:
 
 ```bash
-# Run all tests (excludes expensive and visual tests by default)
-pytest
+# Replace cluster.example.edu with the host under test.
+ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
 
-# Run only unit tests
-pytest -m "unit"
+# Non-standard SSH port:
+ssh-keyscan -p 2222 cluster.example.edu >> ~/.ssh/known_hosts
 
-# Run integration tests
-pytest -m "integration"
-
-# Run real-world tests
-pytest -m "real_world"
+# Local sshd used by the localhost-only SSH tests:
+ssh-keyscan localhost 127.0.0.1 >> ~/.ssh/known_hosts
 ```
 
-### Advanced Test Execution
+Check a host is present before running the suite:
 
 ```bash
-# Run expensive tests (may incur API costs)
-pytest --run-expensive
-
-# Run visual tests (require manual verification)
-pytest --run-visual
-
-# Set cost limits
-pytest --api-cost-limit=10.0 --api-call-limit=200
-
-# Run specific test categories
-pytest -m "aws_required"
-pytest -m "ssh_required"
+ssh-keygen -F cluster.example.edu
 ```
 
-### Test Selection Examples
+Hosts come from `CLUSTRIX_TEST_SSH_HOST`, `CLUSTRIX_TEST_SSH_HOST_2`,
+`CLUSTRIX_TEST_SLURM_HOST` and `CLUSTRIX_TEST_SLURM_HOST_2` (see
+`tests/real_world/credential_manager.py`), so scan whichever of those you have
+set. In GitHub Actions, the `real-world-tests` workflow does this in its
+"Populate known_hosts for host key verification" step.
+
+`ssh-keyscan` trusts the network at the moment you run it. On a host you have
+never reached before, compare the fingerprint it prints against one you got
+out-of-band from the cluster's administrators before appending it.
+
+Turning verification off is possible, but it is not a fix for a failing test —
+it is a decision to stop verifying host keys at all:
+
+```python
+config = ClusterConfig(..., ssh_host_key_policy="auto_add")
+```
+
+## Running tests
 
 ```bash
-# Run filesystem tests only
+# What CI runs: everything safe without credentials or money
+pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+
+# Real-world tests
+pytest tests/real_world/ -m real_world
+```
+
+The options below are registered by `tests/real_world/conftest.py`, so they
+are available when that directory is part of the run:
+
+```bash
+# Include tests marked expensive
+pytest tests/real_world/ --run-expensive
+
+# Include visual tests, which produce artifacts for a human to look at
+pytest tests/real_world/ --run-visual
+
+# Raise or lower the cost ceiling for the session
+pytest tests/real_world/ --api-cost-limit=10.0 --api-call-limit=200
+```
+
+Markers registered for this suite are `real_world`, `expensive`, `visual` and
+`ssh_required`. Selecting specific files works as usual:
+
+```bash
 pytest tests/real_world/test_filesystem_real.py
-
-# Run SSH tests with specific host
-TEST_SSH_HOST=my-cluster.edu pytest tests/real_world/test_ssh_real.py
-
-# Run hybrid tests
-pytest tests/test_*_hybrid.py
-
-# Run visual verification tests
+TEST_SSH_HOST=cluster.example.edu pytest tests/real_world/test_ssh_real.py
+pytest tests/test_filesystem_hybrid.py
 pytest tests/real_world/test_visual_verification.py --run-visual
 ```
 
-## Cost Management
+`tests/integration/` is separate and provisions real, billable AWS resources.
+It refuses to run unless `CLUSTRIX_ALLOW_BILLABLE=1` is set.
 
-### API Cost Limits
+## Cost management
 
-Real-world tests implement cost controls:
+Defaults are 100 API calls and $5.00 per session, both adjustable with the
+options above. The suite prefers operations that cost nothing:
 
-- **Daily API call limit**: 100 calls by default
-- **Cost limit**: $5.00 USD by default
-- **Free operations prioritized**: Use free-tier APIs when possible
+1. **HuggingFace Jobs** — CPU flavors only unless a paid GPU flavor is
+   explicitly allowed; GPU flavors bill by the second.
+2. **AWS STS GetCallerIdentity** — free, and used only to check the
+   credentials the `scripts/aws/` cleanup tooling needs. It is not an
+   execution backend.
+3. **Public APIs** — GitHub, PyPI, HuggingFace, all free at these volumes.
 
-### Cost-Conscious API Selection
+Clustrix has no cloud pricing clients and no cloud VM backend; nothing in the
+suite queries a provider's price list.
 
-We prioritize free or low-cost operations:
-
-1. **HuggingFace Jobs**: CPU-flavor jobs only unless a paid GPU flavor is
-   explicitly allowed (GPU flavors bill by the second)
-2. **AWS**: STS GetCallerIdentity (free) -- credential validation for the
-   `scripts/aws/` cleanup tooling, not an execution backend
-3. **Public APIs**: GitHub, PyPI, HuggingFace (free)
-
-Clustrix's own cloud pricing clients were removed in v0.2.0 along with the
-cloud VM backends they served.
-
-### Monitoring Costs
+To see where a session stands:
 
 ```python
-# Check current cost status
 from tests.real_world import test_manager
 
-print(f"API calls today: {test_manager.api_calls_today}")
+print(f"API calls this session: {test_manager.api_calls_today}")
 print(f"Current cost: ${test_manager.current_cost:.2f}")
 print(f"Cost limit: ${test_manager.cost_limit_usd:.2f}")
 ```
 
-## Test Types by Component
+## What gets tested where
 
-### 1. Filesystem Operations
+### Filesystem operations
 
-**Real-world tests:**
-- Create actual files and directories
-- Test file permissions and ownership
-- Verify cross-platform compatibility
-- Test large file handling
+Real tests create actual files and directories, exercise permissions, and
+handle large files. The hybrid file uses real files for the main path and
+mocks SSH/SFTP only to produce failures that are otherwise hard to arrange.
 
-**Hybrid tests:**
-- Use real files for primary validation
-- Mock SSH/SFTP for remote operations
-- Mock error conditions (permissions, network failures)
+### SSH operations
 
-### 2. SSH Operations
+Real tests connect to an actual SSH server — localhost by default — and cover
+key-based authentication, SFTP transfers, and connection timeouts.
 
-**Real-world tests:**
-- Connect to actual SSH servers (localhost by default)
-- Test key-based authentication
-- Verify SFTP file operations
-- Test connection timeouts and failures
+### HuggingFace Jobs
 
-**Hybrid tests:**
-- Use real SSH for basic operations
-- Mock for testing error conditions
-- Mock for testing different server responses
+There is no HF Jobs test file under `tests/real_world/`; the round trip lives
+in the `hf-jobs-integration` job of `.github/workflows/real-world-tests.yml`,
+which submits a `cpu-basic` job to the `contextlab` namespace through the
+`@cluster` decorator and asserts on the returned value. It needs a token
+rather than a cluster account, which makes it the cheapest end-to-end check
+the project has.
 
-### 3. Cloud Provider APIs
+### Visual verification
 
-**Real-world tests:**
-- Authenticate with actual cloud providers
-- Call free-tier APIs
-- Verify response formats
-- Test error handling
+Tests generate widget HTML and write it under
+`tests/real_world/screenshots/`, along with `index.html` and
+`screenshot_instructions.json`. A person opens those files and looks at them;
+there is no automated image comparison.
 
-**Hybrid tests:**
-- Use real APIs for authentication
-- Mock expensive operations
-- Mock for testing service failures
+## Writing a real-world test
 
-### 4. Visual Verification
-
-**Real-world tests:**
-- Generate actual widget HTML
-- Save screenshots for manual verification
-- Test responsive design
-- Verify accessibility features
-
-## Best Practices
-
-### 1. Test Organization
+Group tests into a class, mark what needs marking, and clean up after
+yourself:
 
 ```python
 class TestComponentReal:
     """Real-world tests for component functionality."""
-    
+
     def test_basic_functionality_real(self):
-        """Test basic functionality with real resources."""
-        pass
-    
+        with TempResourceManager() as temp_mgr:
+            temp_file = temp_mgr.create_temp_file("content")
+            ...
+
     @pytest.mark.expensive
     def test_expensive_operation_real(self):
-        """Test expensive operations."""
-        pass
-    
+        ...
+
     @pytest.mark.visual
     def test_visual_verification(self):
-        """Test visual components."""
-        pass
+        ...
 ```
 
-### 2. Resource Management
+Skip when a resource is genuinely unavailable, and say which one:
 
 ```python
-def test_with_cleanup():
-    """Test with proper resource cleanup."""
-    with TempResourceManager() as temp_mgr:
-        # Create temporary resources
-        temp_file = temp_mgr.create_temp_file("content")
-        
-        # Use resources
-        # Automatic cleanup
+def test_against_remote():
+    creds = credentials.get_ssh_credentials()
+    if not creds:
+        pytest.skip("No SSH credentials available")
+    ...
 ```
 
-### 3. Error Handling
+Do not wrap the whole body in `try/except Exception: pytest.skip(...)`. That
+turns a real failure into a pass, which is exactly what this suite exists to
+prevent. Skip on a missing prerequisite you checked for, not on any exception
+that happens to come out.
 
-```python
-def test_with_error_handling():
-    """Test with proper error handling."""
-    try:
-        # Test operation
-        result = api_call()
-        assert result is not None
-    except Exception as e:
-        # Skip if external service unavailable
-        pytest.skip(f"External service unavailable: {e}")
-```
-
-### 4. Conditional Testing
-
-```python
-@pytest.mark.aws_required
-def test_aws_functionality(aws_credentials):
-    """Test AWS functionality if credentials available."""
-    if not aws_credentials:
-        pytest.skip("AWS credentials not available")
-    
-    # Test AWS operations
-```
-
-## Visual Verification
-
-### Widget Testing
-
-Visual tests generate HTML files for manual verification:
-
-```python
-def test_widget_visual():
-    """Test widget visual appearance."""
-    widget = create_widget()
-    html = widget._repr_html_()
-    
-    # Save for manual verification
-    with open("screenshots/widget.html", "w") as f:
-        f.write(html)
-```
-
-### Manual Verification Process
-
-1. **Run visual tests**: `pytest --run-visual`
-2. **Open generated HTML files** in `tests/real_world/screenshots/`
-3. **Compare with mockups** and design specifications
-4. **Test responsive behavior** by resizing browser window
-5. **Check accessibility** with screen reader tools
-6. **Take screenshots** for documentation
-
-### Screenshot Organization
-
-```
-tests/real_world/screenshots/
-├── index.html                    # Test results index
-├── modern_widget_output.html     # Modern widget HTML
-├── enhanced_widget_output.html   # Enhanced widget HTML
-├── widget_accessibility_report.html
-├── widget_responsive_report.html
-├── widget_comparison_report.html
-└── performance_plots.png
-```
-
-## Continuous Integration
-
-### GitHub Actions Integration
-
-```yaml
-name: Real-World Tests
-on: [push, pull_request]
-
-jobs:
-  real-world-tests:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: Set up Python
-        uses: actions/setup-python@v2
-        with:
-          python-version: 3.9
-      
-      - name: Install dependencies
-        run: |
-          pip install -e ".[test]"
-      
-      - name: Run real-world tests
-        env:
-          TEST_AWS_ACCESS_KEY: ${{ secrets.TEST_AWS_ACCESS_KEY }}
-          TEST_AWS_SECRET_KEY: ${{ secrets.TEST_AWS_SECRET_KEY }}
-        run: |
-          pytest tests/real_world/ -m "not expensive"
-```
-
-### Local Development
-
-```bash
-# Set up development environment
-pip install -e ".[test]"
-
-# Run fast tests during development
-pytest -m "unit"
-
-# Run integration tests before committing
-pytest -m "integration"
-
-# Run full test suite before release
-pytest --run-expensive --run-visual
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Credential Errors**
-   - Verify environment variables are set
-   - Check credential validity
-   - Ensure proper permissions
-
-2. **SSH Connection Failures**
-   - Verify SSH server is running
-   - Check SSH key permissions
-   - Test SSH connection manually
-
-3. **API Rate Limits**
-   - Check cost limits: `--api-cost-limit=X`
-   - Verify daily limits: `--api-call-limit=X`
-   - Use free-tier operations when possible
-
-4. **File Permission Errors**
-   - Ensure test directories are writable
-   - Check temp directory permissions
-   - Verify cleanup processes
-
-### Debug Mode
-
-```bash
-# Run with verbose output
-pytest -v -s
-
-# Run with debug logging
-pytest --log-cli-level=DEBUG
-
-# Run single test for debugging
-pytest tests/real_world/test_filesystem_real.py::TestRealFilesystemOperations::test_create_and_read_file_real -v -s
-```
-
-## Contributing
-
-### Adding New Real-World Tests
-
-1. **Create test file** in `tests/real_world/`
-2. **Add appropriate markers** (`@pytest.mark.real_world`)
-3. **Include cost estimates** for API operations
-4. **Add environment variable documentation**
-5. **Include cleanup procedures**
-
-### Test File Template
+A starting point for a new file:
 
 ```python
 """
@@ -469,57 +311,51 @@ These tests use actual [external resource] to verify functionality.
 import pytest
 from tests.real_world import test_manager, TempResourceManager
 
+
 class TestComponentReal:
-    """Real-world tests for component."""
-    
     def test_basic_functionality_real(self):
-        """Test basic functionality with real resources."""
         if not test_manager.can_make_api_call(0.01):
             pytest.skip("API limit reached")
-        
+
         with TempResourceManager() as temp_mgr:
-            # Test implementation
-            pass
-            
+            ...
+
         test_manager.record_api_call(0.01)
 ```
 
-## Metrics and Reporting
+## Continuous integration
 
-### Test Coverage
+`.github/workflows/real-world-tests.yml` runs this suite. It has no `push:` or
+`pull_request:` trigger, on purpose: these jobs use real credentials and some
+provision billable resources, so a pull request from a fork must never be able
+to start them. It runs on a weekly schedule against the default branch, or
+manually through `workflow_dispatch`.
 
-Real-world tests provide different coverage metrics:
+Each job is gated on whether the secrets it needs are present, resolved in a
+separate `check-secrets` job — the `secrets` context is not available in `if:`
+conditions, so the presence check has to become a job output first.
 
-- **API compatibility coverage**: % of APIs tested with real calls
-- **Integration coverage**: % of integrations tested end-to-end
-- **Visual coverage**: % of UI components visually verified
-- **Platform coverage**: % of platforms tested
+## Troubleshooting
 
-### Success Metrics
+**Credential errors.** Run `python scripts/run_real_world_tests.py
+--check-creds` to see what the suite can find. A credential that works
+interactively but not under pytest is usually in a shell profile the test
+process never sourced.
 
-We track:
-- **Test execution time**: Should remain reasonable
-- **Cost per test run**: Should stay within budget
-- **Real-world failure rate**: Should be low
-- **Bug detection rate**: Should catch issues mocks miss
+**SSH connection failures.** Check the daemon is up, that key permissions are
+`600`, and that the host key is in `known_hosts` — see the prerequisite
+section above. `ssh -vvv` will tell you which of the three it is.
 
-## Future Enhancements
+**Cost or call limits reached.** Raise them with `--api-cost-limit` and
+`--api-call-limit`, or work out why a test is making more calls than it needs.
 
-### Planned Improvements
+**File permission errors.** Check the temp directory is writable and that a
+previous run's `TempResourceManager` cleanup actually ran.
 
-1. **Automated screenshot comparison**
-2. **Performance benchmarking**
-3. **Cross-platform CI testing**
-4. **Integration with monitoring tools**
-5. **Advanced cost optimization**
+For more output:
 
-### Research Areas
-
-- **Container-based testing environments**
-- **Distributed test execution**
-- **AI-powered visual verification**
-- **Automated test generation**
-
----
-
-This documentation provides a comprehensive guide to real-world testing in Clustrix. For questions or contributions, please refer to the main project documentation or open an issue on GitHub.
+```bash
+pytest -v -s
+pytest --log-cli-level=DEBUG
+pytest tests/real_world/test_filesystem_real.py::TestRealFilesystemOperations::test_create_and_read_file_real -v -s
+```

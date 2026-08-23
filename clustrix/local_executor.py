@@ -16,6 +16,23 @@ import pickle
 logger = logging.getLogger(__name__)
 
 
+def is_worker_count(value: object) -> bool:
+    """Whether ``value`` can be a number of workers.
+
+    ``bool`` is excluded deliberately. It subclasses ``int``, so
+    ``isinstance(True, int)`` is true: ``@cluster(cores=True)`` and
+    ``LocalExecutor(max_workers=True)`` were accepted and quietly read as a
+    request for one worker, while ``False`` was rejected as "not a positive
+    integer" -- a message that is confusing for ``True``, which is not a
+    positive integer in any sense the caller means (#152).
+
+    ``None`` is not accepted here. It means "decide for me" at both call
+    sites, but it means two different things (the configured default vs. one
+    worker per core), so each caller checks for it itself.
+    """
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 1
+
+
 class LocalExecutor:
     """Execute functions locally using multiprocessing or threading."""
 
@@ -24,9 +41,30 @@ class LocalExecutor:
         Initialize local executor.
 
         Args:
-            max_workers: Maximum number of worker processes/threads
+            max_workers: Maximum number of worker processes/threads. ``None``
+                means "as wide as this machine".
             use_threads: If True, use ThreadPoolExecutor, else ProcessPoolExecutor
+
+        Raises:
+            ValueError: If ``max_workers`` is given but is not a positive
+                integer. It used to be accepted: ``0`` is falsy, so it turned
+                into the machine's width, and a negative reached
+                ``ProcessPoolExecutor``, which raises far enough down the call
+                stack that ``_execute_local_parallel`` caught the failure and
+                ran sequentially instead (#152). Neither told the caller their
+                number was nonsense.
         """
+        if max_workers is not None and not is_worker_count(max_workers):
+            detail = "it must be a positive integer, or None for one per core."
+            if isinstance(max_workers, bool):
+                detail = (
+                    "it must be a positive integer, and a bool is not one -- "
+                    "whatever Python's type hierarchy says."
+                )
+            raise ValueError(
+                f"max_workers={max_workers!r} is not a usable worker count: "
+                f"{detail}"
+            )
         self.max_workers = max_workers or os.cpu_count() or 4
         self.use_threads = use_threads
         self._executor = None
@@ -501,9 +539,14 @@ class LocalJobManager:
         }
         self.active_jobs[job_id] = record
 
-        executor = LocalExecutor(max_workers=job_config.get("cores"), use_threads=True)
+        # No LocalExecutor here. One deserialized call is one unit of work, so
+        # a pool has nothing to distribute: the ``max_workers`` and
+        # ``use_threads`` this used to pass were read by ``_create_executor``,
+        # which ``execute_single`` never calls (#152). Constructing a pool
+        # object and then not using it is what made ``cores`` look honoured.
+        # ``@cluster`` warns when a caller asked for cores>1 on this route.
         try:
-            record["result"] = executor.execute_single(func, args, kwargs)
+            record["result"] = func(*args, **kwargs)
             record["status"] = "completed"
         except Exception as e:
             record["error"] = e

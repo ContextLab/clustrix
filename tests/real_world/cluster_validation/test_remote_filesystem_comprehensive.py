@@ -21,9 +21,12 @@ from clustrix import (
     cluster_count_files,
 )
 from clustrix.config import ClusterConfig
-from clustrix.secure_credentials import ValidationCredentials
 
-from tests.real_world.credential_manager import require_test_remote_work_dir
+from tests.real_world.credential_manager import (
+    require_cluster_credentials,
+    require_test_remote_work_dir,
+)
+from clustrix.ssh_security import configure_host_key_policy
 
 
 def test_remote_filesystem_comprehensive():
@@ -31,19 +34,15 @@ def test_remote_filesystem_comprehensive():
     print("🧪 Comprehensive Remote Filesystem Testing")
     print("=" * 60)
 
-    # Get SSH credentials
-    creds = ValidationCredentials()
-    ssh_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
-
-    if not ssh_creds:
-        print("❌ No SSH credentials found. Cannot test remote operations.")
-        return False
+    # Credentials come from ~/.clustrix/.env or the environment; skip loudly
+    # rather than return False, which pytest reports as a pass.
+    ssh_creds = require_cluster_credentials("slurm")
 
     # Configure for remote testing
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host=ssh_creds.get("hostname"),
-        username=ssh_creds.get("username"),
+        cluster_host=ssh_creds["host"],
+        username=ssh_creds["username"],
         password=ssh_creds.get("password"),
         remote_work_dir=require_test_remote_work_dir(),
     )
@@ -286,7 +285,7 @@ def test_remote_filesystem_comprehensive():
 
         # Connect directly to create test structure
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh, config)
         ssh.connect(
             hostname=config.cluster_host,
             username=config.username,
@@ -325,7 +324,7 @@ def test_remote_filesystem_comprehensive():
 
         # Cleanup
         ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        configure_host_key_policy(ssh, config)
         ssh.connect(
             hostname=config.cluster_host,
             username=config.username,

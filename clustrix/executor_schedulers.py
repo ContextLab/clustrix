@@ -3,9 +3,9 @@
 This module handles job submission, monitoring, and status checking for SLURM
 and for direct execution over SSH.
 
-PBS/Torque and SGE submission used to live here. Neither was ever verified
-against a real scheduler, so both were removed in v0.2.0 (PBS: issue #140,
-SGE: issue #141).
+Clustrix ships no PBS/Torque or SGE submission. Neither has been verified
+against a real scheduler of that kind, so neither is offered. Support for
+them is tracked in issues #140 and #141.
 """
 
 import os
@@ -18,10 +18,49 @@ import logging
 import threading
 from typing import Dict, Any, Optional
 
-from .utils import create_job_script, setup_remote_environment
+from .utils import (
+    create_job_script,
+    resolve_named_environment,
+    setup_remote_environment,
+)
 from .executor_scheduler_status import SchedulerStatusManager
 
 logger = logging.getLogger(__name__)
+
+
+def config_for_job_script(config, venv_info: Optional[Dict[str, Any]]):
+    """Record the environment layout the job script is generated from.
+
+    The one place a completed (or absent) venv setup is written back onto the
+    config, and deliberately the *only* field it writes.
+
+    What it must not write is ``config.python_executable``. That used to be
+    overwritten here with ``venv_info["venv1_python"]`` -- clustrix's own
+    *serialization* interpreter, an internal detail of the two-venv layout
+    that ``venv_info`` already carries. Nothing ever read it back for VENV1,
+    and #164 then made ``python_executable`` reach VENV2, which turned the
+    overwrite into a defect on the default path: on a conda cluster the job
+    script became ``conda run -n prod 'conda run -n clustrix_venv1_x python'
+    -c "``, one quoted word in the executable position and unrunnable, and on
+    a cluster without conda it became ``conda run -n prod
+    /job/venv1_serialization/bin/python -c "``, which runs the user's
+    function under the serialization venv instead of the environment they
+    named -- silently, which is the exact defect #164 exists to fix.
+
+    ``config`` is the process-wide singleton, so the overwrite also outlived
+    the submission: the next job's ``resolve_remote_python`` read the
+    leftover value as if the user had configured it.
+
+    Args:
+        config: The cluster configuration, mutated in place and returned.
+        venv_info: The two-venv layout, or ``None`` when only the single venv
+            was built.
+
+    Returns:
+        ``config``, for the caller to generate the job script from.
+    """
+    config.venv_info = venv_info
+    return config
 
 
 class SchedulerManager:
@@ -104,16 +143,30 @@ class SchedulerManager:
 
         return remote_job_dir, result_key
 
-    def _setup_job_environment(self, remote_job_dir: str, func_data: Dict[str, Any]):
+    def _setup_job_environment(
+        self,
+        remote_job_dir: str,
+        func_data: Dict[str, Any],
+        named_env: Optional[str] = None,
+    ):
         """Build the Python environment the generated job script will activate.
 
         Shared by SLURM and SSH, which each used to carry their own copy of
         it (#120).
 
+        Args:
+            remote_job_dir: The job directory already staged on the cluster.
+            func_data: The serialized function and its requirements.
+            named_env: The existing cluster environment this job was told to
+                run in, from ``resolve_named_environment``. When there is one,
+                the single-venv build below is not merely redundant -- the
+                generated script never activates it -- so it is skipped, which
+                takes a pip install of the whole local environment off the
+                front of every such submission.
+
         Returns the config to generate the job script from: `venv_info` set for
         the two-venv layout, or cleared when only the single venv was built.
         """
-        updated_config = self.config
 
         if getattr(self.config, "use_two_venv", True):
             try:
@@ -152,13 +205,11 @@ class SchedulerManager:
                     raise exception_occurred
                 elif venv_info:
                     # Update config with venv paths for job script generation
-                    updated_config.python_executable = venv_info["venv1_python"]
-                    updated_config.venv_info = venv_info
                     logger.info(
                         f"Two-venv setup successful, using: "
                         f"{venv_info['venv1_python']}"
                     )
-                    return updated_config
+                    return config_for_job_script(self.config, venv_info)
                 else:
                     raise RuntimeError("Two-venv setup returned no result")
 
@@ -172,21 +223,39 @@ class SchedulerManager:
         # Fall back to the single-venv layout -- which means actually building
         # that venv. Setting venv_info = None without this leaves the generated
         # script activating a virtualenv nobody created.
-        setup_remote_environment(
-            self.connection_manager.ssh_client,
-            remote_job_dir,
-            func_data["requirements"],
-            self.config,
-        )
-        updated_config.venv_info = None
-        return updated_config
+        #
+        # Unless the user named an environment. Then the generated script runs
+        # `conda run -n <name>` and never sources `venv/bin/activate`, so
+        # building the venv is a pip install of the entire local environment
+        # whose only effect is to make every submission slower. This is the
+        # `use_two_venv=False` case, which is what naming an environment is
+        # for in the first place.
+        if named_env:
+            logger.info(
+                "Skipping environment replication: this job runs in the "
+                "existing cluster environment %r, so the environment "
+                "clustrix would otherwise build would never be activated.",
+                named_env,
+            )
+        else:
+            setup_remote_environment(
+                self.connection_manager.ssh_client,
+                remote_job_dir,
+                func_data["requirements"],
+                self.config,
+            )
+        return config_for_job_script(self.config, None)
 
     def submit_slurm_job(
         self, func_data: Dict[str, Any], job_config: Dict[str, Any]
     ) -> str:
         """Submit job via SLURM."""
         remote_job_dir, result_key = self._stage_job_directory(func_data)
-        updated_config = self._setup_job_environment(remote_job_dir, func_data)
+        updated_config = self._setup_job_environment(
+            remote_job_dir,
+            func_data,
+            resolve_named_environment(job_config, self.config),
+        )
 
         # Create job script
         script_content = create_job_script(
@@ -222,7 +291,11 @@ class SchedulerManager:
     ) -> str:
         """Submit job via direct SSH using two-venv approach."""
         remote_job_dir, result_key = self._stage_job_directory(func_data)
-        updated_config = self._setup_job_environment(remote_job_dir, func_data)
+        updated_config = self._setup_job_environment(
+            remote_job_dir,
+            func_data,
+            resolve_named_environment(job_config, self.config),
+        )
 
         # Create execution script
         script_content = create_job_script(

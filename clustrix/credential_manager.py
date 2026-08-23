@@ -8,19 +8,110 @@ multiple fallback sources.
 import os
 import logging
 from pathlib import Path
-from typing import Dict, Optional, List, Any
+from typing import Dict, Mapping, Optional, List, Any
 from abc import ABC, abstractmethod
-from .config import get_config_dir
+from .config import get_config_dir, write_text_securely  # noqa: F401
 
-# Try to import python-dotenv
+# Try to import python-dotenv. ``dotenv_values`` is used rather than
+# ``load_dotenv``: the latter copies the whole file into ``os.environ``,
+# which is the process-wide export this module deliberately does not do.
 try:
-    from dotenv import load_dotenv
+    from dotenv import dotenv_values
 
     HAS_DOTENV = True
 except ImportError:
     HAS_DOTENV = False
 
 logger = logging.getLogger(__name__)
+
+#: The port assumed when a credential set names a host but no port. Applied
+#: only to a set that already holds something real: it used to be the
+#: default of the ``SSH_PORT`` lookup itself, so an unconfigured machine
+#: produced ``{"port": "22"}`` and ``ensure_credential("ssh")`` could never
+#: be ``None``. Every caller testing for "not configured" therefore never
+#: saw it.
+DEFAULT_SSH_PORT = "22"
+
+#: Which environment variable names carry which credential field, per
+#: provider. One table rather than one per source, because the two used to
+#: disagree -- only the environment source honoured the ``HUGGINGFACE_*``
+#: aliases -- and a credential that resolves from the shell but not from
+#: ~/.clustrix/.env is indistinguishable from a missing credential.
+PROVIDER_ENV_NAMES: Dict[str, Dict[str, tuple]] = {
+    "ssh": {
+        "host": ("SSH_HOST",),
+        "username": ("SSH_USERNAME",),
+        "password": ("SSH_PASSWORD",),
+        "private_key_path": ("SSH_PRIVATE_KEY_PATH",),
+        "port": ("SSH_PORT",),
+    },
+    "huggingface": {
+        "token": ("HF_TOKEN", "HUGGINGFACE_TOKEN"),
+        "username": ("HF_USERNAME", "HUGGINGFACE_USERNAME"),
+    },
+}
+
+
+def resolve_provider_credentials(
+    values: Mapping[str, Optional[str]], provider: str
+) -> Optional[Dict[str, str]]:
+    """Credentials for ``provider`` read out of the mapping ``values``.
+
+    ``values`` is any name-to-value mapping -- ``os.environ``, or the parsed
+    contents of a ``.env`` file. Nothing is written back to it: reading a
+    credential is a read, and a lookup that also exports the file into
+    ``os.environ`` changes what every later import in the process sees.
+
+    Returns ``None`` when nothing for the provider is configured, so that
+    "not configured" is distinguishable from "configured with defaults".
+    """
+    if provider == "local":
+        return {"type": "local"}  # local execution needs no real credentials
+
+    names = PROVIDER_ENV_NAMES.get(provider)
+    if names is None:
+        return None
+
+    credentials = {}
+    for field, candidates in names.items():
+        for candidate in candidates:
+            value = values.get(candidate)
+            if value:
+                credentials[field] = value
+                break
+
+    if not credentials:
+        return None
+    if provider == "ssh":
+        credentials.setdefault("port", DEFAULT_SSH_PORT)
+    return credentials
+
+
+def parse_env_file(path: Path) -> Dict[str, str]:
+    """Parse a ``.env`` file into a dictionary, touching nothing else.
+
+    ``load_dotenv`` was used here, and it copies every key in the file into
+    ``os.environ`` for the remaining life of the process. That leaked real
+    AWS and HuggingFace credentials into the environment of every test that
+    happened to run afterwards, and made one test pass in CI (no ``.env``
+    present) while failing on any developer machine that had one -- an
+    asymmetry CI cannot see.
+    """
+    if HAS_DOTENV:
+        return {k: v for k, v in dotenv_values(path).items() if v is not None}
+
+    logger.debug("python-dotenv not available, parsing %s manually", path)
+    values: Dict[str, str] = {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    values[key.strip()] = value.strip().strip('"').strip("'")
+    except Exception as e:
+        logger.debug(f"Failed to read .env file: {e}")
+    return values
 
 
 class CredentialSource(ABC):
@@ -53,45 +144,18 @@ class DotEnvCredentialSource(CredentialSource):
         return self.env_file_path.exists() and self.env_file_path.is_file()
 
     def get_credentials(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials for a provider from .env file."""
+        """Get credentials for a provider from .env file.
+
+        The file is layered *under* the ambient environment, matching what
+        ``load_dotenv`` did (it does not override an already-set variable),
+        but resolved in a local dictionary so that nothing in the file
+        becomes visible to the rest of the process.
+        """
         if not self.is_available():
             return None
 
-        # Load environment variables from .env file
-        if HAS_DOTENV:
-            load_dotenv(self.env_file_path)
-        else:
-            logger.warning(
-                "python-dotenv not available, falling back to manual parsing"
-            )
-            self._load_env_manual()
-
-        # Map providers to their environment variable patterns
-        provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "ssh": {
-                "host": os.getenv("SSH_HOST"),
-                "username": os.getenv("SSH_USERNAME"),
-                "password": os.getenv("SSH_PASSWORD"),
-                "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
-                "port": os.getenv("SSH_PORT", "22"),
-            },
-            "huggingface": {
-                "token": os.getenv("HF_TOKEN"),
-                "username": os.getenv("HF_USERNAME"),
-            },
-            "local": {
-                "type": "local",  # Local provider needs no real credentials
-            },
-        }
-
-        if provider not in provider_mappings:
-            return None
-
-        credentials = provider_mappings[provider]
-
-        # Filter out None values and return only if we have some credentials
-        filtered_credentials = {k: v for k, v in credentials.items() if v is not None}
-        return filtered_credentials if filtered_credentials else None
+        values = {**parse_env_file(self.env_file_path), **os.environ}
+        return resolve_provider_credentials(values, provider)
 
     def list_available_providers(self) -> List[str]:
         """List providers that have credentials available in .env file."""
@@ -108,20 +172,6 @@ class DotEnvCredentialSource(CredentialSource):
 
         return available
 
-    def _load_env_manual(self):
-        """Manually load .env file if python-dotenv is not available."""
-        try:
-            with open(self.env_file_path, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        key, value = line.split("=", 1)
-                        key = key.strip()
-                        value = value.strip().strip('"').strip("'")
-                        os.environ[key] = value
-        except Exception as e:
-            logger.debug(f"Failed to manually load .env file: {e}")
-
 
 class EnvironmentCredentialSource(CredentialSource):
     """Credential source that reads from environment variables."""
@@ -132,33 +182,7 @@ class EnvironmentCredentialSource(CredentialSource):
 
     def get_credentials(self, provider: str) -> Optional[Dict[str, str]]:
         """Get credentials from environment variables."""
-        # Use same mapping as DotEnv but read directly from current environment
-        provider_mappings: Dict[str, Dict[str, Optional[str]]] = {
-            "ssh": {
-                "host": os.getenv("SSH_HOST"),
-                "username": os.getenv("SSH_USERNAME"),
-                "password": os.getenv("SSH_PASSWORD"),
-                "private_key_path": os.getenv("SSH_PRIVATE_KEY_PATH"),
-                "port": os.getenv("SSH_PORT", "22"),
-            },
-            "huggingface": {
-                "token": os.getenv("HF_TOKEN") or os.getenv("HUGGINGFACE_TOKEN"),
-                "username": os.getenv("HF_USERNAME")
-                or os.getenv("HUGGINGFACE_USERNAME"),
-            },
-            "local": {
-                "type": "local",  # Local provider needs no real credentials
-            },
-        }
-
-        if provider not in provider_mappings:
-            return None
-
-        credentials = provider_mappings[provider]
-
-        # Filter out None values and return only if we have some credentials
-        filtered_credentials = {k: v for k, v in credentials.items() if v is not None}
-        return filtered_credentials if filtered_credentials else None
+        return resolve_provider_credentials(os.environ, provider)
 
     def list_available_providers(self) -> List[str]:
         """List providers that have credentials available in environment."""
@@ -218,13 +242,52 @@ class GitHubActionsCredentialSource(CredentialSource):
 class FlexibleCredentialManager:
     """Main credential manager with automatic .env file creation and multiple sources."""
 
+    #: Where the sources actually live. Name-mangled rather than merely
+    #: underscored because the readable name is a *property* with a frame
+    #: check on it, and a check whose storage sits beside it under an
+    #: equally guessable name is decoration.
+    __sources: List[CredentialSource]
+
+    @property
+    def _sources(self) -> List[CredentialSource]:
+        """The configured credential sources. Store-internal.
+
+        A secret-bearing surface in its own right: every element answers
+        ``get_credentials(provider)`` with the password in it, and these
+        particular elements are the ones pointing at ``~/.clustrix/.env``,
+        so reaching them is reaching the file without having to know where
+        it is. ``get_credential_manager()._sources[0].get_credentials("ssh")``
+        returned the password with no recipient named and no frame judged --
+        which is the same door ``_stored_credential`` was, and an underscore
+        was already found to be an insufficient lock for that one.
+
+        So the same lock: :func:`clustrix.credential_release.assert_called_from`,
+        which admits only :data:`~clustrix.credential_release.SOURCE_READERS`
+        of this module. It is always on and makes no reference to tests.
+        Constructing a :class:`DotEnvCredentialSource` over a path of your
+        own is untouched and is not a bypass -- a caller that already holds
+        the path can read the file with ``open``. What this guards is the
+        *manager's* list.
+        """
+        from .credential_release import SOURCE_READERS, STORE_MODULE, assert_called_from
+
+        assert_called_from(STORE_MODULE, SOURCE_READERS)
+        return self.__sources
+
     def __init__(self, config_dir: Optional[Path] = None):
         """Initialize credential manager with automatic setup."""
         self.config_dir = config_dir or get_config_dir()
         self.env_file = self.config_dir / ".env"
 
-        # Initialize credential sources in priority order
-        self.sources = [
+        # The credential sources, in priority order. **Private**, because a
+        # source is a store: ``mgr.sources[0].get_credentials("ssh")``
+        # returned the password with no recipient named and no gate
+        # consulted, which is the whole defect
+        # ``_ensure_credential_unchecked`` was privatised to close. Making
+        # the *method* private while leaving the objects it reads reachable
+        # through a public attribute closed the door and left the window
+        # open.
+        self.__sources = [
             DotEnvCredentialSource(self.env_file),
             EnvironmentCredentialSource(),
             GitHubActionsCredentialSource(),
@@ -257,8 +320,7 @@ class FlexibleCredentialManager:
             # Explicit UTF-8: the template contains non-ASCII characters,
             # and the default locale encoding on Windows (cp1252) cannot
             # encode them -- which left a zero-byte .env behind.
-            self.env_file.write_text(template, encoding="utf-8")
-            self.env_file.chmod(0o600)  # Owner read/write only
+            write_text_securely(self.env_file, template)
 
         except Exception as e:
             logger.warning(f"Failed to create .env template: {e}")
@@ -296,67 +358,37 @@ class FlexibleCredentialManager:
 # 5. Use 'clustrix credentials edit' to safely edit this file
 """
 
-    def load_credentials_optional(
-        self, provider: Optional[str] = None
-    ) -> Dict[str, Dict[str, str]]:
-        """Load available credentials from all sources.
+    def _ensure_credential_unchecked(self, provider: str) -> Optional[Dict[str, str]]:
+        """The stored credential for ``provider``, secrets and all.
 
-        Args:
-            provider: Specific provider to load, or None for all providers
+        **Unchecked** is the whole name: this returns the bytes with no idea
+        who is about to receive them. Deciding that is
+        :func:`clustrix.credential_release.release_credential`, whose first
+        positional parameter is the recipient, and this raises for anybody
+        else -- see :func:`clustrix.credential_release.assert_called_from`.
 
-        Returns:
-            Dictionary mapping provider names to their credentials
+        The guard is always on. It makes no reference to tests and behaves
+        identically whether or not pytest is running, so it is a fact about
+        which module may obtain a secret rather than production code knowing
+        it is under test. It costs one frame lookup on a path that already
+        reads a file off disk, and it means an eighth route written the old
+        way raises on its first run rather than at review.
+
+        This used to be ``ensure_credential``, public, with a module-level
+        convenience function beside it. Both were how a caller obtained the
+        cluster password without saying who for.
         """
-        credentials = {}
+        from .credential_release import (
+            GATE_MODULE,
+            STORE_CALLERS,
+            assert_called_from,
+        )
 
-        if provider:
-            # Load credentials for specific provider
-            for source in self.sources:
-                try:
-                    creds = source.get_credentials(provider)
-                    if creds:
-                        credentials[provider] = creds
-                        logger.debug(
-                            f"Loaded {provider} credentials from {source.__class__.__name__}"
-                        )
-                        break  # Use first successful source
-                except Exception as e:
-                    logger.debug(
-                        f"Failed to load {provider} from {source.__class__.__name__}: {e}"
-                    )
-        else:
-            # Load all available credentials
-            all_providers = ["ssh", "huggingface"]
+        assert_called_from(GATE_MODULE, STORE_CALLERS)
 
-            for prov in all_providers:
-                for source in self.sources:
-                    try:
-                        creds = source.get_credentials(prov)
-                        if creds and prov not in credentials:
-                            credentials[prov] = creds
-                            logger.debug(
-                                f"Loaded {prov} credentials from {source.__class__.__name__}"
-                            )
-                            break  # Use first successful source
-                    except Exception as e:
-                        logger.debug(
-                            f"Failed to load {prov} from {source.__class__.__name__}: {e}"
-                        )
-
-        return credentials
-
-    def ensure_credential(self, provider: str) -> Optional[Dict[str, str]]:
-        """Get credentials for a specific provider with detailed feedback.
-
-        Args:
-            provider: Provider name (ssh, huggingface, local)
-
-        Returns:
-            Credentials dictionary or None if not available
-        """
         logger.debug(f"Looking up {provider} credentials...")
 
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
 
             try:
@@ -399,10 +431,41 @@ class FlexibleCredentialManager:
         missing = []
 
         for provider in required:
-            if not self.ensure_credential(provider):
+            if not self._configured_fields(provider)[1]:
                 missing.append(provider)
 
         return missing
+
+    def _configured_fields(self, provider: str) -> tuple:
+        """``(source name, field names)`` for ``provider``; no values.
+
+        "Is something configured, and where did it come from" never needed
+        the secret, so the status paths ask this instead of the gate. Field
+        *names* only -- ``["host", "username", "password"]`` says a password
+        is configured without being one.
+        """
+        for source in self._sources:
+            try:
+                if not source.is_available():
+                    continue
+                credentials = source.get_credentials(provider)
+                if credentials:
+                    return source.__class__.__name__, sorted(credentials)
+            except Exception as e:
+                # Log and continue: this loop only attributes credentials to
+                # a source, so a source that blows up mid-attribution leaves
+                # "no credentials" -- which later checks report properly.
+                # Saying which source blew up is the difference between a
+                # diagnosable status report and a shrug.
+                logger.warning(
+                    "Credential source %s failed while attributing %s "
+                    "credentials (%s).",
+                    source.__class__.__name__,
+                    provider,
+                    e,
+                )
+                continue
+        return None, []
 
     def list_available_providers(self) -> Dict[str, str]:
         """List all providers with available credentials and their sources.
@@ -413,12 +476,26 @@ class FlexibleCredentialManager:
         available = {}
 
         for provider in ["ssh", "huggingface"]:
-            for source in self.sources:
+            for source in self._sources:
                 try:
                     if source.is_available() and source.get_credentials(provider):
                         available[provider] = source.__class__.__name__
                         break
-                except Exception:
+                except Exception as e:
+                    # Log and continue: the remaining sources can still supply
+                    # a correct listing, and one broken source is not a reason
+                    # to refuse the whole report. But a source that *raised*
+                    # was reported identically to one that simply had no
+                    # credentials, so a broken keychain looked like an empty
+                    # one -- which is the wrong thing to go and fix.
+                    logger.warning(
+                        "Credential source %s failed while listing %s "
+                        "credentials (%s); it is not represented in this "
+                        "listing.",
+                        source.__class__.__name__,
+                        provider,
+                        e,
+                    )
                     continue
 
         return available
@@ -438,7 +515,7 @@ class FlexibleCredentialManager:
         }
 
         # Check each source
-        for source in self.sources:
+        for source in self._sources:
             source_name = source.__class__.__name__
             try:
                 source_status: Dict[str, Any] = {
@@ -454,38 +531,21 @@ class FlexibleCredentialManager:
                 }
                 status["sources"][source_name] = error_status
 
-        # Check each provider
+        # Check each provider. Field *names* and the source that answered --
+        # never a value, because this is printed by a status command.
         providers = [
             "ssh",
             "huggingface",
             "local",
         ]
         for provider in providers:
-            credentials = self.ensure_credential(provider)
-            if credentials:
-                # Find which source provided the credentials
-                source_name = "unknown"
-                for source in self.sources:
-                    try:
-                        if source.is_available() and source.get_credentials(provider):
-                            source_name = source.__class__.__name__
-                            break
-                    except Exception:
-                        continue
-
-                provider_status: Dict[str, Any] = {
-                    "available": True,
-                    "source": source_name,
-                    "fields": list(credentials.keys()),
-                }
-                status["providers"][provider] = provider_status
-            else:
-                empty_status: Dict[str, Any] = {
-                    "available": False,
-                    "source": None,
-                    "fields": [],
-                }
-                status["providers"][provider] = empty_status
+            source_name, field_names = self._configured_fields(provider)
+            provider_status: Dict[str, Any] = {
+                "available": bool(field_names),
+                "source": source_name if field_names else None,
+                "fields": field_names,
+            }
+            status["providers"][provider] = provider_status
 
         return status
 
@@ -503,20 +563,6 @@ def get_credential_manager() -> FlexibleCredentialManager:
 
 
 # Convenience functions for common credential operations
-def load_credentials_optional(
-    provider: Optional[str] = None,
-) -> Dict[str, Dict[str, str]]:
-    """Load available credentials from all sources."""
-    manager = get_credential_manager()
-    return manager.load_credentials_optional(provider)
-
-
-def ensure_credential(provider: str) -> Optional[Dict[str, str]]:
-    """Get credentials for a specific provider with fallbacks."""
-    manager = get_credential_manager()
-    return manager.ensure_credential(provider)
-
-
 def get_missing_providers(required: List[str]) -> List[str]:
     """Identify which required providers are missing credentials."""
     manager = get_credential_manager()

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_slurm_test_credentials() -> Optional[Dict[str, Any]]:
-    """Get real SLURM cluster credentials from 1Password or environment."""
+    """Get real SLURM cluster credentials from ~/.clustrix/.env or environment."""
     manager = get_credential_manager()
 
     # Try to get SLURM credentials from credential manager
@@ -41,7 +41,7 @@ def get_slurm_test_credentials() -> Optional[Dict[str, Any]]:
         return {
             "cluster_host": slurm_creds["host"],
             "username": slurm_creds["username"],
-            "key_file": slurm_creds.get("key_file"),
+            "key_file": slurm_creds.get("private_key_path"),
             "password": slurm_creds.get("password"),
             "remote_work_dir": slurm_creds.get("remote_work_dir", "/tmp/clustrix_test"),
             "cluster_port": int(slurm_creds.get("port", 22)),

@@ -14,8 +14,8 @@ Prerequisites
 
    SLURM is verified end to end against a real cluster (SSH connect, job
    submission, environment build, result retrieval). PBS and SGE are **not
-   currently supported** -- they were removed in v0.2.0 and are planned for a
-   future release; see :ref:`removed-backends`.
+   supported**, and are planned for a future release; see
+   :ref:`removed-backends`.
 
 What Happens When You Call a ``@cluster``-Decorated Function
 --------------------------------------------------------------
@@ -107,9 +107,9 @@ fractional value like ``"1.5GB"`` is rounded up to ``--mem=2G``):
    "
 
 There is no pass-through for arbitrary ``sbatch`` directives beyond
-``cores``, ``memory``, ``time``, ``partition`` and ``queue`` -- an
-unrecognized keyword argument to ``@cluster`` is accepted but never written
-into the script. If you need ``--nodes``, ``--ntasks-per-node``,
+``cores``, ``memory``, ``time`` and ``partition`` -- an
+unrecognized keyword argument to ``@cluster`` produces a warning and is not
+written into the script. If you need ``--nodes``, ``--ntasks-per-node``,
 ``--account`` or similar, put the equivalent in
 ``pre_execution_commands`` or your cluster's own scheduler defaults.
 
@@ -131,7 +131,7 @@ When Things Fail
   :doc:`../ssh_setup`.
 - **Editable/unreproducible local package used by the function**: refused
   at step 1, before any SSH connection is made, naming the package.
-- **``ModuleNotFoundError`` on the worker**: a package your function reaches
+- ``ModuleNotFoundError`` **on the worker**: a package your function reaches
   by *reference* (e.g. ``import mypkg; mypkg.helpers.clean(x)``) that
   clustrix's dependency walk did not detect. Vendor the code into your
   project or list it explicitly.
@@ -175,7 +175,7 @@ Configure Clustrix programmatically for your SLURM cluster:
    
    configure(
        cluster_type="slurm",
-       cluster_host="slurm.university.edu",
+       cluster_host="slurm.example.edu",
        username="your_username",
        key_file="~/.ssh/slurm_key",  # Optional if using SSH agent
        remote_work_dir="/scratch/your_username/clustrix"
@@ -230,7 +230,7 @@ SLURM-specific resource options:
        eigenvalues = np.linalg.eigvals(matrix)
        return len(eigenvalues)
 
-``cores``, ``memory``, ``time``, ``partition`` and ``queue`` are the resource
+``cores``, ``memory``, ``time`` and ``partition`` are the resource
 arguments the decorator understands. There is no pass-through for arbitrary
 ``sbatch`` directives such as ``--nodes``, ``--ntasks-per-node`` or
 ``--account``: unrecognised keyword arguments are collected but never written
@@ -280,7 +280,7 @@ Create ``~/.clustrix/config.yml``:
 .. code-block:: yaml
 
    cluster_type: "slurm"
-   cluster_host: "slurm.university.edu"
+   cluster_host: "slurm.example.edu"
    username: "researcher"
    key_file: "~/.ssh/slurm_key"
    remote_work_dir: "/scratch/researcher/clustrix"
@@ -572,7 +572,7 @@ Here's a complete scientific computing example:
    # Configure SLURM cluster
    configure(
        cluster_type="slurm",
-       cluster_host="slurm.university.edu", 
+       cluster_host="slurm.example.edu", 
        username="researcher",
        remote_work_dir="/scratch/researcher/clustrix",
        

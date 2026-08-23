@@ -25,7 +25,19 @@ logger = logging.getLogger(__name__)
 
 
 class ClusterExecutor:
-    """Handles execution of jobs on various cluster types."""
+    """Handles execution of jobs on various cluster types.
+
+    Use it as a context manager wherever the connection matters::
+
+        with ClusterExecutor(config) as executor:
+            job_id = executor.submit_job(func_data, job_config)
+            result = executor.wait_for_result(job_id)
+
+    On the way out -- including out of an exception -- the SSH transport and
+    any SFTP channel are closed. ``__del__`` still calls ``disconnect()`` as a
+    backstop, but a finaliser runs at an interpreter-defined time or not at
+    all, so it is not a substitute for the ``with``.
+    """
 
     def __init__(self, config):
         """Initialize the cluster executor.
@@ -245,13 +257,32 @@ class ClusterExecutor:
                 # client got bored is not this function's decision. The
                 # remote directory is named so the result can be collected
                 # by hand.
+                #
+                # "unknown" has to read differently from every other status
+                # here, or moving the unmeasurable case off "running" bought
+                # nothing: the loop still polls to the deadline either way,
+                # so the only place the distinction can reach the user is
+                # this message. "Timed out with last status 'running'" says
+                # the job was slow. It was not; clustrix could not see it,
+                # and the two call for completely different next steps.
+                if status == "unknown":
+                    diagnosis = (
+                        " That is not a synonym for 'still running': the last "
+                        "poll could not measure the job at all, so this "
+                        "timeout does not mean the job was slow -- it means "
+                        "clustrix lost sight of it, and the job may well have "
+                        "finished or failed already. Check the scheduler and "
+                        "the job directory directly."
+                    )
+                else:
+                    diagnosis = ""
                 raise TimeoutError(
                     f"Job {job_id} did not finish within "
                     f"{timeout}s (config.job_wait_timeout). Its last known "
-                    f"status was {status!r}. The job has NOT been cancelled; "
-                    f"its files are at {remote_dir} on the cluster. Raise "
-                    f"job_wait_timeout, or set it to None to wait "
-                    f"indefinitely."
+                    f"status was {status!r}.{diagnosis} The job has NOT been "
+                    f"cancelled; its files are at {remote_dir} on the "
+                    f"cluster. Raise job_wait_timeout, or set it to None to "
+                    f"wait indefinitely."
                 )
 
             # Wait before next poll
@@ -332,9 +363,36 @@ class ClusterExecutor:
         job_id = self.submit_job(func_data, job_config)
         return self.wait_for_result(job_id)
 
-    def __del__(self):
-        """Cleanup resources."""
+    def __enter__(self) -> "ClusterExecutor":
+        """Enter a scope whose exit closes the cluster connection.
+
+        Nothing is connected here. ``submit_job`` connects on demand, and the
+        backends that have no host to dial (``local``, ``huggingface``) must
+        be usable under ``with`` too.
+        """
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        """Close the connection, including when the body raised."""
         self.disconnect()
+
+    def __del__(self):
+        """Backstop for callers who did not use ``with``.
+
+        ``__del__`` runs at an interpreter-defined time, or never, so this is
+        not the teardown story -- ``with ClusterExecutor(config) as ex:`` is.
+        It stays because a caller who forgets should still release the
+        transport eventually rather than hold it until the process exits.
+
+        The swallow is deliberate and is the one place it is right: a finaliser
+        can run while modules are already being torn down, an exception raised
+        from it is printed and discarded by the interpreter anyway, and there
+        is no caller left to give a correct or incorrect answer to.
+        """
+        try:
+            self.disconnect()
+        except Exception:  # pragma: no cover - interpreter shutdown only
+            pass
 
     # Backward compatibility properties and methods
     @property

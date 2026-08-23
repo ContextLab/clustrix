@@ -1,13 +1,13 @@
 SSH Key Setup for Remote Clusters
 ====================================
 
-Clustrix provides **automated SSH key setup**: it generates a key, deploys
-it to the cluster and writes the ``~/.ssh/config`` entry in one call, instead
-of doing those three steps by hand.
+Clustrix generates an SSH key, deploys it to the cluster, and writes the
+matching ``~/.ssh/config`` entry, in one call. Those are the same three steps
+you would otherwise run by hand, in the same order.
 
 .. note::
-   **🚀 New in Clustrix**: Automated SSH key setup makes cluster access effortless! 
-   Try the interactive tutorial: `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
+   A runnable walkthrough is available as a notebook:
+   `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
 
 Quick Start: Automated Setup
 -----------------------------
@@ -28,7 +28,7 @@ Then:
 
 1. Choose a remote cluster type (``ssh`` or ``slurm``) so the connection
    section appears
-2. Enter your cluster hostname (e.g. ``cluster.university.edu``)
+2. Enter your cluster hostname (e.g. ``cluster.example.edu``)
 3. Enter your username
 4. Enter your password
 5. Click "Auto setup SSH keys"
@@ -39,10 +39,10 @@ Method 2: Command Line Interface
 .. code-block:: bash
 
    # Basic automated setup
-   clustrix ssh-setup --host cluster.university.edu --user your_username
+   clustrix ssh-setup --host cluster.example.edu --user your_username
    
    # With custom alias for easy access
-   clustrix ssh-setup --host cluster.university.edu --user your_username --alias my_hpc
+   clustrix ssh-setup --host cluster.example.edu --user your_username --alias my_hpc
    
    # Now you can connect with: ssh my_hpc
 
@@ -57,7 +57,7 @@ Method 3: Python API
 
    config = ClusterConfig(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu", 
+       cluster_host="cluster.example.edu", 
        username="your_username"
    )
    
@@ -101,58 +101,110 @@ happens to you.
 Every SSH connection clustrix makes -- for key setup, for job submission, for
 file transfer -- checks the remote host's SSH key against your local
 ``known_hosts`` files (``/etc/ssh/ssh_known_hosts`` and
-``~/.ssh/known_hosts``) before doing anything else. **By default
-(``ssh_host_key_policy="reject"``), a host key that isn't already recorded
+``~/.ssh/known_hosts``) before doing anything else. By default
+(``ssh_host_key_policy="reject"``), **a host key that isn't already recorded
 there causes clustrix to refuse the connection outright.** This is not a
 prompt you can click through; it is a hard failure with an actionable
 message:
 
 .. code-block:: text
 
-   HostKeyVerificationError: Host key verification failed for 'cluster.university.edu':
+   HostKeyVerificationError: Host key verification failed for 'cluster.example.edu':
    this host is not in your known_hosts file(s), so clustrix refused the
    connection rather than risk a machine-in-the-middle attack.
      Offered key: ssh-ed25519 SHA256:AbCdEf...
 
    To fix this:
      1. If you recognize and trust this host, add its key with:
-          ssh-keyscan cluster.university.edu >> ~/.ssh/known_hosts
+          ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
         then retry.
      2. If you understand the risk and want clustrix to trust unknown host
         keys automatically (NOT recommended -- this is exactly the behavior
         that enables MITM attacks), set on ClusterConfig:
           ssh_host_key_policy="auto_add"
 
-**This is a change from clustrix's old behavior.** Every SSH call site used
-to call paramiko's ``AutoAddPolicy()``, which silently trusted whatever key
-a host offered on first connection -- convenient, but it meant clustrix
-never actually verified who it was talking to. The default is now secure,
-which means the first connection to any cluster needs one of:
+A secure default means the first connection to any cluster needs one of:
 
 1. Run the ``ssh-keyscan`` command the error message gives you (this is the
    same thing ``ssh`` itself would ask you to confirm interactively the
    first time you connect by hand), or
 2. Already have a plain ``ssh`` connection to that host under your belt --
-   if you can already ``ssh cluster.university.edu`` from this machine, its
+   if you can already ``ssh cluster.example.edu`` from this machine, its
    key is already in ``known_hosts`` and clustrix will never hit this error
    for that host, or
 3. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
    ``ClusterConfig`` or ``configure(...)`` call -- but understand that this
-   restores the old "trust anything" behavior for that configuration, which
-   is genuinely insecure. Only do this for a host you already trust through
-   some other channel (e.g. you set it up yourself and typed the hostname).
+   accepts whatever key a host offers, which is genuinely insecure. Only do
+   this for a host you already trust through some other channel (e.g. you set
+   it up yourself and typed the hostname).
+
+   The opt-out has to come from **you**. Setting it in a ``./clustrix.yml``
+   that arrived with a ``git clone``, or in a directory
+   ``$CLUSTRIX_CONFIG_DIR`` happens to point at, is ignored and warned
+   about: turning verification off is a security decision, and it is a
+   persistent one, so it is subject to the same provenance rule as a stored
+   credential. See :ref:`untrusted-security-settings`.
+
+``auto_add`` writes what it accepts, and writes it by **appending one line**.
+Clustrix creates ``~/.ssh/known_hosts`` if it does not exist yet -- the
+directory at mode ``0700`` and the file at ``0600``, which is what OpenSSH
+itself does before first contact -- and then appends the accepted key to it,
+exactly as ``ssh-keyscan host >> ~/.ssh/known_hosts`` would. Nothing already
+in the file is read back and re-emitted.
+
+That distinction matters more than it sounds. Clustrix does *not* use
+paramiko's own ``AutoAddPolicy``, which persists a key by rewriting the entire
+file: it drops comments, splits a line naming several hosts, silently discards
+any key type it cannot parse (``sk-ssh-ed25519@openssh.com``, which OpenSSH
+reads fine), and -- if two processes do it at once, or one is interrupted --
+leaves entries cut mid-key. One corrupt line is enough to make *every*
+subsequent SSH connection fail, clustrix's and your own, to hosts that had
+nothing to do with clustrix. Appending cannot do any of that.
+
+What appending does not do: it is not a lock, it makes no promise on NFS, and
+it cannot stop some other tool from rewriting the file. It also never removes
+anything, so a host whose key genuinely changed keeps its old line -- which
+changes nothing in practice, because a known host offering a changed key
+raises ``BadHostKeyException`` without consulting the policy at all.
+
+The ``reject`` policy never writes to your filesystem, since verifying is not
+a reason to create anything.
+
+The automated key setup described above obeys the same policy, and the
+``ssh-copy-id`` it shells out to obeys it too: the subprocess is handed
+``-o StrictHostKeyChecking=yes`` under ``reject`` and ``accept-new`` under
+``auto_add``, so the one place clustrix reaches for OpenSSH cannot be more
+permissive than the paramiko connections beside it. Under ``auto_add`` -- and
+only then -- key setup also runs ``ssh-keyscan`` and appends the result to
+your ``known_hosts``. Under the default ``reject`` it does not: it fails with
+the message above, which names the exact ``ssh-keyscan`` command to run, and
+trusting a new host stays your decision rather than a side effect of
+deploying a key. Both the scan and ``ssh-copy-id`` are pointed at the
+``known_hosts`` clustrix itself reads, with ``-o UserKnownHostsFile=``:
+OpenSSH resolves ``~`` from the passwd database rather than from the
+environment, so without that flag the Python half of clustrix would verify
+against one file while ``ssh-copy-id`` appended to another -- which differ in
+a container, under ``sudo -u``, and on a login node with a relocated home.
+
+Key deployment is also held to the credential gate. If the ``cluster_host``
+came from somewhere you did not choose -- a ``./clustrix.yml`` in a cloned
+repository, say -- ``ssh-copy-id`` is additionally given
+``-o IdentitiesOnly=yes``, ``-o IdentityFile=<the key being deployed>`` and
+``-o IdentityAgent=none``, so OpenSSH offers that one key and neither your
+default identities nor anything in your ssh-agent. For a host you chose,
+nothing changes.
 
 .. code-block:: python
 
    from clustrix import configure
 
    # Secure default: unknown keys are rejected.
-   configure(cluster_type="slurm", cluster_host="cluster.university.edu")
+   configure(cluster_type="slurm", cluster_host="cluster.example.edu")
 
    # Explicit opt-out -- only for hosts you already trust out-of-band.
    configure(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu",
+       cluster_host="cluster.example.edu",
        ssh_host_key_policy="auto_add",
    )
 
@@ -223,8 +275,8 @@ Many university clusters use **Kerberos authentication**. Clustrix handles this 
 .. code-block:: bash
 
    # Clustrix deploys SSH keys successfully, then use Kerberos for auth
-   kinit your_netid@UNIVERSITY.EDU
-   ssh your_netid@cluster.university.edu
+   kinit your_netid@EXAMPLE.EDU
+   ssh your_netid@cluster.example.edu
 
 The SSH key deployment still succeeds and helps with file transfers and other operations.
 
@@ -251,7 +303,7 @@ Python Configuration
    # After automated SSH setup, just configure normally
    configure(
        cluster_type="slurm",
-       cluster_host="cluster.university.edu",
+       cluster_host="cluster.example.edu",
        username="your_username"
        # No need to specify key_file - automatically detected!
    )
@@ -263,7 +315,7 @@ Configuration File
 
    # ~/.clustrix/config.yml
    cluster_type: "slurm"
-   cluster_host: "cluster.university.edu"
+   cluster_host: "cluster.example.edu"
    username: "your_username"
    # key_file automatically set by SSH automation
    
@@ -290,7 +342,7 @@ Here's a complete end-to-end example:
    # Step 1: Automated SSH setup
    config = ClusterConfig(
        cluster_type="slurm",
-       cluster_host="hpc.university.edu",
+       cluster_host="hpc.example.edu",
        username="researcher"
    )
    
@@ -321,13 +373,15 @@ Here's a complete end-to-end example:
    result = scientific_computation(n_samples=500)
    print(f"Computation result: {result}")
 
-Manual Setup (Legacy)
----------------------
+Manual Setup
+------------
 
-.. warning::
-   **Manual setup is no longer recommended**. Use the automated SSH setup above for better security and convenience.
+.. note::
+   Prefer the automated setup above. Do the steps by hand when your site needs
+   something the automation does not cover -- a non-default key type, a jump
+   host, a key held on a smartcard.
 
-If you need manual setup for special configurations:
+The manual equivalent, step by step:
 
 1. Generate SSH Key Pair
 ~~~~~~~~~~~~~~~~~~~~~~~~
@@ -346,7 +400,7 @@ If you need manual setup for special configurations:
 .. code-block:: bash
 
    # Copy public key to cluster
-   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.hostname.edu
+   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.example.edu
 
 3. Configure SSH Client
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -355,7 +409,7 @@ If you need manual setup for special configurations:
 
    # ~/.ssh/config
    Host my-cluster
-       HostName cluster.hostname.edu
+       HostName cluster.example.edu
        User username
        IdentityFile ~/.ssh/clustrix_key
        IdentitiesOnly yes
@@ -396,8 +450,8 @@ Common Issues and Solutions
 .. code-block:: bash
 
    # This is expected for university clusters
-   kinit your_netid@UNIVERSITY.EDU
-   ssh your_netid@cluster.university.edu
+   kinit your_netid@EXAMPLE.EDU
+   ssh your_netid@cluster.example.edu
 
 **Connection Test Failed**
 

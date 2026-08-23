@@ -5,15 +5,20 @@ This module provides a consistent interface for filesystem operations that work
 both locally and on remote clusters based on the ClusterConfig object.
 """
 
+import fnmatch
 import logging
 import os
+import posixpath
+import shlex
+import stat as stat_module
 import glob as glob_module
 from pathlib import Path
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import paramiko
 
 from .config import ClusterConfig
+from .credential_release import CredentialTarget, release_credential
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -210,13 +215,48 @@ class ClusterFilesystem:
                 "banner_timeout": getattr(self.config, "ssh_connect_timeout", 30),
             }
 
-            if self.config.key_file:
-                connect_kwargs["key_filename"] = self.config.key_file
-            elif self.config.password:
-                connect_kwargs["password"] = self.config.password
+            # The same gate the execution path asks, and for the same
+            # reason: ``key_file`` and ``password`` are ordinary declared
+            # fields, so a working-directory ``clustrix.yml`` naming
+            # ``cluster_host`` names these too, and reading them here
+            # without a decision offered the victim's private key to a host
+            # the repository chose. A filesystem call is a connection.
+            #
+            # Paramiko's own credential discovery is part of that decision,
+            # not a default to leave alone: this set ``look_for_keys=True``
+            # and left ``allow_agent`` at paramiko's default, so a refusal
+            # was logged and then ``connect()`` authenticated anyway out of
+            # ``~/.ssh/id_rsa`` or the running agent -- route 13, measured
+            # as ``('victim', 'publickey')`` for a ``./clustrix.yml`` that
+            # named nothing but ``cluster_host``. The gate answers it, so
+            # this call site does not.
+            connect_kwargs["look_for_keys"] = False
+            connect_kwargs["allow_agent"] = False
+            try:
+                target = CredentialTarget.for_config(self.config)
+            except ValueError as exc:
+                logger.warning("No credential can be released: %s", exc)
             else:
-                # Try default SSH key locations
-                connect_kwargs["look_for_keys"] = True
+                release = release_credential(
+                    target,
+                    provider="ssh",
+                    config=self.config,
+                    sources=("config-field", "stored-credential", "environment"),
+                )
+                connect_kwargs["look_for_keys"] = release.local_identities
+                connect_kwargs["allow_agent"] = release.local_identities
+                if release.refusal is not None:
+                    logger.warning(
+                        "Not using a stored SSH credential for %s: %s.",
+                        self.config.cluster_host,
+                        release.refusal,
+                    )
+                elif release.key_path:
+                    connect_kwargs["key_filename"] = release.key_path
+                    connect_kwargs["look_for_keys"] = False
+                elif release.password:
+                    connect_kwargs["password"] = release.password
+                    connect_kwargs["look_for_keys"] = False
 
             self._ssh_client.connect(**connect_kwargs)
 
@@ -413,152 +453,384 @@ class ClusterFilesystem:
             return len(self._local_find(pattern, path))
 
     # ===== Remote Implementations =====
+    #
+    # Two rules hold for everything below, and tests/unit/test_filesystem_injection.py
+    # enforces both:
+    #
+    #   1. Prefer SFTP. ``listdir``, ``stat`` and friends travel as protocol
+    #      messages, so a path is a path -- there is no shell to quote for, no
+    #      leading ``-`` to be read as a flag, and no GNU-vs-BSD difference in
+    #      how a command spells its options.
+    #   2. Where a shell is genuinely needed (only ``find``, for a recursive
+    #      search whose pattern must stay a pattern), every caller-supplied
+    #      value is passed through ``shlex.quote``. This is the same treatment
+    #      ``clustrix/utils.py`` gives job-script values.
+
+    def _run_remote(self, cmd: str) -> str:
+        """Run a shell command on the cluster and return its stdout.
+
+        Every caller-supplied value in ``cmd`` must already be quoted with
+        ``shlex.quote`` before it gets here.
+
+        A non-zero exit status is logged together with the command's stderr.
+        These commands used to end in ``2>/dev/null``, which turned every
+        failure mode -- a missing directory, a permission error, an option
+        the remote host's binary does not support -- into empty output that
+        the caller read as "there is nothing there".
+        """
+        ssh_client = self._get_ssh_client()
+        stdin, stdout, stderr = ssh_client.exec_command(cmd)
+        output = stdout.read().decode()
+        exit_status = stdout.channel.recv_exit_status()
+        if exit_status != 0:
+            logger.warning(
+                "Remote command failed (exit %s): %s: %s",
+                exit_status,
+                cmd,
+                stderr.read().decode().strip(),
+            )
+        return output
+
+    def _remote_attrs(self, full_path: str) -> Optional[Any]:
+        """SFTP attributes for ``full_path``, or None if it does not exist.
+
+        Anything that is not an absence -- a permission error, a dead
+        connection -- propagates as ``OSError`` rather than being reported as
+        "not found".
+        """
+        sftp = self._get_sftp_client()
+        try:
+            return sftp.stat(full_path)
+        except FileNotFoundError:
+            return None
+
+    def _remote_attrs_for_predicate(self, path: str) -> Optional[Any]:
+        """Attributes for a boolean question: absent or unreadable is None.
+
+        ``exists``/``isdir``/``isfile`` return a bool, so an unreadable path
+        has to come back as False the way ``os.path.exists`` does -- but the
+        reason is logged instead of being silently discarded.
+        """
+        full_path = self._get_full_path(path)
+        try:
+            return self._remote_attrs(full_path)
+        except OSError as exc:
+            logger.warning("Cannot stat remote path %s: %s", full_path, exc)
+            return None
 
     def _remote_ls(self, path: str) -> List[str]:
-        """Remote directory listing via SSH."""
-        ssh_client = self._get_ssh_client()
+        """Remote directory listing over SFTP."""
+        sftp = self._get_sftp_client()
         full_path = self._get_full_path(path)
 
-        # Use ls -1 for one file per line
-        cmd = f"ls -1 {full_path} 2>/dev/null || true"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
-
-        if output:
-            return sorted(output.split("\n"))
-        return []
+        try:
+            return sorted(sftp.listdir(full_path))
+        except OSError as exc:
+            # Matches _local_ls, which returns [] rather than raising.
+            logger.debug("Cannot list remote directory %s: %s", full_path, exc)
+            return []
 
     def _remote_find(self, pattern: str, path: str) -> List[str]:
-        """Remote file finding via SSH."""
-        ssh_client = self._get_ssh_client()
+        """Remote recursive file search via ``find``.
+
+        This is the one operation with no SFTP equivalent: walking the tree
+        over SFTP would cost a round trip per directory. So the shell stays,
+        and both caller-supplied values are quoted.
+
+        Quoting ``pattern`` does not stop it being a pattern: ``find``
+        expands ``-name`` itself, and quoting is precisely what stops the
+        *shell* from expanding (or executing) it first.
+
+        ``-print0`` rather than ``-print`` because a filename may legally
+        contain a newline, and splitting such output on newlines would report
+        one real file as two imaginary ones.
+        """
         full_path = self._get_full_path(path)
 
-        # Use find command with name pattern
-        cmd = f"cd {full_path} && find . -name '{pattern}' -type f | sed 's|^\\./||' | sort"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
+        cmd = (
+            f"cd -- {shlex.quote(full_path)} && "
+            f"find . -name {shlex.quote(pattern)} -type f -print0"
+        )
+        output = self._run_remote(cmd)
 
-        if output:
-            return output.split("\n")
-        return []
+        results = []
+        for entry in output.split("\0"):
+            if not entry:
+                continue
+            results.append(entry[2:] if entry.startswith("./") else entry)
+        return sorted(results)
 
     def _remote_stat(self, path: str) -> FileInfo:
-        """Remote file stat via SSH."""
-        ssh_client = self._get_ssh_client()
+        """Remote file stat over SFTP.
+
+        This used to run ``stat -c '%s %Y %f'``, whose ``-c`` is GNU
+        coreutils only -- a BSD or macOS host rejects it, ``2>/dev/null`` ate
+        the error, and the caller was told a file that plainly exists is not
+        there. SFTP returns size, mtime and mode as protocol fields, so there
+        is no remote binary whose options can differ.
+        """
         full_path = self._get_full_path(path)
 
-        # Use stat command with portable format
-        # %s = size, %Y = modification time, %f = file type/mode in hex
-        cmd = f"stat -c '%s %Y %f' {full_path} 2>/dev/null"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
-
-        if not output:
+        attrs = self._remote_attrs(full_path)
+        if attrs is None:
             raise FileNotFoundError(f"File not found: {path}")
 
-        parts = output.split()
-        size = int(parts[0])
-        mtime = int(parts[1])
-        mode_hex = int(parts[2], 16)
-
-        # Check if directory (S_IFDIR = 0x4000)
-        is_dir = bool(mode_hex & 0x4000)
-
-        # Extract permissions (last 3 octal digits)
-        permissions = oct(mode_hex & 0o777)[-3:]
+        mode = attrs.st_mode or 0
 
         return FileInfo(
-            size=size,
-            modified=mtime,
-            is_dir=is_dir,
-            permissions=permissions,
+            size=int(attrs.st_size or 0),
+            modified=float(attrs.st_mtime or 0),
+            is_dir=stat_module.S_ISDIR(mode),
+            # ``oct(mode & 0o777)[-3:]`` is only three digits when the value
+            # needs three: 0o000 renders "0o0", 0o007 "0o7", 0o077 "o77".
+            # ``_local_stat`` never showed this because it slices an
+            # unmasked ``st_mode``, whose file-type bits guarantee enough
+            # digits. Formatting to a fixed width says what was meant.
+            permissions=format(mode & 0o777, "03o"),
             name=os.path.basename(path),
         )
 
     def _remote_exists(self, path: str) -> bool:
-        """Check if remote path exists."""
-        ssh_client = self._get_ssh_client()
-        full_path = self._get_full_path(path)
-
-        cmd = f"test -e {full_path} && echo 'EXISTS' || echo 'NOT_EXISTS'"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
-
-        return output == "EXISTS"
+        """Check if remote path exists, over SFTP."""
+        return self._remote_attrs_for_predicate(path) is not None
 
     def _remote_isdir(self, path: str) -> bool:
-        """Check if remote path is directory."""
-        ssh_client = self._get_ssh_client()
-        full_path = self._get_full_path(path)
-
-        cmd = f"test -d {full_path} && echo 'DIR' || echo 'NOT_DIR'"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
-
-        return output == "DIR"
+        """Check if remote path is a directory, over SFTP."""
+        attrs = self._remote_attrs_for_predicate(path)
+        return attrs is not None and stat_module.S_ISDIR(attrs.st_mode or 0)
 
     def _remote_isfile(self, path: str) -> bool:
-        """Check if remote path is file."""
-        ssh_client = self._get_ssh_client()
-        full_path = self._get_full_path(path)
+        """Check if remote path is a regular file, over SFTP."""
+        attrs = self._remote_attrs_for_predicate(path)
+        return attrs is not None and stat_module.S_ISREG(attrs.st_mode or 0)
 
-        cmd = f"test -f {full_path} && echo 'FILE' || echo 'NOT_FILE'"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
+    # ``glob.glob`` is the contract for pattern matching, and ``_local_glob``
+    # is a thin wrapper around it. The only way the two sides can agree is for
+    # the remote side to run the same algorithm over remote directory
+    # entries, so the helpers below mirror ``glob._iglob``, ``_glob0``,
+    # ``_glob1`` and ``_iterdir`` one for one, with SFTP where the stdlib uses
+    # ``os``. A cheaper hand-rolled component split is what caused the last
+    # divergence: it discarded the empty trailing component of ``*/``, so a
+    # pattern that means "directories only" started matching files as well.
 
-        return output == "FILE"
+    @staticmethod
+    def _has_magic(text: str) -> bool:
+        """``glob.has_magic``: does this string need expanding at all?"""
+        return any(char in text for char in "*?[")
 
-    def _remote_glob(self, pattern: str, path: str) -> List[str]:
-        """Remote glob pattern matching via SSH."""
-        ssh_client = self._get_ssh_client()
-        full_path = self._get_full_path(path)
+    def _remote_lexists(self, full_path: str) -> bool:
+        """``os.path.lexists`` over SFTP -- a broken symlink still exists."""
+        sftp = self._get_sftp_client()
+        try:
+            sftp.lstat(full_path)
+        except OSError:
+            return False
+        return True
 
-        # Use shell glob expansion with ls
-        # The 2>/dev/null suppresses errors for no matches
-        cmd = f"cd {full_path} && ls -d {pattern} 2>/dev/null | sort || true"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
+    def _remote_path_isdir(self, full_path: str) -> bool:
+        """``os.path.isdir`` over SFTP, following symlinks as it does."""
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.stat(full_path)
+        except OSError:
+            return False
+        return stat_module.S_ISDIR(attrs.st_mode or 0)
 
-        if output:
-            return output.split("\n")
+    def _remote_is_symlink(self, full_path: str) -> bool:
+        """Is this path a symlink itself, whatever it points at?"""
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.lstat(full_path)
+        except OSError as exc:
+            logger.debug("Cannot lstat remote path %s: %s", full_path, exc)
+            return False
+        return stat_module.S_ISLNK(attrs.st_mode or 0)
+
+    def _remote_entry_is_dir(self, directory: str, entry: Any) -> bool:
+        """``os.DirEntry.is_dir()``: a symlink is judged by its target.
+
+        OpenSSH answers a readdir with ``lstat`` attributes, so a symlink
+        arrives here as one and its target has to be looked up. A server
+        that answers with ``stat`` attributes has already resolved it.
+        """
+        mode = entry.st_mode or 0
+        if stat_module.S_ISLNK(mode):
+            return self._remote_path_isdir(
+                posixpath.join(directory or ".", entry.filename)
+            )
+        return stat_module.S_ISDIR(mode)
+
+    def _remote_iterdir(self, directory: str, dironly: bool) -> List[str]:
+        """``glob._iterdir``: entry names, or only the directory ones."""
+        sftp = self._get_sftp_client()
+        try:
+            entries = sftp.listdir_attr(directory or ".")
+        except OSError as exc:
+            logger.debug("Cannot list remote directory %s: %s", directory, exc)
+            return []
+
+        names = []
+        for entry in entries:
+            if dironly and not self._remote_entry_is_dir(directory, entry):
+                continue
+            names.append(entry.filename)
+        return names
+
+    def _remote_glob1(self, directory: str, pattern: str, dironly: bool) -> List[str]:
+        """``glob._glob1``: expand a wildcard component in one directory."""
+        names = self._remote_iterdir(directory, dironly)
+        if not pattern.startswith("."):
+            names = [name for name in names if not name.startswith(".")]
+        return fnmatch.filter(names, pattern)
+
+    def _remote_glob0(self, directory: str, basename: str, dironly: bool) -> List[str]:
+        """``glob._glob0``: a literal component only has to exist.
+
+        ``dironly`` is unused here, exactly as it is in the stdlib, and the
+        parameter stays so this and ``_remote_glob1`` remain interchangeable.
+        """
+        del dironly
+        if not basename:
+            # ``posixpath.split`` gives an empty basename for a pattern that
+            # ends in a separator, and "a*/" must match only directories.
+            if self._remote_path_isdir(directory):
+                return [basename]
+        elif self._remote_lexists(posixpath.join(directory, basename)):
+            return [basename]
         return []
 
+    def _remote_iglob(self, pattern: str, dironly: bool) -> Iterator[str]:
+        """``glob._iglob``: the recursive component-by-component expansion."""
+        directory, basename = posixpath.split(pattern)
+        if not self._has_magic(pattern):
+            if basename:
+                if self._remote_lexists(pattern):
+                    yield pattern
+            elif self._remote_path_isdir(directory):
+                yield pattern
+            return
+        if not directory:
+            yield from self._remote_glob1(directory, basename, dironly)
+            return
+        directories: Iterable[str]
+        if directory != pattern and self._has_magic(directory):
+            directories = self._remote_iglob(directory, True)
+        else:
+            directories = [directory]
+        expand = self._remote_glob1 if self._has_magic(basename) else self._remote_glob0
+        for parent in directories:
+            for name in expand(parent, basename, dironly):
+                yield posixpath.join(parent, name)
+
+    def _remote_glob(self, pattern: str, path: str) -> List[str]:
+        """Remote pattern matching, expanded here rather than by a shell.
+
+        The old implementation ran ``ls -d {pattern}`` and relied on the
+        remote shell to expand it, which is why the pattern could not simply
+        be quoted: quoting it would have stopped it being a pattern at all.
+        Expanding it here against real directory entries removes the
+        dilemma -- globbing still works, and nothing reaches a shell.
+
+        The expansion is ``glob.glob``'s, so every rule ``_local_glob`` obeys
+        holds here too: a trailing slash matches directories only, a leading
+        dot is matched only by a pattern that has one, an absolute pattern
+        ignores the working directory, and the returned paths are normalised
+        by ``relpath`` the same way.
+        """
+        full_path = self._get_full_path(path)
+        search_pattern = posixpath.join(full_path, pattern)
+
+        results = []
+        for match in self._remote_iglob(search_pattern, False):
+            try:
+                results.append(posixpath.relpath(match, full_path))
+            except ValueError:
+                results.append(match)
+        return sorted(results)
+
     def _remote_du(self, path: str) -> DiskUsage:
-        """Remote disk usage via SSH."""
-        ssh_client = self._get_ssh_client()
+        """Remote disk usage, walked over SFTP.
+
+        This used to run ``du -sb``, and ``-b`` is GNU coreutils only: on a
+        BSD or macOS host the command failed, ``2>/dev/null`` hid it, and the
+        directory was reported as holding zero bytes. It also measured
+        something different from ``_local_du``, which sums the sizes of the
+        regular files underneath ``path``. Walking over SFTP costs a round
+        trip per directory but is portable, needs no quoting, and counts
+        exactly what the local implementation counts.
+
+        Symlinks are counted the way ``_local_du`` counts them, which is the
+        way ``os.walk(followlinks=False)`` plus ``os.path.getsize`` do: a link
+        to a file contributes its *target's* size, once, and a link to a
+        directory contributes nothing and is not descended into. That last
+        rule is also why this loop terminates. The only way to build a cycle
+        out of POSIX directories is a symlink, and no symlink is followed, so
+        no directory can be reached twice -- which is exactly why ``os.walk``
+        needs no visited set either. A link back to an ancestor used to make
+        this an endless walk.
+        """
+        sftp = self._get_sftp_client()
         full_path = self._get_full_path(path)
 
-        # Get total size in bytes
-        cmd1 = f"du -sb {full_path} 2>/dev/null | cut -f1"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd1)
-        size_output = stdout.read().decode().strip()
+        total_size = 0
+        file_count = 0
+        pending = [full_path]
+        while pending:
+            directory = pending.pop()
+            try:
+                entries = sftp.listdir_attr(directory)
+            except OSError as exc:
+                logger.warning("Cannot read remote directory %s: %s", directory, exc)
+                continue
+            for entry in entries:
+                mode = entry.st_mode or 0
+                child = posixpath.join(directory, entry.filename)
+                if stat_module.S_ISLNK(mode):
+                    # readdir answered with lstat attributes, so this is
+                    # known to be a link and only its target matters.
+                    size = self._remote_link_target_size(child)
+                    if size is not None:
+                        total_size += size
+                        file_count += 1
+                elif stat_module.S_ISDIR(mode):
+                    # readdir may have answered with stat attributes, in
+                    # which case a link to a directory is indistinguishable
+                    # from the directory here, and descending into it is the
+                    # endless walk. One lstat settles it.
+                    if not self._remote_is_symlink(child):
+                        pending.append(child)
+                elif stat_module.S_ISREG(mode):
+                    total_size += int(entry.st_size or 0)
+                    file_count += 1
 
-        # Count files
-        cmd2 = f"find {full_path} -type f 2>/dev/null | wc -l"
-        stdin, stdout, stderr = ssh_client.exec_command(cmd2)
-        count_output = stdout.read().decode().strip()
+        return DiskUsage(total_bytes=total_size, file_count=file_count)
 
-        total_bytes = int(size_output) if size_output else 0
-        file_count = int(count_output) if count_output else 0
+    def _remote_link_target_size(self, full_path: str) -> Optional[int]:
+        """What ``os.path.getsize`` would report for a symlink, or None.
 
-        return DiskUsage(total_bytes=total_bytes, file_count=file_count)
+        ``getsize`` follows the link, so a link to a regular file counts at
+        the target's size. A link to a directory is not a file and a broken
+        link raises -- ``_local_du`` catches that ``OSError`` and skips the
+        entry, so both come back as None.
+        """
+        sftp = self._get_sftp_client()
+        try:
+            attrs = sftp.stat(full_path)
+        except OSError as exc:
+            logger.debug("Cannot stat remote symlink %s: %s", full_path, exc)
+            return None
+        if stat_module.S_ISREG(attrs.st_mode or 0):
+            return int(attrs.st_size or 0)
+        return None
 
     def _remote_count_files(self, path: str, pattern: str) -> int:
-        """Remote file counting via SSH."""
-        ssh_client = self._get_ssh_client()
-        full_path = self._get_full_path(path)
+        """Count remote files matching ``pattern``.
 
-        if pattern == "*":
-            # Count all files
-            cmd = f"find {full_path} -type f 2>/dev/null | wc -l"
-        else:
-            # Count files matching pattern
-            cmd = f"find {full_path} -name '{pattern}' -type f 2>/dev/null | wc -l"
-
-        stdin, stdout, stderr = ssh_client.exec_command(cmd)
-        output = stdout.read().decode().strip()
-
-        return int(output) if output else 0
+        The same ``find`` that ``_remote_find`` runs, counted here rather
+        than piped into ``wc -l`` -- ``wc -l`` counts newlines, and a
+        filename may contain one.
+        """
+        return len(self._remote_find(pattern, path))
 
 
 # ===== Convenience Functions =====

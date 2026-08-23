@@ -7,6 +7,11 @@ claim that it had been migrated to ``scripts/aws/`` -- that directory never
 existed until this file. See GitHub issue #95. The original source was
 recovered from git history (``git show b9c836f^:destroy_cluster.py``).
 
+Clustrix does not create EKS clusters -- there is no AWS backend and no
+provisioner in the package. This is standalone operator tooling for an
+account that already holds a clustrix-tagged cluster, run by hand when
+something that should have been torn down is still on the bill.
+
 WHAT THIS DELETES
 ------------------
 The named EKS cluster's node groups, the EKS cluster itself, its VPC and
@@ -24,9 +29,7 @@ SAFETY
 
 IDENTIFICATION / TAGGING CONVENTION
 ------------------------------------
-This script only recognizes resources created by
-``clustrix.kubernetes.aws_provisioner.AWSEKSFromScratchProvisioner``
-(see ``clustrix/kubernetes/aws_provisioner.py``), which tags/names them as:
+This script only recognizes resources carrying Clustrix's tags and names:
   * EKS cluster: tagged clustrix:managed=true, clustrix:cluster=<name>
   * VPC: tagged clustrix:managed=true, clustrix:cluster=<name>
   * IAM roles: named exactly "clustrix-eks-cluster-role-<name>" and
@@ -36,10 +39,15 @@ script refuses to touch it or anything associated with it.
 
 CREDENTIALS
 -----------
-AWS credentials are loaded via ``clustrix.credential_manager.
-FlexibleCredentialManager`` (environment variables or ``~/.clustrix/.env``).
-If no credentials are found, this script exits immediately with an error --
-it never silently falls back to boto3's default credential chain.
+AWS credentials come from boto3's own credential chain: the ``AWS_*``
+environment variables, ``~/.aws/credentials``, or an instance profile. If it
+resolves nothing, this script exits immediately with an error rather than
+letting a call fail somewhere deeper.
+
+This used to ask ``clustrix.credential_manager`` for provider ``"aws"``,
+which has never existed in ``PROVIDER_ENV_NAMES`` -- the lookup always
+returned ``None``, so the script could never authenticate at all. AWS keys
+are also not something clustrix should be holding: it has no AWS backend.
 
 Usage:
     python scripts/aws/destroy_cluster.py CLUSTER_NAME [--region REGION] [--execute]
@@ -47,8 +55,6 @@ Usage:
 
 import argparse
 import sys
-
-from clustrix.credential_manager import FlexibleCredentialManager
 
 MANAGED_TAG_KEY = "clustrix:managed"
 MANAGED_TAG_VALUE = "true"
@@ -63,9 +69,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
             "cluster, its VPC, and its IAM roles). Defaults to a DRY RUN "
             "that only prints what would be deleted. Refuses to act unless "
             f"the cluster is tagged {MANAGED_TAG_KEY}={MANAGED_TAG_VALUE} "
-            f"and {CLUSTER_TAG_KEY}=<cluster_name> -- the tags "
-            "clustrix.kubernetes.aws_provisioner applies to every cluster "
-            "it creates."
+            f"and {CLUSTER_TAG_KEY}=<cluster_name> -- an untagged cluster "
+            "is never touched, regardless of its name."
         ),
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
@@ -108,44 +113,39 @@ def get_clients(region: str):
             "        are the only thing in the project that needs it.)"
         )
 
-    manager = FlexibleCredentialManager()
-    creds = manager.ensure_credential("aws")
-    if (
-        not creds
-        or not creds.get("access_key_id")
-        or not creds.get("secret_access_key")
-    ):
+    # boto3's own credential chain, deliberately. This used to ask the
+    # clustrix credential manager for provider "aws", which has never been
+    # in PROVIDER_ENV_NAMES -- the lookup always returned None, so this
+    # script could never authenticate at all. Standard AWS environment
+    # variables, ~/.aws/credentials and instance profiles are what an
+    # operator running cleanup tooling already has, and going through the
+    # SDK's chain also keeps AWS keys out of clustrix's credential surface.
+    if boto3.Session().get_credentials() is None:
         print(
             "ERROR: No AWS credentials found. Set AWS_ACCESS_KEY_ID and "
-            "AWS_SECRET_ACCESS_KEY, or configure them in ~/.clustrix/.env, "
-            "before running this script.",
+            "AWS_SECRET_ACCESS_KEY, or configure a profile with `aws "
+            "configure`, before running this script.",
             file=sys.stderr,
         )
         raise SystemExit(1)
     eks = boto3.client(
         "eks",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     ec2 = boto3.client(
         "ec2",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     iam = boto3.client(
         "iam",
-        aws_access_key_id=creds["access_key_id"],
-        aws_secret_access_key=creds["secret_access_key"],
         region_name=region,
     )
     return eks, ec2, iam
 
 
 def iam_role_names(cluster_name: str) -> tuple:
-    """The exact IAM role names clustrix.kubernetes.aws_provisioner creates
-    for a given cluster."""
+    """The exact IAM role names a Clustrix-managed cluster carries: its
+    cluster role and its node role."""
     return (
         f"clustrix-eks-cluster-role-{cluster_name}",
         f"clustrix-eks-node-role-{cluster_name}",

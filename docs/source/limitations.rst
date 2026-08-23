@@ -22,13 +22,8 @@ Functions whose source cannot be read
 value -- they embed the code object -- so the worker never needs the source
 text.
 
-Older versions of this documentation said such functions "cannot be
-serialized". That was wrong, and it mattered: the claim was paired with
-machinery that substituted a rewritten or hardcoded function whenever
-``inspect.getsource`` failed, which at one point returned the literal string
-``"Function execution completed"`` as your result. That machinery has been
-deleted (issues #89, #90). The function you wrote is the function that gets
-serialized. Nothing is substituted for it, ever.
+The function you wrote is the function that gets serialized. Nothing is
+substituted for it, ever, and no code path rewrites it.
 
 **What is actually lost** is everything that reads source text:
 
@@ -131,6 +126,91 @@ really is in site-packages but the metadata is unreproducible, notably VCS
 installs.
 
 
+.. _limitation-local-cores:
+
+Local cores require splittable work
+-----------------------------------
+
+With no cluster configured, ``@cluster(cores=8)`` runs an ordinary function in
+the process that called it, on one core, and logs that the request has no
+effect. One call is one unit of work, so there is nothing to give seven other
+workers. Nothing forks, and the call returns when the function returns.
+
+.. code-block:: python
+
+   import os
+   import clustrix
+
+   clustrix.configure(cluster_type="local")
+
+   @clustrix.cluster(cores=8)
+   def where_did_it_run(n):
+       return os.getpid(), sum(i * i for i in range(n))
+
+   pid, _ = where_did_it_run(200_000)
+   print("this interpreter:", os.getpid())
+   print("the job ran in:  ", pid)
+   print("same process?    ", pid == os.getpid())
+
+.. code-block:: text
+
+   this interpreter: 44824
+   the job ran in:   44824
+   same process?     True
+
+There is exactly one local path where ``cores`` does size a pool: the
+parallelizing path (on by default through ``auto_parallel``, and forced with
+``parallel=True``) must find a supported loop, split it into chunks, and pass
+each chunk through a ``_parallel_<variable>`` keyword the function accepts.
+Most Python loops do not meet those rules. Even when they do, the pool size is
+an upper bound, not a promise that many workers will be busy. On that path the
+work is cut into roughly two chunks per worker, so that a worker which draws a
+slow chunk can be relieved by an idle sibling taking the next one; the count
+follows the pool you asked for, not the machine's CPU count.
+
+Three details of the "has no effect" message itself:
+
+* It is logged **once per decorated function per distinct request**, not on
+  every call, because the local path is exactly where a decorated function
+  gets called in a tight loop. Change the request -- a different
+  ``default_cores``, a different reason for declining -- and it speaks again.
+  That single message is spent only when clustrix can establish that some
+  handler would emit it. A logging filter is the case it cannot establish:
+  a filter is your code, and running it here to find out would run it twice
+  for every message that is logged, so clustrix assumes the worst and repeats
+  the message rather than risk losing it -- up to three times, and then it
+  stops.
+* A request of one worker is not reported. Every one of these routes already
+  provides one.
+* ``configure(default_cores=4)`` -- the shipped default -- is not reported
+  either, deliberately. Clustrix cannot distinguish an explicit request that
+  happens to equal the default from no request at all, and warning on the
+  shipped value would fire on every local call anyone ever makes. Any *other*
+  ``default_cores`` you set is treated as an instruction and is reported.
+
+The parallel machinery underneath is real.
+:class:`clustrix.local_executor.LocalExecutor` builds a
+``ProcessPoolExecutor`` or a ``ThreadPoolExecutor`` and gives the speedups you
+would expect.
+:func:`clustrix.local_executor.choose_executor_type` decides which pool you
+get, in two steps. First it calls ``pickle.dumps`` on your function and on
+every argument, and any failure selects threads, because a process pool has no
+way to send an unpicklable object to a worker. Then it reads
+``inspect.getsource`` and scans the text for ``open(``, ``requests.``,
+``urllib.``, ``http.``, ``ftp.``, ``sql``, ``database``, ``time.sleep`` and
+``threading.``; a hit selects threads on the theory that the work releases the
+GIL. Otherwise you get processes. That second step is a substring scan over
+source text, so it is fooled by a variable called ``sqlite_path`` and blind to
+I/O reached through a helper. Pass ``use_threads=True`` or ``use_threads=False``
+to say what you meant.
+
+For general local parallelism, drive
+:class:`~clustrix.local_executor.LocalExecutor` yourself, or use ``joblib`` or
+``concurrent.futures``. The
+:doc:`local-parallelism notebook <notebooks/local_parallel_comparison>`
+measures both the gap and what the pools are worth.
+
+
 Loop detection is much narrower than it looks
 ---------------------------------------------
 
@@ -225,21 +305,25 @@ The two paths use **different keyword names**, which is easy to trip over:
      - ``_chunk_range_<loop variable>`` **and** ``_chunk_index``
 
 Either path declines, and logs at ``INFO``, when the function cannot accept
-its chunk. Neither injects the argument any more: doing so used to raise
-``TypeError: ... got an unexpected keyword argument '_chunk_range_i'`` on the
-remote path, and on the local path the ``TypeError`` was swallowed into a
-silent sequential run.
+its chunk. Neither injects the keyword regardless; a function that declares
+neither the parameter nor ``**kwargs`` simply runs whole.
 
-Both paths also require the loop's range to be a **literal** ``range(<int>)``.
-A range whose bound is only known at run time -- ``range(n)``,
-``range(len(data))`` -- is declined. It used to be guessed as ``range(10)``,
-which meant the caller silently received a tenth of the work.
+Both paths also require the loop's bound to be something the analysis can work
+out *before* the function runs -- which is not the same as requiring a
+literal. ``SafeRangeEvaluator`` resolves a bare name against the call's bound
+arguments, so ``range(n)`` is accepted whenever ``n`` is an integer argument of
+the decorated function, and so is arithmetic over one, ``range(n + 1)``. What
+is declined is a bound that cannot be reduced to an integer without running
+something:
+
+* a call -- ``range(len(data))`` is the common one;
+* a name computed in the body rather than passed in -- ``m = n * 2`` followed
+  by ``range(m)``, because only the arguments are in scope for the evaluator;
+* a bound that is not an ``int`` at all, such as ``n=8.0``.
 
 When ``_create_local_work_chunks`` splits a loop, it hands each chunk to your
 function as a keyword argument named ``_parallel_<loop variable>``. A function
-that neither declares that parameter nor collects ``**kwargs`` cannot receive
-it, so clustrix declines to parallelize and runs the function sequentially --
-and, since this was previously silent, it now says so:
+that cannot receive it is run sequentially, and clustrix says so:
 
 .. code-block:: text
 
@@ -263,8 +347,68 @@ This is the trap most likely to produce a wrong answer rather than an error.
 * otherwise -> **the list of per-chunk results**
 
 So a function that returns a scalar returns a *list of scalars* when it is
-parallelized, and the length of that list depends on ``os.cpu_count()`` on the
-machine that ran it.
+parallelized, and the length of that list is the number of chunks the work was
+cut into -- roughly two per worker, the worker count being the ``cores`` you
+asked for. Exactly two per worker only when ``2 * cores`` divides the loop's
+length: ``chunk_size`` is a floor, so any remainder becomes a further chunk. A
+100-iteration loop across three workers is cut into seven pieces rather than
+six, and a 10-iteration loop across four workers into ten rather than eight.
+
+The "exactly one chunk" line is the helper's contract rather than something
+you can provoke today: work is only split when the loop runs at least three
+times, and ``chunk_size = max(1, len(loop_range) // (workers * 2))`` cuts any
+such loop into at least two pieces. Nothing on the decorator's path currently
+reaches that branch.
+
+Two consequences catch people out, and neither is a difference between a
+parallel run and a sequential one -- they are differences *between parallel
+runs*.
+
+**Changing the** ``cores`` **count alone changes the answer.** The chunk count follows the
+pool size, so the same call cut a different number of ways returns a different
+list:
+
+.. code-block:: python
+
+   import clustrix
+
+   clustrix.configure(cluster_type="local", cluster_host=None)
+
+   def partial_sum(n, _parallel_i=None):
+       indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
+       marker = 0
+       for i in range(n):
+           marker = i * i
+       del marker
+       return sum(indices)
+
+.. code-block:: text
+
+   partial_sum(8)                                     -> 28
+   @cluster(parallel=True, cores=1) partial_sum(8)    -> [6, 22]
+   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
+   @cluster(parallel=True, cores=4) partial_sum(8)    -> [0, 1, 2, 3, 4, 5, 6, 7]
+
+Three pool sizes, three answers, none of them 28. For a callee that returns a
+**list** the concatenation makes the parallel answer match the sequential one,
+so this only bites scalar-returning callees -- but there it bites hard, because
+nothing raises.
+
+**A short loop changes the return type.** A loop of fewer than three
+iterations is not considered worth splitting, so the same decorated function
+returns the scalar its body returns:
+
+.. code-block:: text
+
+   @cluster(parallel=True, cores=2) partial_sum(2)    -> 1     (an int)
+   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
+
+A caller who tested with a short input and shipped with a long one gets a list
+where they tested an int. Whether any of this is the right behaviour is an open
+design question -- see `issue #170
+<https://github.com/ContextLab/clustrix/issues/170>`_ -- but it is the current
+behaviour, and it is pinned by
+``tests/unit/test_local_cores.py::test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is``.
 
 .. code-block:: python
 
@@ -298,11 +442,12 @@ Called from another module, so that ``inspect.getsource`` can see it:
    print("sequential ->", type(sequential).__name__, repr(sequential))
    assert isinstance(sequential, int)
 
-On a 12-core machine that prints:
+With ``cores=4`` that prints a list of eight -- two chunks per worker -- and
+the scalar:
 
 .. code-block:: text
 
-   parallel   -> list [999, 999, 999, 999, 999, 999, 999, 999, 999, 999, 999, 999,
+   parallel   -> list [999, 999, 999, 999, 999, 999, 999, 999]
    sequential -> int 999
 
 Note also that the function above *accepts* ``_parallel_i`` and then ignores
@@ -441,27 +586,28 @@ database -- and return only a path or a summary.
 
 .. _removed-backends:
 
-Backends removed in v0.2.0
---------------------------
+Backends Clustrix does not support
+----------------------------------
 
-Clustrix once shipped seven more execution backends. All seven were implemented
-in full, and not one of them had ever been shown to run a job end to end
-against real hardware. Rather than keep publishing them as if they worked, they
-were removed in v0.2.0.
+Seven schedulers and cloud providers you might expect to find are absent. If
+you came here looking for one of them, this is the list, and each row links to
+the issue tracking its arrival.
 
-Nothing about them was deprecated gently first, and that is deliberate: a
-backend that has never completed a job is not a feature with rough edges, it is
-an untested code path with a plausible-looking API in front of it. The failure
-mode is that you write against it, it appears to submit, and you find out much
-later that no result was ever produced.
+The gate for admitting any of them is the same gate the four supported backends
+have already passed: a real job, on real hardware, whose result comes back and
+is checked in as evidence under ``docs/evidence/``. Clustrix will not publish a
+backend on the strength of code that compiles. A backend that has never
+completed a job is not a feature with rough edges; it is an untested code path
+with a plausible-looking API in front of it, and the failure mode is that you
+write against it, it appears to submit, and you learn much later that no result
+was ever produced.
 
-Each removed backend has a tracking issue. They are planned for a future
-release, and the gate for each one is the same as the gate the surviving
-backends already passed: a real job, on real hardware, whose result comes back
-and is checked in as evidence.
+Setting ``cluster_type`` to any of these names raises a ``ValueError`` that
+names the backend and its issue, so you find out at configuration time rather
+than three stages into a submission.
 
 =================  =============  ====================================================
-Backend            Issue          What it was
+Backend            Issue          What the name would select
 =================  =============  ====================================================
 PBS                `#140`_        ``cluster_type="pbs"`` -- the PBS/Torque scheduler.
 SGE                `#141`_        ``cluster_type="sge"`` -- Sun/Son of Grid Engine.
@@ -481,17 +627,15 @@ Lambda Cloud       `#146`_        ``provider="lambda"`` -- Lambda Labs GPU cloud
 .. _#145: https://github.com/ContextLab/clustrix/issues/145
 .. _#146: https://github.com/ContextLab/clustrix/issues/146
 
-Two more things went with them:
+Two adjacent things are absent for the same reason:
 
-* **The HuggingFace Spaces provider** (``provider="huggingface"``). This is a
-  different thing from ``cluster_type="huggingface"``, which is HuggingFace
-  **Jobs** and is verified working and fully supported. Only Spaces was
-  removed.
-* **The cost monitoring and cloud pricing API** --
+* **A HuggingFace Spaces provider.** Take care with the name: HuggingFace
+  *Jobs* is ``cluster_type="huggingface"``, and that one is supported and
+  verified. Spaces is a different product and Clustrix has no backend for it.
+* **A cost monitoring and cloud pricing API** -- no
   ``cost_tracking_decorator``, ``get_cost_monitor``, ``start_cost_monitoring``,
-  ``generate_cost_report`` and ``get_pricing_info``. These estimated the cost
-  of running on the cloud VM backends, so with those backends gone the API had
-  nothing left to price.
+  ``generate_cost_report`` or ``get_pricing_info``. Those priced the cloud VM
+  backends, which are not here to be priced.
 
 What to do instead
 ~~~~~~~~~~~~~~~~~~
@@ -503,8 +647,8 @@ What to do instead
   which runs your function in a container on rented GPUs and is verified end to
   end. Otherwise, bring up a VM yourself and use ``cluster_type="ssh"``, which
   is also verified.
-* **Cost estimates**: use your provider's own pricing calculator. Clustrix no
-  longer ships one.
+* **Cost estimates**: use your provider's own pricing calculator. Clustrix
+  does not ship one.
 
 
 Windows clients: config and credential files are not permission-restricted
@@ -545,7 +689,12 @@ What to do about it on Windows:
       icacls "%USERPROFILE%\.clustrix" /inheritance:r /grant:r "%USERNAME%:(OI)(CI)F"
 
   Set ``CLUSTRIX_CONFIG_DIR`` if you want that directory to be somewhere other
-  than ``%USERPROFILE%\.clustrix``.
+  than ``%USERPROFILE%\.clustrix``. Note that a config directory named by that
+  variable is not trusted to choose which host receives a *stored* credential,
+  and neither is a ``profiles.yml`` found under it -- see :ref:`the search
+  order <configuration>`. When you move it, authorise the host by setting
+  ``SSH_HOST`` in the credential file; handing the same hostname back through
+  ``configure`` or ``load_config`` does not lift the refusal.
 * Treat a saved clustrix config on Windows as you would any other unprotected
   file: do not put it on a shared drive, and do not commit it.
 
@@ -568,15 +717,24 @@ Smaller sharp edges
   than pretending otherwise.
 * **A conda environment name proves nothing.** Reuse requires the
   ``.clustrix_ready`` marker, written only after every install succeeded.
-* **``pre_execution_commands`` is not validated or quoted.** It is a raw shell
+* ``pre_execution_commands`` **is not validated or quoted.** It is a raw shell
   injection point by design. ``module_loads`` and ``environment_variables``
   keys *are* validated and will refuse metacharacters.
-* **``cores=0`` falls back to the default.** The merge is written as
-  ``cores or config.default_cores``, so any falsy value takes the default.
-* **Unknown ``@cluster`` keywords are warned about, not rejected**, and only on
-  the first call -- so a typo in a keyword name is easy to miss if you are not
-  watching the log.
-* **Some recognised ``@cluster`` keywords are still ignored by their backend.**
+* ``cores`` **must be a positive integer.** ``@cluster(cores=0)`` and
+  ``@cluster(cores=-2)`` raise ``ValueError`` at decoration time rather than
+  falling through the ``cores or config.default_cores`` merge. Booleans are
+  refused as well, at the decorator and at
+  :class:`~clustrix.local_executor.LocalExecutor`: ``bool`` subclasses
+  ``int``, so ``cores=True`` would otherwise pass the type check and be read
+  as a request for one worker.
+* **Unknown** ``@cluster`` **keywords are warned about, not rejected.** The
+  warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
+  a keyword name is easy to miss if nothing is watching that logger. This is
+  how ``@cluster(cluster_type="local")`` fails: ``cluster_type`` is a
+  *configuration* setting, not a decorator keyword, so the decorator warns and
+  ignores it. Use ``configure(cluster_type="local")``.
+* **Some recognised** ``@cluster`` **keywords are still ignored by their
+  backend.**
   ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted and placed in
   ``job_config``, but ``HFJobsManager`` resolves them from configuration
   instead. This produces no warning, because the keywords *are* on the

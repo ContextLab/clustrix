@@ -106,10 +106,13 @@ class TestFileSystemHybrid:
             assert "file2.py" in files
             assert "subdir" in files
 
-            # Verify SSH methods were called (ls uses exec_command, not SFTP)
-            mock_ssh.exec_command.assert_called()
-            # mock_ssh.open_sftp.assert_called()  # Not called for ls operation
-            # mock_sftp.listdir.assert_called_with("/remote/path")  # Not used for ls
+            # ``ls`` goes over SFTP, not over a shell. It used to run
+            # ``ls -1 {path}`` through exec_command, which is how issue #154's
+            # injection reached the far end; listdir needs no shell, so there
+            # is no command to inject into.
+            mock_ssh.open_sftp.assert_called()
+            mock_sftp.listdir.assert_called_with("/remote/path")
+            mock_ssh.exec_command.assert_not_called()
 
     def test_error_handling_hybrid(self):
         """Test error handling with real and mocked errors."""

@@ -1,4 +1,11 @@
-# GPU Detection Fix for gpu
+# GPU Detection Fix
+
+> **Historical record.** This file documents work completed at the time it
+> was written. It is kept for provenance and does not describe current
+> behaviour. The `gpu_config.yml` it refers to is not in the repository.
+> `can_reach_configured_cluster()` does still live in
+> `tests/real_world/conftest.py`. For current behaviour see the docs under
+> `docs/source/`.
 
 ## Issue Summary
 
@@ -42,7 +49,7 @@ The fix removes the CUDA_VISIBLE_DEVICES restriction, allowing PyTorch to detect
 
 Additionally implemented the requested test skipping functionality:
 
-### the institution Network Detection
+### Cluster network detection
 - Added `can_reach_configured_cluster()` function to detect VPN/on-campus access
 - Automatically skips gpu/hpc2 tests when not on cluster network
 - Prevents GitHub Actions failures while preserving local test functionality

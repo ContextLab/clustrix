@@ -22,9 +22,13 @@ from clustrix import (
     cluster_count_files,
 )
 from clustrix.config import ClusterConfig
-from clustrix.secure_credentials import ValidationCredentials
 
-from tests.real_world.credential_manager import require_test_remote_work_dir
+from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
+    require_cluster_credentials,
+    require_test_remote_work_dir,
+)
 
 
 def test_local_filesystem():
@@ -150,19 +154,15 @@ def test_remote_filesystem():
     print("\n🧪 Testing Remote Filesystem Operations")
     print("=" * 50)
 
-    # Get SSH credentials
-    creds = ValidationCredentials()
-    ssh_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
-
-    if not ssh_creds:
-        print("❌ No SSH credentials found. Skipping remote tests.")
-        return False
+    # Credentials come from ~/.clustrix/.env or the environment; skip loudly
+    # rather than return False, which pytest reports as a pass.
+    ssh_creds = require_cluster_credentials("slurm")
 
     # Configure for remote testing
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host=ssh_creds.get("hostname"),
-        username=ssh_creds.get("username"),
+        cluster_host=ssh_creds["host"],
+        username=ssh_creds["username"],
         password=ssh_creds.get("password"),
         remote_work_dir=f"{require_test_remote_work_dir()}/clustrix_test",
     )
@@ -234,14 +234,13 @@ def test_consistency():
         print(f"   {key}: {value}")
 
     # Test with remote config (if available)
-    creds = ValidationCredentials()
-    ssh_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
+    ssh_creds = get_cluster_credentials("slurm")
 
     if ssh_creds:
         remote_config = ClusterConfig(
             cluster_type="slurm",
-            cluster_host=ssh_creds.get("hostname"),
-            username=ssh_creds.get("username"),
+            cluster_host=ssh_creds["host"],
+            username=ssh_creds["username"],
             password=ssh_creds.get("password"),
             remote_work_dir=require_test_remote_work_dir(),
         )
@@ -253,7 +252,7 @@ def test_consistency():
 
         print("\n✅ Same code executed successfully on both local and remote!")
     else:
-        print("\n⚠️  No SSH credentials available for remote testing")
+        print(f"\n⚠️  No credentials for the slurm cluster. {CREDENTIAL_SETUP_HINT}")
 
     return True
 

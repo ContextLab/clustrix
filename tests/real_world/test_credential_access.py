@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Test script to verify credential access methods."""
+"""Verify the supported credential path actually resolves credentials.
+
+This file used to test 1Password. 1Password was removed from clustrix in
+issue #97, and `SecureCredentialManager` has since been an inert shell whose
+`is_op_available()` returns False unconditionally -- so the old
+`test_1password_access` could only ever print "not authenticated" and return
+False, which pytest reports as a pass. It tested nothing (issue #153).
+
+What is checked now is the path that exists: ~/.clustrix/.env and the
+environment, read through `clustrix.credential_manager`. No credential is
+invented when one is missing; the assertions below only claim what the
+environment actually contains.
+"""
 
 import os
 import sys
@@ -8,127 +20,129 @@ from pathlib import Path
 # Add clustrix to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import SecureCredentialManager, ValidationCredentials
+from clustrix.credential_manager import (  # noqa: E402
+    get_credential_status,
+    parse_env_file,
+)
+from clustrix.credential_release import (  # noqa: E402
+    CredentialTarget,
+    release_credential,
+)
+from clustrix.secure_credentials import ValidationCredentials  # noqa: E402
+from tests.real_world.credential_manager import (  # noqa: E402
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
+)
 
 
-def test_1password_access():
-    """Test 1Password CLI access."""
-    print("🔐 Testing 1Password CLI Access")
+def test_credential_status_reports_real_sources():
+    """`get_credential_status` describes the .env file and every source."""
+    print("🔐 Testing clustrix credential sources")
     print("=" * 40)
 
-    cred_manager = SecureCredentialManager()
+    status = get_credential_status()
 
-    print(f"1Password CLI available: {cred_manager.is_op_available()}")
+    # The shape is a contract other tooling reads; assert it, not the contents,
+    # because the contents depend on what this developer has configured.
+    assert set(status) >= {"env_file", "env_file_exists", "sources", "providers"}
+    assert status["env_file"].endswith(".env")
+    assert {"DotEnvCredentialSource", "EnvironmentCredentialSource"} <= set(
+        status["sources"]
+    )
+    assert {"ssh", "huggingface"} <= set(status["providers"])
 
-    if not cred_manager.is_op_available():
-        print("\n❌ 1Password CLI not authenticated")
-        print("\nTo enable 1Password CLI:")
-        print("1. Open 1Password app")
-        print("2. Go to Settings → Developer")
-        print("3. Enable 'Connect with 1Password CLI'")
-        print("4. Or run: op signin")
-        return False
-
-    print("✅ 1Password CLI is available and authenticated")
-
-    # Test retrieving a credential
-    try:
-        test_cred = cred_manager.get_credential(
-            "clustrix-huggingface-validation", "token"
-        )
-        if test_cred:
-            print(
-                f"✅ Successfully retrieved HuggingFace token (length: {len(test_cred)})"
-            )
-            return True
-        else:
-            print("⚠️  Could not retrieve HuggingFace token")
-            return False
-    except Exception as e:
-        print(f"❌ Error retrieving credential: {e}")
-        return False
+    print(f"   .env file: {status['env_file']} (exists: {status['env_file_exists']})")
+    for provider, provider_status in status["providers"].items():
+        icon = "✅" if provider_status["available"] else "❌"
+        print(f"   {icon} {provider}: source={provider_status['source']}")
 
 
-def test_validation_credentials():
-    """Test the ValidationCredentials class."""
-    print("\n🧪 Testing ValidationCredentials")
+def test_huggingface_credentials_match_the_environment():
+    """A configured HF token is returned; an unconfigured one yields None."""
+    print("\n🧪 Testing HuggingFace credential lookup")
     print("=" * 40)
 
-    creds = ValidationCredentials()
+    # Resolving a credential deliberately does NOT export it, so os.environ
+    # alone cannot say what is configured: a token that lives only in
+    # ~/.clustrix/.env is invisible there. Read the same two places clustrix
+    # reads, in the same precedence order (environment over file).
+    status = get_credential_status()
+    configured = {**parse_env_file(Path(status["env_file"])), **os.environ}
+    env_token = configured.get("HF_TOKEN") or configured.get("HUGGINGFACE_TOKEN")
 
-    # Test HuggingFace credentials
-    hf_creds = creds.get_huggingface_credentials()
-    if hf_creds:
-        print("✅ HuggingFace credentials found")
-        token = hf_creds.get("token", "")
-        print(f"   Token length: {len(token) if token else 0}")
-        if hf_creds.get("username"):
-            print(f"   Username: {hf_creds['username']}")
+    # A token only comes out through the gate, which requires the host about
+    # to receive it. huggingface.co is compiled in, not configured.
+    hf_release = release_credential(
+        CredentialTarget.fixed_service("huggingface.co", why="the HuggingFace Hub API"),
+        provider="huggingface",
+    )
+    hf_creds = {"token": hf_release.token} if hf_release.token else None
+    validation_creds = ValidationCredentials().get_huggingface_credentials()
+
+    if hf_creds and hf_creds.get("token"):
+        # Whatever was returned must be what is actually configured, not a
+        # placeholder: compare against the environment it came from.
+        assert hf_creds["token"] == env_token
+        assert validation_creds is not None
+        assert validation_creds["token"] == env_token
+        print(f"   ✅ token resolved (length {len(hf_creds['token'])})")
     else:
-        print("❌ HuggingFace credentials not found")
-
-    # Test SSH credentials
-    ssh_creds = creds.get_ssh_credentials()
-    if ssh_creds:
-        print("✅ SSH credentials found")
-        print(f"   Host: {ssh_creds.get('host', 'not set')}")
-    else:
-        print("❌ SSH credentials not found")
+        # No token configured: both paths must say so rather than substitute.
+        assert not env_token, "HF token is configured but was not resolved"
+        assert validation_creds is None
+        print("   ❌ no HF token configured (HF_TOKEN / HUGGINGFACE_TOKEN unset)")
 
 
-def test_environment_fallback():
-    """Test environment variable fallback."""
-    print("\n🌍 Testing Environment Variable Fallback")
-    print("=" * 45)
+def test_cluster_credentials_are_complete_or_absent():
+    """Cluster credentials are either fully usable or None -- never partial."""
+    print("\n🌍 Testing cluster credential resolution")
+    print("=" * 40)
 
-    env_vars = [
-        "HUGGINGFACE_TOKEN",
-        "HF_TOKEN",
-    ]
+    for role in ("ssh", "slurm"):
+        credentials = get_cluster_credentials(role)
+        if credentials is None:
+            print(f"   ❌ {role}: not configured")
+            continue
 
-    found_vars = []
-    for var in env_vars:
-        value = os.getenv(var)
-        if value:
-            found_vars.append(var)
-            print(f"✅ {var}: {'*' * min(len(value), 10)}")
-        else:
-            print(f"❌ {var}: Not set")
-
-    print(f"\nEnvironment variables found: {len(found_vars)}/{len(env_vars)}")
-
-    if found_vars:
-        print("✅ Some credentials available via environment variables")
-        return True
-    else:
-        print("❌ No credentials found in environment variables")
-        return False
+        # A half-populated credential connects, fails to authenticate seconds
+        # later, and reads like a broken cluster. Guarantee it cannot happen.
+        assert credentials["host"], f"{role} credentials have no host"
+        assert credentials["username"], f"{role} credentials have no username"
+        assert credentials.get("password") or credentials.get(
+            "private_key_path"
+        ), f"{role} credentials have neither a password nor a key file"
+        print(f"   ✅ {role}: {credentials['username']}@{credentials['host']}")
 
 
 def main():
-    """Main test function."""
-    print("🔍 Clustrix Credential Access Test")
+    """Print a credential report for a developer setting this machine up."""
+    print("🔍 Clustrix Credential Access Report")
     print("=" * 45)
 
-    op_success = test_1password_access()
-    test_validation_credentials()
-    env_success = test_environment_fallback()
+    test_credential_status_reports_real_sources()
+    test_huggingface_credentials_match_the_environment()
+    test_cluster_credentials_are_complete_or_absent()
 
-    print(f"\n📊 Summary:")
-    print(f"   1Password CLI: {'✅' if op_success else '❌'}")
-    print(f"   Environment Variables: {'✅' if env_success else '❌'}")
+    configured = [
+        role for role in ("ssh", "slurm") if get_cluster_credentials(role) is not None
+    ]
+    has_hf = bool(
+        release_credential(
+            CredentialTarget.fixed_service(
+                "huggingface.co", why="the HuggingFace Hub API"
+            ),
+            provider="huggingface",
+        ).token
+    )
 
-    if op_success:
-        print("\n🎉 1Password integration working!")
-        print("   Ready for full credential validation")
-    elif env_success:
-        print("\n⚠️  1Password not available, but environment variables found")
-        print("   Some validation possible with environment credentials")
-    else:
-        print("\n❌ No credential access methods available")
-        print("   Set up 1Password CLI or environment variables")
+    print("\n📊 Summary:")
+    print(f"   Cluster roles configured: {configured or 'none'}")
+    print(f"   HuggingFace token: {'✅' if has_hf else '❌'}")
 
-    return op_success or env_success
+    if not configured and not has_hf:
+        print(f"\n❌ No credentials available. {CREDENTIAL_SETUP_HINT}")
+        return False
+    return True
 
 
 if __name__ == "__main__":

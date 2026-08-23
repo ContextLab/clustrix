@@ -357,7 +357,10 @@ class TestEnhancedClusterConfigWidget:
             "cluster_port": 443,
             "default_cores": 12,
             "default_memory": "64GB",
-            "queue": "production",
+            # ``queue`` until #165: not a ClusterConfig field, so the value
+            # went into the profile and no further. #158 removed its last
+            # consumer; ``default_partition`` is what SLURM actually reads.
+            "default_partition": "production",
             "package_manager": "uv",
         }
         # Add test config and load it
@@ -373,7 +376,7 @@ class TestEnhancedClusterConfigWidget:
         assert widget.port_field.value == 443
         assert widget.cores_field.value == 12
         assert widget.memory_field.value == "64GB"
-        assert widget.queue_field.value == "production"
+        assert widget.partition_field.value == "production"
         assert widget.package_manager.value == "uv"
 
     def test_cluster_type_field_visibility(self, mock_ipython_environment):

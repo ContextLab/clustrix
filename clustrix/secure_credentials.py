@@ -9,17 +9,28 @@ For credential management, please use:
 - clustrix.cli_credentials for command-line credential management
 """
 
-import os
 import logging
-from pathlib import Path
 from typing import Dict, Optional
-from .config import get_config_dir
 
 logger = logging.getLogger(__name__)
 
+#: What a caller of the removed 1Password API should do instead. Kept as one
+#: string so the deprecation error and the module docstring cannot drift.
+REPLACEMENT_GUIDANCE = (
+    "1Password support was removed from Clustrix in issue #97. "
+    "Store credentials in ~/.clustrix/.env (see `clustrix credentials setup`) "
+    "and read them with clustrix.credential_manager instead."
+)
+
 
 class SecureCredentialManager:
-    """Legacy credential manager - 1Password support removed."""
+    """Legacy credential manager - 1Password support removed.
+
+    Every retrieval method reports "no credential" because the backing store
+    is gone; :meth:`store_credential` raises instead, because a write that
+    silently reports failure looks identical to a credential that was saved
+    and then lost.
+    """
 
     def __init__(self, vault_name: str = "Private"):
         """Initialize legacy credential manager."""
@@ -51,64 +62,78 @@ class SecureCredentialManager:
         credential_data: Dict[str, str],
         category: str = "API_CREDENTIAL",
     ) -> bool:
-        """1Password credential storage no longer supported."""
-        logger.warning("1Password credential storage is no longer supported")
-        return False
+        """Always raises: there is no store to write to.
+
+        Raises:
+            NotImplementedError: always, naming the supported alternative.
+        """
+        raise NotImplementedError(
+            f"SecureCredentialManager.store_credential cannot store {item_name!r}: "
+            + REPLACEMENT_GUIDANCE
+        )
 
 
 class ValidationCredentials:
-    """Provides credentials for external service validation using environment variables only."""
+    """HuggingFace credentials for external service validation.
+
+    HuggingFace only. There used to be a ``get_ssh_credentials`` here that
+    returned ``None`` unconditionally, which is worse than not having one:
+    a caller reads the ``None`` as "no SSH credentials are configured"
+    rather than "this class never had any to give". SSH credentials come
+    from :mod:`clustrix.credential_manager`.
+    """
 
     def __init__(self):
-        logger.info("Using environment variable fallback for validation credentials")
+        logger.info("Using the clustrix credential manager for validation credentials")
 
     def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
-        """Get HuggingFace credentials from environment variables."""
-        token = os.getenv("HUGGINGFACE_TOKEN") or os.getenv("HF_TOKEN")
-        if token:
-            return {"token": token, "username": os.getenv("HUGGINGFACE_USERNAME", "")}
-        return None
+        """Get HuggingFace credentials from every supported source.
 
-    def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
-        """SSH credentials no longer available - use ~/.clustrix/.env instead."""
-        return None
+        This read ``os.environ`` directly, which worked only by accident:
+        some earlier lookup in the same process called ``load_dotenv`` and
+        exported ``~/.clustrix/.env`` into the environment, so a token that
+        lived *only* in that file appeared to be an environment variable.
+        Removing that process-wide export (issue #153) made the accident
+        visible as a regression -- ``tests/real_world/test_credential_access.py``
+        and ``scripts/debug_huggingface_auth.py`` both stopped finding a
+        token they were correctly configured to have.
 
+        Going through
+        :func:`clustrix.credential_release.release_credential` fixes it
+        properly rather than by re-exporting: that is the supported lookup,
+        it consults the environment *and* ``~/.clustrix/.env``, and it
+        honours the ``HUGGINGFACE_*``/``HF_*`` aliases from one table so the
+        two sources cannot disagree about which names count.
 
-def ensure_secure_environment():
-    """Ensure environment is set up securely for credential handling."""
-    clustrix_dir = get_config_dir()
-    clustrix_dir.mkdir(exist_ok=True)
+        The recipient is ``huggingface.co``, and it is a
+        :meth:`~clustrix.credential_release.CredentialTarget.fixed_service`
+        because no configuration file can move it: unlike ``cluster_host``,
+        nothing untrusted can have chosen who receives this token.
 
-    # Create .gitignore patterns to prevent credential leaks
-    gitignore_patterns = [
-        "# Clustrix security",
-        "**/.clustrix/credentials/**",
-        "**/.clustrix/keys/**",
-        "**/clustrix-credentials.json",
-        "**/clustrix-*.pem",
-        "**/clustrix-*.key",
-        "**/*-credentials.json",
-        "**/*-service-account.json",
-        ".env.local",
-        ".env.validation",
-    ]
+        That was not true while it was written here, and route 13b is why:
+        the *decision* named ``huggingface.co``, but every client built
+        around the released token was ``HfApi(token=...)`` with no
+        ``endpoint=``, which ``huggingface_hub`` fills in from
+        ``$HF_ENDPOINT``. An inherited environment variable chose where the
+        token actually went. It is true now because
+        :func:`clustrix.credential_release.huggingface_client_kwargs` pins
+        the client to the host the gate decided about.
+        """
+        from .credential_release import (
+            CredentialTarget,
+            describe_credential,
+            release_credential,
+        )
 
-    # Add patterns to project .gitignore if not already present
-    gitignore_path = Path.cwd() / ".gitignore"
-    if gitignore_path.exists():
-        existing_content = gitignore_path.read_text()
-        if "# Clustrix security" not in existing_content:
-            with gitignore_path.open("a") as f:
-                f.write("\n" + "\n".join(gitignore_patterns) + "\n")
-
-    # Create secure credentials directory
-    cred_dir = clustrix_dir / "credentials"
-    cred_dir.mkdir(exist_ok=True)
-
-    # Set restrictive permissions (Unix-like systems)
-    try:
-        cred_dir.chmod(0o700)  # rwx------
-    except Exception:
-        pass  # Windows or other systems
-
-    return cred_dir
+        target = CredentialTarget.fixed_service(
+            "huggingface.co",
+            why="the HuggingFace Hub API, which is compiled in rather than configured",
+        )
+        release = release_credential(target, provider="huggingface")
+        if not release.token:
+            return None
+        return {
+            "token": release.token,
+            # Kept as "" rather than absent: every caller indexes it.
+            "username": describe_credential("huggingface").username,
+        }

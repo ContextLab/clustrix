@@ -9,9 +9,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
+from tests.real_world.credential_manager import require_cluster_credentials
 
 
 def simple_test():
@@ -36,13 +36,9 @@ def test_slurm_cluster_environment_setup():
     config_path = Path(__file__).parent.parent / "slurm_cluster_config.yml"
     config = ClusterConfig.load_from_file(str(config_path))
 
-    # Get credentials for password
-    creds = ValidationCredentials()
-    slurm_creds = creds.cred_manager.get_structured_credential("clustrix-ssh-slurm")
-
-    if not slurm_creds:
-        print("❌ No credentials found")
-        return False
+    # Credentials come from ~/.clustrix/.env or the environment; skip loudly
+    # rather than return False, which pytest reports as a pass.
+    slurm_creds = require_cluster_credentials("slurm")
 
     # Update config with password
     config.password = slurm_creds.get("password")

@@ -1,18 +1,24 @@
-# Migration Guide: From Mocked to Real Tests
+# Replacing Mock-Based Tests With Real Ones
 
-This guide helps you migrate existing mock-based tests to real-world tests following the NO MOCKS principle.
+Roughly a fifth of the test modules still assert against `unittest.mock` in
+ways the project's testing policy does not allow. Replacing them is issue
+[#117](https://github.com/ContextLab/clustrix/issues/117). This page is the
+working guide for that: how to tell which tests need replacing, what to
+replace them with, and how to check the replacement is real.
 
-## Table of Contents
-1. [Why Migrate?](#why-migrate)
-2. [Migration Strategy](#migration-strategy)
-3. [Common Patterns](#common-patterns)
-4. [Step-by-Step Examples](#step-by-step-examples)
-5. [Tools and Helpers](#tools-and-helpers)
-6. [Validation Checklist](#validation-checklist)
+New tests must not add to the count.
 
-## Why Migrate?
+## Contents
+1. [Why](#why)
+2. [Strategy](#strategy)
+3. [Common patterns](#common-patterns)
+4. [Worked examples](#worked-examples)
+5. [Tools](#tools)
+6. [Checklist](#checklist)
 
-### Problems with Mock-Based Tests
+## Why
+
+### What a mock-based test does not tell you
 
 Mock-based tests often miss critical issues:
 
@@ -43,22 +49,31 @@ def test_remote_execution(mock_executor):
 Real tests catch actual problems:
 
 ```python
-# ✅ Real test that validates actual functionality
+# Real test that validates actual functionality
 def test_remote_execution_real():
-    configure(cluster_type="local")  # Real execution
-    
+    configure(cluster_type="local")  # the backend is set here, not on @cluster
+
     @cluster(cores=4)
     def compute(x):
-        import numpy as np  # Real import
-        return np.array([x]) * 2  # Real computation
-    
+        import numpy as np  # a real import, in a real interpreter
+        return np.array([x]) * 2  # a real computation
+
     result = compute(21)
-    assert result[0] == 42  # Tests actual execution
+    assert result[0] == 42  # the assertion is on what the function returned
 ```
 
-## Migration Strategy
+Two things about that example. `cluster_type` is not a `@cluster` keyword —
+passing it there logs "@cluster received unrecognised option(s)" and is
+ignored, so the backend has to come from `configure`. And on the `local`
+backend `cores=4` has no effect: the function runs in the caller's own
+process, sequentially. That is issue
+[#152](https://github.com/ContextLab/clustrix/issues/152). Real in-process
+parallelism lives in `clustrix.local_executor.LocalExecutor`, which is a
+separate entry point.
 
-### Phase 1: Identify Tests to Migrate
+## Strategy
+
+### Step 1: Find the tests that need replacing
 
 Run the audit script to find tests using mocks:
 
@@ -74,30 +89,34 @@ High-priority files to refactor:
 ...
 ```
 
-### Phase 2: Prioritize Migration
+### Step 2: Order the work
 
-Migrate in this order:
+Take them in this order:
 1. **Critical Path Tests**: Core functionality tests
 2. **Integration Tests**: Multi-component interactions
 3. **User-Facing Tests**: Public API tests
 4. **Utility Tests**: Helper function tests
 
-### Phase 3: Setup Infrastructure
+### Step 3: Stand up the infrastructure
 
-Ensure test infrastructure is available:
+The real tests need somewhere real to run:
 
 ```bash
-# Setup local test infrastructure
+# Bring the local test services up
 python tests/infrastructure/setup_test_infrastructure.py setup
 
-# Verify services
+# Check what is running
+python tests/infrastructure/setup_test_infrastructure.py status
 docker ps
-kubectl cluster-info
 ```
 
-### Phase 4: Migrate Tests
+`tests/infrastructure/docker-compose.yml` defines the services: an SSH server
+and a SLURM container. Tear them down again with
+`... setup_test_infrastructure.py teardown`.
 
-Follow the patterns below to convert mock-based tests to real tests.
+### Step 4: Rewrite
+
+Follow the patterns below.
 
 ## Common Patterns
 
@@ -161,6 +180,7 @@ def test_hf_job_real():
 
     @cluster(cores=1, memory="512MB")
     def hf_task():
+        import os
         import socket
         return {
             'hostname': socket.gethostname(),
@@ -243,11 +263,11 @@ def test_serialization_real():
     assert result['col']['mean'] == 3.0
 ```
 
-## Step-by-Step Examples
+## Worked examples
 
-### Example 1: Migrating a Complete Test Class
+### Example 1: a whole test class
 
-**Original Mock-Based Test:**
+**Mock-based:**
 ```python
 class TestClusterExecutor:
     @patch('paramiko.SSHClient')
@@ -264,7 +284,7 @@ class TestClusterExecutor:
         assert job_id == 'job_123'
 ```
 
-**Migrated Real Test:**
+**Real:**
 ```python
 class TestClusterExecutorReal:
     @pytest.fixture
@@ -288,7 +308,7 @@ class TestClusterExecutorReal:
             ssh_config = ClusterConfig()
             ssh_config.cluster_type = "ssh"
             ssh_config.cluster_host = os.getenv("TEST_SSH_HOST")
-            ssh_config.username = os.getenv("TEST_SSH_USER")
+            ssh_config.username = os.getenv("TEST_SSH_USERNAME")
             
             ssh_executor = ClusterExecutor(ssh_config)
             ssh_executor.connect()
@@ -323,9 +343,9 @@ class TestClusterExecutorReal:
         executor.disconnect()
 ```
 
-### Example 2: Migrating Integration Tests
+### Example 2: an integration test
 
-**Original Mock-Based Integration Test:**
+**Mock-based:**
 ```python
 @patch('clustrix.executor.ClusterExecutor.submit_job')
 @patch('clustrix.executor.ClusterExecutor.wait_for_result')
@@ -341,7 +361,7 @@ def test_end_to_end(mock_wait, mock_submit):
     assert result == {'result': 'success'}
 ```
 
-**Migrated Real Integration Test:**
+**Real:**
 ```python
 def test_end_to_end_real():
     """Test complete workflow with real execution."""
@@ -382,114 +402,46 @@ def test_end_to_end_real():
     assert result['overall_std'] > 0
 ```
 
-## Tools and Helpers
+## Tools
 
-### Migration Helper Script
+`tests/audit_antipatterns.py` walks the test tree and reports what it finds,
+ranked by file. Run it before you start and again when you think you are
+finished:
 
-```python
-#!/usr/bin/env python3
-"""
-Helper script to assist in test migration.
-"""
-
-import ast
-import sys
-from pathlib import Path
-
-def find_mock_usage(filepath):
-    """Find mock usage in a test file."""
-    with open(filepath, 'r') as f:
-        tree = ast.parse(f.read())
-    
-    mocks = []
-    for node in ast.walk(tree):
-        # Find @patch decorators
-        if isinstance(node, ast.FunctionDef):
-            for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call):
-                    if hasattr(decorator.func, 'id') and decorator.func.id == 'patch':
-                        mocks.append({
-                            'type': 'patch',
-                            'line': decorator.lineno,
-                            'function': node.name
-                        })
-        
-        # Find Mock() usage
-        if isinstance(node, ast.Call):
-            if hasattr(node.func, 'id') and 'Mock' in node.func.id:
-                mocks.append({
-                    'type': 'mock_object',
-                    'line': node.lineno
-                })
-    
-    return mocks
-
-def suggest_replacement(mock_info):
-    """Suggest replacement for mock usage."""
-    suggestions = {
-        'paramiko.SSHClient': 'Use test SSH server on localhost:2222',
-        'builtins.open': 'Use tempfile.NamedTemporaryFile',
-        'cloudpickle.dumps': 'Test actual serialization/deserialization',
-        'subprocess.run': 'Execute real commands in Docker container'
-    }
-    
-    return suggestions.get(mock_info.get('target'), 'Use real implementation')
-
-if __name__ == '__main__':
-    test_file = sys.argv[1] if len(sys.argv) > 1 else 'test_example.py'
-    
-    mocks = find_mock_usage(test_file)
-    
-    print(f"Found {len(mocks)} mock usages in {test_file}")
-    for mock in mocks:
-        print(f"  Line {mock['line']}: {mock['type']}")
-        print(f"    Suggestion: {suggest_replacement(mock)}")
+```bash
+python tests/audit_antipatterns.py
 ```
 
-### Test Infrastructure Validator
+Two grep checks are worth keeping in your fingers. The first is the one the
+project treats as a hard invariant — production code must never know it is
+being tested, so this must stay empty:
 
-```python
-def validate_test_infrastructure():
-    """Validate that test infrastructure is ready."""
-    checks = {
-        'Docker': check_docker,
-        'SSH Server': check_ssh,
-        'MinIO': check_minio,
-        'PostgreSQL': check_postgres,
-        'Redis': check_redis
-    }
-    
-    ready = True
-    for name, check_func in checks.items():
-        try:
-            check_func()
-            print(f"✅ {name} is ready")
-        except Exception as e:
-            print(f"❌ {name} is not ready: {e}")
-            ready = False
-    
-    return ready
-
-def check_docker():
-    subprocess.run(['docker', 'ps'], check=True, capture_output=True)
-
-def check_ssh():
-    import socket
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.settimeout(1)
-    result = sock.connect_ex(('localhost', 2222))
-    sock.close()
-    if result != 0:
-        raise ConnectionError("SSH server not accessible")
+```bash
+grep -rn "unittest.mock\|MagicMock\|isinstance(.*Mock" clustrix/
 ```
 
-## Validation Checklist
+The second tells you whether a file you just rewrote still has mocks in it:
 
-After migrating a test, verify:
+```bash
+grep -rn "@patch\|MagicMock\|Mock(" tests/test_executor_real.py
+```
+
+To check the local services a real test needs are up:
+
+```bash
+python tests/infrastructure/setup_test_infrastructure.py status
+```
+
+That reports on the containers defined in
+`tests/infrastructure/docker-compose.yml` — SSH server and SLURM.
+
+## Checklist
+
+After rewriting a test, check:
 
 ### Functionality Checklist
 - [ ] Test executes without mocks
-- [ ] Real infrastructure is used (local/Docker/Kind)
+- [ ] Real infrastructure is used (local process, or the Docker services above)
 - [ ] Actual computations are performed
 - [ ] Results are validated for correctness
 - [ ] Error cases are tested with real errors
@@ -576,12 +528,10 @@ def test_file_ops():
         os.unlink(temp_path)  # Always cleanup
 ```
 
-## Conclusion
+## What you get for the effort
 
-Migrating from mocked to real tests requires effort but provides:
-- **Confidence**: Tests validate actual functionality
-- **Coverage**: Real issues are caught before production
-- **Documentation**: Tests serve as working examples
-- **Maintainability**: Less brittle than mock-based tests
+A test that ran against the real thing is evidence about the real thing. It
+also doubles as a working example, and it does not break every time someone
+reorders the arguments of a function it never actually called.
 
 Follow this guide to systematically migrate your tests and join the **NO MOCKS** revolution!

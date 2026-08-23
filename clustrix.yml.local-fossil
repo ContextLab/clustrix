@@ -1,0 +1,15 @@
+Ndoli Cluster:
+  cluster_host: ndoli.dartmouth.edu
+  cluster_port: 22
+  cluster_type: slurm
+  cost_monitoring: false
+  default_cores: 2
+  default_memory: 8GB
+  default_time: 01:00:00
+  key_file: '/Users/jmanning/.ssh/id_ed25519_slurm_ndoli_dartmouth_edu'
+  name: Ndoli
+  package_manager: auto
+  python_executable: python
+  remote_work_dir: ' /dartfs/rc/lab/D/DBIC/CDL/data/f002d6b'
+  username: f002d6b
+

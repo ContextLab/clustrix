@@ -12,16 +12,21 @@ below would document every class and function twice.
 Overview
 --------
 
-The filesystem utilities module provides a unified interface for filesystem operations that work seamlessly across local and remote clusters. All operations use the same API regardless of whether you're working locally or on a remote cluster.
+One set of calls -- ``cluster_ls``, ``cluster_find``, ``cluster_stat``,
+``cluster_exists``, ``cluster_isdir``, ``cluster_isfile``, ``cluster_glob``,
+``cluster_du``, ``cluster_count_files`` -- answers questions about a
+filesystem, and the same call works whether that filesystem is the one under
+your feet or one on a cluster. Which it is depends on the
+:class:`~clustrix.config.ClusterConfig` you pass, not on how you write the
+call. In other words, you write the code once and choose the machine later.
 
-Key Features
-------------
+``cluster_stat`` and ``cluster_du`` return :class:`FileInfo` and
+:class:`DiskUsage` rather than tuples, so the fields have names.
 
-- **Unified API**: Same function calls work locally and remotely
-- **Automatic SSH Management**: Transparent connection handling for remote operations
-- **Path Normalization**: Consistent path handling across platforms
-- **Data Structures**: Structured returns via `FileInfo` and `DiskUsage` classes
-- **Config-Driven**: Uses `ClusterConfig` to determine local vs remote execution
+These utilities are **read-only**. There is no ``cluster_put``, no
+``cluster_get``, and no copy or delete. They tell you what is on a filesystem.
+To send data to a worker, declare it with :func:`clustrix.data_package` and
+pass the result to your function as an argument.
 
 Behind the Scenes
 ------------------
@@ -33,7 +38,7 @@ verified directly against ``clustrix/filesystem.py``: each one is
 ``fs = ClusterFilesystem(config); return fs.<method>(...)``. What that
 instance actually does depends on ``config.cluster_type``:
 
-**Local (``cluster_type="local"``).** Every operation is a plain ``os`` /
+**Local** (``cluster_type="local"``). Every operation is a plain ``os`` /
 ``glob`` call against ``config.local_work_dir`` (or the current directory if
 that's unset) -- no network, no subprocess, nothing to open or close.
 
@@ -59,7 +64,7 @@ for a tight loop:
    from clustrix.config import ClusterConfig
 
    remote_config = ClusterConfig(
-       cluster_type="slurm", cluster_host="cluster.edu", username="researcher"
+       cluster_type="slurm", cluster_host="cluster.example.edu", username="researcher"
    )
    fs = ClusterFilesystem(remote_config)
    for name in fs.ls("data/"):        # first call opens the connection
@@ -80,6 +85,41 @@ rewrites ``config.cluster_type`` to ``"local"`` in place and logs that it
 did so. This matters for code that runs *on* a shared-filesystem HPC
 cluster already: it avoids SSH-ing to itself over the loopback interface
 for every filesystem call.
+
+What the remote side promises
+-----------------------------
+
+The point of one call working against two filesystems is that it gives the
+same answer on both. Three places where that is easy to get wrong, and what
+each one actually does:
+
+**Globbing is** ``glob.glob``. ``_local_glob`` is a thin wrapper around the
+standard library, and the remote side runs that same algorithm --
+``glob._iglob``, ``_glob0``, ``_glob1`` and ``_iterdir``, mirrored
+component-for-component with SFTP where the stdlib uses ``os`` -- against
+remote directory entries. Nothing reaches a shell, so no pattern needs
+quoting and none can be injected. Every rule you know from ``glob.glob``
+therefore holds remotely: a trailing slash matches directories only, so
+``"*/"`` returns directories and ``"alpha.csv/"`` returns nothing at all; a
+leading dot is matched only by a pattern that has one; and an absolute
+pattern ignores the working directory entirely. Both sides then reduce each
+match with ``os.path.relpath`` against the search directory, so a pattern
+containing ``..`` comes back in the same normalised shape either way. Brace
+expansion is a shell feature rather than a ``glob``
+one, so ``"*.{yml,json}"`` matches a file literally named that and nothing
+else. Match each extension separately.
+
+``cluster_du`` **counts symlinks the way** ``os.walk(followlinks=False)``
+plus ``os.path.getsize`` count them, on both sides. A link to a regular file
+contributes its *target's* size, counted once. A link to a directory
+contributes nothing and is never descended into, which is also why the walk
+terminates: a symlink loop is the only way to build a cycle out of
+directories, and the walk does not follow them. A broken link is skipped
+rather than raising.
+
+``FileInfo.permissions`` **is always three octal digits.** ``"000"``,
+``"007"``, ``"644"`` -- a fixed width, so string comparison and slicing mean
+what they look like they mean.
 
 Core Functions
 --------------
@@ -144,7 +184,7 @@ part of this page's own test suite:
 
     config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host="cluster.edu",
+        cluster_host="cluster.example.edu",
         username="researcher",
         remote_work_dir="/scratch/project"
     )
@@ -220,7 +260,7 @@ config object passed to it changes:
 
     remote_config = ClusterConfig(
         cluster_type="slurm",
-        cluster_host="cluster.edu",
+        cluster_host="cluster.example.edu",
         username="researcher"
     )
     remote_files = cluster_ls(".", remote_config)
@@ -298,6 +338,6 @@ Best Practices
 See Also
 --------
 
-- :doc:`../tutorials/filesystem_tutorial` - Comprehensive tutorial with examples
+- :doc:`../tutorials/filesystem_tutorial` - worked examples of each call
 - :doc:`config` - Configuration management
 - :doc:`decorator` - Using filesystem utilities with the @cluster decorator

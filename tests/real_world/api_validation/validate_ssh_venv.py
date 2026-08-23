@@ -14,7 +14,11 @@ from pathlib import Path
 # Add the clustrix package to Python path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clustrix.secure_credentials import ValidationCredentials
+from tests.real_world.credential_manager import (
+    CREDENTIAL_SETUP_HINT,
+    get_cluster_credentials,
+)
+from clustrix.ssh_security import configure_host_key_policy
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +37,7 @@ def test_venv_creation(hostname, username, password=None, key_file=None):
         return False
 
     ssh_client = paramiko.SSHClient()
-    ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    configure_host_key_policy(ssh_client)
 
     try:
         # Connect
@@ -302,35 +306,30 @@ def main():
     print("🚀 Starting SSH Virtual Environment Validation")
     print("=" * 70)
 
-    # Get credentials
-    creds = ValidationCredentials()
-
-    # Test both clusters
+    # Test both clusters. The role names are the ones credential_manager
+    # resolves to CLUSTRIX_TEST_*_HOST; "ssh" is the plain SSH box.
     clusters = [
-        ("clustrix-ssh-slurm", "SLURM Cluster (slurm_cluster)"),
-        ("clustrix-ssh-gpu", "GPU Server (gpu_cluster)"),
+        ("slurm", "SLURM Cluster (slurm_cluster)"),
+        ("ssh", "GPU Server (gpu_cluster)"),
     ]
 
     results = {}
 
-    for cred_name, cluster_description in clusters:
+    for role, cluster_description in clusters:
         print(f"\\n🎯 Testing {cluster_description}")
         print("=" * 70)
 
-        # Get cluster credentials
-        cluster_creds = creds.cred_manager.get_structured_credential(cred_name)
+        # Credentials come from ~/.clustrix/.env or the environment.
+        cluster_creds = get_cluster_credentials(role)
         if not cluster_creds:
-            print(f"❌ No credentials found for {cred_name}")
+            print(f"❌ No credentials found for the {role} cluster")
+            print(f"   {CREDENTIAL_SETUP_HINT}")
             continue
 
-        hostname = cluster_creds.get("hostname")
-        username = cluster_creds.get("username")
+        hostname = cluster_creds["host"]
+        username = cluster_creds["username"]
         password = cluster_creds.get("password")
-        key_file = cluster_creds.get("key_file")
-
-        if not hostname or not username:
-            print(f"❌ Invalid credentials for {cred_name}")
-            continue
+        key_file = cluster_creds.get("private_key_path")
 
         print(f"🔗 Target: {username}@{hostname}")
 

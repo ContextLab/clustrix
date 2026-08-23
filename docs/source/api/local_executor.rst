@@ -174,7 +174,7 @@ through ``ClusterExecutor``, not through ``@cluster``:
    job_id = executor.submit_job(func_data, {"cores": 2})
    result = executor.wait_for_result(job_id)  # -> 5
 
-**This is not what @cluster itself does for ``cluster_type="local"``.**
+**This is not what @cluster itself does for** ``cluster_type="local"``.
 ``clustrix.decorator._choose_execution_mode`` sends a call to its own
 "local" branch (plain ``func(*args, **kwargs)``, or the auto-parallelization
 in :doc:`decorator` when ``parallel=True``) whenever ``config.cluster_host``
