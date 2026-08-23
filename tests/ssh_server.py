@@ -98,11 +98,13 @@ import selectors
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
+import pytest
 import paramiko
 
 # Generating an RSA key takes a noticeable fraction of a second, and every
@@ -378,6 +380,18 @@ class LocalSSHServer:
     """
 
     host = "127.0.0.1"
+
+    # Windows has no OpenSSH server side this fixture can lean on: exec
+    # requests are run through a POSIX shell, permissions and key generation
+    # are Unix-shaped, and paramiko's server mode needs the socket semantics
+    # Windows denies. Every dependent test skips with this reason rather
+    # than failing 271 times per run; bringing the suite to Windows is its
+    # own piece of work, not a side effect of another fix.
+    if sys.platform == "win32":
+        raise pytest.skip(
+            "the in-process SSH server needs a POSIX shell, Unix permission "
+            "bits and ssh-keygen; Windows is not supported for it yet"
+        )
 
     def __init__(
         self,
