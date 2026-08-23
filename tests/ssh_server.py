@@ -390,7 +390,11 @@ class LocalSSHServer:
     if sys.platform == "win32":
         raise pytest.skip(
             "the in-process SSH server needs a POSIX shell, Unix permission "
-            "bits and ssh-keygen; Windows is not supported for it yet"
+            "bits and ssh-keygen; Windows is not supported for it yet",
+            # Suites that build the server at import time hit this during
+            # collection; without the flag that is a collection *error*
+            # rather than a clean module skip.
+            allow_module_level=True,
         )
 
     def __init__(
