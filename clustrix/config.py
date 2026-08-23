@@ -1453,7 +1453,7 @@ def set_config_source(
     alone; the only caller that passes False is ``__post_init__``, whose
     source is inferred rather than known.
 
-    **A ``record_host=False`` mark does not survive ``dataclasses.replace``,
+    **A** ``record_host=False`` **mark does not survive** ``dataclasses.replace``,
     and that is the point rather than a hole.** ``replace`` rebuilds the
     object, ``__post_init__`` runs again, and with no untrusted read in
     flight the second time it infers ``runtime``. Making the mark survive

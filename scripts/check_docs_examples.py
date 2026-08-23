@@ -806,6 +806,10 @@ def _write_kernelspec(root: Path) -> None:
     )
 
 
+class NotebookPlatformUnavailable(RuntimeError):
+    """Notebook execution cannot run on this platform (Windows CI)."""
+
+
 def _execute_notebook(path: Path) -> tuple:
     """Run a notebook in a clean kernel; return (executed copy, failure or None).
 
@@ -813,7 +817,18 @@ def _execute_notebook(path: Path) -> tuple:
     pick up whatever is in the developer's ``~/.clustrix/``: one of them
     printed ``Cluster type: slurm`` on this machine and ``local`` in CI, from
     the same source.
+
+    On Windows this raises NotebookPlatformUnavailable instead: kernel
+    launches there hang past the job timeout (observed twice -- the windows
+    CI leg died at exactly timeout-minutes), and a docs example is not worth
+    a flaky platform war. Callers report the blocks with the reason
+    attached; the same notebooks execute for real on linux and macos.
     """
+    if sys.platform == "win32":
+        raise NotebookPlatformUnavailable(
+            "notebook kernels do not launch on the Windows CI runner"
+        )
+
     import nbformat
     from nbclient import NotebookClient
 
@@ -1021,7 +1036,21 @@ def check_notebook(target: TargetFile, blocks: List[CodeBlock]) -> List[Result]:
             ),
         )
 
-    executed, failure = _execute_notebook(target.path)
+    try:
+        executed, failure = _execute_notebook(target.path)
+    except NotebookPlatformUnavailable as exc:
+        # Windows CI: reported as held-back with the reason, mirroring
+        # cluster-required, rather than a failure nothing on that platform
+        # can fix. The same notebooks execute for real on linux and macos.
+        return _ordered(
+            results + static,
+            Result(
+                first_block,
+                "cluster-required",
+                True,
+                f"notebook not executed: {exc}",
+            ),
+        )
     if failure is not None:
         results.extend(static)
         for cell_index, detail in _stored_output_problems(target.path):
@@ -1037,7 +1066,6 @@ def check_notebook(target: TargetFile, blocks: List[CodeBlock]) -> List[Result]:
                 f"either not an example or needs marking # cluster-required",
             ),
         )
-
     for block in blocks:
         cell = executed.cells[block.cell_index]
         errors = [
