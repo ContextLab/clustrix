@@ -27,6 +27,15 @@ import os
 import stat
 
 import pytest
+
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "drives config loading through POSIX permission and shell edges",
+        allow_module_level=True,
+    )
 import yaml
 
 from clustrix.notebook_magic_config import load_config_from_file

@@ -79,6 +79,14 @@ import subprocess
 
 import pytest
 
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "asserts Unix permission bits and POSIX write/rename semantics",
+        allow_module_level=True,
+    )
+
 from clustrix.cli_credentials import _write_credentials_to_env_file
 from clustrix.credential_manager import (
     FlexibleCredentialManager,

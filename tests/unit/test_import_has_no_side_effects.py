@@ -40,6 +40,15 @@ import yaml
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "asserts unreadable-directory and getcwd-failure semantics that are POSIX-shaped (Linux answers getcwd from the dentry, so even there only part runs)",
+        allow_module_level=True,
+    )
+
 import clustrix.config as config_module
 from clustrix.config import (
     CONFIG_DIR_ENV_VAR,

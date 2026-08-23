@@ -31,6 +31,15 @@ import sys
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "runs the real-world runner through a POSIX shell",
+        allow_module_level=True,
+    )
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 RUNNER = REPO_ROOT / "scripts" / "run_real_world_tests.py"
 

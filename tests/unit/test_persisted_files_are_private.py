@@ -53,6 +53,15 @@ import subprocess
 import warnings
 
 import pytest
+
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "asserts Unix permission bits (0600/0700) that NTFS does not model",
+        allow_module_level=True,
+    )
 import yaml
 
 import clustrix.config as config_module
