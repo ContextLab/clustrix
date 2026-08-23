@@ -10,8 +10,9 @@ cd /remote/job
 # clustrix: a batch shell does not initialise conda, and this job was
 # not preceded by environment replication, so no conda installation
 # was measured for this cluster. Find one now, or stop with a reason.
-_clustrix_conda_base() { command -v conda >/dev/null 2>&1 || return 0; _clustrix_base_out=$( if command -v timeout >/dev/null 2>&1; then timeout 10 conda info --base 2>/dev/null; else conda info --base 2>/dev/null; fi | tr -d "\r" | grep -E "^[[:space:]]*/" | head -1 ); set -- $_clustrix_base_out; [ $# -ge 1 ] && printf "%s\n" "$*"; return 0; }
-_clustrix_conda_works() { command -v conda >/dev/null 2>&1 || return 1; if command -v timeout >/dev/null 2>&1; then timeout 10 conda --version >/dev/null 2>&1; else conda --version >/dev/null 2>&1; fi; }
+_clustrix_conda_works() { command -v conda >/dev/null 2>&1 || return 1; if [ "$(type -t conda 2>/dev/null)" = "function" ]; then conda --version >/dev/null 2>&1; elif command -v timeout >/dev/null 2>&1; then timeout 10 conda --version >/dev/null 2>&1; else conda --version >/dev/null 2>&1; fi; }
+_clustrix_conda_base() { command -v conda >/dev/null 2>&1 || return 0; _clustrix_base_out=$( if [ "$(type -t conda 2>/dev/null)" = "function" ]; then conda info --base 2>/dev/null; elif command -v timeout >/dev/null 2>&1; then timeout 10 conda info --base 2>/dev/null; else conda info --base 2>/dev/null; fi | tr -d "\r" | grep -E "^[[:space:]]*/" | head -1 ); set -- $_clustrix_base_out; [ $# -ge 1 ] && printf "%s
+" "$*"; return 0; }
 _clustrix_conda_sh=""
 if ! _clustrix_conda_works; then
   for _clustrix_base in "${CONDA_PREFIX:-}" "$(_clustrix_conda_base)" "${HOME:-}/miniconda3" "${HOME:-}/anaconda3" "${HOME:-}/miniforge3" /opt/conda /usr/local/miniconda3 /usr/local/anaconda3; do
