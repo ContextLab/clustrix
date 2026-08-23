@@ -108,3 +108,19 @@ git -C /Users/jmanning/clustrix-gate log --oneline -1  # expect 172bcb6 (clean, 
 - Concurrent pytest sessions share pytest-of-jmanning: never run two suites at once here.
 - gh pr close fails silently if already closed ("!") — check state before commenting.
 - collect_execution_evidence.py requires explicit target args; env: CLUSTRIX_TEST_SLURM_HOST/CLUSTRIX_TEST_USERNAME/CLUSTRIX_TEST_SSH_HOST (+1Password creds auto-read).
+
+## RED-TEAM RESULTS (5 lanes)
+- L1 Goal/Constraints (oracle): PASS/HIGH. WARN fixed -> dead set_config_source copy removed (8780c2f).
+- L4 QA hands-on: FAIL -> P1 configure() silent on dead fields FIXED same commit (snapshot-before-setattr pattern; 2 new pins).
+- L5 Context mining: PASS/HIGH. #125 open-but-unaccounted -> status comment posted (6/7 criteria done; drift-guard criterion remains, issue stays open deliberately). #148/#154 closed in-window but unlisted in campaign accounting (FYI). All notes/ promises verified kept.
+- L2 quality + L3 security Oracles: provider credits exhausted -> INCONCLUSIVE; retries as Sisyphus-Junior also stalled 30min -> INCONCLUSIVE. Compensating self-review documented here: AST dead-code scan clean x4 files; all from_file_content sources code-derived; enforcement+wire tests green; evidence files redacted-only.
+
+## PUSH + CI
+- Push blocked first by pre-push hook (#147 works!) - API category pointed at DELETED test_cloud_apis_real.py + HF 402 quota wall. Fixed run_real_world_tests.py: missing-target->skip; 402 Payment Required->skip-with-reason (4c88b78). Pushed 8faee19..639be00.
+- PR #173 opened (release). Docs-only probe PR #174 for #169: checks now REPORT (mechanism proven) but FAIL - real portability defects caught by first full-breadth CI:
+  * nbformat missing in CI env -> notebook checker hard-fails
+  * system conda on runners defeats named-env hermetic tests
+  * Linux getcwd() succeeds w/o read perm (macOS raises)
+  * gpu_honesty reads REAL /proc on linux (fake device absent); emitted `source` under dash
+  * windows TBD
+- Delegated fix package: bg_8a0e2c00 (full diagnoses in prompt). After it lands: verify locally, push, watch #174 CI go green -> close #169 -> comment #127 -> final report.
