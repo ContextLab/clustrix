@@ -494,6 +494,13 @@ class TestTheEmittedShellActuallyWorks:
             stub_bin.mkdir(exist_ok=True)
             (stub_bin / "conda").write_text("#!/bin/sh\nexit 1\n")
             (stub_bin / "conda").chmod(0o755)
+            # A pass-through `timeout` too, so the probe's timeout-wrapped
+            # branch runs exactly as it does on GitHub runners (macOS often
+            # has no timeout at all, which hid that branch for months).
+            (stub_bin / "timeout").write_text(
+                "#!/bin/sh\n" "shift  # the duration\n" 'exec "$@"\n'
+            )
+            (stub_bin / "timeout").chmod(0o755)
             env["PATH"] = f"{stub_bin}:{path}"
         env.update(env_extra or {})
         result = subprocess.run(
@@ -591,6 +598,25 @@ class TestTheEmittedShellActuallyWorks:
         )
         assert result.returncode == 0, result.stderr
         assert "SOURCED=no" in result.stdout, result.stdout
+
+    def test_a_sourced_conda_function_is_not_bypassed_by_the_timeout_wrapper(
+        self, tmp_path
+    ):
+        """The works-check must ask the shell, not `timeout`.
+
+        Sourcing a conda.sh defines conda as a shell function; `timeout` is
+        an external binary that execs files, so wrapping the check sent it
+        to whichever conda FILE came first on PATH. On GitHub's ubuntu
+        runners that file is broken or foreign, and the job died claiming no
+        conda existed while one sat sourced in the very shell asking.
+        """
+        home = tmp_path / "home"
+        _install_conda_sh(home / "miniconda3", marker="miniconda3")
+        result = self._run(tmp_path, home)
+
+        assert (
+            f"SOURCED=miniconda3" in result.stdout
+        ), f"{result.stdout!r} / stderr: {result.stderr!r}"
 
     def test_a_conda_sh_that_fails_to_source_does_not_pass_for_a_working_conda(
         self, tmp_path

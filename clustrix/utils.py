@@ -122,22 +122,33 @@ _MAX_ENV_NAME_LENGTH = 255
 #: No single quote appears in either: the SSH probe wraps them in
 #: ``bash -lc '...'``.
 _CONDA_SHELL_HELPERS = (
+    # A sourced conda.sh defines conda as a shell FUNCTION; wrapping the
+    # check in `timeout 10 conda --version` silently bypassed it -- timeout
+    # execs files, so it ran whichever conda FILE was first on PATH -- or
+    # nothing at all. Found on GitHub's ubuntu runners (a broken
+    # /usr/bin/conda behind the fixture's sourced function); live on real
+    # clusters too, wherever profile.d initialisation is used. So: ask the
+    # shell directly when conda is a function, and only wrap in timeout --
+    # whose whole job is to bound a foreign executable -- when it is one.
+    "_clustrix_conda_works() { "
+    "command -v conda >/dev/null 2>&1 || return 1; "
+    'if [ "$(type -t conda 2>/dev/null)" = "function" ]; then '
+    "conda --version >/dev/null 2>&1; "
+    "elif command -v timeout >/dev/null 2>&1; then "
+    "timeout 10 conda --version >/dev/null 2>&1; "
+    "else conda --version >/dev/null 2>&1; fi; }",
     "_clustrix_conda_base() { "
     "command -v conda >/dev/null 2>&1 || return 0; "
-    "_clustrix_base_out=$( "
-    "if command -v timeout >/dev/null 2>&1; then "
+    '_clustrix_base_out=$( if [ "$(type -t conda 2>/dev/null)" = "function" ]; then '
+    "conda info --base 2>/dev/null; "
+    "elif command -v timeout >/dev/null 2>&1; then "
     "timeout 10 conda info --base 2>/dev/null; "
     "else conda info --base 2>/dev/null; fi "
     '| tr -d "\\r" | grep -E "^[[:space:]]*/" | head -1 ); '
     # Word splitting on the default IFS is the trim: it drops leading and
     # trailing spaces and tabs, and "$*" puts a path containing a space back
     # together rather than truncating it at the space.
-    "set -- $_clustrix_base_out; " '[ $# -ge 1 ] && printf "%s\\n" "$*"; return 0; }',
-    "_clustrix_conda_works() { "
-    "command -v conda >/dev/null 2>&1 || return 1; "
-    "if command -v timeout >/dev/null 2>&1; then "
-    "timeout 10 conda --version >/dev/null 2>&1; "
-    "else conda --version >/dev/null 2>&1; fi; }",
+    "set -- $_clustrix_base_out; " '[ $# -ge 1 ] && printf "%s\n" "$*"; return 0; }',
 )
 
 #: Where clustrix looks for a conda installation, in the order it looks, as
