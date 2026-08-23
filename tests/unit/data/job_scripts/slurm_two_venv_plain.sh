@@ -12,7 +12,7 @@ export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null ||
 # VENV2: Function execution with proper environment
 
 # Step 1: Use VENV1 to deserialize function data
-source /remote/job/venv1_serialization/bin/activate
+. /remote/job/venv1_serialization/bin/activate
 python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
@@ -127,7 +127,7 @@ except Exception as e:
 
 # Step 2: Use VENV2 to execute the function
 deactivate
-source /remote/job/venv2_execution/bin/activate
+. /remote/job/venv2_execution/bin/activate
 /remote/job/venv2_execution/bin/python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')
@@ -206,7 +206,7 @@ except Exception as e:
 
 # Step 3: Use VENV1 to serialize the result
 deactivate
-source /remote/job/venv1_serialization/bin/activate
+. /remote/job/venv1_serialization/bin/activate
 python -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')

@@ -72,9 +72,9 @@ already treats as a placeholder.
 import ast
 import os
 import pathlib
-import resource
 import shutil
 import stat
+import sys
 import subprocess
 
 import pytest
@@ -438,6 +438,13 @@ def test_a_failed_write_leaves_the_original_file_intact(permissive_umask, tmp_pa
     directory.mkdir(mode=0o700)
     target = directory / "clustrix.yml"
     write_text_securely(target, "cluster_type: local\n")
+
+    if sys.platform == "win32":
+        pytest.skip(
+            "resource.RLIMIT_NOFILE is a UNIX rlimit; "
+            "Windows has no descriptor limit to drop"
+        )
+    import resource
 
     soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
     resource.setrlimit(resource.RLIMIT_NOFILE, (3, hard))

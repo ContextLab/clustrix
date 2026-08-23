@@ -61,7 +61,7 @@ CONDA_VENV_INFO = {
     "conda_env1_name": "clustrix_venv1_abc123",
     "conda_env2_name": "clustrix_venv2_abc123",
     "conda_env_name": "clustrix_venv2_abc123",
-    "conda_setup_prefix": "source /opt/conda/etc/profile.d/conda.sh",
+    "conda_setup_prefix": ". /opt/conda/etc/profile.d/conda.sh",
     "uses_conda": True,
 }
 
@@ -134,7 +134,7 @@ class TestBothRoutesReachTheScript:
     @pytest.mark.parametrize("cluster_type", SCHEDULERS)
     def test_neither_route_leaves_the_built_venv_activated(self, cluster_type):
         text = script(cluster_type)
-        assert "source venv/bin/activate" in text
+        assert ". venv/bin/activate" in text
         assert "conda run -n" not in text
 
     def test_an_empty_name_is_not_a_request(self):
@@ -176,7 +176,7 @@ class TestPrecedenceAgainstReplication:
         assert "conda run -n production python" in text
         assert "/remote/job/venv2_execution/bin/python" not in text
         # VENV1 still activates its own virtualenv.
-        assert "source /remote/job/venv1_serialization/bin/activate" in text
+        assert ". /remote/job/venv1_serialization/bin/activate" in text
 
     def test_the_conflict_is_reported(self, caplog):
         with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
@@ -441,7 +441,7 @@ class TestCondaIsUsableBeforeItIsUsed:
             "slurm", environment="production", venv_info=dict(CONDA_VENV_INFO)
         )
         preamble = self._before_conda_run(text)
-        assert "source /opt/conda/etc/profile.d/conda.sh" in preamble
+        assert ". /opt/conda/etc/profile.d/conda.sh" in preamble
         # The blind in-script search is not emitted when there is nothing to
         # search for.
         assert "_clustrix_conda_sh" not in text
