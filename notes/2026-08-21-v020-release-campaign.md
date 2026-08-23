@@ -132,3 +132,8 @@ git -C /Users/jmanning/clustrix-gate log --oneline -1  # expect 172bcb6 (clean, 
 - Real-job evidence committed; usecase matrix slurm/gpu green, hf blocked externally (402 quota).
 - CI portability fixes landed: POSIX dot activations, function-aware conda probe, wc test -f gate, nbformat/nbclient/ipykernel deps, hermetic conda stub, ssh_server win32 skip, 12 POSIX-semantics module skips, Quick Checks timeout 5->15, goldens regenerated x4.
 - Model routing note from user (Ox Alpha Free for deep/hephaestus/metis/momus/oracle/prometheus) applied to ~/.config/opencode/opencode.json under "oh-my-openagent".agents.*.model — VERIFY the key name is what the plugin reads; restart opencode to take effect.
+
+## MERGED + VERIFIED ON MASTER (2026-08-23)
+- PR #173 merged (d0e8dc1), PR #174 merged (8d0f1c4) -> master head.
+- Post-merge CI on master: Tests run 32653842596 = **success**, all 8 jobs green INCLUDING macos 3.11/3.12 (the 45-min bound + TestLocalAndRemoteAgree darwin-CI skip fixed the macos 30-min timeout deaths; root cause was Gatekeeper spawn-tax making the SSH-round-trip file alone take ~25 min).
+- v0.2.0 is ON MASTER with all gates green. Remaining for owner: tag v0.2.0, PyPI publish, HF quota reset for hf matrix leg.
