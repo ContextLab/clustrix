@@ -106,12 +106,18 @@ class SchedulerStatusManager:
                 if result_exists:
                     return "completed"
                 elif error_exists:
-                    # Check if error file has content indicating failure
+                    # Check if error file has content indicating failure.
+                    # The redirect form matters: `wc -l <path>` opens the
+                    # path itself, and GNU wc on Linux happily answers 0 for
+                    # a *directory*, which read as "the error file holds
+                    # nothing, keep waiting". With `<`, a directory fails
+                    # the redirection on every platform, so an unmeasurable
+                    # job.err lands in the except below wherever it runs.
                     try:
                         stdout, _ = self.connection_manager.execute_remote_command(
-                            f"wc -l {job_info['remote_dir']}/job.err"
+                            f"wc -l < {job_info['remote_dir']}/job.err"
                         )
-                        line_count = int(stdout.strip().split()[0])
+                        line_count = int(stdout.strip())
                     except Exception as exc:
                         # This used to answer "running". It is not: the job
                         # wrote an error file, and the only thing that failed
