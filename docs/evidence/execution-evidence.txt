@@ -1,56 +1,37 @@
-# NOTE: hostnames and usernames below have been replaced with placeholders
-# (caller.example.edu, hpc.example.edu, gpu.example.edu, node1.hpc.example.edu,
-# testuser) to remove real institutional identifiers. Each real host/user
-# consistently maps to the same placeholder throughout this file. No other
-# content -- results, timings, output -- was altered; this is otherwise a
-# verbatim transcript.
-
-caller: caller.example.edu (arm64, python 3.12.10)
+caller: vpn-two-factor-general-229-128-226.dartmouth.edu (arm64, python 3.11.16)
 
 ========================================================================
-slurm: SLURM scheduler (hpc.example.edu)
+slurm: SLURM scheduler ($CLUSTRIX_TEST_SLURM_HOST)
 ========================================================================
-submitting to hpc.example.edu ...
+submitting to ndoli.dartmouth.edu ...
 Detecting GPU capabilities on remote cluster...
 Setting up two-venv environment...
 Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
-Reusing existing conda environments (py312_835d8ee6173f)
 No GPUs detected, using standard VENV2 setup...
-Detecting GPU capabilities on remote cluster...
-Setting up two-venv environment...
-Conda available on remote system (/optnfs/common/miniconda3/etc/profile.d/conda.sh), using it for both venvs
-Reusing existing conda environments (py312_835d8ee6173f)
-No GPUs detected, using standard VENV2 setup...
-RESULT (60s): {
+RESULT (822s): {
   "gpus": "",
-  "host": "node1.hpc.example.edu",
+  "host": "s12.hpcc.dartmouth.edu",
   "machine": "x86_64",
-  "python": "3.12.13",
-  "slurm_job_id": "9220729",
-  "slurm_nodelist": "node1",
+  "python": "3.11.15",
+  "slurm_job_id": "9248669",
+  "slurm_nodelist": "s12",
   "sum": 499500,
   "system": "Linux"
 }
 
 ========================================================================
-gpu: SSH + GPU host (gpu.example.edu)
+gpu: SSH + GPU host ($CLUSTRIX_TEST_SSH_HOST)
 ========================================================================
-submitting to gpu.example.edu ...
+submitting to tensor01.dartmouth.edu ...
 Detecting GPU capabilities on remote cluster...
 Setting up two-venv environment...
-Conda available on remote system (/home/testuser/miniforge3/etc/profile.d/conda.sh), using it for both venvs
-Reusing existing conda environments (py312_835d8ee6173f)
+Conda available on remote system, using it for both venvs
 GPU detected (8 devices), setting up GPU-enabled VENV2...
-Detecting GPU capabilities on remote cluster...
-Setting up two-venv environment...
-Conda available on remote system (/home/testuser/miniforge3/etc/profile.d/conda.sh), using it for both venvs
-Reusing existing conda environments (py312_835d8ee6173f)
-GPU detected (8 devices), setting up GPU-enabled VENV2...
-RESULT (13s): {
+RESULT (59s): {
   "gpus": "NVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB\nNVIDIA RTX A6000, 49140 MiB",
-  "host": "gpu.example.edu",
+  "host": "tensor01.dartmouth.edu",
   "machine": "x86_64",
-  "python": "3.12.13",
+  "python": "3.11.15",
   "slurm_job_id": null,
   "slurm_nodelist": null,
   "sum": 499500,
@@ -61,11 +42,11 @@ RESULT (13s): {
 hf: HuggingFace Jobs (container)
 ========================================================================
 submitting to huggingface-jobs ...
-RESULT (12s): {
+RESULT (52s): {
   "gpus": "",
-  "host": "j-contextlab-6a841cc5e55292eada79c155-bsd8b8iw-18a14-dhgrc",
+  "host": "j-contextlab-6a8a46637c5c7dd379235757-aofyukpx-3abd7-62tpq",
   "machine": "x86_64",
-  "python": "3.12.14",
+  "python": "3.11.16",
   "slurm_job_id": null,
   "slurm_nodelist": null,
   "sum": 499500,
@@ -75,6 +56,6 @@ RESULT (12s): {
 ========================================================================
 SUMMARY
 ========================================================================
-slurm  PASSED  node1.hpc.example.edu  python 3.12.13  59.9s
-gpu    PASSED  gpu.example.edu  python 3.12.13  12.5s
-hf     PASSED  j-contextlab-6a841cc5e55292eada79c155-bsd8b8iw-18a14-dhgrc  python 3.12.14  12.0s
+slurm  PASSED  s12.hpcc.dartmouth.edu  python 3.11.15  822.4s
+gpu    PASSED  tensor01.dartmouth.edu  python 3.11.15  58.5s
+hf     PASSED  j-contextlab-6a8a46637c5c7dd379235757-aofyukpx-3abd7-62tpq  python 3.11.16  51.9s
