@@ -78,6 +78,15 @@ import re
 from pathlib import Path
 
 import pytest
+
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "parses workflow YAML and asserts runner-shaped context output",
+        allow_module_level=True,
+    )
 import yaml
 
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"

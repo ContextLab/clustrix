@@ -27,6 +27,15 @@ from pathlib import Path
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "asserts environment-export behaviour with POSIX process semantics",
+        allow_module_level=True,
+    )
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 #: The password written into the throwaway ``.env``. Distinctive enough that

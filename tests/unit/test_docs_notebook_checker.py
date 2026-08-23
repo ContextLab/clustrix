@@ -30,6 +30,15 @@ from pathlib import Path
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "executes notebooks in real kernels; Windows kernel launches hang",
+        allow_module_level=True,
+    )
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECKER_PATH = REPO_ROOT / "scripts" / "check_docs_examples.py"
 NOTEBOOK_DIR = REPO_ROOT / "docs" / "source" / "notebooks"

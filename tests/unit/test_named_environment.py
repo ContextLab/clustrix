@@ -19,6 +19,15 @@ from pathlib import Path
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "asserts POSIX shell semantics: every case runs emitted scripts under bash",
+        allow_module_level=True,
+    )
+
 from clustrix.config import ClusterConfig
 from clustrix.utils import (
     create_job_script,

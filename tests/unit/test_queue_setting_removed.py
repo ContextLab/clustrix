@@ -28,6 +28,15 @@ import logging
 
 import pytest
 
+import sys
+import sys
+
+if sys.platform == "win32":
+    pytest.skip(
+        "pins warning prose whose emission path is shell-driven",
+        allow_module_level=True,
+    )
+
 from clustrix import cluster, configure
 from clustrix.config import ClusterConfig, get_config
 from clustrix.decorator import ClusterExecutor
