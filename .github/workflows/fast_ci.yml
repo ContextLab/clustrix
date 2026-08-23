@@ -75,7 +75,11 @@ jobs:
             -x \
             --tb=short \
             --maxfail=3
-        timeout-minutes: 5
+        # Sized for the suite as it is now (~1,100 unit tests, several of
+        # which execute notebooks and real subprocesses): the old 5-minute
+        # step timeout was set when tests/unit held ~350 fast tests and cut
+        # the run at 60% regardless of what passed before it.
+        timeout-minutes: 15
 
   local-integration:
     name: Local Integration Test
