@@ -590,7 +590,7 @@ def test_the_probe_finds_the_conda_this_cluster_has(cluster, cluster_type):
     ``conda_activation_lines`` had nothing measured to emit.
     """
     _, config = submit(cluster, cluster_type, conda_env_name="prod")
-    expected = f"source {cluster.root}/miniconda3/etc/profile.d/conda.sh"
+    expected = f". {cluster.root}/miniconda3/etc/profile.d/conda.sh"
     assert config.venv_info.get("conda_setup_prefix") == expected, (
         "the SSH probe did not find the conda.sh this account has; "
         f"got {config.venv_info.get('conda_setup_prefix')!r}"
@@ -685,7 +685,7 @@ def test_the_probe_falls_back_to_the_conda_sh_named_in_condas_own_error(tmp_path
         script, config = submit(server, "slurm", conda_env_name="prod")
 
     assert config.venv_info.get("conda_setup_prefix") == (
-        f"source {site}/etc/profile.d/conda.sh"
+        f". {site}/etc/profile.d/conda.sh"
     ), (
         "the probe did not fall back to the conda.sh conda named in its own "
         f"error: {config.venv_info.get('conda_setup_prefix')!r}"

@@ -58,7 +58,7 @@ def test_generated_script_runs_the_shared_execution_block(cluster_type):
     )
 
     # The venv the (now shared) environment setup builds.
-    assert "source venv/bin/activate" in script
+    assert ". venv/bin/activate" in script
     # The result signing the caller verifies before unpickling.
     assert "result.pkl.hmac" in script
     assert "CLUSTRIX_RESULT_KEY" in script

@@ -61,7 +61,7 @@ CONDA_VENV_INFO = {
     "conda_env1_name": "clustrix_venv1_abc123",
     "conda_env2_name": "clustrix_venv2_abc123",
     "conda_env_name": "clustrix_venv2_abc123",
-    "conda_setup_prefix": "source /opt/conda/etc/profile.d/conda.sh",
+    "conda_setup_prefix": ". /opt/conda/etc/profile.d/conda.sh",
     "uses_conda": True,
 }
 
@@ -134,7 +134,7 @@ class TestBothRoutesReachTheScript:
     @pytest.mark.parametrize("cluster_type", SCHEDULERS)
     def test_neither_route_leaves_the_built_venv_activated(self, cluster_type):
         text = script(cluster_type)
-        assert "source venv/bin/activate" in text
+        assert ". venv/bin/activate" in text
         assert "conda run -n" not in text
 
     def test_an_empty_name_is_not_a_request(self):
@@ -176,7 +176,7 @@ class TestPrecedenceAgainstReplication:
         assert "conda run -n production python" in text
         assert "/remote/job/venv2_execution/bin/python" not in text
         # VENV1 still activates its own virtualenv.
-        assert "source /remote/job/venv1_serialization/bin/activate" in text
+        assert ". /remote/job/venv1_serialization/bin/activate" in text
 
     def test_the_conflict_is_reported(self, caplog):
         with caplog.at_level(logging.WARNING, logger="clustrix.utils"):
@@ -441,7 +441,7 @@ class TestCondaIsUsableBeforeItIsUsed:
             "slurm", environment="production", venv_info=dict(CONDA_VENV_INFO)
         )
         preamble = self._before_conda_run(text)
-        assert "source /opt/conda/etc/profile.d/conda.sh" in preamble
+        assert ". /opt/conda/etc/profile.d/conda.sh" in preamble
         # The blind in-script search is not emitted when there is nothing to
         # search for.
         assert "_clustrix_conda_sh" not in text
@@ -459,7 +459,13 @@ class TestTheEmittedShellActuallyWorks:
 
     @staticmethod
     def _run(
-        tmp_path, home, extra="", prologue="", path="/usr/bin:/bin", env_extra=None
+        tmp_path,
+        home,
+        extra="",
+        prologue="",
+        path="/usr/bin:/bin",
+        env_extra=None,
+        stub_broken_conda=True,
     ):
         import subprocess
 
@@ -472,10 +478,23 @@ class TestTheEmittedShellActuallyWorks:
             + '\necho "SOURCED=${CLUSTRIX_FAKE_CONDA:-no}"\n'
             + extra
         )
-        # A pristine environment: no inherited CONDA_PREFIX, no conda on
-        # PATH, and HOME pointed at the fixture. Without this the test
-        # would pass or fail according to the developer's own conda.
+        # A pristine environment: no inherited CONDA_PREFIX, no working conda
+        # on PATH, and HOME pointed at the fixture. Without this the test
+        # would pass or fail according to the developer's own conda. The
+        # stub is what makes "no working conda" true everywhere: GitHub
+        # runners ship a conda that resolves even under /usr/bin:/bin, which
+        # made _clustrix_conda_works succeed and the home search never run
+        # (SOURCED=no). A conda that answers --version with a failure is the
+        # one input the discovery block must treat as absent. Tests that
+        # supply their own (working) conda ahead of it pass
+        # stub_broken_conda=False.
         env = {"HOME": str(home), "PATH": path}
+        if stub_broken_conda:
+            stub_bin = tmp_path / "conda-stub-bin"
+            stub_bin.mkdir(exist_ok=True)
+            (stub_bin / "conda").write_text("#!/bin/sh\nexit 1\n")
+            (stub_bin / "conda").chmod(0o755)
+            env["PATH"] = f"{stub_bin}:{path}"
         env.update(env_extra or {})
         return subprocess.run(
             ["bash", str(script_path)],
@@ -537,7 +556,14 @@ class TestTheEmittedShellActuallyWorks:
         conda.chmod(0o755)
         # The competing installation the old ordering preferred.
         _install_conda_sh(home / "miniconda3", marker="the_users_own")
-        result = self._run(tmp_path, home, path=f"{bindir}:/usr/bin:/bin")
+        result = self._run(
+            tmp_path,
+            home,
+            path=f"{bindir}:/usr/bin:/bin",
+            # The working conda under test lives in `bindir`; the broken
+            # stub must not shadow it.
+            stub_broken_conda=False,
+        )
         assert result.returncode == 0, result.stderr
         assert "SOURCED=no" in result.stdout, result.stdout
 

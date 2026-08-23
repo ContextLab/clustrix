@@ -12,7 +12,7 @@ export OMP_NUM_THREADS=4
 echo hello
 cd /remote/job
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
-source /opt/conda/etc/profile.d/conda.sh
+. /opt/conda/etc/profile.d/conda.sh
 # Two-venv approach for cross-version compatibility
 # VENV1: Serialization/deserialization with compatible Python
 # VENV2: Function execution with proper environment

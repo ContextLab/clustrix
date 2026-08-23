@@ -353,8 +353,14 @@ def test_an_unreadable_candidate_is_skipped_and_reported(unloaded_config, caplog
     messages = [record.getMessage() for record in caplog.records]
     assert any("NOT in effect" in message for message in messages), messages
     # chdir'ing into the directory before revoking access also makes getcwd()
-    # fail, which is the other half of the same "I could not look" case.
-    assert any("current working directory" in message for message in messages), messages
+    # fail on macOS, which is the other half of the same "I could not look"
+    # case. Linux keeps answering getcwd() from the kernel's dentry without
+    # touching permissions, so the warning cannot fire there; the per-
+    # candidate EACCES warnings above still prove skip-and-report.
+    if sys.platform != "linux":
+        assert any(
+            "current working directory" in message for message in messages
+        ), messages
 
 
 def test_configure_applies_on_top_of_the_file_not_underneath_it(unloaded_config):

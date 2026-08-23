@@ -1623,7 +1623,11 @@ dependencies:
 
         setup_commands = [
             f"python -m venv {shlex.quote(venv_path)}",
-            f"source {venv_path}/bin/activate",
+            # POSIX "." not bash "source": these lines run through the
+            # remote login shell, and Ubuntu's /bin/sh is dash, which
+            # has no `source` builtin (a mac CI node's sh is bash and
+            # hid this). Same for every activation below.
+            f". {venv_path}/bin/activate",
         ]
 
         # Install requirements
@@ -1894,7 +1898,7 @@ def setup_two_venv_environment(
 
     if conda_sh:
         conda_available = True
-        conda_setup_prefix = f"source {conda_sh}"
+        conda_setup_prefix = f". {conda_sh}"
         print(f"Conda available on remote system ({conda_sh}), using it for both venvs")
     else:
         stdin, stdout, stderr = ssh_client.exec_command(
@@ -2036,13 +2040,13 @@ def setup_two_venv_environment(
             [
                 # Create VENV1 (serialization environment)
                 f"{compatible_python} -m venv {shlex.quote(venv1_path)}",
-                f"source {shlex.quote(venv1_path)}/bin/activate",
+                f". {shlex.quote(venv1_path)}/bin/activate",
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv1'",
                 "pip install dill cloudpickle --timeout=30",
                 "deactivate",
                 # Create VENV2 using regular venv
                 f"{compatible_python} -m venv {shlex.quote(venv2_path)}",
-                f"source {shlex.quote(venv2_path)}/bin/activate",
+                f". {shlex.quote(venv2_path)}/bin/activate",
                 "pip install --upgrade pip --timeout=30 || echo 'pip upgrade failed for venv2'",
                 "deactivate",
             ]
@@ -2063,7 +2067,7 @@ def setup_two_venv_environment(
                     f"{shlex.quote(pkg)} --timeout=30"
                 )
         else:
-            commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+            commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
             if pkg in requirements:
                 commands.append(
                     f"pip install {shlex.quote(f'{pkg}=={requirements[pkg]}')} "
@@ -2117,7 +2121,7 @@ def setup_two_venv_environment(
             if compatible_python == "conda":
                 commands.append(f"conda run -n {conda_env2_name} {install}")
             else:
-                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                 commands.append(install)
                 commands.append("deactivate")
 
@@ -2133,7 +2137,7 @@ def setup_two_venv_environment(
                         f"{shlex.quote(package_spec)} --timeout=300"
                     )
                 else:
-                    commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                    commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                     commands.append(
                         f"pip install {shlex.quote(package_spec)} --timeout=300"
                     )
@@ -2151,9 +2155,7 @@ def setup_two_venv_environment(
                             f"{shlex.quote(pkg_name)}"
                         )
                     else:
-                        commands.append(
-                            f"source {shlex.quote(venv2_path)}/bin/activate"
-                        )
+                        commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                         install_cmd = f"pip install {shlex.quote(pkg_name)}"
                     if pip_args:
                         install_cmd += f" {pip_args}"
@@ -2173,7 +2175,7 @@ def setup_two_venv_environment(
                 # Run post-install commands in conda environment
                 commands.append(f"conda run -n {conda_env2_name} {cmd}")
             else:
-                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                 commands.append(f"{cmd}")
                 commands.append("deactivate")
 
@@ -2312,7 +2314,7 @@ def setup_python_compatible_environment(
         commands = [
             f"cd {shlex.quote(work_dir)}",
             f"{compatible_python} -m venv {shlex.quote(compat_venv_path)}",
-            f"source {shlex.quote(compat_venv_path)}/bin/activate",
+            f". {shlex.quote(compat_venv_path)}/bin/activate",
         ]
 
         # Install only essential packages for function execution
@@ -2491,7 +2493,7 @@ dependencies:
         commands.extend(
             [
                 f"{shlex.quote(python_cmd)} -m venv venv",
-                "source venv/bin/activate",
+                ". venv/bin/activate",
             ]
         )
 
@@ -2870,7 +2872,7 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f"source {quoted_dir}/venv1_serialization/bin/activate"
+                else f". {quoted_dir}/venv1_serialization/bin/activate"
             ),
             (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
@@ -2963,7 +2965,7 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env2_name}"
                 if conda_env2_name
-                else f"source {quoted_dir}/venv2_execution/bin/activate"
+                else f". {quoted_dir}/venv2_execution/bin/activate"
             ),
             (
                 f'conda run -n {env2} {venv2_python} -c "'
@@ -3024,7 +3026,7 @@ def generate_two_venv_execution_commands(
             (
                 f"# Using conda environment {conda_env1_name}"
                 if conda_env1_name
-                else f"source {quoted_dir}/venv1_serialization/bin/activate"
+                else f". {quoted_dir}/venv1_serialization/bin/activate"
             ),
             (f'conda run -n {env1} python -c "' if conda_env1_name else 'python -c "'),
         ]
@@ -3405,7 +3407,7 @@ def job_execution_lines(
         else:
             entry_lines = [
                 f"cd {quoted_dir}",
-                "source venv/bin/activate",
+                ". venv/bin/activate",
                 f'{python_cmd} -c "',
             ]
         script_lines.append(result_key_export_line(remote_job_dir))
@@ -3990,7 +3992,7 @@ def setup_gpu_enabled_venv2(
                     f"{install_cmd} || echo 'Failed to install {gpu_pkg} via conda'"
                 )
             else:
-                commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                 install_cmd = f"pip install {install_info['pip']} --timeout=600"
                 commands.append(
                     f"{install_cmd} || echo 'Failed to install {gpu_pkg} via pip'"
@@ -4027,7 +4029,7 @@ def setup_gpu_enabled_venv2(
                         f"{install_cmd} || echo 'Failed to install {cuda_pkg} via conda'"
                     )
                 else:
-                    commands.append(f"source {shlex.quote(venv2_path)}/bin/activate")
+                    commands.append(f". {shlex.quote(venv2_path)}/bin/activate")
                     install_cmd = f"pip install {cuda_pkg} --timeout=300"
                     commands.append(
                         f"{install_cmd} || echo 'Failed to install {cuda_pkg} via pip'"

@@ -7,14 +7,14 @@
 #SBATCH --time=01:00:00
 cd /remote/job
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
-source /opt/conda/etc/profile.d/conda.sh
+. /opt/conda/etc/profile.d/conda.sh
 # clustrix: dill embeds CPython bytecode, which cannot be loaded by a
 # different minor version. clustrix cannot see inside an environment it
 # did not build, so the versions are compared here, on the node that
 # will run the job, before any of it runs.
 conda run -n prod python -c "
 import sys
-_want = (3, 12)
+_want = (3, 11)
 _got = sys.version_info[:2]
 if _got != _want:
     sys.stderr.write(

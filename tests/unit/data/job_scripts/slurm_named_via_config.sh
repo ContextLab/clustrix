@@ -36,7 +36,7 @@ fi
 # will run the job, before any of it runs.
 conda run -n legacy python -c "
 import sys
-_want = (3, 12)
+_want = (3, 11)
 _got = sys.version_info[:2]
 if _got != _want:
     sys.stderr.write(

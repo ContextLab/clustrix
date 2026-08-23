@@ -7,7 +7,7 @@
 #SBATCH --time=01:00:00
 export CLUSTRIX_RESULT_KEY=$(cat /remote/job/.clustrix_result_key 2>/dev/null || true)
 cd /remote/job
-source venv/bin/activate
+. venv/bin/activate
 python3.11 -c "
 import os as _os
 _CLUSTRIX_KEY = _os.environ.pop('CLUSTRIX_RESULT_KEY', '')

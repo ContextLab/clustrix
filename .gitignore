@@ -85,3 +85,4 @@ docs/build/
 tests/real_world/screenshots/
 tests/real_world/temp/
 .omc/
+.omo/run-continuation/
