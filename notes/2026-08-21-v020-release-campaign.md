@@ -73,3 +73,38 @@ The runbook's "take theirs" for the widget-apply `config.py` conflict means **th
 git -C /Users/jmanning/clustrix log --oneline -1   # expect 2c59251
 git -C /Users/jmanning/clustrix-gate log --oneline -1  # expect 172bcb6 (clean, aborted)
 ```
+
+---
+
+# RESUME UPDATE — 2026-08-22 (post-suspend session)
+
+## DONE SINCE RESUME
+- Merge fixes→gate REDONE cleanly as ed04066 (13 regions; resolutions exactly per this file's recorded decisions; three franken-bodies from git interleaving replaced with parent originals; typing_your_own_hostname test rewritten to the merged per-host-record rule with stated reason).
+- Merge gate→main line DONE as fdccfd1 after one aborted attempt (incremental splices produced Frankenstein configure(); reset --hard to 25f20e5 and redid in one scripted pass). Key merged-design facts now IN THE TREE:
+  * _load_config_file(path, file_source) = one locked reader for both doors; returns effective source.
+  * _load_config_locked(config_path, file_source=EXPLICIT) shim KEPT — #123's race tests trace its frame by name.
+  * _load_default_config routes through _load_config_locked so the search door shares the lock body.
+  * Bundle detector _read_config_bundle: REGULAR FILES ONLY (S_ISREG guard — FIFO configs would block otherwise; pinned by A8's fifo test), at the SEARCH DOOR ONLY. The widget's discovered-file door intentionally treats {name: settings} as multi-config documents (pinned by test_the_record_is_not_offered_as_a_configuration).
+  * configure(): gate's DECLARED_FIELD_NAMES validation + _-prefix refusal + host normalise + type/conda checks + bound loop + set_config_source(RUNTIME) reclaim tail (the tail git had auto-merged into split_config_kwargs).
+  * TRACKED_DEFECTS emptied (stale entry deleted); JUSTIFIED_SWALLOWS: get_cluster_password→_colab_password rename carried, _read_config_bundle entry present.
+- Gates ALL GREEN on merged tree: 2760 tests/0 failed (suite5/6 logs), black/flake8/mypy clean, sphinx -W clean, docs examples 239/239, tree+history secret scans clean, pre-commit all-files green.
+- Notebook re-executed 4e19e0d; CHANGELOG folded f2a7205 (#168/#169/#171/#172 + bundle-decline + #161 warnings).
+- 19 issues CLOSED with evidence: #116 #123 #147 #150 #152 #153 #157 #158 #159(rollup) #161(warn-on-set, 7ae5519) #162(public_api.rst, 47e1aa9) #163(table updated, 499b50c) #164 #165 #166 #167 #168 #171 #172.
+- PR #156 closed-as-superseded with full review comment (merged SFTP-first design supersedes; PR had glob-quoting bug).
+- REAL JOBS PASSED (VPN up): SLURM job 9248669 s12.hpcc.dartmouth.edu 822s ✓ / tensor01 8×A6000 59s ✓ / HF container 52s ✓. Transcript committed 4b1f934. Host keys added to known_hosts after user verified fingerprints (gate refused first — by design).
+
+## IN FLIGHT
+- verify_cluster_usecases.py pid 48209 → /tmp/usecase_matrix.log (slurm-1 slurm-2 gpu-1 gpu-2 hf); commit refreshed docs/evidence/usecase-matrix.txt when done.
+- Red-team: 5 lanes launched (bg_0050764b goal/oracle, bg_fecc23de quality/oracle, bg_e6e4a805 security/oracle, bg_5a0c2fa4 QA/unspecified-high, bg_7f76ba50 context-mining/unspecified-high). Collect via background_output when notified.
+
+## REMAINING AFTER LANES
+1. Fix any criterion-cited blockers from red-team; re-run affected QA only.
+2. Commit usecase matrix; comment #127 with release-checklist completion (leave tag/PiPI to owner).
+3. Push work/priorities-and-docs; open main PR; docs-only PR to settle #169.
+4. Final report.
+
+## GOTCHAS LEARNED THIS SESSION
+- pytest tmpdir GC + chmod-000 /proc fixtures (test_gpu_detection_honesty) poison later runs on macOS: find -perm 000 -exec chmod 755 before suites.
+- Concurrent pytest sessions share pytest-of-jmanning: never run two suites at once here.
+- gh pr close fails silently if already closed ("!") — check state before commenting.
+- collect_execution_evidence.py requires explicit target args; env: CLUSTRIX_TEST_SLURM_HOST/CLUSTRIX_TEST_USERNAME/CLUSTRIX_TEST_SSH_HOST (+1Password creds auto-read).

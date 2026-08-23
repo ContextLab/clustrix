@@ -76,3 +76,26 @@ def test_the_warning_says_the_field_has_no_effect():
 def test_the_dead_field_is_still_stored_not_dropped():
     config = ClusterConfig(local_parallel_threshold=42)
     assert config.local_parallel_threshold == 42
+
+
+def test_configure_also_announces_a_dead_field():
+    """The primary runtime entry point must honour the same promise.
+
+    ``configure()`` writes by ``setattr``, which never re-runs
+    ``__post_init__ -- so without this, the announcement existed only on
+    the construction path and the main way users set fields stayed silent.
+    """
+    import clustrix
+
+    with pytest.warns(UserWarning, match="max_gpu_parallel_jobs"):
+        clustrix.configure(max_gpu_parallel_jobs=4)
+
+
+def test_configure_does_not_warn_for_live_fields():
+    import warnings
+
+    import clustrix
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        clustrix.configure(default_cores=2)

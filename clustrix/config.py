@@ -1726,6 +1726,16 @@ def configure(**kwargs) -> None:
         # mid-loop, which is the property the lock exists to provide rather
         # than one to lean on twice.
         target = _config
+        # ``setattr`` below does not re-run ``__post_init__ -- which is where
+        # construction announces dead-but-accepted fields (#161). Snapshot
+        # the dead-field values first so the announcement after the loop can
+        # compare what changed, and only for keywords actually named: an
+        # unchanged default stays silent exactly as at construction.
+        dead_before = {
+            key: getattr(target, key)
+            for key in kwargs
+            if key in DEAD_BUT_ACCEPTED_FIELDS
+        }
         for key, value in kwargs.items():
             setattr(target, key, value)
 
@@ -1740,6 +1750,19 @@ def configure(**kwargs) -> None:
             # untrusted however many times it is handed back through here.
             # See _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.
             set_config_source(_config, CONFIG_SOURCE_RUNTIME)
+
+        # ``setattr`` above does not re-run ``__post_init__ -- the snapshot
+        # taken before the loop is what tells us a dead field actually
+        # changed (#161). Same promise, however the field was set.
+        for key, before in dead_before.items():
+            if kwargs[key] != before:
+                warnings.warn(
+                    f"configure({key}={kwargs[key]!r}) has no effect: "
+                    f"{DEAD_BUT_ACCEPTED_FIELDS[key]}. The field is accepted "
+                    f"so old configuration files keep loading, and will be "
+                    f"removed in a future release.",
+                    stacklevel=2,
+                )
 
 
 def config_field_names() -> FrozenSet[str]:
@@ -1799,18 +1822,6 @@ def split_config_kwargs(
         }
     )
     return kwargs, unrecognised
-
-    if "cluster_host" in kwargs:
-        # An explicit configure() call is the user's own Python, so it
-        # replaces whatever a file had said -- including a ./clustrix.yml
-        # that had been picked up from the working directory.
-        #
-        # It replaces it for *this object*. Whether the resulting host is
-        # then trusted is get_config_source's answer, not this one: a
-        # hostname an untrusted file already named in this process stays
-        # untrusted however many times it is handed back through here. See
-        # _HOSTS_NAMED_BY_UNTRUSTED_SOURCES.
-        set_config_source(_config, CONFIG_SOURCE_RUNTIME)
 
 
 def load_config(config_path: str) -> None:
