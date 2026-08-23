@@ -949,6 +949,11 @@ def _run_every_test_method(test_class):
 
 
 def test_comprehensive_edge_case_suite():
+    if sys.platform == "win32":
+        pytest.skip(
+            "exercises POSIX permission, chmod and shell edges that do "
+            "not exist on NTFS"
+        )
     """Every edge-case class in this module, run as one aggregate.
 
     **This used to be a test that could not fail.** It caught every
