@@ -960,3 +960,5 @@ Clustrix is released under the MIT License. See [LICENSE](LICENSE) for details.
 
 - Documentation: [https://clustrix.readthedocs.io](https://clustrix.readthedocs.io)
 - Issues: [https://github.com/ContextLab/clustrix/issues](https://github.com/ContextLab/clustrix/issues)
+
+<!-- issue #169 probe: this docs-only change must still report the required CI Status check -->
