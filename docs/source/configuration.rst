@@ -828,31 +828,34 @@ Settings that currently have no effect
 
 These fields exist on ``ClusterConfig``, are accepted by ``configure()``, are
 saved and loaded, and are shown by the notebook widget -- but no execution code
-path reads them. They are listed here so you do not tune something that cannot
-change anything.
+path reads them. Setting one to a non-default value now produces a warning
+naming the field and why it is dead (#161); defaults stay silent. They are
+listed here so you do not tune something that cannot change anything.
 
 ============================  ===========================================
 Field                         Status
 ============================  ===========================================
-``gpu_detection_enabled``     Not read. GPU detection runs unconditionally
-                              inside ``enhanced_setup_two_venv_environment``.
-``auto_gpu_packages``         Not read.
-``cuda_version_preference``   Not read.
-``gpu_memory_fraction``       Not read.
-``prefer_gpu_execution``      Not read.
-``gpu_requirements``          Not read.
-``rapids_ecosystem``          Not read.
-``max_gpu_parallel_jobs``     Not read.
+``gpu_detection_enabled``     Not read; warns when set. GPU detection runs
+                              unconditionally inside
+                              ``enhanced_setup_two_venv_environment``.
+``auto_gpu_packages``         Not read; warns when set.
+``cuda_version_preference``   Not read; warns when set.
+``gpu_memory_fraction``       Not read; warns when set.
+``prefer_gpu_execution``      Not read; warns when set.
+``gpu_requirements``          Not read; warns when set.
+``rapids_ecosystem``          Not read; warns when set.
+``max_gpu_parallel_jobs``     Not read; warns when set.
 ``auto_gpu_parallel``         Not read. There is no automatic
                               cross-GPU parallelization; parallelize across
                               GPUs inside your own function. The field is
                               accepted so that existing config files keep
                               loading, and passing it to ``@cluster`` warns.
-``local_parallel_threshold``  Not read. Local chunking aims for two chunks
-                              per worker in the pool ``cores`` sized, falling
-                              back to ``os.cpu_count()`` when that is unknown.
-``cache_credentials``         Not read.
-``credential_cache_ttl``      Not read.
+``local_parallel_threshold``  Not read; warns when set. Local chunking aims
+                              for two chunks per worker in the pool ``cores``
+                              sized, falling back to ``os.cpu_count()`` when
+                              that is unknown.
+``cache_credentials``         Not read; warns when set.
+``credential_cache_ttl``      Not read; warns when set.
 ``default_queue``             Retained so older configuration files and widget
                               profiles keep loading, but read by no backend.
                               A non-empty value produces a warning when a
