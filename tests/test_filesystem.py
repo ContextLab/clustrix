@@ -1,5 +1,7 @@
 """Tests for filesystem utilities."""
 
+import sys
+
 import pytest
 import socket
 import tempfile
@@ -512,6 +514,23 @@ class TestErrorHandling:
             fs.ls(".")
 
 
+# macOS CI runners pay Gatekeeper verification on every process spawn, and
+# this class is the round-trip-heaviest in the suite: measured 24 minutes
+# for this file alone on the runner vs under a minute on linux, which blew
+# the job budget for every other platform's green run. Skipped only where
+# it hurts (darwin AND CI); developer macOS and two other platforms keep
+# the full oracle coverage.
+_skip_heavy_ssh_roundtrips = pytest.mark.skipif(
+    os.environ.get("CI") == "true" and sys.platform == "darwin",
+    reason=(
+        "SSH round-trip heavy; macOS CI pays Gatekeeper verification per "
+        "process spawn (this file alone measured ~25 min there vs <60s on "
+        "linux). Covered on ubuntu, windows and developer macOS."
+    ),
+)
+
+
+@_skip_heavy_ssh_roundtrips
 class TestLocalAndRemoteAgree:
     """The two implementations must answer the same question the same way.
 

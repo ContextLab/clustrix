@@ -21,7 +21,7 @@ jobs:
     # This is a bound on a genuinely longer job, not a relaxed check: every
     # test still has to pass, and pytest's own --timeout=120 still bounds any
     # individual test that wedges.
-    timeout-minutes: 30
+    timeout-minutes: 45
     strategy:
       # Show every platform's failures in one run. With the default
       # fail-fast, one job failing cancelled the other six, so a
