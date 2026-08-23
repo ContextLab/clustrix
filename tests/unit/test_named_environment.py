@@ -505,6 +505,14 @@ class TestTheEmittedShellActuallyWorks:
         # The failure diagnostics read these off the result; a
         # CompletedProcess carries no kwargs of its own.
         result.env_used = env
+        # And on failure, the shell's own account of which branch it took.
+        trace = subprocess.run(
+            ["bash", "-x", str(script_path)],
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+        result.trace_tail = "\n".join(trace.stderr.strip().splitlines()[-25:])
         return result
 
     @pytest.mark.parametrize("location", ["miniconda3", "anaconda3", "miniforge3"])
@@ -526,7 +534,8 @@ class TestTheEmittedShellActuallyWorks:
             f"mode={oct(conda_sh.stat().st_mode)}\n"
             f"  rc       : {result.returncode}\n"
             f"  stdout   : {result.stdout!r}\n"
-            f"  stderr   : {result.stderr!r}"
+            f"  stderr   : {result.stderr!r}\n"
+            f"  trace    : {getattr(result, 'trace_tail', '')!r}"
         )
 
     def test_nothing_found_stops_the_job_with_a_diagnosable_message(self, tmp_path):
