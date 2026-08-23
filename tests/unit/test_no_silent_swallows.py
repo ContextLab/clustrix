@@ -872,7 +872,14 @@ def test_a_listening_socket_is_reported_as_reachable(server, caplog):
         )
 
     assert (reachable, reason) == (True, "")
-    assert caplog.records == []
+    # The property is that the *widget* stayed silent. caplog captures every
+    # logger, and paramiko's server thread races a banner-warning into the
+    # record list on loaded runners -- the prober hangs up before the
+    # handshake finishes, which is the probe working.
+    widget_records = [
+        r for r in caplog.records if r.name == "clustrix.notebook_magic_widget"
+    ]
+    assert widget_records == [], [r.getMessage() for r in widget_records]
 
 
 def _press_test_config(host, port):
