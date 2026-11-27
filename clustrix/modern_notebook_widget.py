@@ -1508,7 +1508,7 @@ class ModernClustrixWidget:
             print(f"  returned  {result.get('answer')}  (expected 5050)")
             self.set_status("ok", "job completed")
 
-    def _secret_field(self, key: str, description: str) -> widgets.Password:
+    def _secret_field(self, key: str, description: str) -> "widgets.Password":
         """A field whose content is held here and not in the form."""
         field = widgets.Password(
             description=description,
