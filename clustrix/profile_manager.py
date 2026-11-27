@@ -1,5 +1,6 @@
 """Profile management system for cluster configurations."""
 
+import contextlib
 import json
 import os
 import stat
@@ -7,7 +8,12 @@ import time
 import warnings
 import yaml
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, Iterator, List, Optional, Any, Tuple
+
+try:
+    import fcntl
+except ImportError:  # Windows: no advisory locks; see ProfileManager._store_lock
+    fcntl = None  # type: ignore[assignment]
 from dataclasses import asdict
 
 from .config import (
@@ -24,6 +30,7 @@ from .config import (
     set_config_source,
     strip_secret_fields,
     write_config_file_securely,
+    write_text_securely,
 )
 
 #: The widest a clustrix-owned directory may be: the owner, nobody else.
@@ -369,7 +376,15 @@ class ProfileManager:
         #: True while the store on disk holds something ``_restore`` could
         #: not read. ``_persist`` sets the file aside before writing over it.
         self._store_holds_unread_data = False
+        #: The store as it stood the last time this manager read or wrote it
+        #: (raw, per profile), and this manager's own profiles at that same
+        #: moment (in the form they are saved in). Together they are the
+        #: common ancestor ``_merge_from_disk`` needs to tell "another
+        #: session changed this" from "I changed this".
+        self._synced_disk: Dict[str, Any] = {}
+        self._synced_ours: Dict[str, Any] = {}
         self._load_default_profiles()
+        self._mark_synced({})
         self._restore()
 
     #: Starting points for each backend clustrix supports, so the dropdown is
@@ -470,11 +485,13 @@ class ProfileManager:
             return
         problems: Dict[str, str] = {}
         try:
-            self.load_from_file(
+            loaded, raw_profiles, active = self._read_bundle(
                 str(self.store_path),
-                source=config_source_for_discovered_path(self.store_path),
-                problems=problems,
+                config_source_for_discovered_path(self.store_path),
+                problems,
             )
+            self._adopt(loaded, active)
+            self._mark_synced(raw_profiles)
         except Exception as e:  # noqa: BLE001
             self._store_holds_unread_data = True
             warnings.warn(
@@ -524,12 +541,102 @@ class ProfileManager:
             "and copy it back to recover them."
         )
 
+    @staticmethod
+    def _persisted_form(config: ClusterConfig) -> Dict[str, Any]:
+        """A profile as ``save_to_file`` writes it: fields, secrets left out."""
+        return strip_secret_fields(asdict(config))
+
+    def _mark_synced(self, raw_profiles: Dict[str, Any]) -> None:
+        """Record that memory and the store agree as of now."""
+        self._synced_disk = dict(raw_profiles)
+        self._synced_ours = {
+            name: self._persisted_form(config) for name, config in self.profiles.items()
+        }
+
+    #: Locked for the length of one read-merge-write. A file of its own,
+    #: because the store is replaced on every save and a lock held on the
+    #: old inode excludes nobody.
+    LOCK_FILENAME = ".profiles.lock"
+
+    @contextlib.contextmanager
+    def _store_lock(self) -> Iterator[None]:
+        """Hold the store for one read-merge-write, against other sessions.
+
+        An advisory ``flock`` on an empty file beside the store. The file
+        stays; the lock is released when the handle closes, so a crashed
+        session leaves nothing held. Where ``fcntl`` does not exist
+        (Windows) the merge still runs; it is then only as atomic as the
+        interval between its read and its write.
+        """
+        if fcntl is None:
+            yield
+            return
+        lock_path = self.config_dir / self.LOCK_FILENAME
+        # Appending nothing creates the file 0600 if it is missing and never
+        # replaces one that is there -- replacing it would hand a second
+        # session a different inode to lock.
+        write_text_securely(lock_path, "", append=True)
+        with open(lock_path, "r") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            yield
+
+    def _merge_from_disk(self) -> None:
+        """Fold in what another session saved since this one last looked.
+
+        Every manager holds the whole profile set in memory and ``_persist``
+        writes the whole set, so with two notebooks open the last one to
+        save silently erased whatever the other had created -- measured: two
+        managers each create a profile, and a third sees only the second
+        one's. This is a three-way merge against the state recorded by
+        ``_mark_synced``. Per profile: a change made here wins; otherwise a
+        change made on disk (an edit, an addition, a removal) is taken;
+        where both sides changed the same profile, this session's version is
+        kept, because it is the one in front of the user.
+        """
+        if not self.store_path.exists():
+            return
+        problems: Dict[str, str] = {}
+        try:
+            on_disk, raw_profiles, _ = self._read_bundle(
+                str(self.store_path),
+                config_source_for_discovered_path(self.store_path),
+                problems,
+            )
+        except Exception as e:  # noqa: BLE001
+            # Whatever is there now, this manager cannot read it -- so it is
+            # set aside before the save, exactly as after a failed restore.
+            self._store_holds_unread_data = True
+            warnings.warn(
+                f"{self.store_path} changed since this session read it and "
+                f"can no longer be read ({e}); nothing from it was merged."
+            )
+            return
+        if problems:
+            self._store_holds_unread_data = True
+        if raw_profiles == self._synced_disk:
+            return
+
+        merged: Dict[str, ClusterConfig] = {}
+        for name in [*self.profiles, *(n for n in on_disk if n not in self.profiles)]:
+            ours = self.profiles.get(name)
+            ours_now = None if ours is None else self._persisted_form(ours)
+            changed_here = ours_now != self._synced_ours.get(name)
+            changed_on_disk = raw_profiles.get(name) != self._synced_disk.get(name)
+            chosen = ours if changed_here or not changed_on_disk else on_disk.get(name)
+            if chosen is not None:
+                merged[name] = chosen
+        if merged:
+            self._adopt(merged, self.active_profile)
+
     def _persist(self) -> None:
         """Write profiles out so the next session starts where this one left off."""
         try:
-            if self._store_holds_unread_data and self.store_path.exists():
-                self._set_unread_store_aside()
-            self.save_to_file(str(self.store_path))
+            with self._store_lock():
+                self._merge_from_disk()
+                if self._store_holds_unread_data and self.store_path.exists():
+                    self._set_unread_store_aside()
+                self.save_to_file(str(self.store_path))
+                self._mark_synced(self._raw_profiles(self.store_path))
         except Exception as e:  # noqa: BLE001
             warnings.warn(f"Could not save profiles to {self.store_path}: {e}")
 
@@ -790,6 +897,21 @@ class ProfileManager:
         profile written by a newer clustrix does not hide the others; a
         caller who does not pass it keeps the all-or-nothing behaviour.
         """
+        loaded, _, active = self._read_bundle(filepath, source, problems)
+        self._adopt(loaded, active)
+
+    def _adopt(self, loaded: Dict[str, ClusterConfig], active: Any) -> None:
+        """Make ``loaded`` the profile set. Swapped in whole, never piecemeal."""
+        self.profiles = loaded
+        # An active profile naming something absent would make
+        # get_active_profile() return None for the rest of the session.
+        self.active_profile = (
+            active if active in self.profiles else next(iter(self.profiles))
+        )
+
+    @staticmethod
+    def _read_document(filepath: str) -> Dict[str, Any]:
+        """The parsed bundle at ``filepath``: a mapping, or an error."""
         filepath_obj = Path(filepath)
         if not filepath_obj.exists():
             raise FileNotFoundError(f"Configuration file not found: {filepath}")
@@ -802,15 +924,36 @@ class ProfileManager:
 
         if not isinstance(data, dict):
             raise ValueError(f"{filepath} does not contain a profile bundle")
+        profiles_section = data.get("profiles") or {}
+        if not isinstance(profiles_section, dict):
+            raise ValueError(f"'profiles' in {filepath} is not a mapping")
+        data["profiles"] = profiles_section
+        return data
+
+    def _raw_profiles(self, filepath: Path) -> Dict[str, Any]:
+        """The ``profiles`` mapping of the store, exactly as it is on disk."""
+        return dict(self._read_document(str(filepath))["profiles"])
+
+    def _read_bundle(
+        self,
+        filepath: str,
+        source: str,
+        problems: Optional[Dict[str, str]] = None,
+    ) -> Tuple[Dict[str, ClusterConfig], Dict[str, Any], Any]:
+        """Build every profile in ``filepath`` without touching this manager.
+
+        Returns the profiles, the raw ``profiles`` mapping they were built
+        from, and the bundle's ``active_profile``. See :meth:`load_from_file`
+        for ``source`` and ``problems``.
+        """
+        data = self._read_document(filepath)
 
         recorded_sources = data.get(PROFILE_SOURCES_KEY)
         if not isinstance(recorded_sources, dict):
             recorded_sources = {}
 
         loaded: Dict[str, ClusterConfig] = {}
-        profiles_section = data.get("profiles") or {}
-        if not isinstance(profiles_section, dict):
-            raise ValueError(f"'profiles' in {filepath} is not a mapping")
+        profiles_section = data["profiles"]
         for name, config_dict in profiles_section.items():
             try:
                 if not isinstance(config_dict, dict):
@@ -883,14 +1026,7 @@ class ProfileManager:
         if not loaded:
             raise ValueError(f"{filepath} contains no profiles")
 
-        # Swap in only once everything parsed.
-        self.profiles = loaded
-        active = data.get("active_profile")
-        # An active profile naming something absent would make
-        # get_active_profile() return None for the rest of the session.
-        self.active_profile = (
-            active if active in self.profiles else next(iter(self.profiles))
-        )
+        return loaded, dict(profiles_section), data.get("active_profile")
 
     def export_profile(self, profile_name: str, filepath: str) -> None:
         """Export a single profile to a file, owner-readable only.
