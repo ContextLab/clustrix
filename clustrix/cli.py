@@ -14,7 +14,6 @@ from .config import (
     SUPPORTED_CLUSTER_TYPES,
 )
 from .executor import ClusterExecutor
-from .profile_manager import _mkdir_private
 from .ssh_utils import setup_ssh_keys, detect_working_ssh_key
 from .cli_credentials import (
     setup_credentials_interactive,
@@ -69,7 +68,6 @@ def _save_configuration(config_file=None) -> Path:
                 f"was changed. Move that file aside, or name another one "
                 f"with --config-file and load it with 'clustrix load'."
             )
-        _mkdir_private(destination.parent)
     try:
         save_config(str(destination))
     except OSError as exc:

@@ -136,8 +136,30 @@ def test_a_malformed_default_config_is_an_error_message_not_a_traceback():
     assert broken.read_text() == "{this is: not yaml\n", "the broken file was replaced"
 
 
-def test_config_file_in_a_missing_directory_is_an_error_message(tmp_path):
+def test_config_file_in_a_missing_directory_creates_the_directory(tmp_path):
+    """This used to assert the opposite -- exit 1, "Nothing was saved".
+
+    That was the behaviour, not a decision: ``save_to_file`` simply could
+    not write into a directory that was not there, for the CLI or for
+    ``save_config("new/dir/c.yml")`` in Python. It creates the directory
+    now, private, so the assertion is rewritten rather than relaxed; the
+    error-message contract it was really guarding is the next test.
+    """
     target = tmp_path / "no-such-directory" / "x.yml"
+
+    result = clustrix("config", "--cluster-type", "ssh", "--config-file", str(target))
+
+    assert result.returncode == 0, result.stderr
+    assert yaml.safe_load(target.read_text())["cluster_type"] == "ssh"
+    if os.name != "nt":
+        assert stat.S_IMODE(target.parent.stat().st_mode) == 0o700
+    assert not default_config_file().exists()
+
+
+def test_config_file_that_cannot_be_written_is_an_error_message(tmp_path):
+    """A destination under a regular file: no directory can be made there."""
+    (tmp_path / "a-file").write_text("not a directory\n")
+    target = tmp_path / "a-file" / "x.yml"
 
     result = clustrix("config", "--cluster-type", "ssh", "--config-file", str(target))
 
@@ -145,6 +167,7 @@ def test_config_file_in_a_missing_directory_is_an_error_message(tmp_path):
     assert "Traceback" not in result.stderr
     assert str(target) in result.stderr
     assert "Nothing was saved" in result.stderr
+    assert (tmp_path / "a-file").read_text() == "not a directory\n"
     assert not default_config_file().exists()
 
 

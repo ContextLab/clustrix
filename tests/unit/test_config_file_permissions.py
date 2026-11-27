@@ -346,3 +346,38 @@ def test_repr_masks_credentials_but_keeps_ordinary_fields():
     assert "researcher" in rendered
     assert "OMP_NUM_THREADS" in rendered
     assert "password='***'" in rendered
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+@pytest.mark.parametrize("via", ["method", "module_function"])
+def test_saving_into_a_directory_that_does_not_exist_creates_it_private(
+    tmp_path, monkeypatch, via
+):
+    """``save_config("new/dir/c.yml")`` used to fail with FileNotFoundError.
+
+    The directories clustrix makes are 0700 each, whatever the umask asks
+    for; the one that was already there is left exactly as it was.
+    """
+    import clustrix.config as config_module
+
+    tmp_path.chmod(0o755)
+    destination = tmp_path / "made" / "deeper" / "config.yml"
+    config = ClusterConfig(cluster_type="ssh", cluster_host="login.example.edu")
+
+    previous_umask = os.umask(0o022)
+    try:
+        if via == "method":
+            config.save_to_file(str(destination))
+        else:
+            monkeypatch.setattr(config_module, "_config", config)
+            config_module.save_config(str(destination))
+    finally:
+        os.umask(previous_umask)
+
+    assert ClusterConfig.load_from_file(str(destination)).cluster_host == (
+        "login.example.edu"
+    )
+    assert _mode(destination) == 0o600
+    for made in (destination.parent, destination.parent.parent):
+        assert _mode(made) == 0o700, made
+    assert _mode(tmp_path) == 0o755

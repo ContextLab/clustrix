@@ -348,9 +348,18 @@ class ClusterConfig:
         :data:`CONFIG_SOURCES_KEY` for the key and
         :func:`config_source_for_saved_entry` for the downgrade-only rule
         that stops it becoming a laundering route in its own right.
+
+        A destination directory that does not exist is created, 0700 at
+        every level clustrix makes -- the same rule, and the same function,
+        as the configuration directory itself.
         """
+        # Imported here: profile_manager imports this module.
+        from .profile_manager import _mkdir_private
+
+        destination = Path(config_path).expanduser()
+        _mkdir_private(destination.parent)
         write_config_file_securely(
-            Path(config_path).expanduser(),
+            destination,
             config_document(self, include_secrets=include_secrets),
         )
 
