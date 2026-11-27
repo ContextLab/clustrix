@@ -1,240 +1,97 @@
 name: Real-World Tests
 
-# Deliberately no `push:` or `pull_request:` trigger. These jobs use real
-# credentials (SSH, cloud APIs, HuggingFace) and some provision real
-# resources, so a PR from a fork must never be able to run them -- GitHub
-# only allows that through `pull_request_target`, which this workflow does
-# not use. workflow_dispatch is manual-only and schedule only ever runs on
-# the default branch, so both are safe triggers for credentialed jobs. See
-# issue #113 / #118.
+# Deliberately no `push:` or `pull_request:` trigger. The HuggingFace job uses
+# a real token and submits a real job, so a PR from a fork must never be able
+# to run it -- GitHub only allows that through `pull_request_target`, which
+# this workflow does not use. workflow_dispatch is manual-only and schedule
+# only ever runs on the default branch, so both are safe triggers for a
+# credentialed job. See issue #113 / #118.
 on:
   workflow_dispatch:
-    inputs:
-      run_expensive:
-        description: 'Run expensive tests (provisions billable cloud resources)'
-        required: false
-        default: false
-        type: boolean
   schedule:
-    # Weekly, not daily: HF CPU flavors are cheap but not free (#118), and the
-    # SSH/cloud jobs below depend on credentials that may go stale between
-    # runs. Only the hf-jobs-integration job actually listens to this trigger
-    # (see its `if:` below) -- the rest stay workflow_dispatch-only until
-    # their credentials are confirmed live.
+    # Weekly, not daily: HF CPU flavors are cheap but not free (#118). Only
+    # the hf-jobs-integration job listens to this trigger (see its `if:`
+    # below); the local-cluster job is workflow_dispatch-only.
     - cron: '0 3 * * 1'
 
 jobs:
+  local-cluster:
+    name: Real sshd and SLURM (tests/real_world)
+    # Manual-only. This job needs no secret: the cluster it tests against is
+    # one it builds itself, in the job's own container.
+    #
+    # NOT YET RUN ON GITHUB. scripts/setup_local_slurm.sh and the suite were
+    # developed and run as root in an Ubuntu 24.04 container, which is what
+    # `container:` below asks for; that this job behaves the same on a hosted
+    # runner is inferred from reading the script, not observed. The container
+    # rather than the runner's own VM is deliberate: the hosted image ships
+    # MySQL with a populated /var/lib/mysql, and the script installs MariaDB
+    # and skips mariadb-install-db when that directory exists.
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 60
+    env:
+      CLUSTRIX_TEST_SSH_HOST: 127.0.0.1
+      CLUSTRIX_TEST_SSH_PORT: "2222"
+      CLUSTRIX_TEST_SSH_USER: clx
+      CLUSTRIX_TEST_SSH_KEY: /tmp/clustrix-local-cluster/id_ed25519
+
+    steps:
+    - name: Install git and Python
+      # The container's own Python, not actions/setup-python: a job runs under
+      # the cluster's python3, and client and worker must be the same minor
+      # version or the submission is refused.
+      run: |
+        apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+          git python3 python3-venv python3-pip
+
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Let git read the checkout
+      # The workspace is owned by the runner's user and this job is root in a
+      # container, which git refuses as "dubious ownership". clustrix asks git
+      # for the project's top level when it stages input files.
+      run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+    - name: Stand up sshd and a single-node SLURM cluster
+      # Ends by submitting a job with sbatch and requiring it to complete, so
+      # a cluster that did not come up fails here rather than in the tests.
+      run: bash scripts/setup_local_slurm.sh
+
+    - name: Install clustrix
+      run: |
+        python3 -m venv /opt/clustrix-venv
+        /opt/clustrix-venv/bin/pip install --upgrade pip
+        /opt/clustrix-venv/bin/pip install -e ".[dev]"
+
+    - name: Run the real-world suite
+      run: |
+        /opt/clustrix-venv/bin/python -m pytest tests/real_world/ -m real_world -rs
+
   # The `secrets` context is not available in `if:` conditions (job-level or
   # step-level) per GitHub's own context-availability rules -- confirmed by
   # actionlint rejecting `secrets.X != ''` there. This job is the standard
-  # workaround: resolve secret presence into step outputs here, then have
-  # downstream jobs gate on `needs.check-secrets.outputs.*`, which the
+  # workaround: resolve secret presence into a step output here, then have
+  # the downstream job gate on `needs.check-secrets.outputs.*`, which the
   # `needs` context does allow in `if:`.
   check-secrets:
     runs-on: ubuntu-latest
     outputs:
-      has_cluster_creds: ${{ steps.check.outputs.has_cluster_creds }}
       has_hf_token: ${{ steps.check.outputs.has_hf_token }}
     steps:
       - name: Check which secrets are configured
         id: check
         env:
-          CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
-          CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          if [ -n "$CLUSTRIX_USERNAME" ] && [ -n "$CLUSTRIX_PASSWORD" ]; then
-            echo "has_cluster_creds=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "has_cluster_creds=false" >> "$GITHUB_OUTPUT"
-          fi
           if [ -n "$HF_TOKEN" ]; then
             echo "has_hf_token=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_hf_token=false" >> "$GITHUB_OUTPUT"
           fi
-
-  real-world-tests:
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    # Manual-only: needs CLUSTRIX_USERNAME/PASSWORD to be live, which is not
-    # guaranteed on a schedule. Run it by hand when validating those creds.
-    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_cluster_creds == 'true' }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[test]"
-
-    - name: Set up SSH server for testing
-      run: |
-        # Install SSH server
-        sudo apt-get update
-        sudo apt-get install -y openssh-server
-
-        # Create test user
-        sudo useradd -m -s /bin/bash ${{ secrets.CLUSTRIX_USERNAME }}
-        echo "${{ secrets.CLUSTRIX_USERNAME }}:${{ secrets.CLUSTRIX_PASSWORD }}" | sudo chpasswd
-
-        # Configure SSH
-        sudo sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
-        sudo systemctl restart ssh
-
-        # Test SSH connection
-        timeout 10 ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null ${{ secrets.CLUSTRIX_USERNAME }}@localhost "echo 'SSH connection successful'"
-
-    - name: Populate known_hosts for host key verification
-      # Issue #148: the real-world tests no longer call
-      # `set_missing_host_key_policy(paramiko.AutoAddPolicy())`; they go
-      # through `clustrix.ssh_security.configure_host_key_policy`, whose
-      # default policy is "reject". Any host absent from known_hosts now
-      # raises HostKeyVerificationError instead of being trusted silently,
-      # so every host these tests connect to must be scanned in first.
-      #
-      # localhost/127.0.0.1 is the sshd this job installs a few steps above,
-      # and is the only host the CI run actually reaches.
-      #
-      # There is deliberately no `secrets.*` reference for an external
-      # cluster hostname here, because no such repository secret exists --
-      # the only cluster secrets configured are CLUSTRIX_USERNAME,
-      # CLUSTRIX_PASSWORD, HF_USERNAME and HF_TOKEN. Real cluster hosts are
-      # supplied to the suite through the CLUSTRIX_TEST_{SSH,SLURM}_HOST[_2]
-      # environment variables (see tests/real_world/credential_manager.py);
-      # this step scans whichever of those are set so that adding them later
-      # needs no further workflow change.
-      run: |
-        mkdir -p ~/.ssh
-        chmod 700 ~/.ssh
-        for host in localhost 127.0.0.1 \
-                    "$CLUSTRIX_TEST_SSH_HOST" "$CLUSTRIX_TEST_SSH_HOST_2" \
-                    "$CLUSTRIX_TEST_SLURM_HOST" "$CLUSTRIX_TEST_SLURM_HOST_2"; do
-          [ -n "$host" ] || continue
-          echo "Scanning host key for $host"
-          ssh-keyscan -H "$host" >> ~/.ssh/known_hosts
-        done
-        chmod 600 ~/.ssh/known_hosts
-        # Fail loudly rather than let the tests fail later with an opaque
-        # HostKeyVerificationError for the host this job just created.
-        ssh-keygen -F localhost -f ~/.ssh/known_hosts > /dev/null
-
-    - name: Run filesystem tests
-      run: |
-        python scripts/run_real_world_tests.py --filesystem
-
-    - name: Run SSH tests
-      env:
-        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
-        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
-      run: |
-        python scripts/run_real_world_tests.py --ssh
-
-    - name: Run API tests (free tier)
-      env:
-        HF_USERNAME: ${{ secrets.HF_USERNAME }}
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: |
-        python scripts/run_real_world_tests.py --api
-
-    - name: Run expensive tests
-      if: ${{ inputs.run_expensive }}
-      env:
-        HF_USERNAME: ${{ secrets.HF_USERNAME }}
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: |
-        python scripts/run_real_world_tests.py --api --expensive
-
-    - name: Upload test artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: test-results
-        path: |
-          tests/real_world/temp/
-        retention-days: 7
-
-  slurm-tests:
-    runs-on: ubuntu-latest
-    needs: check-secrets
-    # Manual-only: no SLURM server is available in CI; this just probes
-    # whether the configured credentials resolve.
-    if: ${{ github.event_name == 'workflow_dispatch' && needs.check-secrets.outputs.has_cluster_creds == 'true' }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[test]"
-
-    - name: Test SLURM connection
-      env:
-        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
-        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
-      run: |
-        python -c "
-        from tests.real_world.credential_manager import get_credential_manager
-        manager = get_credential_manager()
-        slurm_creds = manager.get_slurm_credentials()
-        print('SLURM credentials available:', slurm_creds is not None)
-        "
-
-  credential-check:
-    runs-on: ubuntu-latest
-    # Diagnostic job: reports which secrets are configured, so it runs
-    # whenever triggered manually regardless of which secrets exist yet.
-    if: ${{ github.event_name == 'workflow_dispatch' }}
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e ".[test]"
-
-    - name: Check credentials
-      env:
-        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
-        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
-        HF_USERNAME: ${{ secrets.HF_USERNAME }}
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: |
-        python scripts/run_real_world_tests.py --check-creds
-
-    - name: Test credential integration
-      env:
-        CLUSTRIX_USERNAME: ${{ secrets.CLUSTRIX_USERNAME }}
-        CLUSTRIX_PASSWORD: ${{ secrets.CLUSTRIX_PASSWORD }}
-        HF_USERNAME: ${{ secrets.HF_USERNAME }}
-        HF_TOKEN: ${{ secrets.HF_TOKEN }}
-      run: |
-        # NB: this used to point at scripts/test_real_world_credentials.py,
-        # which does not exist. The real file lives under tests/real_world/
-        # -- it is a standalone script (has `if __name__ == "__main__"`),
-        # not a pytest module, despite the tests/ location.
-        python tests/real_world/test_real_world_credentials.py
 
   hf-jobs-integration:
     name: HF Jobs Integration Smoke Test
