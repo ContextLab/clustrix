@@ -623,6 +623,15 @@ def make_portable_function(source: str, name: str) -> Callable:
     return namespace[name]
 
 
+#: The parts of clustrix that are the user's *data* rather than the machinery
+#: running the job. A ``DataPackage`` is an argument: the function calls its
+#: methods on the worker, where clustrix is not installed, so its class has
+#: to be embedded like any class from the user's own project. Without this a
+#: declared data package failed on every ssh and slurm job with
+#: ``ModuleNotFoundError: No module named 'clustrix'``.
+_CLUSTRIX_MODULES_SENT_WITH_JOBS = frozenset({"clustrix.staging"})
+
+
 def _is_local_module(module: Any) -> bool:
     """True when `module` lives in the user's project rather than an install.
 
@@ -637,6 +646,8 @@ def _is_local_module(module: Any) -> bool:
     were never even looked at -- the worker died on ``import nspkg``.
     """
     name = getattr(module, "__name__", "")
+    if name in _CLUSTRIX_MODULES_SENT_WITH_JOBS:
+        return True
     path = getattr(module, "__file__", None)
     if not path:
         entries = list(getattr(module, "__path__", None) or [])

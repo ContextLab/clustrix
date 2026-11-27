@@ -170,6 +170,51 @@ def test_third_party_arguments_and_results_cross_both_ways(backend):
     assert out.tolist() == [0, 1, 3, 6]
 
 
+def test_declared_data_arrives_on_the_worker(backend, tmp_path):
+    """A file, a directory and 8 MB of bytes, named with ``data_package``."""
+    import hashlib
+
+    import clustrix
+
+    (tmp_path / "tree" / "sub").mkdir(parents=True)
+    (tmp_path / "tree" / "a.txt").write_text("one\n")
+    (tmp_path / "tree" / "sub" / "b.txt").write_text("two\n")
+    (tmp_path / "small.csv").write_text("alpha,1\n")
+    blob = os.urandom(8 * 1024 * 1024)
+    (tmp_path / "big.bin").write_bytes(blob)
+
+    small = clustrix.data_package(str(tmp_path / "small.csv"))
+    tree = clustrix.data_package(str(tmp_path / "tree"))
+    # Above the inline threshold a package goes to a private HuggingFace
+    # repo, which a worker without clustrix cannot read; force_local carries
+    # the bytes with the job instead.
+    big = clustrix.data_package(str(tmp_path / "big.bin"), force_local=True)
+
+    @cluster(cores=1, memory="500MB", time="00:05:00")
+    def job(small, tree, big):
+        import hashlib
+
+        with open(big.path("big.bin"), "rb") as handle:
+            digest = hashlib.sha256(handle.read()).hexdigest()
+        return (
+            open(small.path("small.csv")).read(),
+            sorted(tree.filenames()),
+            open(tree.path("sub/b.txt")).read(),
+            digest,
+            big.path("big.bin"),
+        )
+
+    text, names, nested, digest, where = job(small, tree, big)
+
+    assert text == "alpha,1\n"
+    assert names == ["a.txt", "sub/b.txt"]
+    assert nested == "two\n"
+    assert digest == hashlib.sha256(blob).hexdigest()
+    assert (
+        "/clustrix-realworld-tests/job_" in where
+    ), "the data was not unpacked on the worker"
+
+
 def test_only_what_the_job_imports_is_installed_when_mirroring_is_off(backend):
     """replicate_local_environment=False builds from the detected imports."""
     pytest.importorskip("yaml")

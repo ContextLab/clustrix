@@ -372,3 +372,64 @@ class TestWhatComesBackIsTheCallersOwnClass:
         finally:
             cloudpickle.unregister_pickle_by_value(sys.modules[__name__])
         assert loads_remote_payload(payload).marker == 41
+
+
+def reads_a_package(package):
+    with open(package.path("notes/readme.txt")) as handle:
+        return handle.read(), sorted(package.filenames()), package.path("data.bin")
+
+
+class TestADataPackageWorksWhereClustrixIsNotInstalled:
+    """A worker has dill and the user's packages. It does not have clustrix.
+
+    A ``DataPackage`` is an argument, and the function calls methods on it,
+    so its class has to arrive with the job. Passing one to an ssh or slurm
+    job used to fail on ``ModuleNotFoundError: No module named 'clustrix'``.
+    The subprocess below makes ``import clustrix`` fail the way it does on a
+    worker (``sys.modules['clustrix'] = None`` is Python's own spelling of
+    "this module cannot be imported") and runs the function there.
+    """
+
+    def test_an_inline_package_is_read_on_a_machine_without_clustrix(self, tmp_path):
+        import clustrix
+
+        source = tmp_path / "source"
+        (source / "notes").mkdir(parents=True)
+        (source / "notes" / "readme.txt").write_text("declared, so it travelled\n")
+        (source / "data.bin").write_bytes(bytes(range(256)) * 64)
+        package = clustrix.data_package(str(source), force_local=True)
+
+        data = serialize_function(reads_a_package, (package,), {})
+        workdir = tmp_path / "jobdir"
+        workdir.mkdir()
+        program = textwrap.dedent("""
+            import base64, sys
+            sys.modules['clustrix'] = None
+            import dill
+            func = dill.loads(base64.b64decode(sys.argv[1]))
+            text, names, binary = func(*dill.loads(base64.b64decode(sys.argv[2])))
+            print(text.strip()); print(names); print(binary)
+            print(open(binary, 'rb').read() == bytes(range(256)) * 64)
+            """)
+        # The original files are removed first: a package dereferenced where
+        # its sources still exist reads them in place, which would prove
+        # nothing about what travelled.
+        import shutil
+
+        shutil.rmtree(source)
+        result = subprocess.run(
+            [sys.executable, "-c", program]
+            + [base64.b64encode(data[key]).decode() for key in ("function", "args")],
+            capture_output=True,
+            text=True,
+            cwd=str(workdir),
+            env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path / "home")},
+        )
+        assert result.returncode == 0, result.stderr
+        text, names, binary, intact = result.stdout.strip().splitlines()
+        assert text == "declared, so it travelled"
+        assert names == "['data.bin', 'notes/readme.txt']"
+        # Unpacked beside the job, so cleanup_on_success removes it with the
+        # job directory instead of leaving it in a cache on the cluster.
+        assert pathlib.Path(binary).is_relative_to(workdir)
+        assert intact == "True"

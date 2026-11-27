@@ -116,8 +116,6 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 
-from .credential_release import huggingface_client_kwargs
-
 logger = logging.getLogger(__name__)
 
 #: Repo, under the caller's namespace, holding staged data packages.
@@ -441,6 +439,9 @@ def _hf_api(config):
             "the remote store. Install it with `pip install huggingface_hub`, "
             "or build packages with force_local=True."
         ) from exc
+    # Imported here, not at the top of the module: see ``_config``.
+    from clustrix.credential_release import huggingface_client_kwargs
+
     return HfApi(token=_hf_token(config), **huggingface_client_kwargs())
 
 
@@ -667,7 +668,17 @@ class DataPackage:
         return str(root)
 
     def _default_dest(self, config) -> Path:
-        cache = getattr(config or _config(), "local_cache_dir", "~/.clustrix/cache")
+        if config is None:
+            try:
+                config = _config()
+            except ImportError:
+                # A worker: clustrix is not installed here, and the working
+                # directory is the job directory. Unpacking beside the job
+                # means the copy is removed with it by cleanup_on_success,
+                # rather than accumulating in a cache nobody on the cluster
+                # knows to empty.
+                return Path.cwd() / "clustrix-data-packages" / self.package_id
+        cache = getattr(config, "local_cache_dir", "~/.clustrix/cache")
         base = Path(os.path.expanduser(str(cache))) / "data-packages"
         return base / self.package_id
 
@@ -704,7 +715,12 @@ class DataPackage:
                 "huggingface_hub is not installed on this machine, so the "
                 f"data package {self.name!r} cannot be fetched."
             ) from exc
-        cfg = config if config is not None else _config()
+        try:
+            from clustrix.credential_release import huggingface_client_kwargs
+
+            cfg = config if config is not None else _config()
+        except ImportError as exc:
+            raise _on_a_worker_without_clustrix(self.name) from exc
         cached = hf_hub_download(
             repo_id=self.repo_id,
             filename=f"{self.path_in_repo}/files/{entry.relpath}",
@@ -864,9 +880,26 @@ def _is_missing(exc: Exception) -> bool:
 
 
 def _config():
+    """The live configuration, imported when asked for rather than at import.
+
+    This module is sent to workers by value (see ``utils._is_local_module``),
+    because a :class:`DataPackage` passed to a job has to be usable on a
+    machine where clustrix itself is not installed. Anything it takes from
+    the rest of clustrix is therefore imported at the point of use, so that
+    merely rebuilding the class on a worker needs none of it.
+    """
     from clustrix.config import get_config
 
     return get_config()
+
+
+def _on_a_worker_without_clustrix(package_name: str) -> "StagingError":
+    return StagingError(
+        f"Data package {package_name!r} is stored in a HuggingFace repo, and "
+        "this machine has no clustrix installation to fetch it with -- which "
+        "is the normal state of an ssh or slurm worker. Build the package "
+        "with force_local=True so that its contents travel with the job."
+    )
 
 
 def _collect(
@@ -1443,6 +1476,8 @@ def _read_manifest(api, repo_id: str, path: str, config) -> Dict[str, Any]:
     rather than crashing the listing.
     """
     from huggingface_hub import hf_hub_download
+
+    from clustrix.credential_release import huggingface_client_kwargs
 
     try:
         local = hf_hub_download(
