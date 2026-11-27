@@ -70,7 +70,7 @@ _CLUSTER_ROLES = {"gpu_cluster": "ssh", "slurm_cluster": "slurm"}
 
 def _require_cluster(cluster_name: str):
     """Config for `cluster_name`, or skip saying what to set."""
-    config_data = _require_cluster(cluster_name)
+    config_data = TEST_CLUSTERS[cluster_name]
     if config_data is None:
         role = _CLUSTER_ROLES[cluster_name]
         pytest.skip(

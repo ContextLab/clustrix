@@ -780,6 +780,13 @@ GLOBAL_SILENCERS = frozenset(
 #: that happened to be called ``__del__`` was auto-allowed by the entry below,
 #: and renaming a function to ``__del__`` was a one-line way past the guard.
 JUSTIFIED_SWALLOWS = {
+    ("loop_workers.py", "_survives_pickling"): (
+        "A predicate: its whole answer is whether pickling and unpickling "
+        "the value raises, and False is that answer. Both callers act on it "
+        "-- a warning category that cannot travel is reported as "
+        "UserWarning, an exception that cannot travel is sent as its class, "
+        "arguments and attributes -- so nothing is lost by not saying why."
+    ),
     ("executor_core.py", "ClusterExecutor.__del__"): (
         "A finaliser runs at an interpreter-defined time or never, possibly "
         "while modules are already torn down. An exception raised from it is "

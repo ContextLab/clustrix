@@ -132,6 +132,12 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
     # CLUSTRIX_LOOP_WORKER, a module constant: the flag a worker process is
     # started with so that it knows it is one. Not a secret.
     ("loop_workers.py", "in_worker"),
+    # A local worker making its environment equal to its parent's before a
+    # task: it compares each name's value with the one the parent sent. The
+    # recipient is this machine's own child process, which inherited the
+    # same environment when it started; no host and no configuration is
+    # involved.
+    ("loop_workers.py", "_adopt"),
     # Route 9, and gated now: ``get_cluster_password`` used to scan
     # CLUSTRIX_DEFAULT_PASSWORD and CLUSTER_PASSWORD -- variables that name
     # **no host** -- and hand what it found to whatever hostname it was
@@ -208,6 +214,13 @@ ENVIRONMENT_BULK_READ_ALLOWLIST = {
     # would otherwise run right here, with this same environment. Nothing is
     # sent to a host, and no configuration chooses the recipient.
     ("loop_workers.py", "_Worker.__init__"),
+    # The same environment again, as it is at the moment of a call, sent
+    # down the pipe to those same local workers (``WorkerPool.map``) and
+    # applied there (``_adopt``): workers are kept between calls, and a
+    # variable the caller set since they started must be the one the loop
+    # body sees, as it would in a direct call.
+    ("loop_workers.py", "WorkerPool.map"),
+    ("loop_workers.py", "_adopt"),
     # A membership test over five thread-count variable names
     # (OMP_NUM_THREADS and friends), to leave alone the ones the user set.
     # No value is read.
