@@ -371,8 +371,10 @@ Both are pinned to your **local** Python minor version. Conda is preferred and
 is located by probing for ``etc/profile.d/conda.sh``, because paramiko's
 ``exec_command`` starts a non-interactive, non-login shell that never sources
 the profile scripts that put ``conda`` on ``PATH``. If conda is absent,
-clustrix probes for a system interpreter and ``_select_remote_python`` requires
-an exact minor-version match:
+clustrix builds two virtualenvs from a system interpreter: the one
+``python_executable`` names if you set it (and no other), otherwise whichever
+``python3.x`` it finds by probing. Either way ``_select_remote_python``
+requires an exact minor-version match:
 
 .. code-block:: text
 
@@ -556,6 +558,15 @@ Real output:
    export CLUSTRIX_RESULT_KEY=$(cat /home/me/.clustrix/jobs/job_1/.clustrix_result_key 2>/dev/null || true)
    cd /home/me/.clustrix/jobs/job_1
 
+``--job-name`` is ``clustrix`` here only because ``create_job_script`` was
+called directly, with no function. A job submitted through ``@cluster`` is
+named after the function, reduced to letters, digits and ``_ . -`` and cut to
+48 characters, so ``squeue`` and ``sacct`` say which analysis a row belongs
+to. A piece of a divided loop is named after the function the loop is in,
+then the piece: ``sweep_thresholds.body`` is a chunk of iterations,
+``.pre`` and ``.post`` the code around the loop, ``.rest`` the loop run whole.
+The chunk number is not part of the name.
+
 Three settings are pasted into that script unquoted, because quoting would
 break what they mean, and are therefore validated instead:
 
@@ -666,8 +677,27 @@ Errors
 On ``failed``, ``extract_original_exception`` downloads and verifies
 ``error.pkl`` and deserializes it with dill. The remote stages ship the
 exception *object* under an ``exception`` key, so the original type survives
-and ``except ValueError:`` fires as you would expect. If that fails, clustrix
-falls back to ``RuntimeError(f"Job {job_id} failed. Error log:\n{error_log}")``.
+and ``except ValueError:`` fires as you would expect.
+
+A job that ended without raising -- cancelled, killed, out of time, or
+``sys.exit`` -- has no exception to hand back, and raises ``JobFailedError``
+(a ``RuntimeError``, in ``clustrix.executor_scheduler_status``). Its message is
+a few lines: how the job ended as far as clustrix could find out, the job
+directory on the cluster, and the last lines of the job's error log. From a
+real ``scancel``:
+
+.. code-block:: text
+
+   Job 519 was cancelled (according to sacct: state=CANCELLED by 30033 exit_code=0:0 node=vm workdir=).
+   Its files and logs are in /home/clx/clustrix-realworld-tests/job_1795769288_2ca8791f on 127.0.0.1.
+   Its error log:
+     starting the long part
+     slurmstepd-vm: error: *** JOB 519 ON vm CANCELLED AT 2026-11-27T08:48:11 ***
+
+The whole log is the exception's ``error_log`` attribute, beside ``job_id``,
+``reason`` and ``remote_dir``. When a process is killed, bash reports it by
+printing the command it was running, which here is the entire generated
+program; the message folds that echo into one line and ``error_log`` keeps it.
 
 Each of the three stages writes its own ``error_<stage>.pkl`` unconditionally
 but only claims the shared ``error.pkl`` if no earlier stage already did, so a
