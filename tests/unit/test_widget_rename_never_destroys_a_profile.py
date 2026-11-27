@@ -42,6 +42,8 @@ def _widget_selecting(name):
     controls["host"].value = "remote.example.edu"
     controls["username"].value = "researcher"
     controls["password"].value = "only-in-this-session"
+    # Apply is what saves the form to the profile; until then it is a draft.
+    widget._on_apply_config(controls["apply_btn"])
     assert name in controls["profile_dropdown"].options
     controls["profile_dropdown"].value = name
     assert widget.profile_manager.active_profile == name
@@ -152,13 +154,31 @@ def test_a_profile_cannot_be_renamed_to_nothing(blank, capsys):
     assert widget.widgets["profile_name"].value == RENAMED
 
 
+def test_a_refused_rename_does_not_cost_the_unapplied_edits_either(capsys):
+    """Neither the draft on screen nor a draft parked on the occupant."""
+    widget = _widget_selecting(OCCUPANT)
+    widget.widgets["cpus"].value = 31
+    widget.widgets["profile_dropdown"].value = RENAMED
+    widget.widgets["hf_namespace"].value = "typed-not-applied"
+
+    _type_name(widget, OCCUPANT, capsys)
+
+    assert pill(widget) == "not renamed"
+    assert widget.widgets["hf_namespace"].value == "typed-not-applied"
+    widget.widgets["profile_dropdown"].value = OCCUPANT
+    assert widget.widgets["cpus"].value == 31
+
+
 def test_a_rename_that_is_allowed_keeps_what_was_on_screen(capsys):
     """The control: the refusals above must not have cost the rename itself.
 
-    Including an edit that had not been captured yet -- the rename happens to
-    the profile the user is looking at, not to its last saved copy.
+    Renaming moves the *saved* profile and carries the unapplied edits along
+    as a draft under the new name. (It used to write the on-screen edit into
+    the profile as part of the rename; editing no longer writes anywhere, so
+    the edit stays an edit until Apply.)
     """
     widget = _widget_selecting(OCCUPANT)
+    saved_cores = widget.profile_manager.profiles[OCCUPANT].default_cores
     widget.widgets["cpus"].value = 12
 
     told = _type_name(widget, "My cluster", capsys)
@@ -167,10 +187,19 @@ def test_a_rename_that_is_allowed_keeps_what_was_on_screen(capsys):
     assert OCCUPANT not in profiles
     assert profiles["My cluster"].cluster_host == "remote.example.edu"
     assert profiles["My cluster"].password == "only-in-this-session"
-    assert profiles["My cluster"].default_cores == 12
+    assert profiles["My cluster"].default_cores == saved_cores != 12
     assert widget.widgets["profile_dropdown"].value == "My cluster"
+    assert widget.widgets["cpus"].value == 12, "the rename discarded the draft"
+    assert widget.widgets["revert_btn"].disabled is False
     assert "Could not rename" not in told
-    # Surrounding whitespace is not part of a name.
+    # The draft follows the profile through a second rename and a detour.
     _type_name(widget, "  Padded  ", capsys)
     assert "Padded" in widget.profile_manager.profiles
     assert widget.widgets["profile_dropdown"].value == "Padded"
+    widget.widgets["profile_dropdown"].value = RENAMED
+    widget.widgets["profile_dropdown"].value = "Padded"
+    assert widget.widgets["cpus"].value == 12
+    # And Apply saves it under the name the profile has now.
+    widget._on_apply_config(widget.widgets["apply_btn"])
+    assert widget.profile_manager.profiles["Padded"].default_cores == 12
+    assert "My cluster" not in widget.profile_manager.profiles

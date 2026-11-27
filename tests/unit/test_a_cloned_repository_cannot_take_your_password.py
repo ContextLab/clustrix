@@ -4729,7 +4729,10 @@ def test_applying_a_profile_the_widget_found_does_not_send_it_your_password(
     widget = _widget_showing_the_found_profile(bundle, attacker_server.host)
     widget._on_apply_config(None)
 
-    assert "in use" in widget.widgets["status_pill"].value
+    # Applied for real -- the result and the header both say so -- so what
+    # follows is about the credential and not about a refused Apply.
+    assert "applied" in widget.widgets["status_pill"].value
+    assert "in use" in widget.widgets["applied_pill"].value
     assert get_config().cluster_host == attacker_server.host
     assert get_config_source(get_config()) == FOUND_IN_THE_REPOSITORY
 
@@ -4873,6 +4876,57 @@ def test_renaming_a_found_profile_does_not_launder_it(
     assert get_config_source(get_config()) == FOUND_IN_THE_REPOSITORY
     assert not _attempt_connection()
     assert attacker_server.authentications == []
+
+
+def test_a_draft_of_a_found_profile_is_not_laundered_by_being_put_back(
+    attacker_server, env_file, tmp_path, monkeypatch
+):
+    """Unapplied edits are parked as plain field values and laid back over
+    the form when the profile is shown again. That is one more route from
+    "a file named this host" to ``configure()``, so it is walked: edit
+    something that is not the host, leave, come back, Apply, connect."""
+    pytest.importorskip("ipywidgets")
+    env_file(SSH_PASSWORD=SENTINEL_PASSWORD)
+    bundle = _cloned_repository_shipping(
+        _profile_bundle(attacker_server), tmp_path, monkeypatch
+    )
+    _the_host_is_already_known(attacker_server)
+    configure(ssh_host_key_policy="auto_add")
+
+    widget = _widget_showing_the_found_profile(bundle, attacker_server.host)
+    widget.profile_manager.save_profile("mine", ClusterConfig(cluster_type="local"))
+    widget._update_profile_dropdown()
+    widget.widgets["cpus"].value = 17
+    widget.widgets["profile_dropdown"].value = "mine"
+    widget.widgets["profile_dropdown"].value = "Cluster"
+    assert widget.widgets["cpus"].value == 17, "the draft did not come back"
+    assert widget.widgets["host"].value == attacker_server.host
+
+    widget._on_apply_config(None)
+
+    assert "applied" in widget.widgets["status_pill"].value
+    assert get_config().default_cores == 17
+    assert get_config_source(get_config()) == FOUND_IN_THE_REPOSITORY
+    saved = widget.profile_manager.load_profile("Cluster")
+    assert get_config_source(saved) == FOUND_IN_THE_REPOSITORY
+    assert not _attempt_connection()
+    assert attacker_server.authentications == []
+
+
+def test_reverting_a_found_profile_does_not_launder_it(tmp_path, monkeypatch):
+    pytest.importorskip("ipywidgets")
+    bundle = _cloned_repository_shipping(
+        _profile_bundle(_NamedHost(UNRELATED_ATTACKER_HOST)), tmp_path, monkeypatch
+    )
+    widget = _widget_showing_the_found_profile(bundle, UNRELATED_ATTACKER_HOST)
+    widget.widgets["host"].value = "my-own.example.edu"
+
+    widget._on_revert_profile(None)
+    widget._on_apply_config(None)
+
+    assert get_config().cluster_host == UNRELATED_ATTACKER_HOST
+    assert get_config_source(get_config()) == FOUND_IN_THE_REPOSITORY
+    assert stored_credential_is_for_config(get_config(), {}) is not None
 
 
 def test_renaming_a_found_profile_onto_your_own_does_not_inherit_its_trust(
@@ -5225,7 +5279,7 @@ def test_saving_a_found_profile_to_your_own_directory_does_not_adopt_it(
         elsewhere,
     )
 
-    assert "loaded" in second["pills"][0]
+    assert "imported" in second["pills"][0]
     assert second["applied"]["host"] == attacker_server.host
     assert attacker_server.authentications == []
     assert not second["authenticated"]
@@ -5366,8 +5420,8 @@ def test_a_bundle_yaml_did_not_key_with_strings_cannot_break_the_widget(tmp_path
     first = _widget_session(
         [["load", str(bundle)], ["save", "kept.yml"]], home, repository
     )
-    assert "loaded" in first["pills"][0] or "load failed" in first["pills"][0]
-    assert "saved" in first["pills"][1]
+    assert "imported" in first["pills"][0] or "import failed" in first["pills"][0]
+    assert "exported" in first["pills"][1]
     assert all(isinstance(name, str) for name in first["sources"])
 
     second = _widget_session([], home, elsewhere)
