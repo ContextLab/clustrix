@@ -29,10 +29,13 @@ from clustrix.config import (  # noqa: E402
     get_config,
     split_config_kwargs,
 )
-from clustrix.modern_notebook_widget import ModernClustrixWidget  # noqa: E402
+from clustrix.modern_notebook_widget import (  # noqa: E402
+    WIDGET_MANAGED_FIELDS,
+    ModernClustrixWidget,
+)
 from clustrix.profile_manager import ProfileManager  # noqa: E402
 from clustrix.widget_controls import set_choice  # noqa: E402
-from tests.widget_console import pill, press  # noqa: E402
+from tests.widget_console import applied, pill, press  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
@@ -717,31 +720,37 @@ class TestClearingAControlClearsTheSetting:
 #: A profile's settings the form has no control for. Real ``ClusterConfig``
 #: fields, each of which changes what a job does.
 SETTINGS_WITH_NO_CONTROL = {
-    "default_partition": "gpu-long",
     "stage_warn_bytes": 4096,
-    "conda_env_name": "analysis",
+    "job_poll_interval": 5,
+    "venv_setup_timeout": 900,
 }
+
+
+def _uncontrolled(config):
+    return {name: getattr(config, name) for name in SETTINGS_WITH_NO_CONTROL}
 
 
 class TestAProfileSettingWithNoControlIsCarried:
     """A profile is more than the form can show.
 
-    ``ClusterConfig`` has far more fields than the widget has controls --
-    ``default_partition`` among them, which is the SLURM partition a job is
-    submitted to. A profile holding one can only have come from a bundle the
-    user loaded or from ``configure()`` before the widget opened, and in
-    both cases it is a setting they made. The widget this one replaced
-    carried such fields through Apply and kept them in the profile.
+    ``ClusterConfig`` has far more fields than the widget has controls. A
+    profile holding one can only have come from a bundle the user imported
+    or from ``configure()`` before the widget opened, and in both cases it
+    is a setting they made. The widget this one replaced carried such fields
+    through Apply and kept them in the profile.
+
+    Looking at the profile, switching away from it and renaming it are safe
+    now that editing does not write. Apply and Duplicate still rebuild the
+    profile from the controls alone.
     """
 
     REASON = (
-        "PRODUCT GAP, not a test problem. ModernClustrixWidget rebuilds the "
-        "profile from its controls alone (_capture_current_profile -> "
-        "_get_config_from_widgets -> ClusterConfig(**widget fields)), so a "
-        "profile setting with no control -- default_partition, "
-        "conda_env_name, stage_warn_bytes, ssh_host_key_policy, hf_image, "
-        "... -- is reset to its default the first time the profile is "
-        "applied, saved, renamed, duplicated or switched away from, and "
+        "PRODUCT GAP, not a test problem. Apply and Duplicate build the "
+        "profile from the controls alone (_get_config_from_widgets -> "
+        "ClusterConfig(**widget fields)), so a profile setting with no "
+        "control -- stage_warn_bytes, job_poll_interval, venv_setup_timeout, "
+        "ssh_host_key_policy, hf_image, ... -- is reset to its default in "
+        "the saved profile the first time it is applied or duplicated, and "
         "Apply never forwards it to configure() in the first place. The "
         "deleted widget carried these. Remove this marker when the profile "
         "is updated from the controls instead of replaced by them."
@@ -762,11 +771,8 @@ class TestAProfileSettingWithNoControlIsCarried:
         told = _apply(widget, capsys)
 
         assert "Applied." in told, told
-        live = get_config()
-        assert live.cluster_host == "hpc.example.edu"
-        assert {
-            name: getattr(live, name) for name in SETTINGS_WITH_NO_CONTROL
-        } == SETTINGS_WITH_NO_CONTROL
+        assert get_config().cluster_host == "hpc.example.edu"
+        assert _uncontrolled(get_config()) == SETTINGS_WITH_NO_CONTROL
 
     @pytest.mark.xfail(strict=True, reason=REASON)
     def test_it_is_still_in_the_profile_after_apply(self, capsys):
@@ -775,44 +781,182 @@ class TestAProfileSettingWithNoControlIsCarried:
         _apply(widget, capsys)
 
         kept = widget.profile_manager.load_profile("Under test")
-        assert {
-            name: getattr(kept, name) for name in SETTINGS_WITH_NO_CONTROL
-        } == SETTINGS_WITH_NO_CONTROL
+        assert _uncontrolled(kept) == SETTINGS_WITH_NO_CONTROL
 
     @pytest.mark.xfail(strict=True, reason=REASON)
+    def test_a_duplicate_has_it_too(self):
+        widget = self._widget()
+
+        widget._on_add_profile(widget.widgets["add_profile_btn"])
+
+        copied = widget.profile_manager.load_profile(
+            widget.widgets["profile_dropdown"].value
+        )
+        assert copied.cluster_host == "hpc.example.edu"
+        assert _uncontrolled(copied) == SETTINGS_WITH_NO_CONTROL
+
     def test_it_survives_looking_at_another_profile(self):
         """No button at all: select another profile and come back."""
         widget = self._widget()
 
+        widget.widgets["host"].value = "edited.example.edu"
         widget.widgets["profile_dropdown"].value = "Local single-core"
         widget.widgets["profile_dropdown"].value = "Under test"
 
         kept = widget.profile_manager.load_profile("Under test")
-        assert {
-            name: getattr(kept, name) for name in SETTINGS_WITH_NO_CONTROL
-        } == SETTINGS_WITH_NO_CONTROL
+        assert _uncontrolled(kept) == SETTINGS_WITH_NO_CONTROL
 
-    @pytest.mark.xfail(strict=True, reason=REASON)
     def test_it_survives_renaming_the_profile(self):
         widget = self._widget()
 
+        widget.widgets["host"].value = "edited.example.edu"
         widget.widgets["profile_name"].value = "Renamed"
 
         kept = widget.profile_manager.load_profile("Renamed")
-        assert {
-            name: getattr(kept, name) for name in SETTINGS_WITH_NO_CONTROL
-        } == SETTINGS_WITH_NO_CONTROL
+        assert _uncontrolled(kept) == SETTINGS_WITH_NO_CONTROL
 
     def test_the_fixture_really_holds_the_settings(self):
-        """Or the four above would be xfailing on a profile that never had
+        """Or the xfails above would be failing on a profile that never had
         them, and the marker would be hiding a broken test."""
         widget = self._widget()
 
         held = widget.profile_manager.load_profile("Under test")
-        assert {
-            name: getattr(held, name) for name in SETTINGS_WITH_NO_CONTROL
-        } == SETTINGS_WITH_NO_CONTROL
+        assert _uncontrolled(held) == SETTINGS_WITH_NO_CONTROL
+        assert _uncontrolled(ClusterConfig()) != SETTINGS_WITH_NO_CONTROL
+        assert not set(SETTINGS_WITH_NO_CONTROL) & set(WIDGET_MANAGED_FIELDS)
         assert widget.widgets["host"].value == "hpc.example.edu"
+
+
+class TestTheControlsAddedForSettingsThatHadNone:
+    """Partition, the HuggingFace time limit, an existing conda environment
+    and cleanup-on-success each got a control; each has to reach
+    ``configure()``, or it is a box that does nothing."""
+
+    def test_they_reach_the_live_configuration(self, capsys):
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "slurm"
+        controls["host"].value = "hpc.example.edu"
+        controls["username"].value = "researcher"
+        controls["partition"].value = "gpu-long"
+        controls["conda_env"].value = "analysis"
+        controls["cleanup"].value = False
+
+        told = _apply(widget, capsys)
+
+        assert "Applied." in told, told
+        live = get_config()
+        assert live.default_partition == "gpu-long"
+        assert live.conda_env_name == "analysis"
+        assert live.cleanup_on_success is False
+
+    def test_the_huggingface_time_limit_reaches_the_live_configuration(self, capsys):
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "huggingface"
+        controls["hf_namespace"].value = "contextlab"
+        controls["hf_timeout"].value = "45m"
+
+        _apply(widget, capsys)
+
+        assert get_config().hf_job_timeout == "45m"
+
+    def test_a_partition_does_not_follow_the_form_to_another_backend(self, capsys):
+        """A partition names a queue on one scheduler. Applied to plain SSH
+        or to this machine it describes somewhere the job is not going."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "slurm"
+        controls["host"].value = "hpc.example.edu"
+        controls["username"].value = "researcher"
+        controls["partition"].value = "gpu-long"
+        _apply(widget, capsys)
+        assert get_config().default_partition == "gpu-long"
+
+        controls["cluster_type"].value = "ssh"
+        _apply(widget, capsys)
+
+        assert get_config().default_partition is None
+        assert get_config().cluster_host == "hpc.example.edu"
+        # Still on the form, for when the user switches back.
+        assert controls["partition"].value == "gpu-long"
+
+    def test_clearing_them_clears_the_live_setting(self, capsys):
+        configure(default_partition="debug", conda_env_name="old")
+        widget = _widget_showing(
+            cluster_type="slurm",
+            cluster_host="hpc.example.edu",
+            username="researcher",
+            default_partition="debug",
+            conda_env_name="old",
+        )
+
+        widget.widgets["partition"].value = ""
+        widget.widgets["conda_env"].value = "   "
+        _apply(widget, capsys)
+
+        assert get_config().default_partition is None
+        assert get_config().conda_env_name is None
+
+
+class TestWhatApplySaysAndShows:
+    def test_the_result_says_applied_and_the_header_says_in_use(self, capsys):
+        widget = ModernClustrixWidget()
+        assert applied(widget) == "not applied"
+
+        told = _apply(widget, capsys)
+
+        assert pill(widget) == "applied"
+        assert applied(widget) == "in use"
+        assert "Saved to the profile 'Local single-core'." in told
+
+    def test_a_host_typed_as_user_at_host_is_split_before_it_is_applied(self, capsys):
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "ssh"
+
+        controls["host"].value = "  alice@login.example.edu "
+        assert controls["host"].value == "login.example.edu"
+        assert controls["username"].value == "alice"
+        _apply(widget, capsys)
+
+        live = get_config()
+        assert (live.username, live.cluster_host) == ("alice", "login.example.edu")
+
+    def test_surrounding_whitespace_is_not_part_of_a_setting(self, capsys):
+        """A host pasted with a trailing space is the same host; unstripped
+        it fails as "Name or service not known", which does not say why."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "slurm"
+        controls["host"].value = " hpc.example.edu "
+        controls["username"].value = "researcher\t"
+        controls["ssh_key_file"].value = " ~/.ssh/id_hpc "
+        controls["ram"].value = " 32GB "
+        controls["time"].value = " 02:00:00 "
+        controls["python_executable"].value = " python3 "
+
+        told = _apply(widget, capsys)
+
+        assert "Applied." in told, told
+        live = get_config()
+        assert live.cluster_host == "hpc.example.edu"
+        assert live.username == "researcher"
+        assert live.key_file == "~/.ssh/id_hpc"
+        assert live.default_memory == "32GB"
+        assert live.default_time == "02:00:00"
+        assert live.python_executable == "python3"
+
+    def test_a_password_is_not_stripped(self, capsys):
+        """A password may begin or end with a space; it is not a "setting"."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["cluster_type"].value = "ssh"
+        controls["host"].value = "h.example.edu"
+        controls["username"].value = "u"
+        controls["password"].value = " leading and trailing "
+
+        assert widget._get_config_from_widgets().password == " leading and trailing "
 
 
 class TestHowAProfileWidensTheMenu:
@@ -949,8 +1093,8 @@ class TestAProfileNamingARemovedBackend:
     ):
         widget, _, told = self._load(tmp_path, capsys)
 
-        assert pill(widget) == "load failed"
-        assert "Could not load" in told
+        assert pill(widget) == "import failed"
+        assert "Could not import" in told
         assert "pbs" in told
         assert "#140" in told
         assert "Old PBS Cluster" in told
