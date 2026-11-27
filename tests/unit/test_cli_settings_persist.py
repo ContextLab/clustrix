@@ -243,8 +243,44 @@ def test_status_exits_zero_when_the_cluster_answers(tmp_path):
         assert ("tester", "publickey") in server.authentications
 
 
-def test_status_with_nothing_configured_is_not_a_failure():
+def test_status_with_nothing_configured_says_local_and_is_not_a_failure():
+    """#176 L1. It printed "No cluster configured" -- which is not what the
+    situation is: functions run on this machine -- while the notebook's
+    ``%clustrix status`` said "local" for the same configuration."""
+    from clustrix.config import ClusterConfig
+    from clustrix.notebook_magic_core import _status_summary
+
     result = clustrix("status")
 
-    assert "No cluster configured" in result.stdout
     assert result.returncode == 0
+    lines = result.stdout.splitlines()
+    assert lines[0].startswith("backend      : local")
+    assert "No cluster configured" not in result.stdout
+    assert lines[:-1] == _status_summary(ClusterConfig()).splitlines()
+    assert lines[-1].startswith("connection   : not checked")
+
+
+def test_status_for_the_local_backend_makes_no_connection():
+    get_config_dir().mkdir(mode=0o700, exist_ok=True)
+    (get_config_dir() / "config.yml").write_text(
+        yaml.safe_dump(dict(cluster_type="local", cluster_host="127.0.0.1"))
+    )
+
+    result = clustrix("status")
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0] == "backend      : local"
+    assert "Connection: ✗" not in result.stdout
+
+
+def test_status_names_huggingface_without_claiming_a_connection():
+    get_config_dir().mkdir(mode=0o700, exist_ok=True)
+    (get_config_dir() / "config.yml").write_text(
+        yaml.safe_dump(dict(cluster_type="huggingface"))
+    )
+
+    result = clustrix("status")
+
+    assert result.returncode == 0
+    assert result.stdout.splitlines()[0] == "backend      : huggingface"
+    assert "Connected" not in result.stdout and "not checked" in result.stdout

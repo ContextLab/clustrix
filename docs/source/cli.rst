@@ -132,10 +132,28 @@ configuration; it is not merged into it.
 ``clustrix status``
 -------------------
 
-Connects to the configured host and reports the outcome. The exit status is
-``0`` when the connection succeeds and ``1`` when it fails, so it can be used
-in a script. With no ``cluster_host`` it prints ``No cluster configured`` and
-exits ``0``.
+Connects to the configured ``ssh`` or ``slurm`` host and reports the outcome.
+The exit status is ``0`` when the connection succeeds and ``1`` when it
+fails, so it can be used in a script.
+
+With no such host there is nothing to connect to, and that is not a failure:
+it says where ``@cluster`` runs a function instead, in the same words as
+``%clustrix status``, and exits ``0``.
+
+.. code-block:: console
+
+   $ clustrix status
+   backend      : local (no cluster host set; cluster_type is 'slurm')
+   resources    : 4 cores, 8GB, 01:00:00
+   connection   : not checked (no ssh or slurm host is configured)
+   $ echo $?
+   0
+
+That is a fresh installation: ``cluster_type`` defaults to ``slurm``, and
+with no host the function runs on this machine, so that is what the first
+line says. After ``clustrix config --cluster-type local`` it reads
+``backend      : local``. For ``huggingface`` the backend is named and no
+connection is attempted: this command does not check a HuggingFace token.
 
 A host that has never been connected to is refused (see
 :ref:`host-key-verification`):

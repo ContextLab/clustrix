@@ -166,11 +166,23 @@ def load(config_file):
 
 @cli.command()
 def status():
-    """Show cluster status; exits non-zero when the cluster is unreachable."""
+    """Show where @cluster runs; exits non-zero when the cluster is unreachable.
+
+    With an ssh or slurm host configured, the host is connected to and the
+    exit status says whether that worked. With none there is nothing to
+    connect to, which is not a failure: functions run on this machine (or
+    in HuggingFace Jobs), the summary says so in the words ``%clustrix
+    status`` uses, and the exit status is 0.
+    """
     current_config = get_config()
 
-    if not current_config.cluster_host:
-        click.echo("No cluster configured")
+    if not (
+        current_config.cluster_host and current_config.cluster_type in ("ssh", "slurm")
+    ):
+        from .notebook_magic_core import _status_summary
+
+        click.echo(_status_summary(current_config))
+        click.echo("connection   : not checked (no ssh or slurm host is configured)")
         return
 
     click.echo("Cluster Status:")
