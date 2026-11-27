@@ -8,9 +8,13 @@ been exercised against the real thing. Anything implemented but unproven is
 labelled as such and stays labelled until someone runs it for real — and as of
 0.2.0, anything that stayed unproven was removed rather than shipped.
 
-## [Unreleased]
+## [0.2.0] — unreleased
 
-Changes since commit `8d0f1c4`. Everything listed under "Added" was run
+The first release in which `@cluster` demonstrably runs a function on remote
+compute and returns the right answer. Before this, it never had — on any
+backend.
+
+Everything listed under "Added" was run
 against a real `sshd` and a single-node SLURM installation, or locally; what
 was not is marked.
 
@@ -204,6 +208,17 @@ was not is marked.
   notebook namespace.
 - **Python 3.13** classifier and CI job.
 - Documentation pages: loop parallelisation, input files, command line.
+- HuggingFace Jobs backend (`cluster_type="huggingface"`) — verified end to end.
+- `scripts/aws/` — resource cleanup and cluster destruction utilities. They
+  default to a dry run and refuse to touch anything not tagged
+  `clustrix:managed=true`. (The originals, recovered from git history, deleted
+  every NAT gateway and VPC in the account with no ownership check at all.)
+- A usage-patterns tutorial. Every example in the docs is executed by
+  `scripts/check_docs_examples.py`.
+- `clustrix.config.SUPPORTED_CLUSTER_TYPES` as the single source of truth. The
+  CLI's own list had drifted and omitted `huggingface` entirely, so a working
+  backend could not be selected from the command line.
+- `ClusterConfig` is exported from the package root.
 
 ### Changed
 
@@ -242,6 +257,11 @@ was not is marked.
 - **A loop that reads something which cannot be pickled runs in order here**
   instead of failing.
 - **An SSH connection attempt gives up after `ssh_connect_timeout`** (30 s).
+- Version strings in `pyproject.toml`, `setup.py`, `clustrix/__init__.py` and
+  `docs/source/conf.py` now agree. They had drifted to two different values.
+- Documentation builds with zero sphinx warnings, down from 60.
+- Deleted 1,837 lines of genuinely orphaned modules. (The issue that requested
+  this claimed ~5,100 lines and named five files that do not exist on `master`.)
 
 ### Fixed
 
@@ -318,12 +338,6 @@ was not is marked.
 - **A symbolic link in a parent directory no longer hides a credential from
   staging** (`keys -> ~/.ssh`, then `keys/aws-prod` or `keys`).
 - **Staged copies are no longer world-readable** on the cluster.
-
-## [0.2.0] — unreleased
-
-The first release in which `@cluster` demonstrably runs a function on remote
-compute and returns the right answer. Before this, it never had — on any
-backend.
 
 ### Security — one gate for every credential release
 
@@ -555,28 +569,6 @@ backends now work.
   where 83 stale `[127.0.0.1]:<ephemeral port>` entries had accumulated. Port
   reuse against a fresh server key then raised `BadHostKeyException` and failed
   the reject test. The fixture now redirects `~`.
-
-### Added
-
-- HuggingFace Jobs backend (`cluster_type="huggingface"`) — verified end to end.
-- `scripts/aws/` — resource cleanup and cluster destruction utilities. They
-  default to a dry run and refuse to touch anything not tagged
-  `clustrix:managed=true`. (The originals, recovered from git history, deleted
-  every NAT gateway and VPC in the account with no ownership check at all.)
-- A usage-patterns tutorial. Every example in the docs is executed by
-  `scripts/check_docs_examples.py`.
-- `clustrix.config.SUPPORTED_CLUSTER_TYPES` as the single source of truth. The
-  CLI's own list had drifted and omitted `huggingface` entirely, so a working
-  backend could not be selected from the command line.
-- `ClusterConfig` is exported from the package root.
-
-### Changed
-
-- Version strings in `pyproject.toml`, `setup.py`, `clustrix/__init__.py` and
-  `docs/source/conf.py` now agree. They had drifted to two different values.
-- Documentation builds with zero sphinx warnings, down from 60.
-- Deleted 1,837 lines of genuinely orphaned modules. (The issue that requested
-  this claimed ~5,100 lines and named five files that do not exist on `master`.)
 
 ### Removed — unverified backends (BREAKING)
 
