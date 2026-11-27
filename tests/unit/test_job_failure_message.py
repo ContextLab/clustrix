@@ -122,3 +122,20 @@ def test_no_log_at_all_is_one_line():
     error = JobFailedError("7", "failed", "", None, None, "")
 
     assert str(error) == "Job 7 failed."
+
+
+def test_the_exception_survives_a_trip_to_another_process(killed_job_log):
+    """Its constructor does not take a message, which is all the default
+    pickling of an exception would hand back to it."""
+    import pickle
+
+    error = JobFailedError(
+        "ssh_1", "failed", " (why)", "/scratch/job_1", "h.example.edu", killed_job_log
+    )
+
+    loaded = pickle.loads(pickle.dumps(error))
+
+    assert type(loaded) is JobFailedError
+    assert str(loaded) == str(error)
+    assert loaded.error_log == killed_job_log
+    assert (loaded.job_id, loaded.remote_dir) == ("ssh_1", "/scratch/job_1")

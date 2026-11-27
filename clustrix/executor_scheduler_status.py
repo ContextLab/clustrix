@@ -94,6 +94,8 @@ class JobFailedError(RuntimeError):
 
     Attributes:
         job_id: The job, as the scheduler or clustrix names it.
+        outcome: ``"was cancelled"`` or ``"failed"``.
+        host: The cluster the job ran on.
         reason: How it ended, as far as clustrix could find out; may be
             empty.
         remote_dir: The job's directory on the cluster. Its logs are there
@@ -112,8 +114,10 @@ class JobFailedError(RuntimeError):
         error_log: str,
     ):
         self.job_id = job_id
+        self.outcome = outcome
         self.reason = reason
         self.remote_dir = remote_dir
+        self.host = host
         self.error_log = error_log
 
         message = [f"Job {job_id} {outcome}{reason}."]
@@ -131,6 +135,22 @@ class JobFailedError(RuntimeError):
             )
             message.extend(f"  {line}" for line in tail)
         super().__init__("\n".join(message))
+
+    def __reduce__(self):
+        # The default rebuilds an exception from ``args`` -- the message --
+        # which this constructor does not accept, so an instance sent to
+        # another process (a result queue, a worker pool) would fail to load.
+        return (
+            type(self),
+            (
+                self.job_id,
+                self.outcome,
+                self.reason,
+                self.remote_dir,
+                self.host,
+                self.error_log,
+            ),
+        )
 
 
 def describe_exit_status(status: str) -> str:
