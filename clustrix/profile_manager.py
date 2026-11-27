@@ -378,14 +378,14 @@ class ProfileManager:
         "Local single-core": {
             "cluster_type": "local",
             "default_cores": 1,
-            "default_memory": "16.25GB",
+            "default_memory": "16GB",
             "default_time": "01:00:00",
         },
         "Local all cores": {
             # -1 means "every core on this machine".
             "cluster_type": "local",
             "default_cores": -1,
-            "default_memory": "16.25GB",
+            "default_memory": "16GB",
             "default_time": "01:00:00",
         },
         "SLURM cluster": {
