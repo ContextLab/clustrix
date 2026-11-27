@@ -5,18 +5,22 @@ tasks cross the process boundary pickled, exactly as they do when
 ``@cluster`` divides a loop among them.
 """
 
+import contextlib
 import os
+import signal
 import subprocess
 import sys
 import textwrap
 import threading
 import time
+import warnings
 
 import pytest
 
 from clustrix import loop_workers
 from clustrix.loop_workers import (
     THREAD_COUNT_VARIABLES,
+    NotPicklable,
     RemoteTraceback,
     WorkerDied,
     WorkerPool,
@@ -102,7 +106,11 @@ def test_what_a_task_prints_is_replayed_in_task_order(pool):
 
     pool.map(chatty, [(i,) for i in range(6)], emit=heard.append)
 
-    assert "".join(heard).splitlines() == [f"working on {i}" for i in range(6)]
+    # ``emit`` is handed a TaskOutput per task now, not a string: standard
+    # error and warnings travel with it (W4, W5).
+    assert "".join(output.stdout for output in heard).splitlines() == [
+        f"working on {i}" for i in range(6)
+    ]
 
 
 def test_printing_reaches_the_caller_s_stdout_by_default(pool, capsys):
@@ -368,3 +376,256 @@ def test_a_script_with_no_main_guard_is_not_re_run_inside_the_workers(tmp_path):
     assert completed.stdout.count("TOP LEVEL") == 1
     assert "VALUES [0, 3, 6, 9]" in completed.stdout
     assert "IN PARENT False" in completed.stdout
+
+
+# -- what an adversarial review found ------------------------------------------
+
+
+PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(loop_workers.__file__)))
+
+
+def reads_relative(name):
+    with open(name) as handle:
+        return os.getcwd(), handle.read()
+
+
+def sets_a_variable(name):
+    seen = os.environ.get(name)
+    os.environ[name] = "left behind by a task"
+    return seen
+
+
+class Odd(Exception):
+    """An exception that pickles and then cannot be rebuilt from its args."""
+
+    def __init__(self, a, b):
+        super().__init__(a)
+        self.b = b
+
+
+def raises_odd(value):
+    raise Odd(f"odd failure {value}", "second argument")
+
+
+def warns(value):
+    for _ in range(3):
+        warnings.warn(f"careful with {value}", DeprecationWarning)
+    print(f"out {value}")
+    print(f"err {value}", file=sys.stderr)
+    return value
+
+
+def test_a_task_runs_in_the_directory_the_caller_is_in_now(pool, tmp_path, monkeypatch):
+    """W1. Workers outlive an ``os.chdir``; they read the old directory's
+    file, or none."""
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "input.txt").write_text(f"from {name}")
+
+    monkeypatch.chdir(tmp_path / "first")
+    before = pool.map(reads_relative, [("input.txt",)] * 4)
+    monkeypatch.chdir(tmp_path / "second")
+    after = pool.map(reads_relative, [("input.txt",)] * 4)
+
+    assert set(before) == {(str(tmp_path / "first"), "from first")}
+    assert set(after) == {(str(tmp_path / "second"), "from second")}
+
+
+def test_a_task_sees_the_environment_the_caller_has_now(pool, monkeypatch):
+    """W1. Set, changed and removed after the workers started."""
+    name = "CLUSTRIX_TEST_MODE"
+    monkeypatch.delenv(name, raising=False)
+    pool.map(reads_environment, [(name,)] * 6)  # every worker started
+
+    monkeypatch.setenv(name, "fast")
+    assert set(pool.map(reads_environment, [(name,)] * 6)) == {"fast"}
+    monkeypatch.setenv(name, "slow")
+    assert set(pool.map(reads_environment, [(name,)] * 6)) == {"slow"}
+    monkeypatch.delenv(name)
+    assert set(pool.map(reads_environment, [(name,)] * 6)) == {None}
+
+
+def test_a_variable_one_task_set_is_not_there_for_the_next(monkeypatch):
+    name = "CLUSTRIX_TEST_LEFTOVER"
+    monkeypatch.delenv(name, raising=False)
+    with WorkerPool(1) as single:
+        assert single.map(sets_a_variable, [(name,)] * 3) == [None, None, None]
+
+
+def test_what_the_pool_pinned_is_not_overridden_by_the_caller(monkeypatch):
+    """One GPU per worker must survive the caller having its own setting,
+    and a worker must go on knowing it is one."""
+    monkeypatch.setenv("CLUSTRIX_TEST_DEVICE", "caller")
+    monkeypatch.delenv(loop_workers.IN_WORKER_VARIABLE, raising=False)
+    with WorkerPool(1, [{"CLUSTRIX_TEST_DEVICE": "3"}]) as pinned:
+        first = pinned.map(reads_environment, [("CLUSTRIX_TEST_DEVICE",)])
+        monkeypatch.setenv("CLUSTRIX_TEST_DEVICE", "changed")
+        second = pinned.map(reads_environment, [("CLUSTRIX_TEST_DEVICE",)])
+        marker = pinned.map(reads_environment, [(loop_workers.IN_WORKER_VARIABLE,)])
+
+    assert (first, second, marker) == (["3"], ["3"], ["1"])
+
+
+def test_a_thread_count_is_the_pool_s_until_the_caller_sets_one(monkeypatch):
+    name = THREAD_COUNT_VARIABLES[0]
+    monkeypatch.delenv(name, raising=False)
+    with WorkerPool(1, [{name: "3"}]) as limited:
+        assert limited.map(reads_environment, [(name,)]) == ["3"]
+        monkeypatch.setenv(name, "7")
+        assert limited.map(reads_environment, [(name,)]) == ["7"]
+        monkeypatch.delenv(name)
+        assert limited.map(reads_environment, [(name,)]) == ["3"]
+
+
+def test_an_exception_pickle_cannot_rebuild_still_arrives_as_itself(pool):
+    """W2. It used to arrive as ``TypeError: Odd.__init__() missing 1
+    required positional argument``, raised by unpickling in this process."""
+    with pytest.raises(Odd) as raised:
+        pool.map(raises_odd, [(1,)])
+
+    print(repr(raised.value), raised.value.__cause__)
+    assert raised.value.args == ("odd failure 1",)
+    assert raised.value.b == "second argument"
+    assert isinstance(raised.value.__cause__, RemoteTraceback)
+    assert "in raises_odd" in str(raised.value.__cause__)
+    assert [value for _, value in pool.map(where_am_i, [(1,)])] == [2]
+
+
+def test_an_exception_that_cannot_travel_at_all_arrives_described(pool):
+    def raises_held():
+        import threading
+
+        class Held(Exception):
+            def __init__(self, message, lock):
+                super().__init__(message)
+                self.lock = lock
+
+        raise Held("holding a lock", threading.Lock())
+
+    with pytest.raises(RuntimeError) as raised:
+        pool.map(raises_held, [()])
+
+    assert str(raised.value) == "Held: holding a lock"
+    assert "in raises_held" in str(raised.value.__cause__)
+
+
+def test_warnings_from_a_task_reach_the_caller_s_filters(pool):
+    """W4. They were printed as text by the worker, so ``catch_warnings``
+    here recorded nothing and ``-W error`` did not raise."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pool.map(warns, [(1,), (2,)], emit=lambda output: output.replay())
+
+    messages = [(str(w.message), w.category) for w in caught]
+    print(messages)
+    assert messages == [
+        ("careful with 1", DeprecationWarning),
+        ("careful with 2", DeprecationWarning),
+    ], "in task order, and once per task for one line"
+    assert all(w.filename == __file__ for w in caught)
+    assert caught[0].lineno == warns.__code__.co_firstlineno + 2
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(DeprecationWarning, match="careful with 5"):
+            pool.map(warns, [(5,)])
+
+
+def test_a_warning_category_that_cannot_travel_becomes_a_user_warning(pool):
+    def warns_oddly():
+        import threading
+
+        class Held(UserWarning):
+            lock = threading.Lock()
+
+        warnings.warn("held", Held)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        pool.map(warns_oddly, [()])
+
+    assert [(str(w.message), w.category) for w in caught] == [("held", UserWarning)]
+
+
+def test_standard_error_is_replayed_on_standard_error(pool, capsys):
+    """W5. It used to come out on the caller's standard output."""
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        pool.map(warns, [(1,), (2,)])
+
+    shown = capsys.readouterr()
+    assert shown.out == "out 1\nout 2\n"
+    assert shown.err == "err 1\nerr 2\n"
+
+
+def test_a_task_that_cannot_be_pickled_says_which_part(pool):
+    """D2. ``NotPicklable`` is what lets ``@cluster`` run the loop here."""
+    lock = threading.Lock()
+
+    with pytest.raises(NotPicklable) as refused:
+        pool.map(timed_call, [(len, {"total": 0, "self": lock}, [1, 2])])
+    with pytest.raises(NotPicklable) as positional:
+        pool.map(len, [(lock,)])
+
+    print(refused.value, "|", positional.value)
+    assert isinstance(refused.value, TypeError)
+    assert "'self' (a lock)" in str(refused.value)
+    assert "argument 0 (a lock)" in str(positional.value)
+    assert [value for _, value in pool.map(where_am_i, [(1,)])] == [2]
+
+
+def test_an_interrupt_does_not_wait_for_the_tasks_or_leave_workers(tmp_path):
+    """W3. Ctrl-C during a divided loop used to return only when every
+    chunk had finished. The workers busy with the abandoned tasks are killed
+    and the interrupt is raised at once."""
+    script = tmp_path / "driver.py"
+    script.write_text(textwrap.dedent("""
+            import signal, time
+            from clustrix.loop_workers import WorkerPool
+
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+            def nap(seconds):
+                time.sleep(seconds)
+
+            pool = WorkerPool(3)
+            pool.map(nap, [(0,)] * 3)
+            print("READY", flush=True)
+            pool.map(nap, [(6,)] * 5)
+            print("FINISHED", flush=True)
+            """))
+    driver = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        # The package under test, wherever this test was collected from.
+        env={**os.environ, "PYTHONPATH": PACKAGE_ROOT},
+    )
+    try:
+        assert driver.stdout.readline().strip() == "READY"
+        time.sleep(1.0)
+        workers = subprocess.run(
+            ["pgrep", "-g", str(driver.pid), "-f", "clustrix.loop_workers"],
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+        assert len(workers) == 3
+        interrupted = time.perf_counter()
+        os.kill(driver.pid, signal.SIGINT)
+        out, err = driver.communicate(timeout=30)
+        elapsed = time.perf_counter() - interrupted
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(driver.pid, signal.SIGKILL)
+
+    print(f"exited {elapsed:.2f}s after SIGINT, status {driver.returncode}\n{err}")
+    assert "KeyboardInterrupt" in err and "FINISHED" not in out
+    assert elapsed < 3, f"waited {elapsed:.1f}s for 6-second tasks nobody wants"
+    left = subprocess.run(
+        ["pgrep", "-g", str(driver.pid), "-f", "clustrix.loop_workers"],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert left == [], f"worker processes left behind: {left}"

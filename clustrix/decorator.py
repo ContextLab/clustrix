@@ -1,6 +1,5 @@
 import functools
 import logging
-import sys
 import threading
 import weakref
 from dataclasses import fields
@@ -11,7 +10,14 @@ from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
 from . import auto_stage, parallelize
 from .local_executor import is_worker_count
-from .loop_workers import available_cpus, in_worker, shared_pool, timed_call
+from .loop_workers import (
+    NotPicklable,
+    TaskOutput,
+    available_cpus,
+    in_worker,
+    shared_pool,
+    timed_call,
+)
 from .utils import serialize_function
 
 logger = logging.getLogger(__name__)
@@ -289,6 +295,25 @@ def cluster(
                     # Async execution
                     async_executor = _shared_async_executor(config)
 
+                    if config.auto_stage and config.cluster_type in ("ssh", "slurm"):
+                        unstaged = auto_stage.discover(
+                            func,
+                            args,
+                            func_kwargs,
+                            extra=kwargs.get("data", ()),
+                            exclude=kwargs.get("no_data", ()),
+                        )
+                        if unstaged:
+                            logger.warning(
+                                "%s names local input (%s), and inputs are not "
+                                "staged for async_submit=True: the job will "
+                                "only find a path that already exists on the "
+                                "cluster. Call it without async_submit, or put "
+                                "the data there yourself.",
+                                getattr(func, "__name__", repr(func)),
+                                ", ".join(str(c.path) for c in unstaged),
+                            )
+
                     return async_executor.submit_job_async(
                         func, args, func_kwargs, job_config
                     )
@@ -458,9 +483,13 @@ _ABANDONED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
 
 def _plan_for(func: Callable) -> parallelize.ParallelPlan:
     """The split of ``func``'s loop into jobs, or the reasons there is none."""
-    plan = _PLANS.get(func.__code__)
+    code = getattr(func, "__code__", None)
+    if code is None:
+        # A functools.partial, an instance with __call__: nothing to read.
+        return parallelize.plan(func)
+    plan = _PLANS.get(code)
     if plan is None:
-        plan = _PLANS[func.__code__] = parallelize.plan(func)
+        plan = _PLANS[code] = parallelize.plan(func)
     return plan
 
 
@@ -470,11 +499,9 @@ def _abandon(func: Callable) -> Callable[[str], None]:
     def on_fallback(reason: str) -> None:
         _ABANDONED[func.__code__] = reason
         logger.warning(
-            "%s. The loop ran in order instead, so the result is correct -- "
-            "but anything it does besides computing (writing a file, calling "
-            "a service) happened in the attempt as well. It will not be "
-            "divided again in this session; pass parallel=False to say so "
-            "in the code.",
+            "%s. The loop ran in order instead, so the result is the one a "
+            "direct call gives. It will not be divided again in this "
+            "session; pass parallel=False to say so in the code.",
             reason,
         )
 
@@ -518,18 +545,23 @@ def _run_split_remotely(
             len(chunks),
             max(len(chunk) for chunk in chunks),
         )
-        job_ids = [
-            executor.submit_job(serialize_function(body, (env, chunk), {}), job_config)
-            for chunk in chunks
-        ]
-        results = []
+        job_ids: List[str] = []
+        results: list = []
         try:
+            for chunk in chunks:
+                job_ids.append(
+                    executor.submit_job(
+                        serialize_function(body, (env, chunk), {}), job_config
+                    )
+                )
             for job_id in job_ids:
                 results.append(executor.wait_for_result(job_id))
         except BaseException:
-            # One chunk failed, or the caller interrupted: the rest are
-            # doing work whose result will never be used.
-            for job_id in job_ids[len(results) + 1 :]:
+            # One chunk failed, or the caller interrupted. Every job whose
+            # result was not collected is doing work nobody will use -- the
+            # one being waited for included: after an interrupt it is still
+            # running, and it used to be the one job left behind.
+            for job_id in job_ids[len(results) :]:
                 try:
                     executor.cancel_job(job_id)
                 except Exception as error:  # noqa: BLE001 - best effort
@@ -825,7 +857,12 @@ def _run_split_locally(
         _SECONDS_PER_ITERATION[func.__code__] = seconds / total
 
     def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
-        printed: List[str] = []
+        printed: List[TaskOutput] = []
+
+        def show() -> None:
+            for output in printed:
+                output.replay()
+
         try:
             timed = pool.map(
                 timed_call,
@@ -833,10 +870,14 @@ def _run_split_locally(
                 emit=printed.append,
                 limit=workers,
             )
+        except NotPicklable as error:
+            # Something the loop reads cannot leave this process (a lock, an
+            # open file). A direct call works, so this one must too.
+            raise parallelize.CannotShip(str(error)) from error
         except BaseException:
             # What the iterations up to the failing one printed is part of
             # what a direct call would have shown before raising.
-            sys.stdout.write("".join(printed))
+            show()
             raise
         # Timed where the work ran, so starting workers and shipping the
         # arguments are not mistaken for work.
@@ -845,7 +886,7 @@ def _run_split_locally(
         ) / sum(len(chunk) for chunk in chunks)
         results = [result for _, result in timed]
         if not parallelize.will_be_abandoned(results):
-            sys.stdout.write("".join(printed))
+            show()
         return results
 
     return parallelize.run(

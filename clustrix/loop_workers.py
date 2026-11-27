@@ -23,6 +23,20 @@ therefore started as ordinary subprocesses that import nothing but this
 module. Modules the function refers to *by name* are found because each
 worker is given the parent's ``sys.path`` and working directory.
 
+Where a task runs
+-----------------
+
+Workers are kept between calls, so what they inherited when they started
+goes stale: the caller changes directory, or sets an environment variable,
+and expects the loop it runs next to see that. Every task therefore carries
+the caller's current working directory, and its environment whenever that
+differs from what the worker was last given, and the worker adopts both
+before running it. The variables a pool gives its own workers
+(``environments``, ``PYTHONPATH``, ``CLUSTRIX_LOOP_WORKER``) are the
+exception -- see :meth:`_Worker.environment_for`. A variable read once at
+import (a thread count, ``CUDA_VISIBLE_DEVICES``) is not re-read by a
+library a worker has already imported.
+
 Output
 ------
 
@@ -31,20 +45,32 @@ result, and :meth:`WorkerPool.map` replays it in task order once the tasks
 are done. Printing from a loop body therefore still appears where the user
 is looking -- a notebook cell included -- and in the order a sequential run
 would have produced it, though not until the chunk it belongs to finishes.
+
+Standard output and standard error are captured separately and each is
+replayed on the caller's stream of the same name. The order *between* the
+two within one task is not kept: a task's standard output is replayed
+first, then its standard error, then its warnings. Warnings are recorded in
+the worker and issued again in the caller with ``warnings.warn_explicit``,
+so the caller's filters -- ``catch_warnings(record=True)``, ``-W error`` --
+apply to them. The same warning from the same line is reported once per
+task however many iterations raised it.
 """
 
 import atexit
 import contextlib
 import io
 import os
+import pickle
 import struct
 import subprocess
 import sys
 import threading
 import time
 import traceback
-from concurrent.futures import ThreadPoolExecutor
-from typing import IO, Any, Callable, Dict, List, Optional, Sequence, Tuple
+import warnings
+from concurrent.futures import Future, ThreadPoolExecutor
+from dataclasses import dataclass, field
+from typing import IO, Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import cloudpickle
 
@@ -59,8 +85,53 @@ _HEADER = struct.Struct("<Q")
 IN_WORKER_VARIABLE = "CLUSTRIX_LOOP_WORKER"
 
 
+#: Read by numerical libraries, when they are imported, to size their own
+#: thread pools.
+THREAD_COUNT_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+
 class WorkerDied(RuntimeError):
     """A worker process ended without answering -- killed, or crashed."""
+
+
+class NotPicklable(TypeError):
+    """A task could not be pickled, so it cannot be sent to a worker."""
+
+
+#: Dedupes re-issued warnings the way a module's ``__warningregistry__``
+#: does for warnings raised in this process: under the default filter a
+#: warning from one line is shown once, not once per chunk.
+_WARNING_REGISTRY: Dict[Any, Any] = {}
+
+
+@dataclass
+class TaskOutput:
+    """What one task wrote and warned about, to be shown where it was called."""
+
+    stdout: str = ""
+    stderr: str = ""
+    #: ``(message, category, filename, lineno)``, in the order first raised.
+    warnings: List[Tuple[str, type, str, int]] = field(default_factory=list)
+
+    def __bool__(self) -> bool:
+        return bool(self.stdout or self.stderr or self.warnings)
+
+    def replay(self) -> None:
+        """Write to this process's streams and issue the warnings here."""
+        if self.stdout:
+            sys.stdout.write(self.stdout)
+        if self.stderr:
+            sys.stderr.write(self.stderr)
+        for message, category, filename, lineno in self.warnings:
+            warnings.warn_explicit(
+                message, category, filename, lineno, registry=_WARNING_REGISTRY
+            )
 
 
 class RemoteTraceback(Exception):
@@ -128,6 +199,40 @@ def timed_call(function: Callable, *arguments: Any) -> Tuple[float, Any]:
 # --------------------------------------------------------------------------
 
 
+def _survives_pickling(value: Any) -> bool:
+    """Whether ``value`` can be sent *and* rebuilt on the other side."""
+    try:
+        cloudpickle.loads(cloudpickle.dumps(value))
+        return True
+    except Exception:  # noqa: BLE001 - any failure means it cannot travel
+        return False
+
+
+def _adopt(directory: Optional[str], environment: Optional[Dict[str, str]]) -> None:
+    """Make this worker's directory and environment the caller's."""
+    if environment is not None and dict(os.environ) != environment:
+        for name in set(os.environ) - set(environment):
+            del os.environ[name]
+        for name, value in environment.items():
+            if os.environ.get(name) != value:
+                os.environ[name] = value
+    if directory is not None:
+        os.chdir(directory)
+
+
+def _output(
+    out: io.StringIO, err: io.StringIO, caught: List[warnings.WarningMessage]
+) -> TaskOutput:
+    recorded: Dict[Tuple[str, type, str, int], None] = {}
+    for warning in caught:
+        category = warning.category
+        if not _survives_pickling(category):
+            category = UserWarning
+        key = (str(warning.message), category, warning.filename, warning.lineno)
+        recorded.setdefault(key)
+    return TaskOutput(out.getvalue(), err.getvalue(), list(recorded))
+
+
 def worker_main() -> None:
     """Serve tasks from the parent until its end of the pipe closes."""
     requests = os.fdopen(os.dup(sys.stdin.fileno()), "rb")
@@ -138,35 +243,69 @@ def worker_main() -> None:
     os.dup2(os.open(os.devnull, os.O_RDONLY), sys.stdin.fileno())
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
+    #: The environment the parent last sent. Enforced before every task, so
+    #: a variable one task set is not still there for the next.
+    environment: Optional[Dict[str, str]] = None
     while True:
         request = _receive(requests)
         if request is None:
             return
-        printed = io.StringIO()
+        out, err = io.StringIO(), io.StringIO()
+        caught: List[warnings.WarningMessage] = []
         try:
             with (
-                contextlib.redirect_stdout(printed),
-                contextlib.redirect_stderr(printed),
+                contextlib.redirect_stdout(out),
+                contextlib.redirect_stderr(err),
+                warnings.catch_warnings(record=True) as recording,
             ):
-                function, arguments = cloudpickle.loads(request)
+                assert recording is not None
+                caught = recording
+                warnings.simplefilter("always")
+                directory, sent_environment, task = pickle.loads(request)
+                if sent_environment is not None:
+                    environment = sent_environment
+                _adopt(directory, environment)
+                function, arguments = cloudpickle.loads(task)
                 outcome: Tuple[str, Any] = ("ok", function(*arguments))
-            reply = cloudpickle.dumps((*outcome, printed.getvalue()))
+            reply = cloudpickle.dumps((*outcome, _output(out, err, caught)))
         except BaseException as error:  # noqa: BLE001 - shipped to the parent
             # BaseException on purpose: SystemExit and KeyboardInterrupt
             # raised by the task are the task's outcome, to be re-raised
             # where the user called it, not a reason to drop the connection.
-            reply = _failure_reply(error, traceback.format_exc(), printed.getvalue())
+            reply = _failure_reply(
+                error, traceback.format_exc(), _output(out, err, caught)
+            )
         _send(replies, reply)
 
 
-def _failure_reply(error: BaseException, trace: str, printed: str) -> bytes:
-    try:
-        return cloudpickle.dumps(("error", (error, trace), printed))
-    except Exception:  # noqa: BLE001 - an unpicklable exception, or result
-        # The exception object itself could not be sent (or, on the success
-        # path, the result could not). Say what it was in words.
-        described = RuntimeError(f"{type(error).__name__}: {error}")
-        return cloudpickle.dumps(("error", (described, trace), printed))
+def _failure_reply(error: BaseException, trace: str, output: TaskOutput) -> bytes:
+    """The reply for a task that raised (or whose result would not pickle).
+
+    An exception whose ``__init__`` takes more than the message pickles
+    here and then fails to *un*pickle in the parent -- pickle rebuilds it
+    by calling its class with ``args`` -- which would report a ``TypeError``
+    about a missing argument in place of the real failure. So the round
+    trip is tried here. An exception that does not survive it is sent in
+    parts (class, ``args``, attributes) and put together in the parent
+    without calling ``__init__``, so it still arrives as its own type. Only
+    if the parts cannot travel either is it described in words. The
+    traceback that says where it came from goes with all three.
+    """
+    if _survives_pickling(error):
+        return cloudpickle.dumps(("error", (error, trace), output))
+    parts = (type(error), error.args, dict(vars(error)))
+    if _survives_pickling(parts):
+        return cloudpickle.dumps(("error in parts", (parts, trace), output))
+    described = RuntimeError(f"{type(error).__name__}: {error}")
+    return cloudpickle.dumps(("error", (described, trace), output))
+
+
+def _rebuilt(kind: type, arguments: tuple, attributes: Dict[str, Any]) -> BaseException:
+    """An exception from its parts, without calling its ``__init__``."""
+    error: BaseException = BaseException.__new__(kind)
+    error.args = arguments
+    vars(error).update(attributes)
+    return error
 
 
 # --------------------------------------------------------------------------
@@ -180,14 +319,16 @@ class _Worker:
     def __init__(self, extra_environment: Dict[str, str], generation: int = 0):
         #: Which set of ``environments`` the pool had when this was started.
         self.generation = generation
-        environment = dict(os.environ)
-        # Modules the task names rather than carries are imported in the
-        # worker; it must look for them where this process would.
-        environment["PYTHONPATH"] = os.pathsep.join(
-            entry or os.getcwd() for entry in sys.path
-        )
-        environment[IN_WORKER_VARIABLE] = "1"
-        environment.update(extra_environment)
+        #: What the pool, not the caller, decides in this worker's environment.
+        self._owned = {
+            # Modules the task names rather than carries are imported in the
+            # worker; it must look for them where this process would.
+            "PYTHONPATH": os.pathsep.join(entry or os.getcwd() for entry in sys.path),
+            IN_WORKER_VARIABLE: "1",
+            **extra_environment,
+        }
+        #: The environment last sent with a task; resent only when it changes.
+        self._sent_environment: Optional[Dict[str, str]] = None
         self.process = subprocess.Popen(
             [
                 sys.executable,
@@ -196,13 +337,33 @@ class _Worker:
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            env=environment,
+            env={**os.environ, **self._owned},
         )
 
-    def run(self, payload: bytes) -> Tuple[str, Any, str]:
+    def environment_for(self, callers: Dict[str, str]) -> Dict[str, str]:
+        """The environment a task from a caller with ``callers`` runs in.
+
+        The caller's, except for what the pool set for this worker: its
+        pinned variables (one GPU per worker, say), ``PYTHONPATH`` and the
+        worker marker stay as they are. A thread-count variable is the
+        pool's choice only until the caller sets it; then it is theirs.
+        """
+        environment = dict(callers)
+        for name, value in self._owned.items():
+            if not (name in THREAD_COUNT_VARIABLES and name in callers):
+                environment[name] = value
+        return environment
+
+    def run(
+        self, payload: bytes, directory: Optional[str], callers: Dict[str, str]
+    ) -> Tuple[str, Any, TaskOutput]:
         assert self.process.stdin is not None and self.process.stdout is not None
+        environment = self.environment_for(callers)
+        changed = environment != self._sent_environment
+        request = pickle.dumps((directory, environment if changed else None, payload))
         try:
-            _send(self.process.stdin, payload)
+            _send(self.process.stdin, request)
+            self._sent_environment = environment
             reply = _receive(self.process.stdout)
         except (BrokenPipeError, OSError):
             reply = None
@@ -218,6 +379,10 @@ class _Worker:
     def alive(self) -> bool:
         return self.process.poll() is None
 
+    def kill(self) -> None:
+        with contextlib.suppress(OSError):
+            self.process.kill()
+
     def close(self) -> None:
         for stream in (self.process.stdin, self.process.stdout):
             if stream is not None:
@@ -228,6 +393,33 @@ class _Worker:
         except subprocess.TimeoutExpired:
             self.process.kill()
             self.process.wait()
+
+
+@dataclass
+class _Batch:
+    """The tasks of one :meth:`WorkerPool.map` call, while they run."""
+
+    directory: Optional[str]
+    environment: Dict[str, str]
+    #: Workers running one of this call's tasks right now.
+    busy: Set[_Worker] = field(default_factory=set)
+    #: Set when the caller stopped waiting: nothing more is to be started.
+    abandoned: bool = False
+
+
+def _what_cannot_be_pickled(function: Callable, arguments: Sequence[Any]) -> str:
+    """Name the part of a task that pickling fails on."""
+    if not _survives_pickling(function):
+        return f"the function {getattr(function, '__name__', function)!r}"
+    for position, argument in enumerate(arguments):
+        if _survives_pickling(argument):
+            continue
+        if isinstance(argument, dict):
+            for key, value in argument.items():
+                if not _survives_pickling(value):
+                    return f"{key!r} (a {type(value).__name__})"
+        return f"argument {position} (a {type(argument).__name__})"
+    return "the task"
 
 
 class WorkerPool:
@@ -341,18 +533,39 @@ class WorkerPool:
             # Either a worker is idle, or there is room to start one.
             self._available.notify()
 
-    def _run_one(self, payload: bytes) -> Tuple[str, Any, str]:
+    def _run_one(self, payload: bytes, batch: _Batch) -> Tuple[str, Any, TaskOutput]:
         worker = self._acquire()
         try:
-            return worker.run(payload)
+            with self._lock:
+                if batch.abandoned:
+                    raise WorkerDied("the call this task belonged to was interrupted")
+                batch.busy.add(worker)
+            return worker.run(payload, batch.directory, batch.environment)
         finally:
+            with self._lock:
+                batch.busy.discard(worker)
             self._release(worker)
+
+    def _abandon(self, batch: _Batch, futures: Sequence[Future]) -> None:
+        """Stop the tasks of a call nobody is waiting for any more.
+
+        A task cannot be interrupted from outside, so the workers running
+        this call's tasks are killed; the pool starts others when it next
+        needs them. Tasks not yet started are never started.
+        """
+        for future in futures:
+            future.cancel()
+        with self._lock:
+            batch.abandoned = True
+            busy = list(batch.busy)
+        for worker in busy:
+            worker.kill()
 
     def map(
         self,
         function: Callable,
         argument_lists: Sequence[Sequence[Any]],
-        emit: Optional[Callable[[str], object]] = None,
+        emit: Optional[Callable[[TaskOutput], object]] = None,
         limit: Optional[int] = None,
     ) -> List[Any]:
         """Call ``function(*arguments)`` for each list, in parallel.
@@ -360,39 +573,69 @@ class WorkerPool:
         At most ``limit`` run at once (the pool's size when omitted): the
         shared pool may be larger than one caller asked for.
 
-        Results come back in the order of ``argument_lists``. What the tasks
-        printed is passed to ``emit`` in that same order (``sys.stdout``'s
-        ``write`` as it is when the tasks finish, if not given). If a task raised,
-        the exception of the *earliest* such task is re-raised here once
-        every task has finished -- the one a sequential run would have hit.
+        Each task runs in the working directory and environment this
+        process has when ``map`` is called (see the module docstring).
+
+        Results come back in the order of ``argument_lists``. What each task
+        printed and warned about is passed to ``emit`` as a
+        :class:`TaskOutput`, in that same order (:meth:`TaskOutput.replay`,
+        which shows it here, if not given). If a task raised, the exception
+        of the *earliest* such task is re-raised here once every task has
+        finished -- the one a sequential run would have hit.
+
+        If this call is itself interrupted -- ``KeyboardInterrupt`` in the
+        waiting thread -- it does not wait for the tasks: the workers
+        running them are killed and the interrupt is raised at once.
+
+        Raises :class:`NotPicklable` if a task cannot be sent at all.
         """
-        payloads = [
-            cloudpickle.dumps((function, tuple(arguments)))
-            for arguments in argument_lists
-        ]
+        payloads = []
+        for arguments in argument_lists:
+            try:
+                payloads.append(cloudpickle.dumps((function, tuple(arguments))))
+            except Exception as error:  # noqa: BLE001 - whatever pickling raises
+                raise NotPicklable(
+                    f"{_what_cannot_be_pickled(function, arguments)} cannot be "
+                    f"pickled, so it cannot be sent to a worker process: {error}"
+                ) from error
         if not payloads:
             return []
+        try:
+            directory: Optional[str] = os.getcwd()
+        except OSError:  # the working directory has been removed
+            directory = None
+        batch = _Batch(directory, dict(os.environ))
         width = max(1, min(limit or self.size, self.size, len(payloads)))
         with ThreadPoolExecutor(max_workers=width) as threads:
-            futures = [threads.submit(self._run_one, payload) for payload in payloads]
-            outcomes: List[Any] = []
-            for future in futures:
-                try:
-                    outcomes.append(future.result())
-                except WorkerDied as died:
-                    outcomes.append(("died", died, ""))
+            futures: List[Future] = []
+            outcomes: List[Tuple[str, Any, TaskOutput]] = []
+            try:
+                for payload in payloads:
+                    futures.append(threads.submit(self._run_one, payload, batch))
+                for future in futures:
+                    try:
+                        outcomes.append(future.result())
+                    except WorkerDied as died:
+                        outcomes.append(("died", died, TaskOutput()))
+            except BaseException:
+                # Leaving the ``with`` waits for the threads, and they are
+                # waiting for the workers.
+                self._abandon(batch, futures)
+                raise
 
         results = []
-        for status, value, printed in outcomes:
-            if printed:
-                (emit or sys.stdout.write)(printed)
+        for status, value, output in outcomes:
+            if output:
+                (emit or TaskOutput.replay)(output)
             if status == "ok":
                 results.append(value)
             elif status == "died":
                 raise value
             else:
-                error, trace = value
-                raise error from RemoteTraceback(trace)
+                raised, trace = value
+                if status == "error in parts":
+                    raised = _rebuilt(*raised)
+                raise raised from RemoteTraceback(trace)
         return results
 
     def close(self) -> None:
@@ -416,16 +659,6 @@ class WorkerPool:
 
 _SHARED_LOCK = threading.Lock()
 _SHARED: Optional[WorkerPool] = None
-
-#: Read by numerical libraries, when they are imported, to size their own
-#: thread pools.
-THREAD_COUNT_VARIABLES = (
-    "OMP_NUM_THREADS",
-    "OPENBLAS_NUM_THREADS",
-    "MKL_NUM_THREADS",
-    "NUMEXPR_NUM_THREADS",
-    "VECLIB_MAXIMUM_THREADS",
-)
 
 
 def _threads_per_worker(workers: int) -> Dict[str, str]:

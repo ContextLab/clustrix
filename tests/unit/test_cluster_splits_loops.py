@@ -358,8 +358,16 @@ def noisy(values):
     [
         (running_total, ([1, 2, 3, 4],), "previous is read before the iteration"),
         (first_negative, ([3, -1, -2, 5],), "break stops the loop early"),
-        (audited, ([1, 2, 3],), "AUDIT_TRAIL is a global the loop writes to"),
-        (noisy, ([1, 2, 3],), "random.random() draws from a random generator"),
+        (
+            audited,
+            ([1, 2, 3],),
+            "AUDIT_TRAIL is not created in this function and the loop changes it",
+        ),
+        (
+            noisy,
+            ([1, 2, 3],),
+            "random.random() uses a random generator shared by the whole process",
+        ),
     ],
     ids=["carried-value", "break", "global-write", "unseeded-rng"],
 )
@@ -479,7 +487,7 @@ def _rows_case():
     "function, case, reason",
     [
         (tallied, _tallied_case, "the loop changed counter"),
-        (collected_into, _aliased_case, "seen can reach the same object as out"),
+        (collected_into, _aliased_case, "seen can reach an object out collects into"),
         (rows_extended, _rows_case, "the loop changed the items being looped over"),
     ],
     ids=["hidden-mutation", "aliased-collector", "items-mutated"],
@@ -531,7 +539,7 @@ def test_the_first_abandonment_warns_that_side_effects_happened_twice(caplog):
         cluster(cores=4)(tallied)(*arguments)
 
     (said,) = records(caplog, logging.WARNING, "not split")
-    assert "happened in the attempt as well" in said
+    assert "happened in that attempt as well" in said
     assert "parallel=False" in said
 
 
@@ -884,3 +892,172 @@ def test_a_divided_loop_that_calls_a_decorated_function_does_not_divide_again(ro
             outer_pid
         }, "the inner loop left the worker that called it: a pool inside a pool"
     assert len(outer_pids) <= min(4, CPUS)
+
+
+# --------------------------------------------------------------------------
+# What an adversarial review found
+# --------------------------------------------------------------------------
+
+
+class Guarded:
+    """An object a direct call is happy with and pickle is not."""
+
+    def __init__(self, factor):
+        self.factor = factor
+        self.lock = threading.Lock()
+
+    @cluster(cores=4)
+    def scale(self, values):
+        out = []
+        for value in values:
+            out.append((self.factor * value, os.getpid()))
+        return out
+
+
+@needs_two_cpus
+def test_a_loop_reading_something_that_cannot_be_pickled_runs_here(caplog):
+    """D2. ``TypeError: cannot pickle '_thread.lock' object`` used to come
+    out of the decorated call, where calling the function directly works."""
+    guarded = Guarded(3)
+
+    with caplog.at_level(logging.INFO, logger="clustrix"):
+        result = guarded.scale([1, 2, 3, 4])
+
+    print(caplog.text)
+    assert values_of(result) == [3, 6, 9, 12]
+    assert pids_of(result) == {os.getpid()}
+    assert "'self' (a Guarded)" in caplog.text
+
+
+def reads_where_it_is(names):
+    out = []
+    for name in names:
+        with open(name) as handle:
+            out.append(
+                (handle.read(), os.environ.get("CLUSTRIX_TEST_MODE"), os.getpid())
+            )
+    return out
+
+
+@needs_two_cpus
+def test_a_divided_loop_sees_the_directory_and_environment_of_this_call(
+    tmp_path, monkeypatch
+):
+    """W1. The pool's workers are older than the ``os.chdir``."""
+    for name in ("first", "second"):
+        (tmp_path / name).mkdir()
+        for index in range(4):
+            (tmp_path / name / f"{index}.txt").write_text(f"{name} {index}")
+    names = [f"{index}.txt" for index in range(4)]
+    decorated = cluster(cores=4)(reads_where_it_is)
+
+    monkeypatch.chdir(tmp_path / "first")
+    monkeypatch.delenv("CLUSTRIX_TEST_MODE", raising=False)
+    before = decorated(names)
+    decorator_module._SECONDS_PER_ITERATION.clear()  # divide the next call too
+    monkeypatch.chdir(tmp_path / "second")
+    monkeypatch.setenv("CLUSTRIX_TEST_MODE", "fast")
+    after = decorated(names)
+
+    assert [(text, mode) for text, mode, _ in before] == [
+        (f"first {index}", None) for index in range(4)
+    ]
+    assert [(text, mode) for text, mode, _ in after] == [
+        (f"second {index}", "fast") for index in range(4)
+    ]
+    assert os.getpid() not in {pid for _, _, pid in before + after}
+
+
+def complains(values, rounds):
+    import warnings
+
+    out = []
+    for value in values:
+        spin(rounds)
+        print(f"err {value}", file=sys.stderr)
+        warnings.warn(f"value {value} is deprecated", DeprecationWarning)
+        out.append(value)
+    return out
+
+
+@needs_two_cpus
+def test_stderr_and_warnings_from_the_loop_arrive_where_they_belong(rounds, capsys):
+    """W4, W5. Standard error came out on standard output, and a warning
+    was text there too, invisible to ``warnings.catch_warnings``."""
+    import warnings
+
+    values = list(range(8))
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        assert cluster(cores=4)(complains)(values, rounds // 4) == values
+
+    shown = capsys.readouterr()
+    assert shown.out == ""
+    assert shown.err == "".join(f"err {v}\n" for v in values)
+    assert [str(w.message) for w in caught] == [
+        f"value {v} is deprecated" for v in values
+    ]
+    assert {w.category for w in caught} == {DeprecationWarning}
+
+
+@needs_two_cpus
+def test_ctrl_c_during_a_divided_loop_returns_at_once_and_leaves_no_workers(tmp_path):
+    """W3. It used to return only when every chunk had finished."""
+    import signal
+    import subprocess
+    import textwrap
+
+    script = tmp_path / "driver.py"
+    script.write_text(textwrap.dedent("""
+            import signal, time
+            from clustrix import cluster
+
+            signal.signal(signal.SIGINT, signal.default_int_handler)
+
+            @cluster(cores=2)
+            def slow(n):
+                out = []
+                for i in range(n):
+                    time.sleep(1.5)
+                    out.append(i)
+                return out
+
+            print("READY", flush=True)
+            print("FINISHED", slow(8), flush=True)
+            """))
+    driver = subprocess.Popen(
+        [sys.executable, str(script)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+        env={
+            **os.environ,
+            "CLUSTRIX_CONFIG_DIR": str(tmp_path),
+            # The package under test, wherever this test was collected from.
+            "PYTHONPATH": os.path.dirname(os.path.dirname(clustrix.__file__)),
+        },
+    )
+    try:
+        assert driver.stdout.readline().strip() == "READY"
+        time.sleep(1.5)
+        interrupted = time.perf_counter()
+        os.kill(driver.pid, signal.SIGINT)
+        out, err = driver.communicate(timeout=60)
+        elapsed = time.perf_counter() - interrupted
+    finally:
+        try:
+            os.killpg(driver.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+    print(f"exited {elapsed:.2f}s after SIGINT, status {driver.returncode}\n{err}")
+    assert "KeyboardInterrupt" in err and "FINISHED" not in out
+    assert elapsed < 3, f"waited {elapsed:.1f}s for a loop with 6s still to run"
+    left = subprocess.run(
+        ["pgrep", "-g", str(driver.pid), "-f", "clustrix.loop_workers"],
+        capture_output=True,
+        text=True,
+    ).stdout.split()
+    assert left == [], f"worker processes left behind: {left}"
