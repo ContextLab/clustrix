@@ -19,6 +19,8 @@ from pathlib import Path
 
 import pytest
 
+from tests.markers import needs_permission_denial
+
 import sys
 import sys
 
@@ -644,6 +646,7 @@ class TestTheEmittedShellActuallyWorks:
         assert "no conda installation was found on this node" in result.stderr
         assert "SOURCED" not in result.stdout
 
+    @needs_permission_denial
     def test_an_unreadable_conda_sh_is_the_same_story(self, tmp_path):
         home = tmp_path / "home_unreadable_conda"
         conda_sh = _install_conda_sh(home / "miniconda3")

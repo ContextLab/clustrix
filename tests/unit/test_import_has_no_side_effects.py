@@ -40,6 +40,8 @@ import yaml
 
 import pytest
 
+from tests.markers import needs_permission_denial
+
 import sys
 import sys
 
@@ -179,6 +181,7 @@ def test_import_opens_no_file_in_the_users_home_or_cwd(home, workdir):
     ), result["during_first_use"]
 
 
+@needs_permission_denial
 def test_import_survives_a_config_directory_it_cannot_read(home, workdir):
     """An unreadable ~/.clustrix used to make ``import clustrix`` raise.
 
@@ -349,6 +352,7 @@ def test_an_unusable_file_keeps_failing_rather_than_failing_once(unloaded_config
         ), f"the search was marked complete after failing (attempt {attempt})"
 
 
+@needs_permission_denial
 def test_an_unreadable_candidate_is_skipped_and_reported(unloaded_config, caplog):
     """ "I could not look there" is a warning, not an answer of "nothing there"."""
     os.chmod(unloaded_config, 0o000)

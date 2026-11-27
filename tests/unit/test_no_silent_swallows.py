@@ -60,6 +60,8 @@ from typing import NamedTuple
 
 import pytest
 
+from tests.markers import needs_permission_denial
+
 from clustrix.config import CONFIG_DIR_ENV_VAR, ClusterConfig
 from clustrix.executor_connections import ConnectionManager
 from clustrix.executor_scheduler_status import SchedulerStatusManager
@@ -940,6 +942,7 @@ def test_the_widget_still_reports_a_refusal_it_really_measured(capsys):
     )
 
 
+@needs_permission_denial
 def test_a_profile_file_that_could_not_be_read_says_so(tmp_path, caplog):
     """A missing entry in the Load menu is the symptom; silence was the cause.
 
