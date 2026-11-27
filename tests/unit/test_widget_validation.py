@@ -139,10 +139,12 @@ class TestBackendSpecificSections:
     def test_exactly_the_right_sections_are_shown(self, cluster_type):
         widget = _widget(cluster_type)
         for section, applies_to in self.SECTIONS.items():
-            expected = "block" if cluster_type in applies_to else "none"
-            assert (
-                widget.widgets[section].layout.display == expected
-            ), f"{section} should be {expected} for {cluster_type}"
+            # A hidden section has display "none"; a shown one has no
+            # override at all, so the stylesheet lays it out.
+            shown = widget.widgets[section].layout.display != "none"
+            assert shown == (
+                cluster_type in applies_to
+            ), f"{section} shown={shown} for {cluster_type}"
 
     def test_huggingface_settings_reach_the_config(self):
         widget = _widget("huggingface")
@@ -159,7 +161,7 @@ class TestBackendSpecificSections:
         from clustrix.executor_core import ClusterExecutor  # noqa: F401
 
         widget = _widget("local")
-        offered = set(widget.widgets["cluster_type"].options)
+        offered = {value for _, value in widget.widgets["cluster_type"].options}
         assert offered == {
             "local",
             "ssh",

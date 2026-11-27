@@ -108,6 +108,9 @@ STORE = "credential_manager.py"
 CLUSTER_CONFIG_SPLAT_ALLOWLIST = {
     # The widget's own fields, typed by the user in this session.
     ("modern_notebook_widget.py", "ModernClustrixWidget._get_config_from_widgets"),
+    # The same fields with the ones the chosen backend ignores reset: what
+    # Test connection, Run test job and Set up SSH key act on.
+    ("modern_notebook_widget.py", "ModernClustrixWidget._config_for_backend"),
     # Literals in the class body: the built-in profile templates.
     ("profile_manager.py", "ProfileManager._load_default_profiles"),
     # asdict() of a config that already exists, so its provenance is already
@@ -177,7 +180,6 @@ LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST = {
     # username is not a credential -- it is half of who the credential is
     # *for*, which the gate compares rather than consumes.
     ("executor_connections.py", "ConnectionManager.setup_ssh_connection"),
-    ("modern_notebook_widget.py", "ModernClustrixWidget._create_remote_section"),
     ("validation.py", "validate_on_test_clusters"),
     # Which hosts the operator's own validation run should talk to. Host
     # names, no secret, and they are read from the operator's environment

@@ -647,8 +647,8 @@ class ModernClustrixWidget:
         )
 
     @contextmanager
-    def _action(self, button, busy_label: str, busy_status: str) -> Iterator[None]:
-        """Run one button press: clear the console, show progress, restore.
+    def _action(self, key: str, busy_label: str, busy_status: str) -> Iterator[None]:
+        """Run the action behind button ``key``: clear, show progress, restore.
 
         The console is cleared first so the result on screen is always the
         result of the button just pressed. It used to be an append-only log
@@ -657,6 +657,7 @@ class ModernClustrixWidget:
         """
         output = self.widgets["output"]
         output.clear_output()
+        button = self.widgets[key]
         original = button.description
         button.description = busy_label
         button.disabled = True
@@ -732,16 +733,31 @@ class ModernClustrixWidget:
             self._report(f"Could not keep the changes to '{profile_name}': {e}")
             self.set_status("error", "not saved")
 
-    def _show_profile(self, name: str) -> None:
-        """Put profile `name` on screen, without treating that as an edit."""
-        config = self.profile_manager.set_active_profile(name)
+    def _update_profile_dropdown(self) -> None:
+        """Re-read the profile names; the active profile stays selected.
+
+        Rebuilding the options fires change events that are not edits by the
+        user, so capture is suspended for the duration.
+        """
+        previous = self._suspend_profile_capture
         self._suspend_profile_capture = True
         try:
             self.widgets["profile_dropdown"].options = (
                 self.profile_manager.get_profile_names()
             )
-            self.widgets["profile_dropdown"].value = name
-            self.widgets["profile_name"].value = name
+            self.widgets["profile_dropdown"].value = self.profile_manager.active_profile
+            self.widgets["profile_name"].value = (
+                self.profile_manager.active_profile or ""
+            )
+        finally:
+            self._suspend_profile_capture = previous
+
+    def _show_profile(self, name: str) -> None:
+        """Put profile `name` on screen, without treating that as an edit."""
+        config = self.profile_manager.set_active_profile(name)
+        self._update_profile_dropdown()
+        self._suspend_profile_capture = True
+        try:
             self._load_config_to_widgets(config)
             self._update_ui_for_cluster_type()
         finally:
@@ -922,7 +938,7 @@ class ModernClustrixWidget:
         return str(config_dir / filename)
 
     def _on_save_config(self, button) -> None:
-        with self._action(button, "Saving…", "saving…"):
+        with self._action("save_btn", "Saving…", "saving…"):
             try:
                 filename = self._resolve_config_path(
                     self.widgets["config_filename"].value
@@ -942,7 +958,7 @@ class ModernClustrixWidget:
             self.set_status("ok", "saved")
 
     def _on_load_config(self, button) -> None:
-        with self._action(button, "Loading…", "loading…"):
+        with self._action("load_btn", "Loading…", "loading…"):
             try:
                 filename = self._resolve_config_path(
                     self.widgets["config_filename"].value
@@ -982,7 +998,7 @@ class ModernClustrixWidget:
 
     def _on_apply_config(self, button) -> None:
         """Make the displayed configuration the one ``@cluster`` uses."""
-        with self._action(button, "Applying…", "applying…"):
+        with self._action("apply_btn", "Applying…", "applying…"):
             if self._refuse_if_invalid("apply"):
                 return
             try:
@@ -1064,10 +1080,10 @@ class ModernClustrixWidget:
 
     def _on_test_connect(self, button) -> None:
         """Connect and authenticate to the backend on screen, without a job."""
-        with self._action(button, "Testing…", "testing…"):
+        with self._action("test_connect_btn", "Testing…", "testing…"):
             if self._refuse_if_invalid("test"):
                 return
-            config = ClusterConfig(**self._config_data_for_backend())
+            config = self._config_for_backend()
             try:
                 lines = self._check_connection(config)
             except Exception as e:  # noqa: BLE001 - reported to the user below
@@ -1088,10 +1104,10 @@ class ModernClustrixWidget:
         Earlier versions printed "4 test jobs executed" without calling an
         executor at all; a test that cannot fail tells you nothing.
         """
-        with self._action(button, "Running…", "running…"):
+        with self._action("test_submit_btn", "Running…", "running…"):
             if self._refuse_if_invalid("run a job with"):
                 return
-            config = ClusterConfig(**self._config_data_for_backend())
+            config = self._config_for_backend()
 
             from .executor import ClusterExecutor
             from .utils import make_portable_function, serialize_function
@@ -1130,7 +1146,7 @@ class ModernClustrixWidget:
 
     def _on_auto_setup_ssh(self, button) -> None:
         """Generate an SSH key and install it on the host on screen."""
-        with self._action(button, "Setting up…", "setting up key…"):
+        with self._action("auto_setup_ssh", "Setting up…", "setting up key…"):
             if self._refuse_if_invalid("set up a key for"):
                 return
             password = self.widgets["password"].value
@@ -1144,7 +1160,7 @@ class ModernClustrixWidget:
 
             from .ssh_utils import setup_ssh_keys
 
-            config = ClusterConfig(**self._config_data_for_backend())
+            config = self._config_for_backend()
             result = setup_ssh_keys(
                 config, password, force_refresh=self.widgets["refresh_keys"].value
             )
@@ -1309,6 +1325,10 @@ class ModernClustrixWidget:
                 for name in field_names:
                     data[name] = defaults[name]
         return data
+
+    def _config_for_backend(self) -> ClusterConfig:
+        """The configuration a test or a job started from this form uses."""
+        return ClusterConfig(**self._config_data_for_backend())
 
     def _get_config_from_widgets(self) -> ClusterConfig:
         """The configuration currently shown, as a ClusterConfig."""

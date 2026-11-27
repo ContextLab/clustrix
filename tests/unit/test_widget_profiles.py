@@ -173,7 +173,7 @@ class TestTestJobButton:
     def test_every_offered_cluster_type_is_either_runnable_or_validated(self):
         """A type the button cannot handle must fail validation, not crash."""
         widget = ModernClustrixWidget()
-        for cluster_type in widget.widgets["cluster_type"].options:
+        for _, cluster_type in widget.widgets["cluster_type"].options:
             widget.widgets["cluster_type"].value = cluster_type
             widget._update_ui_for_cluster_type()
             widget._on_test_submit(widget.widgets["test_submit_btn"])
@@ -403,7 +403,7 @@ class TestApplyTouchesOnlyWhatItOwns:
 
         widget = ModernClustrixWidget()
         produced = set()
-        for cluster_type in widget.widgets["cluster_type"].options:
+        for _, cluster_type in widget.widgets["cluster_type"].options:
             widget.widgets["cluster_type"].value = cluster_type
             widget._update_ui_for_cluster_type()
             produced |= set(widget._config_data_from_widgets())

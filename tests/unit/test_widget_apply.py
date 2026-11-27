@@ -1279,6 +1279,8 @@ class TestAProfileNamingARemovedBackend:
         modern = ModernClustrixWidget()
 
         assert list(legacy.cluster_type.options) == list(SUPPORTED_CLUSTER_TYPES)
-        assert list(modern.widgets["cluster_type"].options) == list(
+        # The modern menu shows a display name per backend; its *values* are
+        # the tuple.
+        assert [value for _, value in modern.widgets["cluster_type"].options] == list(
             SUPPORTED_CLUSTER_TYPES
         )
