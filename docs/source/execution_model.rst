@@ -58,11 +58,11 @@ ignored option is worse than a rejected one:
 .. code-block:: text
 
    WARNING clustrix.decorator: @cluster received unrecognised option(s) gpu_type;
-   they have no effect. Recognised extras: hf_flavor, hf_namespace, hf_timeout,
-   hf_token, hf_username, key_file, ...
+   they have no effect. Recognised extras: data, hf_flavor, hf_namespace,
+   hf_timeout, hf_token, hf_username, key_file, no_data
 
-The authoritative list is the ``cloud_params`` tuple in
-``clustrix/decorator.py``; the warning prints it sorted.
+The authoritative list is ``passthrough_params`` plus ``INPUT_DATA_OPTIONS``
+in ``clustrix/decorator.py``; the warning prints it sorted.
 
 
 The order of operations on a call
@@ -73,14 +73,21 @@ The order of operations on a call
    defaults.
 3. Decide local or remote (``_choose_execution_mode``).
 4. Decide sync or async (``async_submit``).
-5. Optionally attempt loop parallelization.
-6. Serialize the function, its arguments and the environment description.
-7. Submit: create the remote job directory, upload the payload, build the
-   remote environment, generate and submit a job script.
-8. Poll for completion.
-9. Download ``result.pkl``, **verify its HMAC**, then deserialize it with dill.
-10. Clean up the remote job directory if the job succeeded and
+5. On ``ssh`` and ``slurm``, stage the local input files the call names
+   (:doc:`input_files`).
+6. If loop division is on and the function has a loop that qualifies, divide
+   it: each piece then goes through steps 7--11 as its own job
+   (:doc:`parallel_loops`). Otherwise the whole function is one job.
+7. Serialize the function, its arguments and the environment description.
+8. Submit: create the remote job directory, upload the payload, build or
+   reuse the remote environment, generate and submit a job script.
+9. Poll for completion.
+10. Download ``result.pkl``, **verify its HMAC**, then deserialize it with
+    dill.
+11. Clean up the remote job directory if the job succeeded and
     ``cleanup_on_success`` is set.
+
+The section headings below keep their older step numbers.
 
 Steps 7--10 differ per backend; see :ref:`per-backend-divergence`.
 
@@ -103,9 +110,9 @@ Decorator arg    Config fallback
 ===============  =============================
 
 The fallback is written as ``cores or config.default_cores``. ``cores`` is
-validated before that merge: anything other than a positive integer raises
-``ValueError`` at decoration time, so ``cores=0``, ``cores=-2`` and
-``cores=True`` are rejected rather than absorbed -- the last of those because
+validated before that merge: anything other than a positive integer or
+``-1`` raises ``ValueError`` at decoration time, so ``cores=0``,
+``cores=-2`` and ``cores=True`` are rejected rather than absorbed -- the last of those because
 ``bool`` subclasses ``int`` and would otherwise be read as one worker. Any resource key still missing when a job script is
 generated is filled in again by ``resolve_job_resources``.
 
@@ -148,11 +155,14 @@ Local execution then splits again:
 
 * ``auto_parallel`` off (or ``parallel=False``) -> ``func(*args, **kwargs)``,
   directly, with no serialization at all.
-* ``auto_parallel`` on -> ``_execute_local_parallel``, which looks for a
-  parallelizable loop and, if it finds one **and** your function can accept a
-  chunk, runs chunks in a process pool. See :doc:`limitations` before relying
-  on this: the conditions are narrow and the return shape changes.
-
+* ``auto_parallel`` on -> the function's source is analysed once
+  (``clustrix.parallelize.plan``). If a top-level loop qualifies, the code
+  before the loop runs in the calling process, the loop's items are cut into
+  ``cores`` contiguous pieces that run in worker subprocesses
+  (``clustrix.loop_workers``), and the recorded writes are replayed in order
+  before the code after the loop runs. The return value is the function's
+  own. If no loop qualifies, the function is called directly. See
+  :doc:`parallel_loops`.
 
 Step 6: serialization
 ---------------------
@@ -453,17 +463,30 @@ reconstruction opcodes through stdlib pickle builds a *fresh* class for
 anything defined in your ``__main__``, so a returned instance failed
 ``isinstance()`` against the very class that defined it.
 
-The single-venv fallback
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+A failed environment build is an error
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If ``use_two_venv=False``, or if the two-venv setup raises or exceeds
-``venv_setup_timeout`` (300s), ``_setup_job_environment`` logs a warning and
-falls back to ``setup_remote_environment``, which builds **one** venv
-containing only ``dill`` and ``cloudpickle`` (version-pinned to yours when
-known). It does **not** mirror your environment. A job that lands here will
-fail on the first ``import`` of anything outside the standard library, so treat
-the warning ``Two-venv setup failed, falling back to basic setup:`` as an
-error in practice.
+If the two-venv setup raises, the submission raises that error. If it exceeds
+``venv_setup_timeout`` (300 s) the submission raises ``TimeoutError``; the
+build may still be running on the cluster and is locked, so a second
+submission waits for it. There is no silent fallback to a bare environment.
+``use_two_venv=False`` asks for one venv containing only ``dill`` and
+``cloudpickle`` on purpose; a job run that way fails on the first import of
+anything else.
+
+What is installed
+~~~~~~~~~~~~~~~~~
+
+With ``replicate_local_environment=True`` (the default) the execution
+environment mirrors every reproducible distribution installed locally. With
+``False`` it contains only the packages the job was found to need: those the
+serialized function, its arguments and the project code shipped with it
+import, closed over their dependencies. In both cases the environment is
+keyed by its contents under ``<remote_work_dir>/envs/`` and reused.
+
+Local and remote Python must be the same minor version. With no matching
+interpreter on the remote host and no conda to build one, the submission is
+refused with a ``RuntimeError`` naming the versions it found.
 
 
 Step 7b: the job directory and the signing key
@@ -572,8 +595,11 @@ secret it would need to forge a result.
 Steps 8--9: polling, verification, and the result
 -------------------------------------------------
 
-``wait_for_result`` polls ``check_job_status`` every ``job_poll_interval``
-seconds (default 30) until the status is ``completed`` or ``failed``.
+``wait_for_result`` polls ``check_job_status`` until the status is
+``completed`` or ``failed``. The first check is one second after submission
+and each later wait is 1.5 times the one before, up to ``job_poll_interval``
+(default 30), which is the ceiling rather than the interval. A short job
+therefore returns within a second or two of finishing.
 
 * **SLURM** -- ``squeue -j <id> -h -o %T``, with a file-based fallback because
   completed jobs leave the queue.
@@ -656,7 +682,8 @@ Per-backend divergence
 ===================  ==================================================================
 Backend              How the flow differs
 ===================  ==================================================================
-``local``            No SSH, no job script, no venvs, no HMAC. ``LocalJobManager``
+``local``            Reached when ``cluster_type="local"`` *and* a ``cluster_host``
+                     is set. No SSH, no job script, no venvs, no HMAC. ``LocalJobManager``
                      deserializes the payload and runs it **synchronously inside**
                      ``submit_job``; ``wait_for_result`` just returns the recorded
                      outcome or re-raises the recorded exception. ``cancel_job``
@@ -709,9 +736,9 @@ SSH connection             ``ValueError: cluster_host must be specified for
                            ``ssh_host_key_policy="auto_add"``.
 Job directory              ``mkdir -m 700`` failing is fatal and is not retried.
 Environment build          ``RuntimeError: Failed to setup two-venv environment:
-                           <stderr>``, or a version-skew ``RuntimeError``. Both are
-                           caught one level up and downgraded to the single-venv
-                           fallback with a ``WARNING``.
+                           <stderr>``, a version-skew ``RuntimeError``, or a
+                           ``TimeoutError`` after ``venv_setup_timeout``. All
+                           three are raised to the caller.
 Job submission             Scheduler stderr; a job id that does not parse.
 Execution                  The remote exception, re-raised locally with its
                            original type.

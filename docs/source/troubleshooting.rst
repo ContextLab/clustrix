@@ -120,7 +120,9 @@ Job results are not portable across processes.
 **"Host key verification failed for '<host>' ..."**
 
 The host is not in your ``known_hosts``. This is the default and it is
-deliberate. The message contains the exact ``ssh-keyscan`` command to add it.
+deliberate. The message contains the fingerprint the host offered and the
+``ssh-keyscan`` command that adds it; the notebook widget offers a "Trust this
+host" button instead. See :ref:`host-key-verification`.
 The alternative, ``ssh_host_key_policy="auto_add"``, trusts any key and is what
 makes machine-in-the-middle attacks possible; choose it knowingly or not at
 all. It also writes: on that policy clustrix creates ``~/.ssh/known_hosts`` if
@@ -159,34 +161,61 @@ queued, and cancelling someone's allocation because the client got bored is
 not that function's decision -- so the result can still be collected by hand
 from the directory the message names. Raise ``job_wait_timeout`` for a queue
 that legitimately runs longer, or set it to ``None`` to wait indefinitely.
-``job_poll_interval`` (30 seconds) controls how often the loop asks.
+Polling starts one second apart and backs off to ``job_poll_interval``
+(30 seconds), which is the longest gap between checks.
 
-**Parallelization silently did not happen**
+**"@cluster(cores=N) has no effect here: ... has no loop that can be split"**
 
-If you set ``parallel=True`` and the work was not distributed, the most likely
-reason is that your function cannot accept a chunk. Both paths decline rather
-than failing, and say so at ``INFO``::
+Locally, ``cores`` is the number of worker processes a loop is divided among.
+The function has no loop that qualifies, so it ran once in the calling
+process. ``print(clustrix.explain(function))`` gives the line and the reason;
+:doc:`parallel_loops` lists what qualifies.
 
-    INFO clustrix.decorator: Not parallelizing collect on the cluster:
-    it takes no '_chunk_range_i', '_chunk_index' parameter(s).
+**"<function>: not split -- ..."**
 
-The local and remote paths want *different* keyword names, and the loop's
-range must be a literal. See the parallelization section of
-:doc:`limitations` for the exact contract.
+A loop passed the source analysis and then failed a run-time check (a shared
+value was modified, or the global random state moved). The loop ran once, in
+order, and the result is the sequential one. Nothing needs fixing unless you
+wanted the parallel run.
+
+**FileNotFoundError on the cluster for a file that exists locally**
+
+The path was not found by automatic staging. Usually it is computed at run
+time (``os.path.join(...)`` with a variable, a glob, a path read from a
+configuration file). Pass it as an argument or list it in
+``@cluster(data=[...])``. Staging does not apply to HuggingFace Jobs or to
+``async_submit=True``. See :doc:`input_files`.
+
+**"This call names ... of local input, more than clustrix copies to a cluster automatically"**
+
+The call would upload more than ``auto_stage_max_bytes``. Put the data on the
+cluster and pass that path, raise the limit, or exclude a path with
+``@cluster(no_data=[...])``.
+
+**A file the job wrote is not on my machine**
+
+Only the return value comes back. See :doc:`input_files`.
+
+**The first job on a host takes much longer than later ones**
+
+It builds the Python environment there. Later jobs with the same requirements
+reuse it. ``configure(replicate_local_environment=False)`` builds a smaller
+environment from only the packages the job was found to need.
 
 When the answer looks wrong rather than missing
 -----------------------------------------------
 
-Two shapes of "wrong answer" are known and documented rather than mysterious:
-
-- A parallel run and a sequential run of the same function can return
-  **different shapes**, because results arrive as a list of per-chunk values.
-  See :doc:`limitations`.
+- A divided loop returns what the sequential loop returns, with one
+  exception that no check can see: side effects outside the values the loop
+  was given (a module-level cache, files, a database, GPU random state)
+  happen in an unspecified order and, locally, in worker processes. If a
+  result depends on such state, use ``@cluster(parallel=False)``. See
+  :ref:`parallel-loops-unseen`.
 - Passing a keyword to ``@cluster`` that it does not recognise is accepted and
-  **ignored**, with a warning. ``hf_namespace`` and friends are
-  configuration-level settings, not per-call ones. If a setting seems not
-  to apply, check :doc:`configuration` for whether it is read at all -- a
-  number of fields have no effect.
+  **ignored**, with a warning. ``hf_namespace``, ``hf_token``,
+  ``hf_username`` and ``key_file`` are accepted without a warning and are
+  also not read from the decorator. If a setting seems not to apply, check
+  :doc:`configuration` for whether it is read at all.
 
 Getting help
 ------------

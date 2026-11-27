@@ -5,24 +5,17 @@ Installation
 
 .. warning::
 
-   **The version on PyPI is behind this documentation.** ``pip install
-   clustrix`` currently installs **0.1.1**; these pages document **0.2.0**.
-
-   That gap is not cosmetic. 0.1.1 predates fixes for two defects that
-   matter:
-
-   - ``@cluster`` could return a fabricated string instead of your result
-     when a function's source could not be read.
-   - Results fetched from a remote host were unpickled without
-     authentication, which is a remote-to-local code execution path.
-
-   Until 0.2.0 is published, install from the repository::
+   **The version on PyPI is behind this documentation.** When this page was
+   written, ``pip install clustrix`` installed **0.1.1**. That release has
+   none of the loop division, input staging, host key verification or result
+   authentication described here. Until a newer release is published, install
+   from the repository::
 
        pip install "git+https://github.com/ContextLab/clustrix.git@master"
 
-   Everything below describes 0.2.0. If you installed from PyPI, check what
-   you actually have with ``python -c "import clustrix;
-   print(clustrix.__version__)"``.
+   Check what you have with ``python -c "import clustrix;
+   print(clustrix.__version__)"`` and see the
+   `changelog <https://github.com/ContextLab/clustrix/blob/master/CHANGELOG.md>`_.
 
 Clustrix is a pure-Python package. The base install pulls in everything the
 verified backends need -- SSH (``paramiko``), serialization (``cloudpickle``,
@@ -32,7 +25,11 @@ verified backends need -- SSH (``paramiko``), serialization (``cloudpickle``,
 Requirements
 ------------
 
-- **Python 3.10 or newer** (``requires-python = ">=3.10"``).
+- **Python 3.10 to 3.13** locally (``requires-python = ">=3.10"``).
+- **The same Python minor version on the remote side**, or conda there so
+  that Clustrix can create it. A serialized function does not load under a
+  different minor version, and a mismatch is refused when the job is
+  submitted.
 - For remote backends: SSH access to the target machine, and the scheduler's
   own client tools (``sbatch``/``squeue``) present *on that machine*. Nothing
   scheduler-specific is needed locally.
@@ -119,14 +116,17 @@ This runs entirely on your own machine -- no cluster, no credentials:
 
    from clustrix import cluster, configure
 
-   configure(cluster_type="local")  # run in the calling process
+   configure(cluster_type="local")
 
    @cluster(cores=2)
-   def test_function():
-       return "Clustrix is working!"
+   def squares(n):
+       found = []
+       for i in range(n):
+           found.append(i * i)
+       return found
 
-   result = test_function()
-   print(result)  # Should print: "Clustrix is working!"
+   print(clustrix.explain(squares))
+   print(squares(5))  # [0, 1, 4, 9, 16]
 
 Check the CLI at the same time:
 
@@ -137,15 +137,15 @@ Check the CLI at the same time:
 Verify Jupyter Integration
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you installed widget support, test the magic command in Jupyter. Importing
-``clustrix`` registers the magic but does not display anything -- the widget
-appears when you run ``%%remote``, in a cell of its own:
+If you installed widget support, run these in two notebook cells. Loading
+the extension displays nothing; ``%%remote`` shows the widget
+(:doc:`api/notebook_magic`):
 
-.. code-block:: python
+.. code-block:: ipython
 
-   import clustrix  # registers the magic; displays nothing
+   %load_ext clustrix
 
-.. code-block:: ipython3
+.. code-block:: ipython
 
    %%remote
 

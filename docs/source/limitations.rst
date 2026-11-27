@@ -400,11 +400,9 @@ exist there, rather than merely being untested.
 Smaller sharp edges
 -------------------
 
-* **The single-venv fallback does not install your packages.** If
-  ``use_two_venv=False``, or the two-venv setup raises or exceeds
-  ``venv_setup_timeout``, the job gets one venv containing only ``dill`` and
-  ``cloudpickle``. The warning ``Two-venv setup failed, falling back to basic
-  setup:`` should be treated as an error.
+* ``use_two_venv=False`` **does not install your packages.** The job gets
+  one venv containing only ``dill`` and ``cloudpickle``. A failed or
+  timed-out two-venv setup raises; it no longer falls back to this.
 * **Local jobs cannot be cancelled.** ``cluster_type="local"`` runs the
   function *during* ``submit_job``, so by the time you could cancel it, it has
   finished and its side effects have happened. ``cancel_job`` raises rather

@@ -125,43 +125,18 @@ automatically, at first use. Changing directory afterwards does not reload it.
    offending file is the same story: naming a path you did not write is not
    choosing a host.
 
-   **In the** ``%%clusterfy`` **widget, only the host field lifts it.** The
-   widget remembers which of the configurations in its dropdown it found on
-   disk and which hostname each of those files named, so rearranging them
-   changes nothing: renaming a configuration in the name box, copying it with
-   the *+* button, saving it into your own configuration directory or pasting
-   over it in the *Load* box all keep the refusal, because none of them is
-   you choosing who receives your password. Typing your own hostname over the
-   host field does lift it -- for that hostname -- because a host is only
-   refused by a file that actually named it.
+   **In the notebook widget**, typing your own hostname into the Host field
+   and pressing Apply is you naming a host. Selecting, renaming, duplicating,
+   exporting or importing a profile is not, and a profile whose host came
+   from a file you did not choose keeps the refusal.
 
-   Pasting is the one worth stating precisely, because it is the user
-   typing: the refusal survives a paste that *keeps* the hostname the found
-   file named, and a paste that changes the hostname is you naming a host,
-   which lifts it for that host exactly as the host field does.
+   **A save writes the source down.** What a save writes is a credential
+   decision one restart later, so a configuration that came from an untrusted
+   source is saved with a top-level ``config_sources`` key recording that.
+   The record can only ever *lower* trust: a file claiming ``runtime`` for
+   itself is ignored.
 
-   **Saving is where that has to survive a restart.** *Save configuration*
-   writes into ``~/.clustrix``, and that is a directory the widget infers
-   trust from when it looks for configurations next time -- so without care,
-   pressing Save would promote a configuration a repository shipped to one
-   you chose, one session later, with nothing left on disk to say otherwise.
-   It is also not only the configuration you selected: a save writes every
-   configuration in the dropdown, verbatim, including ones you never opened.
-
-   So the widget writes the source down beside the configurations, under a
-   top-level ``config_sources`` key, and reads it back the next time. It
-   behaves exactly like the profile store's record below: it can only ever
-   *lower* trust -- a file claiming ``runtime`` for its own configurations is
-   ignored -- so a project's configuration you deliberately keep is kept,
-   along with the reason it is not handed your credential.
-
-   Typing your own hostname over the host field before saving is recorded
-   the same way it is applied: nothing is written for that entry, because
-   the file no longer names the host it came with, and the next session
-   treats it as yours. Any other entry the save carries along is unaffected
-   and still records where it came from.
-
-   **Every writer of a configuration file does this, not only the widget.**
+   **Every writer of a configuration file does this.**
    ``ClusterConfig.save_to_file(path)``, ``clustrix.save_config(path)``,
    ``clustrix config --config-file <path>`` and
    ``ProfileManager.export_profile(name, path)`` all write the same key, for
@@ -271,6 +246,34 @@ file. Both reject unknown names rather than accepting them silently:
 
    Unknown configuration parameter: cleanup_remote_files
 
+``configure`` also checks types and ranges, and applies nothing when any
+keyword is refused:
+
+.. code-block:: python
+
+   import clustrix
+
+   before = clustrix.get_config().cluster_host
+   for bad in ({"default_cores": "four"}, {"cluster_host": "h", "default_cores": 0}):
+       try:
+           clustrix.configure(**bad)
+       except ValueError as exc:
+           print(exc)
+   print(clustrix.get_config().cluster_host == before)
+
+.. code-block:: text
+
+   default_cores='four' is not valid: expected int, got str.
+   default_cores=0 is not valid: use a positive number of cores, or -1 for every core available.
+   True
+
+Not every range is checked: ``configure(job_poll_interval=-1)`` is accepted.
+
+**From the command line.** ``clustrix config --option value`` and
+``clustrix load file`` change the configuration and save it to
+``<config dir>/config.yml``, item 1 of the search above, so the next process
+starts from it. See :doc:`cli`.
+
 ``load_config`` goes further and suggests the field you probably meant:
 
 .. code-block:: text
@@ -333,12 +336,6 @@ submitter and read back by the program running inside it;
 ``CLUSTRIX_ORIGINAL_CWD`` plays the same role for a packaged remote job. In
 other words, these are an internal channel between the two halves of one
 submission, and you do not set them yourself.
-
-Separately, ``clustrix.validation`` -- a diagnostic helper, not part of
-execution -- takes its target hosts from ``CLUSTRIX_VALIDATION_SSH_HOST``,
-``CLUSTRIX_VALIDATION_SSH_NAME``, ``CLUSTRIX_VALIDATION_SLURM_HOST`` and
-``CLUSTRIX_VALIDATION_SLURM_NAME``. With none of them set it reports that it
-has nothing to check.
 
 Reading and saving
 ~~~~~~~~~~~~~~~~~~
@@ -436,14 +433,15 @@ Connection and authentication
      - ``30``
      - Seconds paramiko waits to connect. The OS default is minutes, which
        turns an unreachable host into a hang rather than an error.
-   * - ``ssh_port``
-     - ``22``
-     - Read by ``auth_manager``, and by ``validate_cluster_auth`` in
-       ``clustrix.validation`` -- the connection test behind the notebook
-       widget's password check. The executor uses ``cluster_port``.
    * - ``api_key``
      - ``None``
-     - Generic API key used by the credential/auth helpers.
+     - Stored and treated as a secret (masked in ``repr``, left out of saved
+       files). No backend reads it.
+
+``ssh_port`` is not a field. ``configure(ssh_port=N)``,
+``ClusterConfig(ssh_port=N)`` and an ``ssh_port`` key in an old configuration
+file are accepted as a deprecated alias for ``cluster_port``, with a
+``DeprecationWarning``.
 
 .. code-block:: python
 
@@ -503,7 +501,9 @@ Resources
      - Effect
    * - ``default_cores``
      - ``4``
-     - ``--cpus-per-task`` / ``ppn`` / ``-pe``, and the local process-pool size.
+     - CPUs per job (``--cpus-per-task`` on SLURM). Locally, the number of
+       worker processes a divided loop uses; ``-1`` means every CPU available
+       to the process and is refused for a SLURM job. ``0`` is refused.
    * - ``default_memory``
      - ``"8GB"``
      - Rewritten per scheduler by ``normalize_memory``: ``8G`` for SLURM.
@@ -515,9 +515,8 @@ Resources
      - ``#SBATCH --partition``. Omitted when unset.
    * - ``max_parallel_jobs``
      - ``100``
-     - Upper bound on the number of chunks ``_execute_parallel`` splits a
-       remote loop into.
-
+     - The largest number of jobs a divided loop is submitted as on ``ssh``,
+       ``slurm`` and ``huggingface``. See :doc:`parallel_loops`.
 
 Paths and the remote environment
 --------------------------------
@@ -551,7 +550,7 @@ Paths and the remote environment
        you packaged.
    * - ``python_executable``
      - ``"python"``
-     - Command used to create the single-venv fallback and to run the job
+     - Command used to create the single venv (``use_two_venv=False``) and to run the job
        script. Note that many systems have no ``python``, only ``python3``;
        ``resolve_remote_python`` probes for a working interpreter rather than
        trusting this blindly. If the probe itself cannot be run -- a dropped
@@ -561,7 +560,8 @@ Paths and the remote environment
    * - ``package_manager``
      - ``"pip"``
      - ``"pip"``, ``"uv"`` (``uv pip``), ``"conda"``, or ``"auto"`` (uv, then
-       conda, then pip). Applies to the single-venv fallback path.
+       conda, then pip). Applies to the single-venv path
+       (``use_two_venv=False``).
    * - ``conda_env_name``
      - ``None``
      - Names a conda environment that **already exists on the cluster**. The
@@ -639,13 +639,15 @@ Paths and the remote environment
        your packages are not mirrored.
    * - ``venv_setup_timeout``
      - ``300``
-     - Seconds allowed for the two-venv setup thread. Exceeding it logs
-       ``Two-venv setup timed out`` and falls back to the single venv.
+     - Seconds allowed for building the remote environment. Exceeding it
+       raises ``TimeoutError``.
    * - ``replicate_local_environment``
      - ``True``
-     - Mirror every installed ``name==version`` into VENV2 (and into the
-       HuggingFace container). Turning it off makes the remote environment
-       standard-library-only plus ``cluster_packages``.
+     - ``True``: mirror every installed ``name==version`` into the remote
+       execution environment (and into the HuggingFace container). ``False``:
+       install only the packages the job was detected to need -- the ones the
+       serialized function and the project code shipped with it import --
+       plus ``cluster_packages``.
    * - ``excluded_packages``
      - ``[]``
      - Names to leave out of that mirror. The documented escape hatch for a
@@ -699,16 +701,19 @@ Execution behaviour
      - Effect
    * - ``auto_parallel``
      - ``True``
-     - Attempt loop parallelization. Locally this routes through
-       ``_execute_local_parallel``; remotely through ``detect_loops`` and
-       ``_execute_parallel``. Read :doc:`limitations` before trusting it: the
-       preconditions are narrow and the *return shape can change*.
+     - Divide a qualifying top-level loop among worker processes (locally)
+       or jobs (remotely). The function's return value is unchanged. See
+       :doc:`parallel_loops`, including what cannot be checked.
+       ``@cluster(parallel=...)`` overrides it per function.
    * - ``async_submit``
      - ``False``
-     - Return an ``AsyncJobResult`` immediately instead of blocking.
+     - Return an ``AsyncJobResult`` immediately instead of blocking. Loop
+       division and automatic input staging do not apply to such a call.
    * - ``job_poll_interval``
      - ``30``
-     - Seconds between status checks while waiting for a scheduler job.
+     - The **longest** wait, in seconds, between checks for a job's result.
+       Polling starts one second apart and backs off to this value, so a
+       short job returns quickly whatever it is set to.
    * - ``job_wait_timeout``
      - ``86400``
      - Seconds to keep polling before giving up on a scheduler job and raising
@@ -721,7 +726,11 @@ Execution behaviour
    * - ``cleanup_on_success``
      - ``True``
      - ``rm -rf`` the remote job directory after a successful collection. A
-       **failed** job's directory is always kept.
+       **failed** job's directory is always kept. Staged input data is not
+       touched.
+   * - ``prefer_local_parallel``
+     - ``False``
+     - Run on this machine even when a ``cluster_host`` is configured.
 
 .. _decorator-extras:
 
@@ -784,13 +793,31 @@ cache), so passing them per call has no effect on this backend.
    hf_allow_gpu_flavors=True to confirm you intend to pay for it; otherwise use
    a CPU flavor (default: cpu-basic).
 
-Data staging
-~~~~~~~~~~~~
+Input files and data packages
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-These four control ``clustrix.staging``, which moves a directory of input files
-to wherever the function will run. Small packages ride inside the pickled
-payload; larger ones go to a private HuggingFace dataset repo. The size bands
-below decide which, and where the second one stops.
+Two settings control automatic staging of input files on ``ssh`` and
+``slurm`` (:doc:`input_files`):
+
+.. list-table::
+   :header-rows: 1
+   :widths: 28 18 54
+
+   * - Field
+     - Default
+     - Effect
+   * - ``auto_stage``
+     - ``True``
+     - Find the local files a call names and make them available to its
+       jobs.
+   * - ``auto_stage_max_bytes``
+     - ``1000000000``
+     - A call naming more local input than this raises ``StagingError``
+       before anything is copied.
+
+Four control declared data packages (:doc:`data_packages`). Small packages
+travel inside the pickled payload; larger ones go to a private HuggingFace
+dataset repository, which an ``ssh`` or ``slurm`` worker cannot read.
 
 .. list-table::
    :header-rows: 1
@@ -804,8 +831,7 @@ below decide which, and where the second one stops.
      - Repo that oversized packages are uploaded to. Unset, the repo is
        ``<namespace>/clustrix-data``, with the namespace taken from
        ``hf_namespace``, then ``hf_username``, then whatever the token's
-       ``whoami()`` reports. Applies whichever backend you run on: a ``slurm``
-       job with a package too big to inline still stages through HuggingFace.
+       ``whoami()`` reports.
    * - ``stage_inline_max_bytes``
      - ``1048576`` (1 MB)
      - Packages smaller than this carry their file contents inside the package
@@ -822,13 +848,14 @@ below decide which, and where the second one stops.
 
 Nothing staged is reclaimed automatically. There is no TTL and no reaper --
 deleting a package is always something you do, through
-``DataPackage.delete``.
+``DataPackage.delete``, and the automatic staging store under
+``<remote_work_dir>/data/`` is yours to remove.
 
 Settings that currently have no effect
 --------------------------------------
 
 These fields exist on ``ClusterConfig``, are accepted by ``configure()``, are
-saved and loaded, and are shown by the notebook widget -- but no execution code
+saved and loaded -- but no execution code
 path reads them. Setting one to a non-default value now produces a warning
 naming the field and why it is dead (#161); defaults stay silent. They are
 listed here so you do not tune something that cannot change anything.
@@ -851,10 +878,7 @@ Field                         Status
                               GPUs inside your own function. The field is
                               accepted so that existing config files keep
                               loading, and passing it to ``@cluster`` warns.
-``local_parallel_threshold``  Not read; warns when set. Local chunking aims
-                              for two chunks per worker in the pool ``cores``
-                              sized, falling back to ``os.cpu_count()`` when
-                              that is unknown.
+``local_parallel_threshold``  Not read; warns when set.
 ``cache_credentials``         Not read; warns when set.
 ``credential_cache_ttl``      Not read; warns when set.
 ``default_queue``             Retained so older configuration files and widget

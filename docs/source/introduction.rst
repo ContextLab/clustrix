@@ -68,7 +68,10 @@ How it works, in one paragraph
 
 ``@cluster`` wraps your function. When you call the wrapper, Clustrix decides
 between local and remote execution (no ``cluster_host`` configured means it
-just calls your function in-process). For remote execution it pickles the
+runs on this machine). If the function has a top-level loop whose iterations
+are independent, the loop is divided among worker processes or jobs
+(:doc:`parallel_loops`); on ``ssh`` and ``slurm`` the local files the call
+names are staged first (:doc:`input_files`). For remote execution it pickles the
 function *by value* using ``dill(recurse=True)`` with a ``cloudpickle``
 fallback, so closures, nested functions and module-level globals the body
 references all travel with it; the arguments are pickled the same way.
@@ -82,10 +85,8 @@ One consequence is worth stating up front: **serialization does not need your
 function's source code.** In other words, a function you typed into a REPL, a
 notebook cell, or built with ``exec`` serializes and runs correctly, because
 dill and cloudpickle work from the compiled code object rather than from text.
-Only the *source-based* features need ``inspect.getsource()``. Automatic loop
-parallelization, which ``config.auto_parallel`` leaves on, is the one that
-matters here: it parses the function body with ``ast``, and quietly does
-nothing when there is no source to parse.
+Only loop division needs the source: when it is not available the function
+runs as one unit.
 
 .. _what-clustrix-is-not:
 
@@ -113,25 +114,20 @@ queue time, and a download. That is seconds at best, and on a busy HPC queue
 it is however long the queue is. Sending a millisecond of work through it is
 pure loss.
 
-**It does not stage your data for you.** What travels to the worker is the
-pickled function and its pickled arguments, and nothing else. A dataset your
-function opens by path has to already be reachable from the worker -- on a
-shared filesystem, in object storage it can authenticate to, or somewhere you
-put it yourself with ``scp`` or ``rsync`` beforehand. The
-:doc:`filesystem utilities <tutorials/filesystem_tutorial>` are read-only:
-``cluster_ls``, ``cluster_glob``, ``cluster_stat`` and their siblings let you
-inspect and locate remote data, and they are not a transfer service for bulk
-inputs. Passing a 200 GB array as an *argument* is worse still, since it would
-be pickled into the payload.
+**It is not a data mover.** On ``ssh`` and ``slurm`` the local input files a
+call names are uploaded automatically, up to a size limit, and a
+:func:`clustrix.data_package` carries declared data to any backend. That is
+all. Files a job writes are not brought back; only the return value is. A
+path computed at run time is not found. Nothing staged is deleted for you.
+For hundreds of gigabytes the right answer is data that already lives on the
+cluster. Passing a 200 GB array as an *argument* is worse still, since it
+would be pickled into the payload. See :doc:`input_files` and
+:doc:`data_packages`.
 
-What Clustrix will move is data you *declare*, never data it guesses at.
-:func:`clustrix.data_package` packages the files you name into an object you
-then pass to the function as an ordinary argument; the worker dereferences it
-on demand. Nothing is inferred from your source code, which is the whole point
--- an inferred upload triggered by a string literal is the worst failure mode
-available here. Small packages ride inside the payload; larger ones go to a
-private HuggingFace dataset repo that clustrix creates in your account and
-never deletes, so read :doc:`data_packages` before you stage anything big.
+**It does not prove a loop safe to divide.** It reads the source, refuses
+what it can see is unsafe, and checks shared values at run time. It cannot
+see side effects outside the values the loop was given. See
+:ref:`parallel-loops-unseen`.
 
 .. _alternatives:
 
@@ -193,15 +189,14 @@ daemon, that difference is decisive.
 joblib
 ~~~~~~
 
-``joblib.Parallel`` is the closest thing in spirit -- parallelize a loop with
-minimal ceremony -- and for multi-core work on one machine it is the better
-tool by a wide margin. Reach for joblib there. Clustrix's ordinary local path
-does not compete with it: ``@cluster(cores=N)`` with no cluster configured runs
-your function in the calling process, one core, and -- for any ``N`` above one
--- warns that ``cores`` had no effect. The narrow local-parallelization path
-and the pools built by :class:`clustrix.local_executor.LocalExecutor` do use
-multiple workers; see
-:doc:`the local-parallelism notebook <notebooks/local_parallel_comparison>`.
+``joblib.Parallel`` parallelizes a loop that you rewrite as a generator of
+``delayed`` calls. Clustrix divides a plain ``for`` loop in place: with no
+cluster configured, ``@cluster(cores=N)`` runs the iterations of a qualifying
+top-level loop in ``N`` worker processes and returns what the function would
+have returned. joblib gives you more control (backends, batching, shared
+memory) and works on any expression you can write as a call; Clustrix handles
+only the loop shapes described in :doc:`parallel_loops`, and a function with
+no such loop runs once, with a warning that ``cores`` had no effect.
 
 The difference that does favour Clustrix is reach. joblib's backends are
 processes and threads on the current machine, and its distributed backends
@@ -237,7 +232,7 @@ Do not use it if:
 - **Your workload is a data pipeline over data that already lives on the
   cluster.** Then the cluster's own tooling, or Dask/Spark, is closer to the
   shape of the problem.
-- **You need stateful workers.** Every call starts a fresh process.
+- **You need stateful workers.** Every remote call starts a fresh process.
 - **You need guaranteed-correct dependency resolution on the remote side.**
   Clustrix reconstructs an environment from your local requirements. That
   works well for pure-Python and common scientific stacks, and it can fail for
@@ -253,8 +248,8 @@ Backend maturity
 
 Clustrix ships exactly four backends, and each one has been exercised against
 the real thing. ``slurm``, ``ssh`` and ``huggingface`` have each submitted a
-real job to real infrastructure and returned its result; ``local`` runs
-in-process. :ref:`supported-cluster-types` on the front page is the
+real job to real infrastructure and returned its result; ``local`` runs on
+the calling machine. :ref:`supported-cluster-types` on the front page is the
 authoritative list, and ``cluster_type`` accepts nothing outside it.
 
 PBS, SGE, Kubernetes and the AWS / GCP / Azure / Lambda Cloud VM providers are

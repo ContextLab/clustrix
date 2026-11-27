@@ -235,9 +235,13 @@ are absent as well. `cluster_type="huggingface"` means HuggingFace **Jobs**.
 ## Install
 
 ```bash
-pip install clustrix              # the library and the `clustrix` command
-pip install "clustrix[widget]"    # plus the Jupyter widget
+pip install "git+https://github.com/ContextLab/clustrix.git@master"
+pip install "clustrix[widget] @ git+https://github.com/ContextLab/clustrix.git@master"   # plus the Jupyter widget
 ```
+
+The release on PyPI (`pip install clustrix`) was 0.1.1 when this was written
+and does not contain what this file describes. Check with
+`python -c "import clustrix; print(clustrix.__version__)"`.
 
 Python 3.10 to 3.13. The remote side needs Python of the same minor version
 and either `venv` or conda.
