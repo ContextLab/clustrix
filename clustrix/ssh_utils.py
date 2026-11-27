@@ -576,11 +576,21 @@ def deploy_public_key(
             config=config,
         )
 
+        # No stdin and no controlling terminal. OpenSSH never reads a
+        # password from stdin -- it opens /dev/tty -- so the password this
+        # used to pipe in went nowhere, and from a terminal (``clustrix
+        # ssh-setup``) the user who had just typed their password was shown
+        # a second "user@host's password:" prompt whose answer clustrix
+        # could not see, and which sat there until the timeout below. In a
+        # session of its own ssh has nobody to ask: it succeeds with a key
+        # that already works or fails at once, and the paramiko deployment
+        # below is the one that uses the password.
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
-            input=password if password else None,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
             timeout=30,
         )
 
