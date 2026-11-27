@@ -61,6 +61,28 @@ was not is marked.
   refused at submission instead of failing inside the job.
 - **`setup.py` is a shim.** The version lives in `pyproject.toml`,
   `clustrix/__init__.py` and `docs/source/conf.py`.
+- **`ClusterConfig.api_key` is removed.** Nothing read it. `configure(api_key=...)`
+  and an `api_key` key in a configuration file are refused with that
+  explanation. *Migration:* delete it.
+- **`%clustrix status` returns `None`.** It used to return the configuration,
+  which a notebook then printed in full under the summary. Its first line is
+  now `backend`, the backend in effect, not `cluster_type`: a configuration
+  with no `cluster_host` is reported as `local (no cluster host set; ...)`.
+  *Migration:* `%clustrix config` still returns the configuration.
+- **A SLURM job is named after its function**, not `clustrix`; a chunk of a
+  divided loop is `<function>.body`. *Migration:* anything that selects jobs
+  with `squeue --name=clustrix` needs another selector, such as `--user`.
+- **A job that was stopped rather than raising reports in a few lines.** The
+  exception is `JobFailedError`, still a `RuntimeError`; the text `Error
+  log:` followed by the entire log is gone from the message, and the log is
+  the exception's `error_log`. *Migration:* read `error_log` instead of
+  parsing the message.
+- **`python_executable`, when set to anything but `"python"`, is the
+  interpreter both remote virtualenvs are built from** on a host without
+  conda, and must exist there at this session's minor version. It used to be
+  ignored on the default path. On a host with conda it still does not choose
+  the build interpreter; that branch was not run. *Migration:* leave it at
+  the default unless you mean it.
 
 ### Added
 
@@ -161,6 +183,14 @@ was not is marked.
   rejects.
 - A local worker pool could exceed its size, and a decorated function called
   from inside a divided loop divided again in every worker.
+- `key_file="~/.ssh/id_x"` failed with "No such file"; `cluster_ls("~/dir")`
+  and every relative path under a `~` work directory returned nothing on a
+  remote cluster.
+- Saving a configuration into a directory that did not exist failed; the
+  directory is now created, mode 0700.
+- `import clustrix` failed without `ipywidgets` installed.
+- The tutorials were listed out of order in the table of contents, and the
+  documentation workflow ran `nbconvert` on a deleted notebook.
 
 ### Removed
 
