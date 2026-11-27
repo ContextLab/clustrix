@@ -1,5 +1,6 @@
 import functools
 import logging
+import sys
 import threading
 import weakref
 from dataclasses import fields
@@ -8,12 +9,16 @@ from typing import Any, Callable, NamedTuple, Optional, Dict, List, Sequence
 from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
-from . import parallelize
+from . import auto_stage, parallelize
 from .local_executor import is_worker_count
-from .loop_workers import available_cpus, shared_pool, timed_call
+from .loop_workers import available_cpus, in_worker, shared_pool, timed_call
 from .utils import serialize_function
 
 logger = logging.getLogger(__name__)
+
+#: ``@cluster(data=[...])`` adds paths to the inputs staged for a call and
+#: ``@cluster(no_data=[...])`` removes them; see ``clustrix.auto_stage``.
+INPUT_DATA_OPTIONS = ("data", "no_data")
 
 #: Cluster types that submit work over an API instead of SSH, and therefore
 #: never have a ``cluster_host``.
@@ -72,7 +77,9 @@ def cluster(
     Decorator to execute functions on a cluster.
 
     Args:
-        cores: Number of CPU cores to request
+        cores: Number of CPU cores to request. Locally, the number of worker
+            processes a loop is divided among; ``-1`` means every CPU this
+            process may use, and has no meaning for a SLURM job.
         memory: Memory to request (e.g., "8GB")
         time: Time limit (e.g., "01:00:00")
         partition: Cluster partition to use
@@ -104,9 +111,14 @@ def cluster(
     # ran on one core, and not even the cores warning fired (#152). ``True``
     # was a third silent absorption: ``bool`` subclasses ``int``, so it passed
     # the type check and became a request for one worker while ``False`` was
-    # refused -- see ``is_worker_count``.
-    if cores is not None and not is_worker_count(cores):
-        detail = "cores must be a positive integer."
+    # refused -- see ``is_worker_count``. ``-1`` is the one value that is not
+    # a count and is still an answer: every CPU this process may use.
+    every_cpu = type(cores) is int and cores == -1
+    if cores is not None and not every_cpu and not is_worker_count(cores):
+        detail = (
+            "cores must be a positive integer, or -1 for every CPU available "
+            "to this process."
+        )
         if isinstance(cores, bool):
             detail = (
                 "cores must be a positive integer, and a bool is not one -- "
@@ -160,13 +172,15 @@ def cluster(
 
             # A silently ignored option is worse than a rejected one: the job
             # runs with settings the caller believes they changed.
-            unknown_kwargs = sorted(set(kwargs) - set(passthrough_params))
+            unknown_kwargs = sorted(
+                set(kwargs) - set(passthrough_params) - set(INPUT_DATA_OPTIONS)
+            )
             if unknown_kwargs:
                 logger.warning(
                     "@cluster received unrecognised option(s) %s; they have no "
                     "effect. Recognised extras: %s",
                     ", ".join(unknown_kwargs),
-                    ", ".join(sorted(passthrough_params)),
+                    ", ".join(sorted([*passthrough_params, *INPUT_DATA_OPTIONS])),
                 )
 
             # #158: ``default_queue`` outlived its only consumers. ``queue``
@@ -187,6 +201,22 @@ def cluster(
 
             # Determine execution mode
             execution_mode = _choose_execution_mode(config, func, args, func_kwargs)
+
+            # "Every CPU available" is a statement about the machine the
+            # caller is on. A scheduler has to be asked for a number, and
+            # ``--cpus-per-task=-1`` is refused by sbatch with a message that
+            # names neither clustrix nor the setting that produced it.
+            if (
+                execution_mode == "remote"
+                and config.cluster_type == "slurm"
+                and job_config["cores"] == -1
+            ):
+                raise ValueError(
+                    "cores=-1 means every CPU available to this process, "
+                    "which a SLURM job cannot be asked for: give "
+                    "@cluster(cores=...) or default_cores the number of CPUs "
+                    "each job needs."
+                )
 
             # Check if function contains loops that can be parallelized
             should_parallelize = (
@@ -261,6 +291,22 @@ def cluster(
                 else:
                     # Synchronous execution (original behavior)
                     executor = ClusterExecutor(config)
+
+                    # The local files this call names are put where its jobs
+                    # can read them, before anything is serialized: an
+                    # argument may come back pointing at the cluster's copy.
+                    if config.auto_stage and config.cluster_type in ("ssh", "slurm"):
+                        executor.connect()
+                        args, func_kwargs, data_plan = auto_stage.prepare(
+                            executor.connection_manager,
+                            config,
+                            func,
+                            args,
+                            func_kwargs,
+                            extra=kwargs.get("data", ()),
+                            exclude=kwargs.get("no_data", ()),
+                        )
+                        job_config["data_links"] = data_plan.links
 
                     if should_parallelize:
                         loop_plan = _plan_for(func)
@@ -673,12 +719,27 @@ def _run_split_locally(
     The first iteration is run on its own and timed. If the rest of the loop
     looks too short to be worth dividing, one worker finishes it in order;
     either way the result is what a direct call returns.
+
+    What the iterations print is shown once the loop is done, in iteration
+    order -- unless the split is then abandoned, in which case the loop is
+    about to run again here and print it all itself.
     """
     name = getattr(func, "__name__", repr(func))
     plan = _plan_for(func)
     if not plan.parallelizable:
         _warn_cores_unused(requested, f"{name} has no loop that can be split")
         logger.info("%s runs unsplit.\n%s", name, plan.explain())
+        return func(*args, **kwargs)
+
+    if in_worker():
+        # This call is itself an iteration of a loop that is already divided
+        # among workers. Dividing again would start ``cores`` processes in
+        # each of them for the same CPUs.
+        logger.info(
+            "%s runs unsplit: it was called from a loop that is already "
+            "divided among worker processes.",
+            name,
+        )
         return func(*args, **kwargs)
 
     cores = job_config.get("cores") or 1
@@ -692,26 +753,37 @@ def _run_split_locally(
     def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
         total = sum(len(chunk) for chunk in chunks)
         first, others = chunks[0], chunks[1:]
-        ((seconds, probe_result),) = pool.map(
-            timed_call, [(body, env, first[:1])], limit=1
-        )
-        remaining = [chunk for chunk in (first[1:], *others) if len(chunk)]
-        worth_dividing = seconds * (total - 1) >= MIN_SECONDS_WORTH_DIVIDING
-        if not worth_dividing:
-            logger.info(
-                "%s: its loop is too short to be worth dividing "
-                "(about %.3fs in all); one worker runs it.",
-                name,
-                seconds * total,
+        printed: List[str] = []
+        try:
+            ((seconds, probe_result),) = pool.map(
+                timed_call, [(body, env, first[:1])], emit=printed.append, limit=1
             )
-        return [
-            probe_result,
-            *pool.map(
-                body,
-                [(env, chunk) for chunk in remaining],
-                limit=workers if worth_dividing else 1,
-            ),
-        ]
+            remaining = [chunk for chunk in (first[1:], *others) if len(chunk)]
+            worth_dividing = seconds * (total - 1) >= MIN_SECONDS_WORTH_DIVIDING
+            if not worth_dividing:
+                logger.info(
+                    "%s: its loop is too short to be worth dividing "
+                    "(about %.3fs in all); one worker runs it.",
+                    name,
+                    seconds * total,
+                )
+            results = [
+                probe_result,
+                *pool.map(
+                    body,
+                    [(env, chunk) for chunk in remaining],
+                    emit=printed.append,
+                    limit=workers if worth_dividing else 1,
+                ),
+            ]
+        except BaseException:
+            # What the iterations up to the failing one printed is part of
+            # what a direct call would have shown before raising.
+            sys.stdout.write("".join(printed))
+            raise
+        if not parallelize.will_be_abandoned(results):
+            sys.stdout.write("".join(printed))
+        return results
 
     return parallelize.run(
         plan,

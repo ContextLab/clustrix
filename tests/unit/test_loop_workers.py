@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import textwrap
+import threading
 import time
 
 import pytest
@@ -18,6 +19,7 @@ from clustrix.loop_workers import (
     WorkerDied,
     WorkerPool,
     available_cpus,
+    in_worker,
     shared_pool,
     timed_call,
 )
@@ -182,11 +184,73 @@ def test_a_pool_needs_at_least_one_worker():
 
 
 def test_the_shared_pool_is_reused_and_grows_only_when_asked_for_more():
+    """It grows *in place*. This used to assert that a larger request got a
+    new pool object, which is the behaviour that killed another thread's
+    loop: the old pool was closed under it. See the next test."""
     small = shared_pool(2)
-    assert shared_pool(1) is small
-    assert shared_pool(2) is small
-    bigger = shared_pool(small.size + 1)
-    assert bigger is not small and bigger.size == small.size + 1
+    size = small.size
+    assert shared_pool(1) is small and small.size == size
+    assert shared_pool(size) is small and small.size == size
+    assert shared_pool(size + 1) is small
+    assert small.size == size + 1
+
+
+def test_growing_the_shared_pool_does_not_kill_a_loop_already_running_on_it():
+    """One thread is half-way through its tasks when another asks for a
+    wider pool. Replacing the pool closed the first thread's workers, and
+    its tasks came back as ``WorkerDied``."""
+    running = shared_pool(2)
+    outcome = {}
+
+    def long_loop():
+        try:
+            outcome["pids"] = running.map(napping, [(0.6,), (0.6,)], limit=2)
+        except BaseException as error:  # noqa: BLE001 - reported by the assert
+            outcome["error"] = error
+
+    thread = threading.Thread(target=long_loop)
+    thread.start()
+    time.sleep(0.2)  # its tasks are in the workers now
+    wider = shared_pool(running.size + 1)
+    thread.join(timeout=60)
+
+    assert "error" not in outcome, f"the running loop was broken: {outcome}"
+    assert len(outcome["pids"]) == 2 and os.getpid() not in outcome["pids"]
+    assert wider is running
+    assert wider.map(where_am_i, [(3,)])[0][1] == 6
+
+
+def test_threads_sharing_a_pool_never_start_more_workers_than_its_size():
+    """A task that finds every worker busy waits for one. It used to start
+    another: four threads on a pool of two left eight processes running, and
+    they were kept, so the "pool of two" stayed eight wide."""
+    results = {}
+
+    with WorkerPool(2) as pool:
+
+        def use_the_pool(index):
+            results[index] = pool.map(napping, [(0.15,)] * 4)
+
+        threads = [
+            threading.Thread(target=use_the_pool, args=(index,)) for index in range(4)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=60)
+
+        assert sorted(results) == [0, 1, 2, 3]
+        pids = {pid for answers in results.values() for pid in answers}
+        assert len(pids) <= 2, f"a pool of 2 ran its tasks in {len(pids)} processes"
+        assert os.getpid() not in pids
+        assert all(len(answers) == 4 for answers in results.values())
+
+
+def test_a_worker_knows_it_is_one_and_this_process_knows_it_is_not(pool):
+    """What stops a decorated function called inside a divided loop from
+    starting a pool of its own in every worker."""
+    assert not in_worker()
+    assert pool.map(in_worker, [(), ()]) == [True, True]
 
 
 def test_a_scheduler_s_allocation_wins_over_the_affinity_mask(monkeypatch):

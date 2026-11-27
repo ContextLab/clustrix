@@ -51,6 +51,13 @@ import cloudpickle
 #: Each message on the pipe is this header (payload length) and the payload.
 _HEADER = struct.Struct("<Q")
 
+#: Set in the environment of every worker. A decorated function that is
+#: called from inside a loop that is already divided among workers must not
+#: start a pool of its own: each worker would start ``cores`` more, and a
+#: machine with four CPUs would be running sixteen busy processes -- or
+#: sixty-four, one level further down. See :func:`in_worker`.
+IN_WORKER_VARIABLE = "CLUSTRIX_LOOP_WORKER"
+
 
 class WorkerDied(RuntimeError):
     """A worker process ended without answering -- killed, or crashed."""
@@ -98,6 +105,11 @@ def available_cpus() -> int:
     if hasattr(os, "sched_getaffinity"):
         return max(1, len(os.sched_getaffinity(0)))
     return max(1, os.cpu_count() or 1)
+
+
+def in_worker() -> bool:
+    """Whether this process is one of a pool's workers (or was started by one)."""
+    return bool(os.environ.get(IN_WORKER_VARIABLE))
 
 
 def timed_call(function: Callable, *arguments: Any) -> Tuple[float, Any]:
@@ -172,6 +184,7 @@ class _Worker:
         environment["PYTHONPATH"] = os.pathsep.join(
             entry or os.getcwd() for entry in sys.path
         )
+        environment[IN_WORKER_VARIABLE] = "1"
         environment.update(extra_environment)
         self.process = subprocess.Popen(
             [
@@ -216,7 +229,10 @@ class _Worker:
 
 
 class WorkerPool:
-    """A fixed number of worker processes, started on first use and kept.
+    """At most ``size`` worker processes, started on first use and kept.
+
+    The bound holds however many threads use the pool at once: a task that
+    finds every worker busy waits for one, it does not start another.
 
     ``environments`` gives each worker extra environment variables, by
     position -- this is how one GPU is pinned per worker
@@ -237,27 +253,36 @@ class WorkerPool:
         self._idle: List[_Worker] = []
         self._all: List[_Worker] = []
         self._lock = threading.Lock()
+        #: Signalled whenever a worker becomes idle or a new one may be started.
+        self._available = threading.Condition(self._lock)
         self._closed = False
 
+    def _start_worker(self) -> _Worker:
+        """Start one more worker. The caller holds the lock."""
+        extra = (
+            self._environments[len(self._all) % len(self._environments)]
+            if self._environments
+            else {}
+        )
+        worker = _Worker(extra)
+        self._all.append(worker)
+        return worker
+
     def _acquire(self) -> _Worker:
-        with self._lock:
-            if self._closed:
-                raise RuntimeError("the worker pool has been closed")
-            while self._idle:
-                worker = self._idle.pop()
-                if worker.alive():
-                    return worker
-                self._all.remove(worker)
-                worker.close()
-            index = len(self._all)
-            extra = (
-                self._environments[index % len(self._environments)]
-                if self._environments
-                else {}
-            )
-            worker = _Worker(extra)
-            self._all.append(worker)
-            return worker
+        with self._available:
+            while True:
+                if self._closed:
+                    raise RuntimeError("the worker pool has been closed")
+                while self._idle:
+                    worker = self._idle.pop()
+                    if worker.alive():
+                        return worker
+                    self._all.remove(worker)
+                    worker.close()
+                if len(self._all) < self.size:
+                    return self._start_worker()
+                # Every worker is busy with another caller's task.
+                self._available.wait()
 
     def prestart(self) -> None:
         """Start every worker now, without waiting for any of them.
@@ -266,25 +291,32 @@ class WorkerPool:
         Begun together, the workers are importing while the first task is
         still being timed, instead of one after another as tasks arrive.
         """
-        with self._lock:
+        with self._available:
             while len(self._all) < self.size:
-                extra = (
-                    self._environments[len(self._all) % len(self._environments)]
-                    if self._environments
-                    else {}
-                )
-                worker = _Worker(extra)
-                self._all.append(worker)
-                self._idle.append(worker)
+                self._idle.append(self._start_worker())
+            self._available.notify_all()
+
+    def grow(self, workers: int) -> None:
+        """Allow up to ``workers`` processes; never fewer than there are.
+
+        Tasks already running are not disturbed, which replacing the pool
+        with a larger one would do to every other thread using it.
+        """
+        with self._available:
+            if workers > self.size:
+                self.size = workers
+                self._available.notify_all()
 
     def _release(self, worker: _Worker) -> None:
-        with self._lock:
+        with self._available:
             if worker.alive() and not self._closed:
                 self._idle.append(worker)
             else:
                 if worker in self._all:
                     self._all.remove(worker)
                 worker.close()
+            # Either a worker is idle, or there is room to start one.
+            self._available.notify()
 
     def _run_one(self, payload: bytes) -> Tuple[str, Any, str]:
         worker = self._acquire()
@@ -341,9 +373,10 @@ class WorkerPool:
         return results
 
     def close(self) -> None:
-        with self._lock:
+        with self._available:
             self._closed = True
             workers, self._all, self._idle = self._all, [], []
+            self._available.notify_all()
         for worker in workers:
             worker.close()
 
@@ -371,10 +404,13 @@ def shared_pool(workers: int) -> WorkerPool:
     """
     global _SHARED
     with _SHARED_LOCK:
-        if _SHARED is None or _SHARED.size < workers:
-            if _SHARED is not None:
-                _SHARED.close()
+        if _SHARED is None:
             _SHARED = WorkerPool(workers)
+            _SHARED.prestart()
+        elif _SHARED.size < workers:
+            # Grown in place: another thread may be in the middle of a loop
+            # on this pool, and closing it would kill that loop's workers.
+            _SHARED.grow(workers)
             _SHARED.prestart()
         return _SHARED
 

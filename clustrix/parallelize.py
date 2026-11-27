@@ -1525,6 +1525,16 @@ def chunk(items: Sequence[Any], count: int) -> List[Sequence[Any]]:
     return chunks
 
 
+def will_be_abandoned(chunk_results: Sequence[tuple]) -> bool:
+    """Whether :func:`run` will discard these chunk results and run the loop
+    unsplit: some chunk reported that it changed something iterations share.
+
+    For a backend that holds something back until the outcome is known --
+    what the chunks printed, say, which the unsplit loop will print again.
+    """
+    return any(changed for _log, changed, _unchecked in chunk_results)
+
+
 #: ``invoke(function, *arguments)``: run one of the split's functions
 #: somewhere and return its result.
 Invoke = Callable[..., Any]
