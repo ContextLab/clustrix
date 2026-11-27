@@ -139,27 +139,20 @@ class ClusterfyMagics(Magics):
 
     @cell_magic
     def remote(self, line, cell):
-        """
-        Create an interactive widget for managing Clustrix configurations.
+        """Show the configuration widget, then run the rest of the cell.
 
         Usage::
 
             %%remote
 
-        This creates a widget interface that allows you to:
-
-        - Select and manage cluster configurations
-        - Create new configurations with validation
-        - Save/load configurations from files
-        - Apply configurations to the current session
+        The widget chooses where ``@cluster`` runs: pick or edit a profile,
+        test the connection, and press Apply. Anything else in the cell is
+        ordinary code and runs after the widget is displayed.
         """
-        if not IPYTHON_AVAILABLE:
-            print("❌ This magic command requires IPython and ipywidgets")
-            print("Install with: pip install ipywidgets")
-            return None
+        # Says how to install the widget when it cannot be shown, so the
+        # advice has one wording however the user asked for it.
         display_config_widget()
-        # Execute any code in the cell (if provided)
-        if cell.strip():
+        if IPYTHON_AVAILABLE and cell.strip():
             self.shell.run_cell(cell)
 
     @cell_magic

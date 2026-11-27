@@ -1,245 +1,192 @@
-"""
-Tests to ensure GitHub Actions environment compatibility.
+"""clustrix must import and degrade honestly where IPython is not installed.
 
-This module provides tests that simulate the GitHub Actions CI/CD environment
-to catch issues that only appear in CI but not in local development.
+``ipywidgets`` and IPython are optional (the ``widget`` extra). A plain
+``pip install clustrix`` on a CI runner or a cluster login node has neither,
+and everything except the notebook widget still has to work there.
+
+Each test runs a **separate, real interpreter** in which ``import IPython``
+and ``import ipywidgets`` raise ``ImportError``. That is arranged with the
+import system's own switch for it -- a ``None`` entry in ``sys.modules``,
+which is documented to make the import fail -- set before clustrix is first
+imported. Nothing in the child is patched or replaced: the fallback code that
+runs is the code a user without IPython gets.
+
+These used to purge and re-import ``clustrix.*`` inside the pytest process
+under ``patch.dict(sys.modules, ...)``, which left every later test holding a
+second copy of the configuration singleton, and called the magics on a
+``MagicMock`` shell.
 """
 
+import os
+import subprocess
 import sys
-from unittest.mock import patch, MagicMock
-import pytest
+import textwrap
 
-
-@pytest.fixture
-def preserve_modules():
-    """Preserve module state before and after test."""
-    # Save original modules
-    original_modules = {}
-    modules_to_preserve = [
-        mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-    ]
-    for mod in modules_to_preserve:
-        original_modules[mod] = sys.modules.get(mod)
-
-    yield
-
-    # Clear any test modules
-    modules_to_clear = [mod for mod in sys.modules.keys() if mod.startswith("clustrix")]
-    for mod in modules_to_clear:
-        if mod in sys.modules:
-            del sys.modules[mod]
-
-    # Restore original modules
-    for mod, value in original_modules.items():
-        if value is not None:
-            sys.modules[mod] = value
-
-
-class TestGitHubActionsCompatibility:
-    """Test compatibility with GitHub Actions CI/CD environment."""
-
-    def test_notebook_magic_without_dependencies(self, preserve_modules):
-        """Test notebook magic works when IPython/ipywidgets are completely unavailable."""
-        # Clear any existing clustrix modules
-        modules_to_clear = [
-            mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-        ]
-        for mod in modules_to_clear:
-            del sys.modules[mod]
-
-        # Simulate GitHub Actions environment where IPython/ipywidgets don't exist
-        with patch.dict(
-            "sys.modules",
-            {
-                "IPython": None,
-                "IPython.core": None,
-                "IPython.core.magic": None,
-                "IPython.display": None,
-                "ipywidgets": None,
-            },
-        ):
-            # Import should work without raising exceptions
-            from clustrix.notebook_magic import ClusterfyMagics, IPYTHON_AVAILABLE
-
-            # IPYTHON_AVAILABLE should be False
-            assert IPYTHON_AVAILABLE is False
-
-            # Creating ClusterfyMagics instance should work
-            magic = ClusterfyMagics()
-            magic.shell = MagicMock()
-
-            # Test calling the method - decorator now handles this properly
-            with patch("builtins.print") as mock_print:
-                result = magic.clusterfy("", "")
-
-                # Should have printed error messages
-                assert mock_print.call_count >= 1
-                print_calls = [call[0][0] for call in mock_print.call_args_list]
-                assert any("IPython and ipywidgets" in msg for msg in print_calls)
-
-                # Should return None (graceful failure)
-                assert result is None
-
-    def test_widget_creation_without_dependencies(self, preserve_modules):
-        """Test widget creation fails gracefully when dependencies missing."""
-        # Clear any existing clustrix modules
-        modules_to_clear = [
-            mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-        ]
-        for mod in modules_to_clear:
-            del sys.modules[mod]
-
-        # Simulate environment without IPython/ipywidgets
-        with patch.dict("sys.modules", {"IPython": None, "ipywidgets": None}):
-            from clustrix.notebook_magic import (
-                EnhancedClusterConfigWidget,
-                IPYTHON_AVAILABLE,
-            )
-
-            assert IPYTHON_AVAILABLE is False
-
-            # Widget creation should raise ImportError with helpful message
-            with pytest.raises(
-                ImportError, match="IPython and ipywidgets are required"
-            ):
-                EnhancedClusterConfigWidget()
-
-    def test_auto_display_without_dependencies(self, preserve_modules):
-        """Test auto display function handles missing dependencies gracefully."""
-        # Clear any existing clustrix modules
-        modules_to_clear = [
-            mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-        ]
-        for mod in modules_to_clear:
-            del sys.modules[mod]
-
-        # Simulate environment without IPython
-        with patch.dict("sys.modules", {"IPython": None}):
-            from clustrix.notebook_magic import (
-                auto_display_on_import,
-                IPYTHON_AVAILABLE,
-            )
-
-            assert IPYTHON_AVAILABLE is False
-
-            # Should not raise any exceptions
-            auto_display_on_import()
-
-    def test_load_ipython_extension_without_dependencies(self, preserve_modules):
-        """Test IPython extension loading handles missing dependencies."""
-        # Clear any existing clustrix modules
-        modules_to_clear = [
-            mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-        ]
-        for mod in modules_to_clear:
-            del sys.modules[mod]
-
-        # Simulate environment without IPython
-        with patch.dict("sys.modules", {"IPython": None, "ipywidgets": None}):
-            from clustrix.notebook_magic import (
-                load_ipython_extension,
-                IPYTHON_AVAILABLE,
-            )
-
-            assert IPYTHON_AVAILABLE is False
-
-            # Mock IPython instance
-            mock_ipython = MagicMock()
-
-            # Should handle the case gracefully (no print when IPYTHON_AVAILABLE=False)
-            with patch("builtins.print") as mock_print:
-                load_ipython_extension(mock_ipython)
-
-                # Should NOT print when IPYTHON_AVAILABLE is False
-                assert mock_print.call_count == 0
-
-                # Should not try to register magic function
-                assert not mock_ipython.register_magic_function.called
-
-    def test_module_import_chain_without_dependencies(self, preserve_modules):
-        """Test the full module import chain works without dependencies."""
-        # Clear any existing clustrix modules
-        modules_to_clear = [
-            mod for mod in sys.modules.keys() if mod.startswith("clustrix")
-        ]
-        for mod in modules_to_clear:
-            del sys.modules[mod]
-
-        # Simulate complete absence of IPython ecosystem
-        with patch.dict(
-            "sys.modules",
-            {
-                "IPython": None,
-                "IPython.core": None,
-                "IPython.core.magic": None,
-                "IPython.display": None,
-                "ipywidgets": None,
-            },
-        ):
-            # Import the main clustrix module
-            import clustrix
-
-            # Should be able to access main functionality
-            assert hasattr(clustrix, "cluster")
-            assert hasattr(clustrix, "configure")
-
-            # Import notebook magic specifically
-            from clustrix import notebook_magic
-
-            assert hasattr(notebook_magic, "ClusterfyMagics")
-            assert hasattr(notebook_magic, "IPYTHON_AVAILABLE")
-            assert notebook_magic.IPYTHON_AVAILABLE is False
-
-
-def simulate_github_actions_environment():
-    """
-    Utility function to simulate GitHub Actions environment for manual testing.
-
-    Usage:
-        python -c "
-        from tests.test_github_actions_compat import simulate_github_actions_environment
-        simulate_github_actions_environment()
-        "
-    """
+#: Run first in every child: after this, importing either package fails the
+#: way it does when the package is not installed.
+WITHOUT_IPYTHON = textwrap.dedent("""
     import sys
-    from unittest.mock import patch
 
-    # Clear clustrix modules
-    modules_to_clear = [mod for mod in sys.modules.keys() if mod.startswith("clustrix")]
-    for mod in modules_to_clear:
-        del sys.modules[mod]
-
-    print("🔄 Simulating GitHub Actions environment...")
-
-    # Simulate missing dependencies
-    with patch.dict(
-        "sys.modules",
-        {
-            "IPython": None,
-            "IPython.core": None,
-            "IPython.core.magic": None,
-            "IPython.display": None,
-            "ipywidgets": None,
-        },
+    for name in (
+        "IPython",
+        "IPython.core",
+        "IPython.core.magic",
+        "IPython.display",
+        "ipywidgets",
     ):
-        print("📦 Importing clustrix.notebook_magic...")
-        from clustrix.notebook_magic import ClusterfyMagics, IPYTHON_AVAILABLE
+        sys.modules[name] = None
+    """)
 
-        print(f"✅ IPYTHON_AVAILABLE: {IPYTHON_AVAILABLE}")
 
-        print("🏗️  Creating ClusterfyMagics instance...")
-        magic = ClusterfyMagics()
+def _run_without_ipython(body, tmp_path):
+    """Run ``body`` in a fresh interpreter that cannot import IPython.
 
-        print("🧪 Testing clusterfy method call...")
+    Returns the child's stdout. A non-zero exit fails the calling test with
+    everything the child wrote, so a traceback is never swallowed.
+    """
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path)
+    env["CLUSTRIX_CONFIG_DIR"] = str(tmp_path / ".clustrix")
+    completed = subprocess.run(
+        [sys.executable, "-c", WITHOUT_IPYTHON + textwrap.dedent(body)],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=str(tmp_path),
+        timeout=120,
+    )
+    assert completed.returncode == 0, (
+        f"the interpreter without IPython exited {completed.returncode}\n"
+        f"--- stdout ---\n{completed.stdout}\n--- stderr ---\n{completed.stderr}"
+    )
+    return completed.stdout
+
+
+def test_ipython_really_is_unimportable_in_the_child(tmp_path):
+    """The arrangement itself: without this the tests below prove nothing."""
+    out = _run_without_ipython(
+        """
+        for name in ("IPython", "ipywidgets"):
+            try:
+                __import__(name)
+            except ImportError:
+                print("unimportable", name)
+        """,
+        tmp_path,
+    )
+
+    assert out.split("\n")[:2] == ["unimportable IPython", "unimportable ipywidgets"]
+
+
+def test_the_package_imports_and_runs_a_function(tmp_path):
+    """The point of the fallback: plain Python use is unaffected."""
+    out = _run_without_ipython(
+        """
+        import clustrix
+        from clustrix import notebook_magic
+
+        assert notebook_magic.IPYTHON_AVAILABLE is False
+
+        @clustrix.cluster(cores=1)
+        def add(a, b):
+            return a + b
+
+        print("result", add(2, 3))
+        """,
+        tmp_path,
+    )
+
+    assert "result 5" in out
+
+
+def test_the_line_magic_still_reports_the_configuration(tmp_path):
+    """``%clustrix`` needs no display backend, so it works as a method."""
+    out = _run_without_ipython(
+        """
+        from clustrix import configure
+        from clustrix.notebook_magic import ClusterfyMagics
+
+        configure(cluster_type="slurm", cluster_host="hpc.example.edu")
+        returned = ClusterfyMagics().clustrix("status")
+        print("returned", returned.cluster_host)
+        """,
+        tmp_path,
+    )
+
+    assert "cluster_type : slurm" in out
+    assert "host         : hpc.example.edu" in out
+    assert "returned hpc.example.edu" in out
+
+
+def test_the_cell_magic_says_what_is_missing_and_runs_nothing(tmp_path):
+    """``%%remote`` exists to show a widget; without one it must say so."""
+    out = _run_without_ipython(
+        """
+        import warnings
+
+        from clustrix.notebook_magic import ClusterfyMagics
+
+        magics = ClusterfyMagics()
+        print("remote returned", magics.remote("", "raise SystemExit(3)"))
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            print("clusterfy returned", magics.clusterfy("", ""))
+        print("warned", [w.category.__name__ for w in caught])
+        """,
+        tmp_path,
+    )
+
+    assert out.count("The configuration widget needs IPython and ipywidgets") == 2
+    assert "pip install 'clustrix[widget]'" in out
+    assert "remote returned None" in out
+    assert "clusterfy returned None" in out
+    assert "warned ['DeprecationWarning']" in out
+
+
+def test_constructing_the_widget_names_the_missing_packages(tmp_path):
+    out = _run_without_ipython(
+        """
+        from clustrix import ModernClustrixWidget, display_modern_widget
+
         try:
-            result = magic.clusterfy("", "")
-            print(f"✅ Method call successful, result: {result}")
-        except Exception as e:
-            print(f"❌ Method call failed: {type(e).__name__}: {e}")
-            raise
+            ModernClustrixWidget()
+        except ImportError as error:
+            print("refused:", error)
 
-        print("🎉 GitHub Actions simulation completed successfully!")
+        print("display returned", display_modern_widget())
+        """,
+        tmp_path,
+    )
+
+    assert "refused: IPython and ipywidgets are required" in out
+    assert "pip install 'clustrix[widget]'" in out
+    assert "display returned None" in out
 
 
-if __name__ == "__main__":
-    simulate_github_actions_environment()
+def test_the_import_time_hooks_do_nothing(tmp_path):
+    """Neither hook may raise, print, or touch the object it is handed."""
+    out = _run_without_ipython(
+        """
+        import os
+
+        from clustrix.notebook_magic import (
+            auto_display_on_import,
+            load_ipython_extension,
+        )
+
+        class Shell:
+            user_ns = {}
+
+            def register_magic_function(self, *args):
+                raise AssertionError("a magic was registered without IPython")
+
+        os.environ["CLUSTRIX_AUTO_WIDGET"] = "1"
+        auto_display_on_import()
+        shell = Shell()
+        load_ipython_extension(shell)
+        print("namespace", shell.user_ns)
+        """,
+        tmp_path,
+    )
+
+    assert out == "namespace {}\n"
