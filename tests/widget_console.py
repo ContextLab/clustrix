@@ -23,7 +23,23 @@ def press(action, output_widget, capsys):
     return (streamed + captured).replace("\x1b[2K\r", "")
 
 
-def pill(widget):
-    """The words in the header pill: ``in use``, ``connected``, ``invalid``..."""
-    html = widget.widgets["status_pill"].value
+def _words(html):
+    """The text inside a pill's one ``<span>``; ``""`` for an empty pill."""
+    if not html:
+        return ""
     return html.split(">", 1)[1].rsplit("<", 1)[0]
+
+
+def pill(widget):
+    """How the last action went: ``applied``, ``connected``, ``invalid``...
+
+    Empty when no action has run since the form last changed -- a result
+    describes the form it was produced from, and is cleared by the next edit.
+    """
+    return _words(widget.widgets["status_pill"].value)
+
+
+def applied(widget):
+    """The header's answer to "is the form what @cluster is using?":
+    ``in use`` or ``not applied``. Independent of the last action's result."""
+    return _words(widget.widgets["applied_pill"].value)
