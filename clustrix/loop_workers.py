@@ -177,7 +177,9 @@ def _failure_reply(error: BaseException, trace: str, printed: str) -> bytes:
 class _Worker:
     """One worker process and the pipe to it."""
 
-    def __init__(self, extra_environment: Dict[str, str]):
+    def __init__(self, extra_environment: Dict[str, str], generation: int = 0):
+        #: Which set of ``environments`` the pool had when this was started.
+        self.generation = generation
         environment = dict(os.environ)
         # Modules the task names rather than carries are imported in the
         # worker; it must look for them where this process would.
@@ -256,6 +258,9 @@ class WorkerPool:
         #: Signalled whenever a worker becomes idle or a new one may be started.
         self._available = threading.Condition(self._lock)
         self._closed = False
+        #: Bumped when ``environments`` is replaced: a worker started under
+        #: the old one cannot be given the new one, only retired.
+        self._generation = 0
 
     def _start_worker(self) -> _Worker:
         """Start one more worker. The caller holds the lock."""
@@ -264,9 +269,12 @@ class WorkerPool:
             if self._environments
             else {}
         )
-        worker = _Worker(extra)
+        worker = _Worker(extra, self._generation)
         self._all.append(worker)
         return worker
+
+    def _usable(self, worker: _Worker) -> bool:
+        return worker.alive() and worker.generation == self._generation
 
     def _acquire(self) -> _Worker:
         with self._available:
@@ -275,7 +283,7 @@ class WorkerPool:
                     raise RuntimeError("the worker pool has been closed")
                 while self._idle:
                     worker = self._idle.pop()
-                    if worker.alive():
+                    if self._usable(worker):
                         return worker
                     self._all.remove(worker)
                     worker.close()
@@ -296,20 +304,35 @@ class WorkerPool:
                 self._idle.append(self._start_worker())
             self._available.notify_all()
 
-    def grow(self, workers: int) -> None:
+    def grow(
+        self,
+        workers: int,
+        environments: Optional[Sequence[Dict[str, str]]] = None,
+    ) -> None:
         """Allow up to ``workers`` processes; never fewer than there are.
 
         Tasks already running are not disturbed, which replacing the pool
         with a larger one would do to every other thread using it.
+
+        ``environments``, when given, replaces the pool's. An environment is
+        fixed when a process starts, so workers started under the old one
+        are retired as they become idle and are replaced on demand.
         """
         with self._available:
+            if environments is not None:
+                self._environments = list(environments)
+                self._generation += 1
+                retired, self._idle = self._idle, []
+                for worker in retired:
+                    self._all.remove(worker)
+                    worker.close()
             if workers > self.size:
                 self.size = workers
-                self._available.notify_all()
+            self._available.notify_all()
 
     def _release(self, worker: _Worker) -> None:
         with self._available:
-            if worker.alive() and not self._closed:
+            if self._usable(worker) and not self._closed:
                 self._idle.append(worker)
             else:
                 if worker in self._all:
@@ -394,6 +417,30 @@ class WorkerPool:
 _SHARED_LOCK = threading.Lock()
 _SHARED: Optional[WorkerPool] = None
 
+#: Read by numerical libraries, when they are imported, to size their own
+#: thread pools.
+THREAD_COUNT_VARIABLES = (
+    "OMP_NUM_THREADS",
+    "OPENBLAS_NUM_THREADS",
+    "MKL_NUM_THREADS",
+    "NUMEXPR_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+
+def _threads_per_worker(workers: int) -> Dict[str, str]:
+    """The thread-count variables for each of ``workers`` workers.
+
+    NumPy's BLAS, scikit-learn's OpenMP and the like each start a thread
+    pool as wide as the machine in every process that imports them. Four
+    workers on four CPUs are then sixteen threads fighting over four cores,
+    and dividing the loop gains nothing. Each worker is told its share.
+
+    A variable the user has set is theirs: it is inherited as it is.
+    """
+    share = str(max(1, available_cpus() // workers))
+    return {name: share for name in THREAD_COUNT_VARIABLES if name not in os.environ}
+
 
 def shared_pool(workers: int) -> WorkerPool:
     """The process-wide pool, grown if ``workers`` is more than it has.
@@ -401,16 +448,22 @@ def shared_pool(workers: int) -> WorkerPool:
     Kept between calls: starting an interpreter and importing a scientific
     stack costs a large fraction of a second per worker, which would be paid
     on every call of a decorated function otherwise.
+
+    Its workers are each limited to their share of the CPUs in the threads
+    numerical libraries start (see :func:`_threads_per_worker`). A
+    :class:`WorkerPool` built directly sets nothing of the kind.
     """
     global _SHARED
     with _SHARED_LOCK:
         if _SHARED is None:
-            _SHARED = WorkerPool(workers)
+            _SHARED = WorkerPool(workers, [_threads_per_worker(workers)])
             _SHARED.prestart()
         elif _SHARED.size < workers:
             # Grown in place: another thread may be in the middle of a loop
             # on this pool, and closing it would kill that loop's workers.
-            _SHARED.grow(workers)
+            # More workers means a smaller share of threads for each, so
+            # those already started are retired as they finish.
+            _SHARED.grow(workers, [_threads_per_worker(workers)])
             _SHARED.prestart()
         return _SHARED
 

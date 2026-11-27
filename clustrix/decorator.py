@@ -433,6 +433,13 @@ _PLANS: "weakref.WeakKeyDictionary[Callable, parallelize.ParallelPlan]" = (
 )
 
 
+#: Seconds one iteration of each function's loop took the last time it was
+#: measured: in the workers when the loop was divided, here when it was not.
+_SECONDS_PER_ITERATION: "weakref.WeakKeyDictionary[Callable, float]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
 def _plan_for(func: Callable) -> parallelize.ParallelPlan:
     """The split of ``func``'s loop into jobs, or the reasons there is none."""
     plan = _PLANS.get(func)
@@ -699,8 +706,11 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     )
 
 
-#: Below this much estimated work, a loop is not divided among workers:
+#: Below this much measured work, a loop is not divided among workers:
 #: handing chunks out and collecting them back would cost more than it saves.
+#: The first call of a function divides its loop and measures it; later calls
+#: divide only when the measurement says the loop is long enough, and an
+#: undivided run is timed too.
 MIN_SECONDS_WORTH_DIVIDING = 0.2
 
 
@@ -716,9 +726,13 @@ def _run_split_locally(
     ``cores`` is the number of workers (``-1``: every CPU this process may
     use). The code around the loop runs in this process, as it would have.
 
-    The first iteration is run on its own and timed. If the rest of the loop
-    looks too short to be worth dividing, one worker finishes it in order;
-    either way the result is what a direct call returns.
+    The first call of a function divides its loop and measures, in the
+    workers, what an iteration costs. A later call whose loop that
+    measurement says is too short to be worth dividing runs it in this
+    process instead -- a small decorated function called thousands of times
+    must not pay for a pool each time -- and is timed too, so a loop that
+    has become expensive is divided again on the call after. Either way the
+    result is what a direct call returns.
 
     What the iterations print is shown once the loop is done, in iteration
     order -- unless the split is then abandoned, in which case the loop is
@@ -750,37 +764,41 @@ def _run_split_locally(
 
     pool = shared_pool(workers)
 
+    def should_split(total: int) -> bool:
+        known = _SECONDS_PER_ITERATION.get(func)
+        if known is None or known * total >= MIN_SECONDS_WORTH_DIVIDING:
+            return True
+        logger.info(
+            "%s: its loop is too short to be worth dividing "
+            "(about %.3fs in all); it runs in this process.",
+            name,
+            known * total,
+        )
+        return False
+
+    def on_unsplit(total: int, seconds: float) -> None:
+        _SECONDS_PER_ITERATION[func] = seconds / total
+
     def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
-        total = sum(len(chunk) for chunk in chunks)
-        first, others = chunks[0], chunks[1:]
         printed: List[str] = []
         try:
-            ((seconds, probe_result),) = pool.map(
-                timed_call, [(body, env, first[:1])], emit=printed.append, limit=1
+            timed = pool.map(
+                timed_call,
+                [(body, env, chunk) for chunk in chunks],
+                emit=printed.append,
+                limit=workers,
             )
-            remaining = [chunk for chunk in (first[1:], *others) if len(chunk)]
-            worth_dividing = seconds * (total - 1) >= MIN_SECONDS_WORTH_DIVIDING
-            if not worth_dividing:
-                logger.info(
-                    "%s: its loop is too short to be worth dividing "
-                    "(about %.3fs in all); one worker runs it.",
-                    name,
-                    seconds * total,
-                )
-            results = [
-                probe_result,
-                *pool.map(
-                    body,
-                    [(env, chunk) for chunk in remaining],
-                    emit=printed.append,
-                    limit=workers if worth_dividing else 1,
-                ),
-            ]
         except BaseException:
             # What the iterations up to the failing one printed is part of
             # what a direct call would have shown before raising.
             sys.stdout.write("".join(printed))
             raise
+        # Timed where the work ran, so starting workers and shipping the
+        # arguments are not mistaken for work.
+        _SECONDS_PER_ITERATION[func] = sum(seconds for seconds, _ in timed) / sum(
+            len(chunk) for chunk in chunks
+        )
+        results = [result for _, result in timed]
         if not parallelize.will_be_abandoned(results):
             sys.stdout.write("".join(printed))
         return results
@@ -793,4 +811,6 @@ def _run_split_locally(
         map_chunks,
         jobs=workers,
         on_fallback=logger.warning,
+        should_split=should_split,
+        on_unsplit=on_unsplit,
     )

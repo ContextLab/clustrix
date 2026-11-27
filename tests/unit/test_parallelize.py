@@ -762,3 +762,213 @@ def test_a_global_rebound_after_planning_is_seen_by_the_split():
     assert parallelize.run(plan, scaled, ([1, 2],), {}, in_process, 2) == [2, 4]
     namespace["FACTOR"] = 10
     assert parallelize.run(plan, scaled, ([1, 2],), {}, in_process, 2) == [10, 20]
+
+
+# -- declining a split that is safe but not worth making ---------------------
+
+
+def tally_into(xs, seen):
+    """Mutates an argument through an accumulator: a direct call leaves
+    ``seen`` extended, and so must any way of running this."""
+    for x in xs:
+        seen.append(x * 2)
+    return len(seen)
+
+
+def run_recording(func, *args, should_split, jobs=3):
+    """Run through the engine and report everything the hooks were told."""
+    told = {"chunks": 0, "asked": [], "unsplit": [], "fallback": []}
+
+    def counting_backend(body, env, chunks):
+        told["chunks"] += len(chunks)
+        return in_process(body, env, chunks)
+
+    def ask(count):
+        told["asked"].append(count)
+        return should_split
+
+    result = parallelize.run(
+        parallelize.plan(func),
+        func,
+        args,
+        {},
+        counting_backend,
+        jobs,
+        on_fallback=told["fallback"].append,
+        should_split=ask,
+        on_unsplit=lambda count, seconds: told["unsplit"].append((count, seconds)),
+    )
+    return result, told
+
+
+def test_a_declined_split_runs_the_original_loop_on_the_real_objects():
+    mine, reference = [0], [0]
+    expected = tally_into([1, 2, 3, 4, 5], reference)
+
+    result, told = run_recording(tally_into, [1, 2, 3, 4, 5], mine, should_split=False)
+
+    assert result == expected
+    assert mine == reference == [0, 2, 4, 6, 8, 10]
+    assert told["asked"] == [5]
+    assert told["chunks"] == 0, "the backend was used for a split nobody wanted"
+    assert told["fallback"] == [], "declining is a choice, not a failed check"
+    ((count, seconds),) = told["unsplit"]
+    assert count == 5 and seconds > 0
+
+
+def test_an_accepted_split_is_the_split_it_always_was():
+    result, told = run_recording(squares, 9, should_split=True)
+
+    assert result == squares(9)
+    assert told["asked"] == [9] and told["chunks"] == 3
+    assert told["unsplit"] == [] and told["fallback"] == []
+
+
+def returns_before_its_loop(xs):
+    if not xs:
+        return "nothing to do"
+    out = []
+    for x in xs:
+        out.append(x)
+    return out
+
+
+def test_nobody_is_asked_about_a_loop_that_has_nothing_to_run():
+    result, told = run_recording(squares, 0, should_split=False)
+    assert result == [] and told["asked"] == [] and told["unsplit"] == []
+
+    result, told = run_recording(returns_before_its_loop, [], should_split=False)
+    assert result == "nothing to do" and told["asked"] == []
+
+
+def test_a_split_abandoned_for_aliasing_is_not_asked_about_either():
+    """The aliasing check comes first: there is no split left to decline."""
+
+    def collect(xs, out, seen):
+        for x in xs:
+            out.append(x + len(seen))
+        return list(out)
+
+    shared, reference = [1], [1]
+    expected = collect([1, 2], reference, reference)
+
+    result, told = run_recording(collect, [1, 2], shared, shared, should_split=False)
+
+    assert result == expected == [1, 2, 4]
+    assert told["asked"] == [] and len(told["fallback"]) == 1
+
+
+# -- what may run in the caller ----------------------------------------------
+
+
+def test_imports_and_empty_containers_before_a_loop_do_not_cost_a_job():
+    def only_imports(xs):
+        import os
+        from math import sqrt
+
+        out = []
+        for x in xs:
+            out.append(sqrt(x) + len(os.sep))
+        return out
+
+    def unpacked_containers(xs):
+        finals, pids = {}, set()
+        [first, second] = (0, [])
+        for x in xs:
+            finals[x] = x
+            pids.add(x)
+        return finals, pids, first, second
+
+    def loads_first(xs):
+        table = load_table()  # noqa: F821 - never run, only analysed
+        out = []
+        for x in xs:
+            out.append(table[x])
+        return out
+
+    def imports_then_reads(path):
+        import os
+
+        rows = open(os.path.expanduser(path)).read().split()
+        out = []
+        for row in rows:
+            out.append(row)
+        return out
+
+    def assigns_into_an_object(xs, holder):
+        holder.started = True
+        out = []
+        for x in xs:
+            out.append(x)
+        return out
+
+    cheap = {
+        f.__name__: parallelize.plan(f).pre_is_cheap
+        for f in (
+            only_imports,
+            unpacked_containers,
+            loads_first,
+            imports_then_reads,
+            assigns_into_an_object,
+        )
+    }
+
+    assert cheap == {
+        "only_imports": True,
+        "unpacked_containers": True,
+        "loads_first": False,
+        "imports_then_reads": False,
+        "assigns_into_an_object": False,
+    }
+    assert split_run(only_imports, [1, 4, 9]) == only_imports([1, 4, 9])
+    assert split_run(unpacked_containers, [3, 1]) == unpacked_containers([3, 1])
+
+
+def test_an_import_that_fails_in_the_caller_is_retried_where_the_work_runs():
+    """``pre`` runs in the caller when it only imports -- but the module may
+    be installed on the cluster and not here. That must not become an
+    ImportError the user would never have seen from a single remote job."""
+    import sys
+    import types
+
+    def needs_a_remote_library(xs):
+        import only_on_the_cluster
+
+        out = []
+        for x in xs:
+            out.append(only_on_the_cluster.double(x))
+        return out
+
+    plan = parallelize.plan(needs_a_remote_library)
+    assert plan.pre_is_cheap
+    invoked = []
+
+    def on_the_cluster(function, *arguments):
+        invoked.append(function.__name__)
+        library = types.ModuleType("only_on_the_cluster")
+        library.double = lambda x: 2 * x
+        sys.modules["only_on_the_cluster"] = library
+        try:
+            return function(*arguments)
+        finally:
+            del sys.modules["only_on_the_cluster"]
+
+    def chunks_on_the_cluster(body, env, chunks):
+        return [on_the_cluster(body, dict(env), chunk) for chunk in chunks]
+
+    result = parallelize.run(
+        plan,
+        needs_a_remote_library,
+        ([1, 2, 3],),
+        {},
+        chunks_on_the_cluster,
+        2,
+        invoke=on_the_cluster,
+    )
+
+    assert result == [2, 4, 6]
+    assert invoked[0] == "__cx_pre", invoked
+
+    # With nowhere else to run it, the ImportError is the user's to see.
+    with pytest.raises(ImportError):
+        parallelize.run(plan, needs_a_remote_library, ([1],), {}, in_process, 2)

@@ -23,6 +23,7 @@ import pytest
 
 import clustrix
 from clustrix import cluster, configure, explain
+from clustrix import decorator as decorator_module
 from clustrix.decorator import MIN_SECONDS_WORTH_DIVIDING
 from clustrix.loop_workers import RemoteTraceback, available_cpus, shared_pool
 
@@ -38,6 +39,17 @@ needs_two_cpus = pytest.mark.skipif(
         "here and there are no worker processes to observe"
     ),
 )
+
+
+@pytest.fixture(autouse=True)
+def nothing_measured_yet():
+    """Every test starts as a fresh process would: no loop timed so far.
+
+    What a loop cost last time decides whether it is divided this time, and
+    that record is per function and process-wide -- so without this, which
+    tests ran earlier would decide what each test observes.
+    """
+    decorator_module._SECONDS_PER_ITERATION.clear()
 
 
 # --------------------------------------------------------------------------
@@ -100,20 +112,23 @@ def records(caplog, level, containing):
 
 @needs_two_cpus
 def test_a_cpu_bound_loop_is_divided_among_other_processes_and_is_faster(rounds):
-    values = list(range(24))
+    """Eight iterations of about 0.2 s each -- few and expensive, the case in
+    which running one iteration alone first to time it cost the most."""
+    values = list(range(8))
+    work = int(rounds * 0.2 / 0.12)
     workers = min(4, CPUS)
     divided = cluster(cores=4)(squares_and_pids)
 
     # The pool is kept between calls; starting its interpreters is paid once
     # and is not what is being measured.
-    divided(values[:workers], rounds)
+    divided(values[:workers], work)
 
     started = time.perf_counter()
-    direct = squares_and_pids(values, rounds)
+    direct = squares_and_pids(values, work)
     sequential_seconds = time.perf_counter() - started
 
     started = time.perf_counter()
-    split = divided(values, rounds)
+    split = divided(values, work)
     split_seconds = time.perf_counter() - started
 
     print(
@@ -125,13 +140,14 @@ def test_a_cpu_bound_loop_is_divided_among_other_processes_and_is_faster(rounds)
     assert values_of(split) == values_of(direct) == [v * v for v in values]
     pids = pids_of(split)
     assert os.getpid() not in pids, "an iteration ran in the calling process"
-    assert 2 <= len(pids) <= workers, pids
-    # Ideal is 1/workers; anything short of 0.8 is real division of labour
-    # and leaves room for a loaded machine.
-    assert split_seconds < 0.8 * sequential_seconds, (
-        f"dividing among {workers} workers took {split_seconds:.2f}s against "
-        f"{sequential_seconds:.2f}s sequentially"
-    )
+    assert len(pids) == workers, pids
+    if CPUS >= 4:
+        # Ideal is 0.25; 0.6 leaves room for a loaded machine. With fewer
+        # CPUs the ideal is too close to any bound worth asserting.
+        assert split_seconds < 0.6 * sequential_seconds, (
+            f"dividing among {workers} workers took {split_seconds:.2f}s "
+            f"against {sequential_seconds:.2f}s sequentially"
+        )
 
 
 @needs_two_cpus
@@ -188,29 +204,110 @@ def test_parallel_false_runs_the_loop_in_this_process(rounds, caplog):
     assert len(records(caplog, logging.WARNING, "@cluster(cores=4)")) == 1
 
 
-@needs_two_cpus
-def test_a_loop_too_short_to_divide_is_run_by_one_worker(caplog):
-    with caplog.at_level(logging.INFO, logger="clustrix.decorator"):
-        result = cluster(cores=4)(squares_and_pids)(list(range(40)), 10)
+def labelled(values, seconds):
+    """Its cost per iteration is whatever the caller says it is."""
+    out = []
+    for value in values:
+        time.sleep(seconds)
+        out.append((value * value, os.getpid()))
+    return out
 
-    assert values_of(result) == [v * v for v in range(40)]
+
+@needs_two_cpus
+def test_a_tiny_loop_is_divided_once_to_measure_it_and_then_runs_here(caplog):
+    decorated = cluster(cores=4)(labelled)
+    here = {os.getpid()}
+
+    with caplog.at_level(logging.INFO, logger="clustrix.decorator"):
+        first = decorated(list(range(40)), 0)
+        assert not records(caplog, logging.INFO, "too short"), caplog.text
+        second = decorated(list(range(40)), 0)
+
+    assert values_of(first) == values_of(second) == [v * v for v in range(40)]
+    assert os.getpid() not in pids_of(first), "never measured: it is divided"
+    assert pids_of(second) == here, "measured as tiny: it runs in this process"
     said = records(caplog, logging.INFO, "too short to be worth dividing")
-    assert len(said) == 1 and "squares_and_pids" in said[0], caplog.text
-    assert len(pids_of(result)) == 1, "the message says one worker ran it"
-    assert os.getpid() not in pids_of(result)
+    assert len(said) == 1 and "labelled" in said[0], caplog.text
+    assert "runs in this process" in said[0]
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@needs_two_cpus
+def test_the_decision_follows_the_cost_as_it_changes_between_calls():
+    """Each call is judged by the measurement the call before it left, and
+    every call leaves one -- divided or not."""
+    decorated = cluster(cores=4)(labelled)
+    here = {os.getpid()}
+    six = list(range(6))
+    expensive = MIN_SECONDS_WORTH_DIVIDING  # per iteration: 6 of them is 6x over
+
+    def ran_here(seconds):
+        result = decorated(six, seconds)
+        assert values_of(result) == [v * v for v in six]
+        return pids_of(result) == here
+
+    assert not ran_here(0), "1: never measured, so divided -- and found cheap"
+    assert ran_here(0), "2: known cheap, so run here"
+    assert ran_here(expensive), "3: still believed cheap -- and found expensive"
+    assert not ran_here(expensive), "4: known expensive, so divided"
+    assert not ran_here(0), "5: still believed expensive -- and found cheap"
+    assert ran_here(0), "6: known cheap again"
 
 
 @needs_two_cpus
 def test_the_threshold_is_about_the_whole_loop_not_one_iteration(rounds, caplog):
     """Each iteration is well under the threshold; forty of them are not."""
     per_iteration = rounds // 10  # about 12 ms
+    decorated = cluster(cores=2)(squares_and_pids)
+    decorated(list(range(40)), per_iteration)  # measured here
+
     with caplog.at_level(logging.INFO, logger="clustrix.decorator"):
-        result = cluster(cores=2)(squares_and_pids)(list(range(40)), per_iteration)
+        result = decorated(list(range(40)), per_iteration)
 
     assert 0.012 * 40 > MIN_SECONDS_WORTH_DIVIDING
     assert values_of(result) == [v * v for v in range(40)]
     assert not records(caplog, logging.INFO, "too short"), caplog.text
-    assert len(pids_of(result)) == 2
+    assert len(pids_of(result)) == 2 and os.getpid() not in pids_of(result)
+
+
+def small_job(values):
+    out = []
+    for value in values:
+        out.append(spin(100) + value)
+    return out
+
+
+@needs_two_cpus
+def test_a_small_function_called_thousands_of_times_does_not_pay_for_a_pool():
+    """Why a loop is not simply always divided. A round trip to a worker is
+    measured in milliseconds; this function takes a fraction of one.
+
+    The bound is about the pool, not about the decorator itself: a decorated
+    call that runs here still costs some tens of microseconds more than a
+    bare one (configuration, binding the arguments), which is a small part
+    of this function and would be most of an empty one."""
+    arguments = list(range(60))
+    decorated = cluster(cores=4)(small_job)
+    expected = small_job(arguments)
+    assert decorated(arguments) == expected  # the one divided, measuring call
+
+    started = time.perf_counter()
+    for _ in range(2000):
+        small_job(arguments)
+    plain_seconds = time.perf_counter() - started
+
+    started = time.perf_counter()
+    for _ in range(2000):
+        result = decorated(arguments)
+    decorated_seconds = time.perf_counter() - started
+
+    print(
+        f"\n2000 calls: undecorated {plain_seconds:.3f}s "
+        f"({plain_seconds / 2000 * 1e6:.0f} us each), decorated "
+        f"{decorated_seconds:.3f}s ({decorated_seconds / plain_seconds:.2f}x)"
+    )
+    assert result == expected
+    assert decorated_seconds < 2 * plain_seconds
 
 
 # --------------------------------------------------------------------------
@@ -616,10 +713,14 @@ def test_explain_works_on_the_decorated_function():
 
 FACTOR = 2
 
+#: Three iterations of this are comfortably worth dividing, on every call.
+PAUSE = 0.4 * MIN_SECONDS_WORTH_DIVIDING
+
 
 def uses_a_global(values):
     out = []
     for value in values:
+        time.sleep(PAUSE)
         out.append((value * FACTOR, os.getpid()))
     return out
 
@@ -667,12 +768,13 @@ def test_a_global_rebound_between_calls_is_seen_by_the_workers(monkeypatch):
 @needs_two_cpus
 def test_four_threads_calling_at_once_each_get_their_own_answer(rounds):
     decorated = cluster(cores=4)(squares_and_pids)
-    decorated([0, 1], rounds // 20)  # the pool exists before the race starts
+    work = rounds // 4  # twelve of these are worth dividing
+    decorated([0, 1], work)  # the pool exists before the race starts
     answers, errors = {}, []
 
     def call(index):
         try:
-            answers[index] = decorated(list(range(index, index + 12)), rounds // 20)
+            answers[index] = decorated(list(range(index, index + 12)), work)
         except BaseException as error:  # noqa: BLE001 - asserted on below
             errors.append(repr(error))
 

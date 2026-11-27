@@ -90,6 +90,7 @@ import builtins
 import copy
 import inspect
 import textwrap
+import time
 import types
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -1336,10 +1337,24 @@ def _is_cheap_expression(node: ast.expr) -> bool:
     return True
 
 
+def _is_plain_target(target: ast.expr) -> bool:
+    """A name, or a tuple or list of them: binding it runs no code."""
+    if isinstance(target, (ast.Tuple, ast.List)):
+        return all(_is_plain_target(element) for element in target.elts)
+    return isinstance(target, ast.Name)
+
+
 def _is_cheap_block(statements: Sequence[ast.stmt]) -> bool:
-    """True for a block of plain assignments and returns of cheap expressions."""
+    """True for a block of imports and of plain assignments and returns of
+    cheap expressions.
+
+    An import counts as cheap although it runs code: a function whose only
+    preparation is ``import os`` should not cost a job for it. If the module
+    is not installed where the caller is, :func:`run` notices and runs the
+    block where the rest of the work runs instead.
+    """
     for stmt in statements:
-        if isinstance(stmt, ast.Pass):
+        if isinstance(stmt, (ast.Pass, ast.Import, ast.ImportFrom)):
             continue
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
             continue  # a docstring
@@ -1348,7 +1363,7 @@ def _is_cheap_block(statements: Sequence[ast.stmt]) -> bool:
                 return False
             continue
         if isinstance(stmt, ast.Assign) and all(
-            isinstance(target, ast.Name) for target in stmt.targets
+            _is_plain_target(target) for target in stmt.targets
         ):
             if not _is_cheap_expression(stmt.value):
                 return False
@@ -1553,6 +1568,8 @@ def run(
     jobs: int,
     invoke: Invoke = _here,
     on_fallback: Optional[Callable[[str], None]] = None,
+    should_split: Optional[Callable[[int], bool]] = None,
+    on_unsplit: Optional[Callable[[int, float], None]] = None,
 ) -> Any:
     """Execute ``func`` through its split and return what it would have.
 
@@ -1574,13 +1591,30 @@ def run(
     loop then runs once, in order, on the environment ``pre`` produced, so
     ``pre`` is never executed twice and the result is the sequential one.
     ``on_fallback`` is told why.
+
+    ``should_split(count)`` lets the caller decline a split that is safe but
+    not worth making. It is asked once, with the number of items, after
+    ``pre`` and the aliasing check and only when there are items. If it
+    answers False the original loop runs through ``invoke``, in order, on
+    the environment ``pre`` produced -- the real objects, no copies. That is
+    a choice and not a failed check, so ``on_fallback`` hears nothing;
+    ``on_unsplit(count, seconds)`` is told how long that run took by the
+    wall clock, so the caller can decide differently next time.
     """
     split = bind(parallel_plan, func)
     arguments = bound_arguments(func, args, kwargs)
     around_pre = _here if parallel_plan.pre_is_cheap else invoke
     around_post = _here if parallel_plan.post_is_cheap else invoke
 
-    outcome = around_pre(split.pre, arguments)
+    try:
+        outcome = around_pre(split.pre, arguments)
+    except ImportError:
+        if around_pre is invoke:
+            raise
+        # ``pre`` was run here because it only imports and assigns, and a
+        # module it imports is not installed here. It may be where the work
+        # runs; an import that fails there too is raised from there.
+        outcome = invoke(split.pre, arguments)
     if outcome[0] == "return":
         return outcome[1]
     _, env, items, aliases = outcome
@@ -1602,6 +1636,12 @@ def run(
 
     log: List[tuple] = []
     if len(items):
+        if should_split is not None and not should_split(len(items)):
+            started = time.perf_counter()
+            result = invoke(split.rest, env, items)
+            if on_unsplit is not None:
+                on_unsplit(len(items), time.perf_counter() - started)
+            return result
         modified: Set[str] = set()
         for chunk_log, changed, _unchecked in map_chunks(
             split.body, body_env, chunk(items, jobs)

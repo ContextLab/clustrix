@@ -14,7 +14,9 @@ import time
 
 import pytest
 
+from clustrix import loop_workers
 from clustrix.loop_workers import (
+    THREAD_COUNT_VARIABLES,
     RemoteTraceback,
     WorkerDied,
     WorkerPool,
@@ -251,6 +253,70 @@ def test_a_worker_knows_it_is_one_and_this_process_knows_it_is_not(pool):
     starting a pool of its own in every worker."""
     assert not in_worker()
     assert pool.map(in_worker, [(), ()]) == [True, True]
+
+
+def thread_settings():
+    return {name: os.environ.get(name) for name in THREAD_COUNT_VARIABLES}
+
+
+@pytest.fixture
+def no_shared_pool(monkeypatch):
+    """The shared pool is one per process: start each of these tests without
+    one, and without thread counts inherited from whoever runs the suite."""
+    loop_workers._close_shared_pool()
+    for name in THREAD_COUNT_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
+    yield
+    loop_workers._close_shared_pool()
+
+
+def test_shared_workers_are_each_given_their_share_of_the_cpus(no_shared_pool):
+    """Numerical libraries size their thread pools to the whole machine in
+    every process that imports them; N workers would run N times too many
+    threads. The variables have to be in place when the worker starts."""
+    share = str(max(1, available_cpus() // 2))
+
+    seen = shared_pool(2).map(thread_settings, [(), (), (), ()])
+
+    assert seen == [dict.fromkeys(THREAD_COUNT_VARIABLES, share)] * 4
+    assert set(THREAD_COUNT_VARIABLES) >= {"OMP_NUM_THREADS", "MKL_NUM_THREADS"}
+
+
+def test_a_thread_count_the_user_set_is_left_alone(no_shared_pool, monkeypatch):
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")
+    share = str(max(1, available_cpus() // 2))
+
+    seen = shared_pool(2).map(thread_settings, [(), ()])
+
+    for settings in seen:
+        assert settings["OMP_NUM_THREADS"] == "3"
+        assert settings["OPENBLAS_NUM_THREADS"] == share
+
+
+def test_a_pool_built_directly_sets_no_thread_counts(no_shared_pool):
+    with WorkerPool(2) as neutral:
+        seen = neutral.map(thread_settings, [(), ()])
+
+    assert seen == [dict.fromkeys(THREAD_COUNT_VARIABLES)] * 2
+
+
+def test_growing_the_shared_pool_shrinks_every_worker_s_share(no_shared_pool):
+    """A worker's environment is fixed when it starts, so one started for a
+    narrower pool is retired rather than left with a share that is too big."""
+    cpus = available_cpus()
+    narrow = shared_pool(1)
+    (before,) = narrow.map(lambda: (os.getpid(), thread_settings()), [()])
+    assert before[1]["OMP_NUM_THREADS"] == str(cpus)
+
+    wide = shared_pool(2)
+    after = wide.map(lambda: (napping(0.2), thread_settings()), [(), ()], limit=2)
+
+    assert wide is narrow
+    assert [settings["OMP_NUM_THREADS"] for _, settings in after] == [
+        str(max(1, cpus // 2))
+    ] * 2
+    assert len({pid for pid, _ in after}) == 2
+    assert before[0] not in {pid for pid, _ in after}, "the old worker was kept"
 
 
 def test_a_scheduler_s_allocation_wins_over_the_affinity_mask(monkeypatch):
