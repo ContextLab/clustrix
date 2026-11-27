@@ -1,211 +1,217 @@
-"""Pressing "Save configuration" must not put a password on disk.
+"""Nothing the widget writes may contain a secret, however it is spelled.
+
+Two files are written from the form. ``Save all`` writes a bundle wherever
+the user says; and, without any button being pressed, every edit is kept in
+the widget's own store under ``~/.clustrix/profiles`` so that profiles
+survive the session. A password typed to test a connection must reach
+neither. ``password_env_var`` is the supported way to supply a password
+without writing it down, so there is no opt-in here.
 
 ``tests/unit/test_persisted_files_are_private.py`` is the guarantee for the
-file itself -- it walks the tree and checks modes and contents. This module
-covers the half a tree walk cannot see: whether the user is *told* that the
-password they typed was withheld, and told once rather than on every click.
+tree as a whole -- it walks every file clustrix writes and checks modes and
+contents. This module is the widget's half, driven through its real controls
+and handlers.
 
-The decision matches ``ProfileManager`` deliberately. A widget save fires
-from ordinary editing rather than from anyone asking to persist a secret,
-one file carries every configuration in the dropdown, and
-``password_env_var`` is the supported way to supply a password without
-writing it down -- so there is no ``include_secrets`` opt-in here either.
-
-``<redacted>`` is the placeholder spelling
-``tests/unit/test_check_for_secrets.py`` already suppresses.
+The tests never name a secret to the code under test. They plant sentinel
+*values* -- strings that appear nowhere else in the project -- in every place
+the form will take one, and then read every byte the widget wrote looking for
+any of them. A guard that recognises a key by its name cannot pass this by
+learning a new spelling, because no spelling is being checked: the widget
+this replaced filtered ``environment_variables`` entry by entry on key names,
+and ``SSH_PASSPHRASE``, ``GITHUB_PAT``, a ``DATABASE_URL`` with the password
+inside it and ``USE_PASSWORD`` all reached disk.
 """
-
-import io
-from contextlib import redirect_stdout
 
 import pytest
 import yaml
 
-from clustrix.config import get_config_dir
-
 pytest.importorskip("ipywidgets")
 
-from clustrix.notebook_magic_widget import (  # noqa: E402
-    EnhancedClusterConfigWidget,
-    _dropped_keys,
-)
+from clustrix.modern_notebook_widget import ModernClustrixWidget  # noqa: E402
+from tests.widget_console import pill, press  # noqa: E402
 
 
-def _configured_widget():
-    """A widget holding one SSH configuration with a password typed in."""
-    widget = EnhancedClusterConfigWidget()
-    widget.config_name.value = "with-credentials"
-    widget.cluster_type.value = "ssh"
-    widget.host_field.value = "cluster.example.edu"
-    widget.username_field.value = "researcher"
-    widget.password_field.value = "<redacted>"
-    widget.current_config_name = "with-credentials"
-    widget.configs = {"with-credentials": widget._save_config_from_widgets()}
+#: Assembled from parts so that no credential-shaped literal appears in the
+#: file -- the shape ``tests/unit/test_check_for_secrets.py`` flags -- and
+#: distinctive enough that finding one on disk can only mean it was written.
+def _sentinel(slot):
+    return "-".join(["clustrix", "sentinel", slot, "value"])
+
+
+#: Environment variable names no pattern over key names would catch, a value
+#: carrying its secret where no key name can see it, and one a ``^use_`` rule
+#: would have exempted.
+SENTINEL_ENVIRONMENT = {
+    "SSH_PASSPHRASE": _sentinel("passphrase"),
+    "GITHUB_PAT": _sentinel("pat"),
+    "DATABASE_URL": f"postgres://u:{_sentinel('dburl')}@db.example.edu/app",
+    "USE_PASSWORD": _sentinel("usepassword"),
+}
+
+SENTINELS = {
+    "password": _sentinel("password"),
+    "hf_token": _sentinel("hftoken"),
+    **SENTINEL_ENVIRONMENT,
+}
+
+
+def _sentinels_in(text):
+    return sorted(slot for slot, value in SENTINELS.items() if value in text)
+
+
+def _widget_holding_every_secret():
+    """Two profiles, each with every credential the form accepts typed in.
+
+    Two, because one file carries every profile: the one on screen is
+    rebuilt from the controls when Save is pressed, and the other is written
+    from what was captured when the user switched away from it. Both paths
+    have to withhold.
+    """
+    widget = ModernClustrixWidget()
+    controls = widget.widgets
+
+    controls["profile_dropdown"].value = "SSH remote machine"
+    controls["host"].value = "cluster.example.edu"
+    controls["username"].value = "researcher"
+    controls["cpus"].value = 6
+    controls["home_dir"].value = "/scratch/researcher/clustrix"
+    controls["password"].value = SENTINELS["password"]
+    controls["local_env_var"].value = "MY_CLUSTER_PASSWORD"
+    controls["env_vars"].value = "OMP_NUM_THREADS=4\n" + "\n".join(
+        f"{key}={value}" for key, value in SENTINEL_ENVIRONMENT.items()
+    )
+
+    # Switching away is what captures the profile above into the store.
+    controls["profile_dropdown"].value = "HuggingFace Jobs (CPU)"
+    controls["hf_namespace"].value = "contextlab"
+    controls["hf_token"].value = SENTINELS["hf_token"]
+    controls["env_vars"].value = f"HF_HUB_TOKEN_COPY={SENTINELS['GITHUB_PAT']}"
     return widget
 
 
-def _save(widget, filename):
-    """Press the button, returning whatever the widget printed."""
-    widget.save_filename_input.value = filename
-    captured = io.StringIO()
-    with redirect_stdout(captured):
-        widget._on_save_config(None)
-    return captured.getvalue()
+def _save(widget, target, capsys):
+    widget.widgets["config_filename"].value = str(target)
+    return press(
+        lambda: widget._on_save_config(widget.widgets["save_btn"]),
+        widget.widgets["output"],
+        capsys,
+    )
 
 
-def _saved(filename):
-    return yaml.safe_load((get_config_dir() / filename).read_text(encoding="utf-8"))
+class TestTheSentinelsWerePlanted:
+    def test_every_sentinel_is_in_what_the_session_holds(self):
+        """A test that planted nothing would pass forever.
 
-
-class TestWhatReachesDisk:
-    def test_the_password_is_not_written(self):
-        widget = _configured_widget()
-
-        _save(widget, "single.yml")
-
-        saved = _saved("single.yml")
-        assert saved["cluster_host"] == "cluster.example.edu"
-        assert saved["username"] == "researcher"
-        assert "password" not in saved
-
-    def test_the_huggingface_token_is_not_written(self):
-        widget = _configured_widget()
-        widget.cluster_type.value = "huggingface"
-        widget.hf_token_field.value = "<redacted>"
-        widget.configs = {"hf": widget._save_config_from_widgets()}
-        widget.current_config_name = "hf"
-
-        _save(widget, "hf.yml")
-
-        assert "hf_token" not in _saved("hf.yml")
-
-    def test_the_multi_configuration_branch_is_redacted_too(self):
-        """One file, every configuration in the dropdown -- N credentials."""
-        widget = _configured_widget()
-        second = dict(widget.configs["with-credentials"], name="second")
-        widget.configs["second"] = second
-
-        _save(widget, "many.yml")
-
-        saved = _saved("many.yml")
-        assert set(saved) == {"with-credentials", "second"}
-        for name, entry in saved.items():
-            assert "password" not in entry, name
-
-    def test_environment_variables_are_withheld_whole(self):
-        """The field name is innocuous and the entries cannot be judged.
-
-        **Rewritten, not relaxed.** This used to assert that
-        ``OMP_NUM_THREADS`` survived while ``AWS_SECRET_ACCESS_KEY`` was
-        dropped -- i.e. that each entry is judged by its key name. Measured
-        against user-chosen names that rule fails: ``SSH_PASSPHRASE`` and
-        ``GITHUB_PAT`` match nothing, a ``DATABASE_URL`` carries its
-        password where no key name can see it, and ``USE_PASSWORD`` was
-        *exempted* by the ``^use_`` rule written for the boolean field
-        ``use_env_password``. Both the names and the values here are the
-        user's, so clustrix cannot classify them and no longer guesses.
-        ``tests/unit/test_widget_save_withholds_unnamed_secrets.py`` is the
-        value-level proof.
+        If the fixture stopped carrying the sentinels -- a renamed control, a
+        swallowed exception -- the assertions below would go green while
+        proving nothing.
         """
-        widget = _configured_widget()
-        widget.env_vars_field.value = (
-            '{"OMP_NUM_THREADS": "4", "SSH_PASSPHRASE": "<redacted>"}'
+        widget = _widget_holding_every_secret()
+        manager = widget.profile_manager
+
+        ssh = manager.load_profile("SSH remote machine")
+        huggingface = widget._get_config_from_widgets()
+
+        assert ssh.password == SENTINELS["password"]
+        assert ssh.environment_variables == {
+            "OMP_NUM_THREADS": "4",
+            **SENTINEL_ENVIRONMENT,
+        }
+        assert huggingface.hf_token == SENTINELS["hf_token"]
+        held = yaml.safe_dump([ssh.__dict__, huggingface.__dict__], default_style='"')
+        assert _sentinels_in(held) == sorted(SENTINELS)
+
+
+class TestNoSentinelReachesDisk:
+    def test_save_all_writes_no_sentinel(self, tmp_path, capsys):
+        widget = _widget_holding_every_secret()
+        target = tmp_path / "bundle.yml"
+
+        _save(widget, target, capsys)
+
+        assert pill(widget) == "saved"
+        leaked = _sentinels_in(target.read_text(encoding="utf-8"))
+        assert not leaked, f"values planted under {leaked} were written to {target}"
+
+    def test_the_widgets_own_store_holds_no_sentinel(self):
+        """No button at all: the store is rewritten on every captured edit."""
+        widget = _widget_holding_every_secret()
+        # Capture the profile on screen too, the way leaving it does.
+        widget.widgets["profile_dropdown"].value = "Local single-core"
+
+        store = widget.profile_manager.store_path
+        assert store.exists(), f"the widget kept nothing at {store}"
+        leaked = _sentinels_in(store.read_text(encoding="utf-8"))
+        assert not leaked, f"values planted under {leaked} were written to {store}"
+
+    def test_a_json_bundle_writes_no_sentinel_either(self, tmp_path, capsys):
+        """The format is chosen by the extension, and is a second writer."""
+        widget = _widget_holding_every_secret()
+        target = tmp_path / "bundle.json"
+
+        _save(widget, target, capsys)
+
+        assert pill(widget) == "saved"
+        assert not _sentinels_in(target.read_text(encoding="utf-8"))
+
+
+class TestWhatSurvives:
+    def test_the_ordinary_settings_still_round_trip(self, tmp_path, capsys):
+        """Withholding must not become a general loss of the user's work."""
+        widget = _widget_holding_every_secret()
+        target = tmp_path / "bundle.yml"
+
+        _save(widget, target, capsys)
+
+        saved = yaml.safe_load(target.read_text(encoding="utf-8"))["profiles"]
+        ssh = saved["SSH remote machine"]
+        assert ssh["cluster_type"] == "ssh"
+        assert ssh["cluster_host"] == "cluster.example.edu"
+        assert ssh["username"] == "researcher"
+        assert ssh["default_cores"] == 6
+        assert ssh["remote_work_dir"] == "/scratch/researcher/clustrix"
+        assert saved["HuggingFace Jobs (CPU)"]["hf_namespace"] == "contextlab"
+
+    def test_the_supported_channel_for_a_password_is_written(self, tmp_path, capsys):
+        """The *name* of the variable is the setting; its contents never are."""
+        widget = _widget_holding_every_secret()
+        target = tmp_path / "bundle.yml"
+
+        _save(widget, target, capsys)
+
+        ssh = yaml.safe_load(target.read_text(encoding="utf-8"))["profiles"][
+            "SSH remote machine"
+        ]
+        assert ssh["password_env_var"] == "MY_CLUSTER_PASSWORD"
+        assert ssh["use_env_password"] is True
+
+    def test_the_secrets_are_still_usable_in_the_session(self, tmp_path, capsys):
+        """Withheld from disk is not the same as thrown away."""
+        widget = _widget_holding_every_secret()
+
+        _save(widget, tmp_path / "bundle.yml", capsys)
+
+        assert widget.widgets["hf_token"].value == SENTINELS["hf_token"]
+        widget.widgets["profile_dropdown"].value = "SSH remote machine"
+        assert widget.widgets["password"].value == SENTINELS["password"]
+        assert SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"] in (
+            widget.widgets["env_vars"].value
         )
-        widget.configs = {"with-credentials": widget._save_config_from_widgets()}
-
-        _save(widget, "envvars.yml")
-
-        assert "environment_variables" not in _saved("envvars.yml")
-
-    def test_the_ordinary_settings_still_round_trip(self):
-        """The redaction must not be a general loss of the user's work."""
-        widget = _configured_widget()
-
-        _save(widget, "ordinary.yml")
-
-        saved = _saved("ordinary.yml")
-        assert saved["cluster_type"] == "ssh"
-        assert saved["default_cores"] == widget.cores_field.value
-        assert saved["remote_work_dir"] == widget.work_dir_field.value
 
 
 class TestWhatTheUserIsTold:
-    def test_the_user_is_told_what_was_withheld(self):
-        widget = _configured_widget()
+    def test_saving_says_that_credentials_were_left_out(self, tmp_path, capsys):
+        """Silently dropping what the user typed is its own surprise."""
+        widget = _widget_holding_every_secret()
 
-        output = _save(widget, "announced.yml")
+        told = _save(widget, tmp_path / "announced.yml", capsys)
 
-        assert "password" in output
-        assert "password_env_var" in output, "the supported channel must be named"
-        assert "not a credential store" in output
+        assert "Saved" in told
+        assert "Passwords and tokens are never written to this file" in told
 
-    def test_the_notice_names_every_dropped_field(self):
-        widget = _configured_widget()
-        widget.cluster_type.value = "huggingface"
-        widget.hf_token_field.value = "<redacted>"
-        widget.configs = {"hf": widget._save_config_from_widgets()}
-        widget.current_config_name = "hf"
+    def test_no_sentinel_is_echoed_while_saying_so(self, tmp_path, capsys):
+        widget = _widget_holding_every_secret()
 
-        output = _save(widget, "both.yml")
+        told = _save(widget, tmp_path / "quiet.yml", capsys)
 
-        assert "password" in output and "hf_token" in output
-
-    def test_the_notice_fires_once_per_widget(self):
-        """``_on_save_config`` is a button. A repeated notice stops being read."""
-        widget = _configured_widget()
-
-        first = _save(widget, "once-a.yml")
-        second = _save(widget, "once-b.yml")
-
-        assert "password_env_var" in first
-        assert "password_env_var" not in second
-        assert "Configuration saved to" in second
-
-    def test_a_configuration_without_credentials_saves_silently(self):
-        """The notice must mean something, so it may not fire for everyone."""
-        widget = EnhancedClusterConfigWidget()
-        widget.config_name.value = "plain"
-        widget.cluster_type.value = "local"
-        widget.password_field.value = ""
-        widget.current_config_name = "plain"
-        widget.configs = {"plain": widget._save_config_from_widgets()}
-
-        output = _save(widget, "plain.yml")
-
-        assert "password_env_var" not in output
-        assert "Configuration saved to" in output
-
-
-class TestTheDroppedKeyDiff:
-    """The notice is only as honest as the comparison behind it."""
-
-    def test_a_removed_field_is_named(self):
-        assert _dropped_keys({"a": 1, "password": "x"}, {"a": 1}) == {"password"}
-
-    def test_a_removed_mapping_is_named_by_its_field(self):
-        """Rewritten: entries are no longer filtered one at a time.
-
-        This asserted that ``API_KEY`` was named individually, which only
-        made sense while ``environment_variables`` was being filtered entry
-        by entry on key names. The whole mapping is withheld now, so the
-        field is what the user has to be told about.
-        """
-        before = {"environment_variables": {"OMP_NUM_THREADS": "4", "API_KEY": "x"}}
-        after: dict = {}
-
-        assert _dropped_keys(before, after) == {"environment_variables"}
-
-    def test_a_key_the_format_does_not_define_is_named(self):
-        """The widget carries whatever a loaded file contained.
-
-        Those keys are dropped by the allowlist, and dropping something the
-        user can see in their file without saying so is the surprise this
-        notice exists to prevent.
-        """
-        before = {"cluster_type": "ssh", "aws_secret_access_key": "x"}
-        after = {"cluster_type": "ssh"}
-
-        assert _dropped_keys(before, after) == {"aws_secret_access_key"}
-
-    def test_nothing_removed_is_reported_as_nothing(self):
-        assert _dropped_keys({"a": 1}, {"a": 1}) == set()
+        assert not _sentinels_in(told), told
