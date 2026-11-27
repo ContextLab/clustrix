@@ -43,8 +43,8 @@ everything you left out:
 .. code-block:: text
 
    {'cores': 8, 'memory': '16GB', 'time': None, 'partition': None,
-    'parallel': None, 'auto_gpu_parallel': None, 'environment': None,
-    'async_submit': None}
+    'gpus': None, 'parallel': None, 'auto_gpu_parallel': None,
+    'environment': None, 'async_submit': None}
 
 The consequence is that **configuration order does not matter**. Decorating
 before ``clustrix.configure()`` is fine; the wrapper calls ``get_config()`` on
