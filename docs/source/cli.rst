@@ -143,7 +143,7 @@ it says where ``@cluster`` runs a function instead, in the same words as
 .. code-block:: console
 
    $ clustrix status
-   backend      : local (no cluster host set; cluster_type is 'slurm')
+   backend      : local
    resources    : 4 cores, 8GB, 01:00:00
    connection   : not checked (no ssh or slurm host is configured)
    $ echo $?

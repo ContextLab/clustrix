@@ -229,7 +229,7 @@ def test_import_survives_an_absent_config_directory(home, workdir):
 
     assert result["during_import"] == []
     assert result["error"] is None
-    assert result["values"]["cluster_type"] == "slurm"
+    assert result["values"]["cluster_type"] == "local"
     assert not (home / ".clustrix").exists(), "import created a config directory"
 
 
@@ -433,7 +433,7 @@ def test_load_config_detaches_a_held_reference_and_configure_does_not(
 
     # ...and the other half: configure() is seen by a reference held across it.
     still_held = get_config()
-    configure(cluster_host="configured.example")
+    configure(cluster_type="slurm", cluster_host="configured.example")
     assert get_config() is still_held, "configure no longer mutates in place"
     assert still_held.cluster_host == "configured.example"
 
@@ -781,6 +781,7 @@ def test_a_child_process_started_during_the_search_can_read_the_config(
 #: equal to what the competing file sets, so a half-applied result is
 #: recognisable as one rather than having to be inferred.
 _CONFIGURE_KEYWORDS = {
+    "cluster_type": "slurm",
     "cluster_host": "configured.example",
     "username": "configured-user",
     "cluster_port": 2222,

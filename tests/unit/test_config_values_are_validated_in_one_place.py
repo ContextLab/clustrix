@@ -215,7 +215,8 @@ class TestThereIsOnePort:
         """Every old file carries ``ssh_port: 22``; that is not a claim."""
         path = tmp_path / "old.yml"
         path.write_text(
-            "cluster_host: box.example.edu\ncluster_port: 2200\nssh_port: 22\n"
+            "cluster_type: ssh\ncluster_host: box.example.edu\n"
+            "cluster_port: 2200\nssh_port: 22\n"
         )
 
         with warnings.catch_warnings():
@@ -226,7 +227,9 @@ class TestThereIsOnePort:
 
     def test_a_file_that_only_set_ssh_port_gets_that_port(self, tmp_path):
         path = tmp_path / "old.yml"
-        path.write_text("cluster_host: box.example.edu\nssh_port: 2222\n")
+        path.write_text(
+            "cluster_type: ssh\ncluster_host: box.example.edu\nssh_port: 2222\n"
+        )
 
         with pytest.warns(DeprecationWarning):
             load_config(str(path))
@@ -269,7 +272,10 @@ class TestThereIsOnePort:
 
         manager = AuthenticationManager(
             ClusterConfig(
-                cluster_host="box.example.edu", username="me", cluster_port=2200
+                cluster_type="slurm",
+                cluster_host="box.example.edu",
+                username="me",
+                cluster_port=2200,
             )
         )
 

@@ -567,7 +567,7 @@ def test_configure_reclaims_a_host_a_working_directory_file_had_set(
     configure(cluster_port=2222)
     assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
 
-    configure(cluster_host="cluster.example.edu")
+    configure(cluster_type="slurm", cluster_host="cluster.example.edu")
     assert get_config_source(get_config()) == CONFIG_SOURCE_RUNTIME
 
 
@@ -1179,7 +1179,7 @@ def test_a_hostname_that_cannot_be_normalised_is_refused_at_construction():
         with pytest.raises(ValueError, match="not a usable hostname"):
             ClusterConfig(cluster_type="ssh", cluster_host=host)
         with pytest.raises(ValueError, match="not a usable hostname"):
-            configure(cluster_host=host)
+            configure(cluster_type="slurm", cluster_host=host)
 
     # A hostname that only *looks* numeric is fine once it is a string.
     assert ClusterConfig(cluster_type="ssh", cluster_host="127.0.0.1")
@@ -1473,7 +1473,7 @@ def test_no_message_offers_a_remedy_that_does_not_work(tmp_path, monkeypatch):
     # And the recommendation is measured, not asserted: naming the same host
     # through either route leaves it exactly where it was.
     assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
-    configure(cluster_host="named.by.the.repository")
+    configure(cluster_type="slurm", cluster_host="named.by.the.repository")
     assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
     load_config(str(project / "clustrix.yml"))
     assert get_config_source(get_config()) == CONFIG_SOURCE_WORKING_DIRECTORY
@@ -2230,7 +2230,8 @@ def test_a_config_naming_no_host_makes_no_target_at_all():
     # The stringify still does its job for the value it exists for.
     assert (
         CredentialTarget.for_config(
-            ClusterConfig(cluster_host="hpc.example.edu"), hostname=2130706433
+            ClusterConfig(cluster_type="slurm", cluster_host="hpc.example.edu"),
+            hostname=2130706433,
         ).hostname
         == "2130706433"
     )
@@ -2272,7 +2273,9 @@ def test_a_forged_provenance_cannot_outrank_the_config_that_was_also_passed(
     """
     env_file(SSH_USERNAME="victim", SSH_PASSWORD=SENTINEL_PASSWORD)
     record_discovered_hostname(attacker_server.host, CONFIG_SOURCE_WORKING_DIRECTORY)
-    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    config = ClusterConfig(
+        cluster_type="slurm", cluster_host="hpc.example.edu", username="victim"
+    )
     assert get_config_source(config) in TRUSTED_CONFIG_SOURCES
 
     target = CredentialTarget.for_config(config, hostname=attacker_server.host)
@@ -2386,7 +2389,9 @@ def test_a_release_is_truthy_exactly_when_it_carries_a_secret():
 
 def test_a_target_built_from_a_config_takes_that_config_s_provenance(tmp_path):
     """Provenance is a fact about the hostname, and the gate derives it."""
-    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    config = ClusterConfig(
+        cluster_type="slurm", cluster_host="hpc.example.edu", username="victim"
+    )
     target = CredentialTarget.for_config(config)
 
     assert target.hostname == "hpc.example.edu"
@@ -2494,7 +2499,9 @@ def test_a_config_that_lost_its_stamp_makes_an_untrusted_target():
     overwritten -- so a target built from it is untrusted rather than
     trusted by default. An absent value must never read as "chosen by you".
     """
-    config = ClusterConfig(cluster_host="hpc.example.edu", username="victim")
+    config = ClusterConfig(
+        cluster_type="slurm", cluster_host="hpc.example.edu", username="victim"
+    )
     object.__delattr__(config, "_clustrix_config_source")
 
     target = CredentialTarget.for_config(config)
@@ -3108,8 +3115,12 @@ def test_the_gate_decides_the_local_identity_search_not_the_call_site():
     three of them wrong, and a ``CredentialRelease`` built anywhere else
     must not open the search by omission.
     """
-    trusted = ClusterConfig(cluster_host="chosen.example.edu", username="victim")
-    untrusted = ClusterConfig(cluster_host="named-by-a-file.example")
+    trusted = ClusterConfig(
+        cluster_type="slurm", cluster_host="chosen.example.edu", username="victim"
+    )
+    untrusted = ClusterConfig(
+        cluster_type="slurm", cluster_host="named-by-a-file.example"
+    )
     record_discovered_hostname(untrusted.cluster_host, CONFIG_SOURCE_WORKING_DIRECTORY)
 
     allowed = release_credential(CredentialTarget.for_config(trusted), config=trusted)
@@ -3190,7 +3201,9 @@ def test_a_trusted_config_does_not_vouch_for_some_other_host():
     world that no file had happened to name, and the hostless
     ``SSH_PASSWORD`` went to it.
     """
-    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+    trusted = ClusterConfig(
+        cluster_type="slurm", cluster_host="myhpc.example.edu", username="victim"
+    )
 
     assert get_config_source(trusted) in TRUSTED_CONFIG_SOURCES
     assert derived_provenance(trusted, "myhpc.example.edu") in TRUSTED_CONFIG_SOURCES
@@ -3200,7 +3213,9 @@ def test_a_trusted_config_does_not_vouch_for_some_other_host():
 
 def test_a_hostless_credential_is_not_released_to_an_unrelated_host():
     """The consequence of the above, at the gate rather than below it."""
-    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+    trusted = ClusterConfig(
+        cluster_type="slurm", cluster_host="myhpc.example.edu", username="victim"
+    )
     target = CredentialTarget(
         hostname="totally-unrelated.attacker.example",
         username="victim",
@@ -3225,7 +3240,9 @@ def test_a_hostname_that_cannot_be_normalised_has_no_provenance(hostname):
     neither can be keyed in the taint map and neither can be compared by
     ``hostname_matches``.
     """
-    trusted = ClusterConfig(cluster_host="myhpc.example.edu", username="victim")
+    trusted = ClusterConfig(
+        cluster_type="slurm", cluster_host="myhpc.example.edu", username="victim"
+    )
 
     assert derived_provenance(trusted, hostname) is None
 
@@ -3297,6 +3314,7 @@ def test_the_default_release_sources_do_not_include_the_config_fields():
     from clustrix.credential_release import DEFAULT_RELEASE_SOURCES
 
     trusted = ClusterConfig(
+        cluster_type="slurm",
         cluster_host="chosen.example.edu",
         username="victim",
         password=SENTINEL_PASSWORD,
@@ -3329,11 +3347,15 @@ def test_a_rebuild_keeps_the_taint_that_was_recorded_and_drops_the_guess():
     """
     import dataclasses
 
-    read_by_a_loader = ClusterConfig(cluster_host="named-by-a-file.example")
+    read_by_a_loader = ClusterConfig(
+        cluster_type="slurm", cluster_host="named-by-a-file.example"
+    )
     config_module.set_config_source(read_by_a_loader, CONFIG_SOURCE_WORKING_DIRECTORY)
 
     with config_module.config_built_from_file(CONFIG_SOURCE_WORKING_DIRECTORY):
-        guessed = ClusterConfig(cluster_host="built-elsewhere.example")
+        guessed = ClusterConfig(
+            cluster_type="slurm", cluster_host="built-elsewhere.example"
+        )
 
     assert get_config_source(read_by_a_loader) == CONFIG_SOURCE_WORKING_DIRECTORY
     assert (
@@ -4493,7 +4515,11 @@ def test_the_container_image_you_chose_yourself_is_still_used():
     assert HFJobsManager(get_config())._image() == "myorg/cuda-python:3.11"
     assert (
         HFJobsManager(
-            ClusterConfig(cluster_host="hf-mine2.example", hf_image="myorg/x:1")
+            ClusterConfig(
+                cluster_type="slurm",
+                cluster_host="hf-mine2.example",
+                hf_image="myorg/x:1",
+            )
         )._image()
         == "myorg/x:1"
     )

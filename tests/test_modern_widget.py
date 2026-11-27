@@ -40,6 +40,8 @@ from clustrix.modern_notebook_widget import (  # noqa: E402
     ModernClustrixWidget,
     ENVIRONMENT_LINE_REMOVED,
     ENVIRONMENT_MASK,
+    PLAIN_ENVIRONMENT_LABEL,
+    SECRET_ENVIRONMENT_LABEL,
     _environment_problems,
     _merge_environment_edit,
     create_modern_cluster_widget,
@@ -222,6 +224,7 @@ EVERYTHING_SET = dict(
     hf_job_timeout="45m",
     conda_env_name="analysis",
     cleanup_on_success=False,
+    plain_environment_variables=["MKL_NUM_THREADS=2", "MODE=fast run"],
     environment_variables={"OMP_NUM_THREADS": "4", "URL": "a=b=c"},
     module_loads=["python/3.11", "cuda/12.1"],
     pre_execution_commands=["source /etc/profile", "ulimit -n 4096"],
@@ -304,6 +307,7 @@ class TestFormAndConfigurationAgree:
             "username",
             "password",
             "hf_token",
+            "plain_env_vars",
             "env_vars",
             "modules",
             "partition",
@@ -363,7 +367,7 @@ class TestEnvironmentVariables:
         assert pill(widget) == "invalid"
         assert "Cannot apply this configuration" in told
         assert "'export BAD'" in told and "BAD=2" not in told
-        assert "KEY=value" in told
+        assert "NAME=value" in told
         assert (
             get_config().environment_variables == before
         ), "an invalid form was applied anyway"
@@ -392,6 +396,307 @@ class TestEnvironmentVariables:
             "GOOD": "2",
             "PATH_EXTRA": "/opt/bin",
         }
+
+
+class TestPlainEnvironmentVariables:
+    """The field beside the masked one: shown as typed, saved with the
+    profile. ``OMP_NUM_THREADS=4`` used to read back as
+    ``OMP_NUM_THREADS=\u2022\u2022\u2022\u2022`` because there was only the
+    masked field to put it in. Setting ``value`` is what the browser does
+    when the field is left."""
+
+    TYPED = "OMP_NUM_THREADS=4\nMODE=fast run"
+    LINES = ["OMP_NUM_THREADS=4", "MODE=fast run"]
+    HIDDEN = "clustrix-sentinel-typed-into-the-other-variables-field"
+
+    def _store_text(self, widget):
+        """Every byte under the configuration directory, as text."""
+        root = pathlib.Path(widget.profile_manager.config_dir)
+        files = [path for path in root.rglob("*") if path.is_file()]
+        assert files, "nothing was written at all"
+        return "\n".join(path.read_text(errors="replace") for path in files)
+
+    def test_the_two_fields_are_told_apart_by_label_and_by_a_line_of_help(self):
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        shown = _in_layout(widget.get_widget())
+
+        assert controls["plain_env_vars"].description == PLAIN_ENVIRONMENT_LABEL
+        assert controls["env_vars"].description == SECRET_ENVIRONMENT_LABEL
+        assert PLAIN_ENVIRONMENT_LABEL != SECRET_ENVIRONMENT_LABEL
+        assert "secret" in SECRET_ENVIRONMENT_LABEL.lower()
+        assert "secret" not in PLAIN_ENVIRONMENT_LABEL.lower()
+        plain_help = controls["plain_env_hint"].value.lower()
+        secret_help = controls["env_hint"].value.lower()
+        assert "saved" in plain_help and "profile" in plain_help
+        assert "shown" in plain_help and "nothing secret" in plain_help
+        assert "never saved" in secret_help and "masked" in secret_help
+        for key in ("plain_env_vars", "plain_env_hint", "env_vars", "env_hint"):
+            assert id(controls[key]) in shown, f"{key} is not on screen"
+        assert "cx-pair" in controls["environment_row"]._dom_classes
+        assert ".cx-pair" in STYLESHEET and ".cx-stack" in STYLESHEET
+
+    def test_what_is_typed_is_shown_back_exactly_and_never_masked(self):
+        widget = ModernClustrixWidget()
+        field = widget.widgets["plain_env_vars"]
+
+        field.value = self.TYPED
+
+        assert field.value == self.TYPED
+        assert ENVIRONMENT_MASK[0] not in field.value
+        data = widget._config_data_from_widgets()
+        assert data["plain_environment_variables"] == self.LINES
+        assert data["environment_variables"] == {}
+        assert widget._environment == {}, "a plain value was held as a secret"
+        assert widget._validation_problems() == []
+
+    def test_apply_makes_them_live_and_they_reach_the_job_script(self, capsys):
+        from clustrix.utils import environment_setup_lines
+
+        widget = ModernClustrixWidget()
+        widget.widgets["plain_env_vars"].value = self.TYPED
+
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "applied", told
+        assert get_config().plain_environment_variables == self.LINES
+        assert get_config().environment_variables == {}
+        script = environment_setup_lines(get_config())
+        assert "export OMP_NUM_THREADS=4" in script
+        assert "export MODE='fast run'" in script
+        assert "never written to disk" not in told, "nothing was withheld"
+        assert widget.widgets["plain_env_vars"].value == self.TYPED
+        assert applied(widget) == "in use"
+
+    def test_they_are_on_disk_and_come_back_in_a_new_session(self, capsys):
+        from clustrix.profile_manager import ProfileManager
+
+        widget = ModernClustrixWidget()
+        name = widget.widgets["profile_dropdown"].value
+        widget.widgets["plain_env_vars"].value = self.TYPED
+        _click(widget, "apply_btn", capsys)
+
+        assert "OMP_NUM_THREADS=4" in self._store_text(widget)
+        next_session = ProfileManager(str(widget.profile_manager.config_dir))
+        assert next_session.load_profile(name).plain_environment_variables == (
+            self.LINES
+        )
+        reopened = ModernClustrixWidget(next_session)
+        reopened.widgets["profile_dropdown"].value = name
+        assert reopened.widgets["plain_env_vars"].value == self.TYPED
+
+    def test_the_secret_field_beside_it_still_reaches_no_disk_and_no_state(
+        self, capsys
+    ):
+        from clustrix.profile_manager import ProfileManager
+        from clustrix.utils import job_environment_variables
+
+        widget = ModernClustrixWidget()
+        name = widget.widgets["profile_dropdown"].value
+        widget.widgets["plain_env_vars"].value = self.TYPED
+        widget.widgets["env_vars"].value = f"DB_PASSWORD={self.HIDDEN}"
+
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "applied", told
+        assert job_environment_variables(get_config()) == {
+            "OMP_NUM_THREADS": "4",
+            "MODE": "fast run",
+            "DB_PASSWORD": self.HIDDEN,
+        }
+        assert widget.widgets["env_vars"].value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
+        assert "secret environment variables" in told, "said to be session-only"
+        state = _every_state(widget)
+        on_disk = self._store_text(widget)
+        assert self.HIDDEN not in told + state + on_disk
+        # The plain ones are in both, as promised under the field.
+        assert "OMP_NUM_THREADS=4" in state and "OMP_NUM_THREADS=4" in on_disk
+        reloaded = ProfileManager(str(widget.profile_manager.config_dir))
+        assert reloaded.load_profile(name).environment_variables == {}
+        assert reloaded.load_profile(name).plain_environment_variables == self.LINES
+
+    def test_an_export_carries_the_plain_ones_and_an_import_shows_them(
+        self, tmp_path, capsys
+    ):
+        target = tmp_path / "shared.yml"
+        first = ModernClustrixWidget()
+        name = first.widgets["profile_dropdown"].value
+        first.widgets["plain_env_vars"].value = self.TYPED
+        first.widgets["env_vars"].value = f"DB_PASSWORD={self.HIDDEN}"
+        _click(first, "apply_btn", capsys)
+        first.widgets["config_filename"].value = str(target)
+        _click(first, "save_btn", capsys)
+        assert pill(first) == "exported"
+
+        exported = target.read_text()
+        assert "OMP_NUM_THREADS=4" in exported and "MODE=fast run" in exported
+        assert self.HIDDEN not in exported and "DB_PASSWORD" not in exported
+
+        second = ModernClustrixWidget()
+        second.widgets["config_filename"].value = str(target)
+        _click(second, "load_btn", capsys)
+        assert pill(second) == "imported"
+        second.widgets["profile_dropdown"].value = name
+        assert second.widgets["plain_env_vars"].value == self.TYPED
+        assert second.widgets["env_vars"].value == ""
+
+    def test_an_edit_is_a_draft_until_applied_and_revert_discards_it(self, capsys):
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        first = controls["profile_dropdown"].value
+        other = next(
+            name for name in widget.profile_manager.get_profile_names() if name != first
+        )
+        controls["plain_env_vars"].value = self.TYPED
+        _click(widget, "apply_btn", capsys)
+        assert controls["revert_btn"].disabled is True
+
+        controls["plain_env_vars"].value = "OMP_NUM_THREADS=16"
+
+        assert applied(widget) == "not applied"
+        assert controls["revert_btn"].disabled is False
+        assert "Edited" in controls["profile_state"].value
+        assert get_config().plain_environment_variables == self.LINES
+        assert (
+            widget.profile_manager.load_profile(first).plain_environment_variables
+            == self.LINES
+        ), "an edit was written to the profile without Apply"
+        # The draft survives a look at another profile, which shows its own.
+        controls["profile_dropdown"].value = other
+        assert controls["plain_env_vars"].value == ""
+        controls["profile_dropdown"].value = first
+        assert controls["plain_env_vars"].value == "OMP_NUM_THREADS=16"
+
+        _click(widget, "revert_btn", capsys)
+
+        assert controls["plain_env_vars"].value == self.TYPED
+        assert applied(widget) == "in use"
+
+    def test_duplicate_copies_the_plain_ones_and_not_the_secret_ones(self, capsys):
+        widget = ModernClustrixWidget()
+        original = widget.widgets["profile_dropdown"].value
+        widget.widgets["plain_env_vars"].value = self.TYPED
+        widget.widgets["env_vars"].value = f"DB_PASSWORD={self.HIDDEN}"
+
+        told = _click(widget, "add_profile_btn", capsys)
+
+        copy = widget.widgets["profile_dropdown"].value
+        assert copy != original and pill(widget) == "profile created"
+        assert widget.widgets["plain_env_vars"].value == self.TYPED
+        assert widget.widgets["env_vars"].value == ""
+        assert widget._environment == {}
+        saved = widget.profile_manager.profiles[copy]
+        assert saved.plain_environment_variables == self.LINES
+        assert saved.environment_variables == {}
+        assert "secret environment variables" in told and "not copied" in told
+        assert self.HIDDEN not in told + _every_state(widget)
+
+    def test_a_name_in_both_fields_is_said_and_neither_is_dropped(self, capsys):
+        from clustrix.utils import job_environment_variables
+
+        widget = ModernClustrixWidget()
+        widget.widgets["plain_env_vars"].value = "REGION=eu-plain\nOMP_NUM_THREADS=4"
+        assert pill(widget) == ""
+
+        widget.widgets["env_vars"].value = f"REGION={self.HIDDEN}"
+
+        # Said as soon as the second field is left...
+        assert pill(widget) == "same name twice"
+        assert widget.widgets["plain_env_vars"].value == (
+            "REGION=eu-plain\nOMP_NUM_THREADS=4"
+        )
+        (note,) = widget._environment_overlap_notes()
+        assert note.startswith("REGION: set in both")
+        assert PLAIN_ENVIRONMENT_LABEL in note and SECRET_ENVIRONMENT_LABEL in note
+        assert "The job gets the secret value" in note
+        assert widget._validation_problems() == [], "it is not an error"
+
+        # ...and again by Apply, which keeps both.
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "applied", told
+        assert note in " ".join(told.split())
+        assert get_config().plain_environment_variables == [
+            "REGION=eu-plain",
+            "OMP_NUM_THREADS=4",
+        ]
+        assert get_config().environment_variables == {"REGION": self.HIDDEN}
+        assert job_environment_variables(get_config())["REGION"] == self.HIDDEN
+        assert self.HIDDEN not in told + _every_state(widget)
+
+        # Once the secret one is gone there is nothing left to say.
+        widget.widgets["env_vars"].value = ""
+        assert widget._environment_overlap_notes() == [] and pill(widget) == ""
+
+    def test_a_name_set_twice_in_the_plain_field_is_said(self):
+        widget = ModernClustrixWidget()
+
+        widget.widgets["plain_env_vars"].value = "A=1\nB=2\nA=3"
+
+        assert pill(widget) == "same name twice"
+        (note,) = widget._environment_overlap_notes()
+        assert note.startswith("A: set more than once in " + PLAIN_ENVIRONMENT_LABEL)
+        assert "last one" in note
+        assert widget.widgets["plain_env_vars"].value == "A=1\nB=2\nA=3"
+
+    @pytest.mark.parametrize(
+        "line",
+        ["NO_EQUALS", "=value", "1DIGIT=x", "HAS-DASH=x", "export BAD=2"],
+    )
+    def test_a_line_that_is_not_name_equals_value_is_refused_and_named(
+        self, line, capsys
+    ):
+        widget = ModernClustrixWidget()
+        field = widget.widgets["plain_env_vars"]
+        field.value = f"GOOD=1\n{line}\nALSO=2"
+        before = list(get_config().plain_environment_variables)
+
+        ((key, problem),) = widget._validation_problems()
+        told = _click(widget, "apply_btn", capsys)
+
+        assert key == "plain_env_vars"
+        assert repr(line) in problem and PLAIN_ENVIRONMENT_LABEL in problem
+        assert "NAME=value" in problem
+        assert pill(widget) == "invalid"
+        assert "Cannot apply this configuration" in told
+        assert repr(line) in " ".join(told.split())
+        assert "cx-invalid" in field._dom_classes
+        assert "cx-invalid" not in widget.widgets["env_vars"]._dom_classes
+        assert get_config().plain_environment_variables == before
+        # Nothing typed is taken away: the line is there to be corrected.
+        assert field.value == f"GOOD=1\n{line}\nALSO=2"
+
+        field.value = "GOOD=1\nALSO=2"
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "applied", told
+        assert get_config().plain_environment_variables == ["GOOD=1", "ALSO=2"]
+
+    def test_a_bad_line_in_the_secret_field_is_still_not_echoed(self, capsys):
+        """The plain field quotes a bad line; the secret one must not."""
+        widget = ModernClustrixWidget()
+        widget.widgets["plain_env_vars"].value = "also not a variable"
+        widget.widgets["env_vars"].value = f"oops {self.HIDDEN}"
+
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "invalid"
+        assert "'also not a variable'" in " ".join(told.split())
+        assert self.HIDDEN not in told + _every_state(widget)
+
+    def test_a_configuration_set_in_code_opens_in_the_right_fields(self):
+        configure(
+            cluster_type="local",
+            plain_environment_variables=["OMP_NUM_THREADS=4"],
+            environment_variables={"DB_PASSWORD": self.HIDDEN},
+        )
+
+        widget = ModernClustrixWidget()
+
+        assert widget.widgets["plain_env_vars"].value == "OMP_NUM_THREADS=4"
+        assert widget.widgets["env_vars"].value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
+        assert applied(widget) == "in use"
+        assert self.HIDDEN not in _every_state(widget)
 
 
 class TestModulesAndCommands:
@@ -704,6 +1009,7 @@ class TestTheTwoIndicators:
             ("conda_env", "analysis"),
             ("clone_env", False),
             ("cleanup", False),
+            ("plain_env_vars", "A=1"),
             ("env_vars", "A=1"),
             ("modules", "gcc"),
             ("pre_exec_commands", "true"),

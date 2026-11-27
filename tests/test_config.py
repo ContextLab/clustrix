@@ -19,7 +19,7 @@ class TestClusterConfig:
     def test_default_initialization(self):
         """Test default configuration values."""
         config = ClusterConfig()
-        assert config.cluster_type == "slurm"
+        assert config.cluster_type == "local"
         assert config.cluster_port == 22
         assert config.default_cores == 4
         assert config.default_memory == "8GB"
@@ -359,3 +359,133 @@ class TestRemovedBackendsAreExplained:
             load_config(str(config_path))
 
         assert "did you mean cluster_host?" in str(excinfo.value)
+
+
+class TestTheDefaultBackendIsThisMachine:
+    """``cluster_type`` defaults to ``"local"``. It was ``"slurm"``, which
+    also ran on this machine whenever no host was set."""
+
+    def test_nothing_configured_means_local(self):
+        assert ClusterConfig().cluster_type == "local"
+        assert type(ClusterConfig().cluster_type) is str
+
+    @pytest.mark.parametrize("backend", ["ssh", "slurm"])
+    def test_a_host_with_its_backend_named_is_accepted(self, backend):
+        config = ClusterConfig(cluster_host="login.example.edu", cluster_type=backend)
+
+        assert (config.cluster_type, config.cluster_host) == (
+            backend,
+            "login.example.edu",
+        )
+
+    def test_a_host_with_no_backend_is_refused_not_run_here(self):
+        """It used to mean SLURM. Taken as local, the host would be ignored
+        and the work would run on the submitting machine."""
+        with pytest.raises(ValueError) as refused:
+            ClusterConfig(cluster_host="login.example.edu")
+
+        message = str(refused.value)
+        assert "cluster_type='ssh'" in message and "cluster_type='slurm'" in message
+        assert "would run on this machine" in message
+
+    def test_configure_refuses_a_host_alone_and_changes_nothing(self):
+        configure(cluster_type="local", cluster_host=None)
+
+        with pytest.raises(ValueError, match=r"configure\(\) names a cluster_host"):
+            configure(cluster_host="login.example.edu", username="alice")
+
+        assert get_config().cluster_host is None
+        assert get_config().username != "alice"
+
+    def test_configure_accepts_a_host_once_a_backend_is_set(self):
+        configure(cluster_type="ssh", cluster_host="a.example.edu")
+        configure(cluster_host="b.example.edu")
+
+        assert get_config().cluster_host == "b.example.edu"
+        assert get_config().cluster_type == "ssh"
+
+    def test_a_file_that_names_a_host_alone_is_refused(self, tmp_path):
+        path = tmp_path / "clustrix.yml"
+        path.write_text("cluster_host: login.example.edu\nusername: alice\n")
+
+        with pytest.raises(ValueError, match="names a cluster_host without"):
+            load_config(str(path))
+
+    def test_local_with_a_host_is_allowed_when_it_is_written_down(self):
+        config = ClusterConfig(cluster_type="local", cluster_host="localhost")
+
+        assert config.cluster_type == "local"
+
+
+class TestPlainEnvironmentVariables:
+    """``NAME=value`` lines the user has said are not secret: saved and
+    shown, unlike ``environment_variables``."""
+
+    def test_they_are_saved_and_the_other_kind_is_not(self, tmp_path):
+        config = ClusterConfig(
+            plain_environment_variables=["OMP_NUM_THREADS=4", "MODE=fast run"],
+            environment_variables={"API_TOKEN": "s3cret-value"},
+        )
+        path = tmp_path / "saved.yml"
+
+        config.save_to_file(str(path))
+
+        text = path.read_text()
+        assert "OMP_NUM_THREADS=4" in text and "MODE=fast run" in text
+        assert "s3cret-value" not in text and "API_TOKEN" not in text
+        assert ClusterConfig.from_file_content(
+            yaml.safe_load(text), "explicit-file"
+        ).plain_environment_variables == ["OMP_NUM_THREADS=4", "MODE=fast run"]
+
+    def test_a_job_gets_both_and_the_hidden_value_wins(self):
+        from clustrix.utils import environment_setup_lines, job_environment_variables
+
+        config = ClusterConfig(
+            plain_environment_variables=["A=1", "SHARED=plain", "EMPTY="],
+            environment_variables={"SHARED": "hidden", "B": "2"},
+        )
+
+        assert job_environment_variables(config) == {
+            "A": "1",
+            "SHARED": "hidden",
+            "EMPTY": "",
+            "B": "2",
+        }
+        assert environment_setup_lines(config) == [
+            "export A=1",
+            "export SHARED=hidden",
+            "export EMPTY=''",
+            "export B=2",
+        ]
+
+    @pytest.mark.parametrize("line", ["NOEQUALS", "1BAD=x", "A B=x", "=x", 7])
+    def test_an_entry_that_is_not_name_equals_value_is_refused(self, line):
+        with pytest.raises(ValueError, match="not NAME=value"):
+            ClusterConfig(plain_environment_variables=[line])
+        with pytest.raises(ValueError, match="not NAME=value"):
+            configure(plain_environment_variables=[line])
+
+    def test_a_value_is_quoted_whatever_it_holds(self):
+        from clustrix.utils import environment_setup_lines
+
+        config = ClusterConfig(plain_environment_variables=["X=1; touch /tmp/pwn "])
+
+        assert environment_setup_lines(config) == ["export X='1; touch /tmp/pwn '"]
+
+    def test_none_means_none_set(self):
+        configure(plain_environment_variables=None)
+
+        assert get_config().plain_environment_variables == []
+
+
+class TestAutoStageOnMismatch:
+    def test_only_the_two_choices_are_accepted(self):
+        assert ClusterConfig().auto_stage_on_mismatch == "error"
+        assert (
+            ClusterConfig(auto_stage_on_mismatch="use_cluster").auto_stage_on_mismatch
+            == "use_cluster"
+        )
+        with pytest.raises(ValueError, match="'error', 'use_cluster'"):
+            ClusterConfig(auto_stage_on_mismatch="upload")
+        with pytest.raises(ValueError, match="'error', 'use_cluster'"):
+            configure(auto_stage_on_mismatch="ignore")

@@ -74,6 +74,7 @@ def ssh_server(tmp_path):
 
 def _config(server, **overrides):
     kwargs = dict(
+        cluster_type="ssh",
         cluster_host=server.host,
         cluster_port=server.port,
         username="testuser",
@@ -110,7 +111,7 @@ class TestSSHKeyAutomation:
 
     def test_setup_ssh_keys_missing_username(self):
         """Test setup_ssh_keys with missing username."""
-        config = ClusterConfig(cluster_host="test.example.com")
+        config = ClusterConfig(cluster_type="slurm", cluster_host="test.example.com")
 
         result = setup_ssh_keys(config, password="test")
 

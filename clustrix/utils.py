@@ -2948,6 +2948,23 @@ def module_load_lines(config) -> list:
     return lines
 
 
+def job_environment_variables(config) -> Dict[str, str]:
+    """Every variable a job is given, from both settings that name them.
+
+    ``plain_environment_variables`` first, then ``environment_variables``,
+    so a name in both takes the value from the latter: the one the user
+    kept out of sight is the one they meant to win.
+    """
+    from .config import split_plain_environment_variable
+
+    variables: Dict[str, str] = dict(
+        split_plain_environment_variable(line)
+        for line in getattr(config, "plain_environment_variables", None) or ()
+    )
+    variables.update(getattr(config, "environment_variables", None) or {})
+    return variables
+
+
 def environment_setup_lines(config) -> list:
     """The module-load / export / pre-execution lines every generator emits.
 
@@ -2959,7 +2976,8 @@ def environment_setup_lines(config) -> list:
       and the module name is its bare argument, so quoting would change what
       is loaded. They are validated against a strict allowlist instead, and a
       metacharacter is refused by name.
-    * ``environment_variables`` names cannot be quoted -- ``export NAME=``
+    * ``environment_variables`` and ``plain_environment_variables`` names
+      cannot be quoted -- ``export NAME=``
       needs the bare name -- so they are validated as shell identifiers. The
       values beside them are quoted, which also makes a value containing a
       space work for the first time.
@@ -2968,7 +2986,7 @@ def environment_setup_lines(config) -> list:
       who writes a command there is asking for it to run.
     """
     lines: list = module_load_lines(config)
-    for var, value in (getattr(config, "environment_variables", None) or {}).items():
+    for var, value in job_environment_variables(config).items():
         lines.append(f"export {validate_env_var_name(var)}={shlex.quote(str(value))}")
     for cmd in getattr(config, "pre_execution_commands", None) or []:
         lines.append(cmd)

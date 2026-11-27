@@ -50,6 +50,7 @@ from .config import (
     get_config,
     get_config_dir,
     split_config_kwargs,
+    split_plain_environment_variable,
 )
 from .utils import MEMORY_PATTERN
 from .profile_manager import ProfileManager, _mkdir_private
@@ -96,6 +97,7 @@ WIDGET_MANAGED_FIELDS = frozenset(
         "conda_env_name",
         "replicate_local_environment",
         "cleanup_on_success",
+        "plain_environment_variables",
         "environment_variables",
         "module_loads",
         "pre_execution_commands",
@@ -192,6 +194,7 @@ FORM_CONTROLS = (
     "conda_env",
     "clone_env",
     "cleanup",
+    "plain_env_vars",
     "env_vars",
     "modules",
     "pre_exec_commands",
@@ -227,12 +230,28 @@ def _is_walltime(text: str) -> bool:
     return all(part is None or int(part) < 60 for part in match.groups()[2:])
 
 
-#: What the environment-variable field shows in place of a value it holds.
+#: The two environment-variable fields, by the names on their labels. Every
+#: message about either says which one it means in these words.
+PLAIN_ENVIRONMENT_LABEL = "Environment variables"
+SECRET_ENVIRONMENT_LABEL = "Secret environment variables"
+
+#: The line under each of the two fields: where its contents go.
+PLAIN_ENVIRONMENT_HINT = (
+    "<b>Saved</b> in the profile file and shown here as typed, so put "
+    "nothing secret in it."
+)
+SECRET_ENVIRONMENT_HINT = (
+    "<b>Never saved.</b> Held in memory for this session and masked once you "
+    "leave the field. Delete a line to forget it."
+)
+
+#: What the secret environment-variable field shows in place of a value it
+#: holds.
 ENVIRONMENT_MASK = "\u2022\u2022\u2022\u2022"
 
 #: Said when a line had to be dropped without being shown back.
 ENVIRONMENT_LINE_REMOVED = (
-    "A line in the environment variables was not NAME=value. It was removed "
+    f"A line in {SECRET_ENVIRONMENT_LABEL} was not NAME=value. It was removed "
     "without being shown again, in case it was a secret: write it as "
     "NAME=value."
 )
@@ -241,7 +260,7 @@ ENVIRONMENT_LINE_REMOVED = (
 def _merge_environment_edit(
     text: str, held: Mapping[str, Optional[str]]
 ) -> Tuple[Dict[str, Optional[str]], List[str]]:
-    """Fold what is now in the environment-variable field into what is held.
+    """Fold what is now in the secret-variable field into what is held.
 
     The field never shows a value back: once a line is committed its value
     is kept in memory and the line reads ``NAME=\u2022\u2022\u2022\u2022`` (see
@@ -309,14 +328,80 @@ def _environment_problems(held: Mapping[str, Optional[str]]) -> List[str]:
     for name, value in held.items():
         if not ENVIRONMENT_VARIABLE_NAME.match(name):
             problems.append(
-                f"Environment variable name {name!r} is not KEY=value with a "
-                "name made of letters, digits and underscores"
+                f"{SECRET_ENVIRONMENT_LABEL}: the name {name!r} is not "
+                "NAME=value with a name made of letters, digits and "
+                "underscores"
             )
         elif value is None:
             problems.append(
-                f"Environment variable {name} has no value: write {name}=value"
+                f"{SECRET_ENVIRONMENT_LABEL}: {name} has no value: write "
+                f"{name}=value"
             )
     return problems
+
+
+def _plain_environment_lines(text: str) -> List[str]:
+    """The entries typed into the plain-variable field, one per line."""
+    return [line.strip() for line in text.splitlines() if line.strip()]
+
+
+def _plain_environment_names(lines: Iterable[str]) -> List[str]:
+    """The name each well-formed ``NAME=value`` line sets, in order."""
+    names = []
+    for line in lines:
+        try:
+            names.append(split_plain_environment_variable(line)[0])
+        except ValueError:
+            continue  # reported by _plain_environment_problems
+    return names
+
+
+def _plain_environment_problems(lines: Iterable[str]) -> List[str]:
+    """What is wrong with the plain variables, quoting each bad line.
+
+    The line is shown back: this field is saved and displayed as typed, so
+    nothing in it is being kept out of sight.
+    """
+    problems = []
+    for line in lines:
+        try:
+            split_plain_environment_variable(line)
+        except ValueError:
+            problems.append(
+                f"{PLAIN_ENVIRONMENT_LABEL}: the line {line!r} is not "
+                "NAME=value with a name made of letters, digits and "
+                "underscores"
+            )
+    return problems
+
+
+def _names_in_words(names: List[str]) -> str:
+    return names[0] if len(names) == 1 else f"{', '.join(names[:-1])} and {names[-1]}"
+
+
+def _repeated_name_notes(plain: List[str], secret: Mapping[str, Any]) -> List[str]:
+    """What the user should know about a name that is set more than once.
+
+    Nothing here is an error -- the configuration accepts both -- but one of
+    the two values is not the one the job gets, and that must not be a
+    surprise.
+    """
+    notes = []
+    repeated = sorted({name for name in plain if plain.count(name) > 1})
+    if repeated:
+        notes.append(
+            f"{_names_in_words(repeated)}: set more than once in "
+            f"{PLAIN_ENVIRONMENT_LABEL}. The job gets the last one."
+        )
+    shared = [name for name in dict.fromkeys(plain) if name in secret]
+    if shared:
+        notes.append(
+            f"{_names_in_words(shared)}: set in both {PLAIN_ENVIRONMENT_LABEL} "
+            f"and {SECRET_ENVIRONMENT_LABEL}. The job gets the secret value; "
+            "the other is saved with the profile and used only when no secret "
+            "one is held."
+        )
+    return notes
 
 
 class ModernClustrixWidget:
@@ -357,12 +442,13 @@ class ModernClustrixWidget:
         #: Automatically"), and a password left in the field would be saved
         #: with it, in plain text.
         self._secrets: Dict[str, str] = {key: "" for key in SECRET_PLACEHOLDERS}
-        #: The environment variables, by name as typed, in the order typed;
-        #: ``None`` for a name still waiting for its value. Held here for the
-        #: same reason as ``_secrets`` -- ``DB_PASSWORD=...`` is a password --
-        #: while the field shows each name with its value masked. A name is
-        #: not a secret and stays readable; a value never goes back into
-        #: the field.
+        #: The secret environment variables, by name as typed, in the order
+        #: typed; ``None`` for a name still waiting for its value. Held here
+        #: for the same reason as ``_secrets`` -- ``DB_PASSWORD=...`` is a
+        #: password -- while the field shows each name with its value
+        #: masked. A name is not a secret and stays readable; a value never
+        #: goes back into the field. The *plain* variables are not here:
+        #: they live in their own field like any other text.
         self._environment: Dict[str, Optional[str]] = {}
         #: What the last edit of that field did that the user has to be
         #: told once: a line removed, a mask typed into.
@@ -534,15 +620,28 @@ class ModernClustrixWidget:
             value=True,
             indent=False,
         )
+        # Two fields, because one cannot be both readable and safe: what is
+        # typed into the first is saved and shown, what is typed into the
+        # second is neither.
+        w["plain_env_vars"] = widgets.Textarea(
+            description=PLAIN_ENVIRONMENT_LABEL,
+            placeholder="NAME=value, one per line",
+            rows=3,
+            continuous_update=False,
+        )
+        w["plain_env_hint"] = widgets.HTML(PLAIN_ENVIRONMENT_HINT)
         w["env_vars"] = widgets.Textarea(
-            description="Environment variables (this session only, never saved)",
-            placeholder="KEY=value, one per line",
+            description=SECRET_ENVIRONMENT_LABEL,
+            placeholder="NAME=value, one per line; never saved",
             rows=3,
             # One report when the field is left: its values are moved out
             # and masked on that report, which must not happen mid-word.
             continuous_update=False,
         )
         w["env_vars"].observe(self._on_environment_edit, names="value")
+        w["env_hint"] = widgets.HTML(SECRET_ENVIRONMENT_HINT)
+        for key in ("plain_env_hint", "env_hint"):
+            w[key].add_class("cx-hint")
         w["modules"] = self._text(
             "Modules to load", "space-separated, e.g. python/3.11 cuda", mono=True
         )
@@ -588,6 +687,7 @@ class ModernClustrixWidget:
             "hf_flavor",
             "hf_token",
             "package_manager",
+            "plain_env_vars",
             "env_vars",
             "pre_exec_commands",
         ):
@@ -614,6 +714,12 @@ class ModernClustrixWidget:
         self.widgets[key].layout.flex = "1 1 auto"
         box = widgets.Box([self.widgets[key], self.widgets[f"{key}_forget"]])
         box.add_class("cx-secret")
+        return box
+
+    def _with_hint(self, key: str, hint_key: str):
+        """A field with its one line of explanation directly under it."""
+        box = widgets.Box([self.widgets[key], self.widgets[hint_key]])
+        box.add_class("cx-stack")
         return box
 
     @staticmethod
@@ -697,6 +803,11 @@ class ModernClustrixWidget:
             self._row((w["hf_allow_gpu"], "1 1 240px")),
         )
 
+        w["environment_row"] = self._row(
+            (self._with_hint("plain_env_vars", "plain_env_hint"), "1 1 240px"),
+            (self._with_hint("env_vars", "env_hint"), "1 1 240px"),
+        )
+        w["environment_row"].add_class("cx-pair")
         w["advanced_section"] = self._section(
             "Advanced",
             self._row(
@@ -706,10 +817,8 @@ class ModernClustrixWidget:
             ),
             self._row((w["clone_env"], "1 1 240px"), (w["cleanup"], "1 1 240px")),
             self._row((w["modules"], "1 1 240px")),
-            self._row(
-                (w["env_vars"], "1 1 240px"),
-                (w["pre_exec_commands"], "1 1 240px"),
-            ),
+            w["environment_row"],
+            self._row((w["pre_exec_commands"], "1 1 240px")),
             self._row(
                 (w["config_filename"], "1 1 240px"),
                 (self._group(w["save_btn"], w["load_btn"]), fixed),
@@ -895,9 +1004,14 @@ class ModernClustrixWidget:
         # Whatever the console says was about the form as it was.
         self._clear_result()
         self._mark_invalid(())
-        if change.get("owner") is self.widgets["env_vars"] and self._environment_notes:
+        owner = change.get("owner")
+        if owner is self.widgets["env_vars"] and self._environment_notes:
             self._report("error", "check the variables", *self._environment_notes)
             self._mark_invalid(("env_vars",))
+        elif owner in (self.widgets["env_vars"], self.widgets["plain_env_vars"]):
+            overlap = self._environment_overlap_notes()
+            if overlap:
+                self._report("idle", "same name twice", *overlap)
         self._refresh_state()
 
     def _update_ui_for_cluster_type(self) -> None:
@@ -1033,16 +1147,17 @@ class ModernClustrixWidget:
     def _session_only_note(self) -> Optional[str]:
         """Name what Apply did *not* write to disk, if anything.
 
-        Passwords, tokens and environment variables are withheld from the
-        profile store: clustrix cannot tell a setting from a credential in a
-        variable's value, so it writes none of them.
+        Passwords, tokens and the secret environment variables are withheld
+        from the profile store: clustrix cannot tell a setting from a
+        credential in a variable's value, so it writes none of them. The
+        plain environment variables are written, and are not named here.
         """
         held = [
             label
             for label, value in (
                 ("the password", self.secret("password")),
                 ("the token", self.secret("hf_token")),
-                ("environment variables", self._environment),
+                ("secret environment variables", self._environment),
             )
             if value
         ]
@@ -1144,17 +1259,26 @@ class ModernClustrixWidget:
             return
         try:
             # What is on screen becomes the new profile; the one it was
-            # copied from keeps what it had. A password or token is the
-            # exception: it was entered for one profile, and a copy that
-            # quietly holds it too would offer it to whatever host the copy
-            # is then pointed at.
+            # copied from keeps what it had. A password, a token and the
+            # secret environment variables are the exception: they were
+            # entered for one profile, and a copy that quietly holds them
+            # too would offer them to whatever host the copy is then pointed
+            # at. The plain environment variables are settings like any
+            # other and go with the copy.
             left_behind = [
                 label
-                for label, key in (("password", "password"), ("token", "hf_token"))
-                if self.secret(key)
+                for label, held in (
+                    ("password", self.secret("password")),
+                    ("token", self.secret("hf_token")),
+                    ("secret environment variables", self._environment),
+                )
+                if held
             ]
             config = replace(
-                self._get_config_from_widgets(), password=None, hf_token=None
+                self._get_config_from_widgets(),
+                password=None,
+                hf_token=None,
+                environment_variables={},
             )
             new_name = self.profile_manager.clone_profile(current)
             self._save_profile(new_name, config)
@@ -1172,9 +1296,9 @@ class ModernClustrixWidget:
             "Give it a name of your own in 'Rename to'.",
             *(
                 [
-                    f"The {' and '.join(left_behind)} entered for '{current}' "
-                    "was not copied and is no longer held: enter it again "
-                    "where it is needed."
+                    f"The {_names_in_words(left_behind)} entered for "
+                    f"'{current}': not copied, and no longer held. Enter "
+                    "again what is needed."
                 ]
                 if left_behind
                 else []
@@ -1459,6 +1583,8 @@ class ModernClustrixWidget:
             note = self._session_only_note()
             if note:
                 print(note)
+            for overlap in self._environment_overlap_notes():
+                print(overlap)
             if unrecognised:
                 print("Ignored, not a clustrix setting: " + ", ".join(unrecognised))
             self.set_status("ok", "applied")
@@ -1675,7 +1801,7 @@ class ModernClustrixWidget:
             field.value = ""
 
     def _on_environment_edit(self, change) -> None:
-        """Move what was typed into the variables field out of it."""
+        """Move what was typed into the secret-variables field out of it."""
         if self._writing_environment:
             return
         self._environment, self._environment_notes = _merge_environment_edit(
@@ -1684,7 +1810,7 @@ class ModernClustrixWidget:
         self._show_environment()
 
     def _show_environment(self) -> None:
-        """Write the held variables into their field, names only.
+        """Write the held secret variables into their field, names only.
 
         Not an edit: the observers that treat a change of the field as one
         are told to look away while it is written.
@@ -1702,12 +1828,29 @@ class ModernClustrixWidget:
             self._suspend_profile_capture = capturing
 
     def _environment_variables(self) -> Dict[str, str]:
-        """The held variables a job can be given: a valid name and a value."""
+        """The held secret variables a job can be given: a valid name and a
+        value."""
         return {
             name: value
             for name, value in self._environment.items()
             if value is not None and ENVIRONMENT_VARIABLE_NAME.match(name)
         }
+
+    def _plain_environment_variables(self) -> List[str]:
+        """The plain variables as typed, one ``NAME=value`` per entry.
+
+        Every line, well-formed or not: this is the draft, and a mistyped
+        line has to survive a profile switch to be corrected. Validation is
+        what refuses it, and ``ClusterConfig`` refuses it again.
+        """
+        return _plain_environment_lines(self.widgets["plain_env_vars"].value)
+
+    def _environment_overlap_notes(self) -> List[str]:
+        """What to say about a variable the two fields set between them."""
+        return _repeated_name_notes(
+            _plain_environment_names(self._plain_environment_variables()),
+            self._environment_variables(),
+        )
 
     def _on_auto_setup_ssh(self, button) -> None:
         """Generate an SSH key and install it on the host on screen."""
@@ -1854,6 +1997,8 @@ class ModernClustrixWidget:
         # What an edit *did* to the field (``_environment_notes``) was said
         # when it happened and is not repeated here: the field is consistent
         # again, and refusing Apply over it would leave no way to proceed.
+        for problem in _plain_environment_problems(self._plain_environment_variables()):
+            problems.append(("plain_env_vars", problem))
         for problem in _environment_problems(self._environment):
             problems.append(("env_vars", problem))
 
@@ -2025,6 +2170,7 @@ class ModernClustrixWidget:
             "conda_env_name": text("conda_env") or None,
             "replicate_local_environment": bool(w["clone_env"].value),
             "cleanup_on_success": bool(w["cleanup"].value),
+            "plain_environment_variables": self._plain_environment_variables(),
             # Malformed lines are reported by validation; the valid ones are
             # still recorded so a typo does not cost the rest.
             "environment_variables": self._environment_variables(),
@@ -2095,6 +2241,9 @@ class ModernClustrixWidget:
         w["conda_env"].value = data.get("conda_env_name") or ""
         w["clone_env"].value = bool(data.get("replicate_local_environment", True))
         w["cleanup"].value = bool(data.get("cleanup_on_success", True))
+        w["plain_env_vars"].value = "\n".join(
+            data.get("plain_environment_variables") or []
+        )
         self._environment = dict(data.get("environment_variables") or {})
         self._environment_notes = []
         self._show_environment()

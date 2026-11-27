@@ -295,13 +295,17 @@ class TestClusterDecorator:
         assert mode == "local"
 
         # Test remote mode when cluster host is set
-        config_with_host = ClusterConfig(cluster_host="test.cluster.com")
+        config_with_host = ClusterConfig(
+            cluster_type="slurm", cluster_host="test.cluster.com"
+        )
         mode = _choose_execution_mode(config_with_host, lambda: None, (), {})
         assert mode == "remote"
 
         # Test local mode when prefer_local_parallel is set
         config_prefer_local = ClusterConfig(
-            cluster_host="test.cluster.com", prefer_local_parallel=True
+            cluster_type="slurm",
+            cluster_host="test.cluster.com",
+            prefer_local_parallel=True,
         )
         mode = _choose_execution_mode(config_prefer_local, lambda: None, (), {})
         assert mode == "local"

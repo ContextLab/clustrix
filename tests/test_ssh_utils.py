@@ -70,6 +70,7 @@ class TestDetectExistingSSHKey:
         root.mkdir()
         with LocalSSHServer(root=root, password="unused") as server:
             config = ClusterConfig(
+                cluster_type="slurm",
                 cluster_host=server.host,
                 cluster_port=server.port,
                 username="testuser",

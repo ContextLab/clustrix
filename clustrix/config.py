@@ -73,6 +73,53 @@ DEAD_BUT_ACCEPTED_FIELDS: Dict[str, str] = {
 }
 
 
+#: The backend when none is named: this machine.
+DEFAULT_CLUSTER_TYPE = "local"
+
+#: Choices for ``ClusterConfig.auto_stage_on_mismatch``.
+AUTO_STAGE_ON_MISMATCH = ("error", "use_cluster")
+
+_PLAIN_VARIABLE = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)=(.*)", re.DOTALL)
+
+
+def split_plain_environment_variable(
+    line: Any, source: str = "plain_environment_variables"
+) -> Tuple[str, str]:
+    """``("NAME", "value")`` from one ``NAME=value`` entry, or a refusal.
+
+    The name reaches ``export`` bare, so it must be a shell identifier; the
+    value is quoted where it is used and may be anything, empty included.
+    """
+    match = _PLAIN_VARIABLE.fullmatch(line) if isinstance(line, str) else None
+    if match is None:
+        raise ValueError(
+            f"{source} has an entry that is not NAME=value: {line!r}. The "
+            "name must start with a letter or underscore and contain only "
+            "letters, digits and underscores."
+        )
+    return match.group(1), match.group(2)
+
+
+class _BackendNotNamed(str):
+    """The default ``cluster_type``, told apart from one that was written.
+
+    ``ClusterConfig(cluster_host="login.example.edu")`` and
+    ``ClusterConfig(cluster_host=..., cluster_type="local")`` hold equal
+    strings; only the second is somebody's decision. ``__post_init__``
+    replaces this with a plain ``str``.
+    """
+
+
+def _refuse_a_host_with_no_backend(source: str) -> None:
+    raise ValueError(
+        f"{source} names a cluster_host without a cluster_type, and the "
+        f"default cluster_type is {DEFAULT_CLUSTER_TYPE!r}: the host would be "
+        "ignored and the work would run on this machine. Say which it is: "
+        "cluster_type='ssh' for one remote machine, cluster_type='slurm' for "
+        "a SLURM scheduler. (Before 0.2.0 the default was 'slurm'.)"
+    )
+
+
 @dataclass
 class ClusterConfig:
     """Configuration settings for cluster execution."""
@@ -89,7 +136,13 @@ class ClusterConfig:
     # must read that tuple rather than keeping its own copy: the CLI was
     # missing "huggingface" entirely, so a working backend could not be
     # selected from the command line at all.
-    cluster_type: str = "slurm"
+    #
+    # "local" is the default: with nothing configured, @cluster runs on this
+    # machine, and the default says so. It used to be "slurm", which also
+    # ran on this machine whenever no host was set. A host named *without*
+    # a backend is refused (see _refuse_a_host_with_no_backend): the host
+    # would be ignored, and the work would run on a laptop.
+    cluster_type: str = _BackendNotNamed(DEFAULT_CLUSTER_TYPE)
     cluster_host: Optional[str] = None
     cluster_port: int = 22
 
@@ -177,6 +230,11 @@ class ClusterConfig:
     # asked. Above it the call stops and lists the sizes: the right answer
     # for a large dataset is to find it on the cluster, not to copy it.
     auto_stage_max_bytes: int = 1_000_000_000
+    # What to do when an input exists on the cluster at the same path and
+    # is not the same data. "error" (default) stops the call and says what
+    # differs. "use_cluster" warns, says what differs, and runs the job on
+    # the cluster's copy as it is.
+    auto_stage_on_mismatch: str = "error"
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
     async_submit: bool = False  # Use asynchronous job submission
@@ -201,6 +259,15 @@ class ClusterConfig:
     ssh_host_key_policy: str = "reject"
 
     # Advanced settings
+    #
+    # Two ways to set a variable for a job, kept apart on purpose.
+    # ``plain_environment_variables`` is a list of ``NAME=value`` lines the
+    # user has said are not secret: shown as typed, and saved in profiles
+    # and configuration files like ``module_loads``.
+    # ``environment_variables`` is for values that may be secret: never
+    # written to disk unless asked (UNCLASSIFIABLE_FIELDS), masked in the
+    # widget. A name in both takes the value in ``environment_variables``.
+    plain_environment_variables: Optional[List[str]] = None
     environment_variables: Optional[Dict[str, str]] = None
     module_loads: Optional[list] = None
     pre_execution_commands: Optional[list] = None
@@ -272,6 +339,8 @@ class ClusterConfig:
 
     def __post_init__(self, ssh_port: Optional[int] = None):
         self.cluster_port = _resolve_deprecated_ssh_port(ssh_port, self.cluster_port)
+        backend_named = type(self.cluster_type) is not _BackendNotNamed
+        self.cluster_type = str(self.cluster_type)
         for name, empty in _EMPTY_WHEN_NONE.items():
             if getattr(self, name) is None:
                 setattr(self, name, empty())
@@ -279,6 +348,10 @@ class ClusterConfig:
         self._warn_about_dead_fields()
 
         _validate_config_values({f.name: getattr(self, f.name) for f in fields(self)})
+        # After the values are known to be values: a host that is not a
+        # hostname is the first thing to say about it.
+        if self.cluster_host and not backend_named:
+            _refuse_a_host_with_no_backend("This configuration")
 
         # Where this configuration came from. A ``ClusterConfig(...)`` call is
         # somebody's Python, so the default is the trusted end of the scale --
@@ -575,6 +648,7 @@ def _validate_config_mapping(mapping: Mapping[str, Any], origin: str) -> None:
 #: leave a literal ``None`` where every reader calls ``.items()``.
 _EMPTY_WHEN_NONE: Dict[str, Any] = {
     "environment_variables": dict,
+    "plain_environment_variables": list,
     "module_loads": list,
     "pre_execution_commands": list,
     "cluster_packages": list,
@@ -722,6 +796,18 @@ def _validate_config_values(values: Mapping[str, Any], origin: str = "") -> None
 
     if "cluster_type" in values:
         validate_cluster_type(values["cluster_type"], source=label("cluster_type"))
+
+    if values.get("auto_stage_on_mismatch", "error") not in AUTO_STAGE_ON_MISMATCH:
+        raise ValueError(
+            f"{label('auto_stage_on_mismatch')}="
+            f"{values['auto_stage_on_mismatch']!r} is not valid: use one of "
+            f"{', '.join(repr(choice) for choice in AUTO_STAGE_ON_MISMATCH)}."
+        )
+
+    for line in values.get("plain_environment_variables") or ():
+        split_plain_environment_variable(
+            line, source=label("plain_environment_variables")
+        )
 
     if "conda_env_name" in values:
         validate_conda_env_name(
@@ -1937,6 +2023,12 @@ def configure(**kwargs) -> None:
             if name in kwargs and kwargs[name] is None:
                 kwargs[name] = empty()
         _validate_config_values(kwargs)
+        if (
+            kwargs.get("cluster_host")
+            and "cluster_type" not in kwargs
+            and _config.cluster_type == DEFAULT_CLUSTER_TYPE
+        ):
+            _refuse_a_host_with_no_backend("configure()")
 
         # Bound once. Even under the lock, re-reading the global on every
         # iteration would make this loop depend on _config not being rebound

@@ -20,6 +20,15 @@ was not is marked.
 
 ### Breaking changes, and what to change
 
+- **`cluster_type` defaults to `"local"`.** It was `"slurm"`, which also ran
+  on this machine whenever no host was set, so the default now says what
+  happens. A `cluster_host` given without a `cluster_type` -- to
+  `configure()`, to `ClusterConfig(...)`, or in a configuration file --
+  raises `ValueError`: taken as local, the host would be ignored and the
+  work would run on the submitting machine. *Migration:* add
+  `cluster_type="slurm"` (or `"ssh"`) wherever a host is set without one.
+  Files written by `save_to_file` and profiles already name it.
+
 - **`clustrix.setup_environment` is deleted**, with `utils.is_uv_available`,
   `is_conda_available` and `get_package_manager_command`. It built a list of
   commands, ran none of them and returned the path of an interpreter it had
@@ -104,6 +113,16 @@ was not is marked.
   the default unless you mean it.
 
 ### Added
+
+- **`plain_environment_variables`**: `NAME=value` lines for variables that
+  are not secret (`["OMP_NUM_THREADS=4"]`). Saved in configuration files
+  and profiles and shown as typed, where `environment_variables` is
+  withheld from disk and masked. A job gets both; a name in both takes the
+  value from `environment_variables`.
+- **`auto_stage_on_mismatch="use_cluster"`**: when an input is on the
+  cluster at the same path and is not the same data, run on the cluster's
+  copy with a warning naming what differs, instead of stopping. The
+  default, `"error"`, is unchanged.
 
 - **Automatic loop parallelisation** (`clustrix.parallelize`). A top-level
   `for` loop, or a single-`for` comprehension statement, whose iterations are
@@ -225,6 +244,17 @@ was not is marked.
 
 ### Changed
 
+- Notebook widget: environment variables are two fields. **Environment
+  variables** (`plain_environment_variables`) is shown exactly as typed,
+  saved with the profile on Apply, exported and imported with it, and
+  copied by Duplicate. **Secret environment variables**
+  (`environment_variables`) is the masked field as before: held in memory,
+  never saved. Each says which it is on the line under it. A name set in
+  both, or twice in the plain one, is reported when the field is left and
+  on Apply; the job gets the secret value. A plain line that is not
+  `NAME=value` is outlined and quoted, and Apply is refused; the secret
+  field still never echoes a line.
+
 - **Waiting for a result** starts polling one second apart and backs off to
   `job_poll_interval`, which is now the ceiling. Four one-second SLURM jobs
   went from 67 s to 9.5 s in the commit's own measurement.
@@ -267,6 +297,10 @@ was not is marked.
   this claimed ~5,100 lines and named five files that do not exist on `master`.)
 
 ### Fixed
+
+- Notebook widget: Duplicate carried the secret environment variables into
+  the new profile for the rest of the session. They are now left behind
+  like the password and token, and the console says so.
 
 - With `use_two_venv=False`, a virtualenv that could not be created was
   reported as a successful setup: the unpinned install meant as a retry ran

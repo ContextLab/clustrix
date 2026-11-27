@@ -52,7 +52,7 @@ class TestClusterConfigReal:
         config = ClusterConfig()
 
         # Verify all defaults
-        assert config.cluster_type == "slurm"
+        assert config.cluster_type == "local"
         assert config.cluster_host is None
         assert config.cluster_port == 22
         assert config.username is None

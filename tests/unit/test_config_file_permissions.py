@@ -181,6 +181,7 @@ def test_save_config_module_function_matches_save_to_file(tmp_path, monkeypatch)
     import clustrix.config as config_module
 
     real_config = ClusterConfig(
+        cluster_type="slurm",
         cluster_host="module-level.example.edu",
         username="modtest",
         password="fake-module-password",
@@ -256,6 +257,7 @@ def test_environment_variables_are_not_persisted_by_default(tmp_path):
     writes it.
     """
     config = ClusterConfig(
+        cluster_type="slurm",
         cluster_host="cluster.example.edu",
         username="researcher",
         environment_variables={
@@ -294,6 +296,7 @@ def test_environment_variables_are_not_persisted_by_default(tmp_path):
 def test_environment_variable_secrets_survive_include_secrets(tmp_path):
     """Opting in must write the whole mapping, not the filtered version."""
     config = ClusterConfig(
+        cluster_type="slurm",
         cluster_host="cluster.example.edu",
         environment_variables={
             "OMP_NUM_THREADS": "8",
@@ -318,6 +321,7 @@ def test_repr_masks_credentials_but_keeps_ordinary_fields():
     omitted, so it stays visible that a value is set at all.
     """
     config = ClusterConfig(
+        cluster_type="slurm",
         cluster_host="hpc.example.edu",
         username="researcher",
         password="fake-password-value",

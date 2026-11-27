@@ -113,7 +113,11 @@ What happens to a file that was found
        choice: ``no_data=[path]`` for the cluster's copy.
    * - The same absolute path exists on the cluster and holds something else
      - ``StagingError``, naming what differs. Clustrix does not guess which
-       copy is right. ``no_data=[path]`` uses the cluster's copy as it is.
+       copy is right. ``no_data=[path]`` uses the cluster's copy of that
+       path as it is. ``configure(auto_stage_on_mismatch="use_cluster")``
+       runs anyway on the cluster's copy of *every* input that differs,
+       with a warning naming each one -- for a cluster that holds the full
+       dataset where this machine holds a sample.
    * - The same absolute path exists there but cannot be compared
      - Uploaded, as if it were not there. This is what happens when the
        cluster has no SHA-256 command, or a file name in the directory has
@@ -324,6 +328,9 @@ Controlling it
      - Turn the mechanism off.
    * - ``configure(auto_stage_max_bytes=N)``
      - Change the size at which a call stops.
+   * - ``configure(auto_stage_on_mismatch="use_cluster")``
+     - Run on the cluster's copy when it differs from the local one,
+       instead of stopping.
 
 .. _auto-stage-or-package:
 

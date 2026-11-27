@@ -1105,6 +1105,47 @@ class TestTheSameDataNotJustTheSamePath:
         assert "not the same data" in message and "different content" in message
         assert "no_data" in message
 
+    def test_the_call_runs_on_the_cluster_s_copy_when_asked_and_says_so(
+        self, project, connected, caplog
+    ):
+        """``auto_stage_on_mismatch="use_cluster"``: the same stale copy as
+        above no longer stops the call. Nothing is uploaded, the argument
+        still names the path on the cluster, and both the plan and a
+        warning say the data is not what this machine has."""
+        connection, config, remote = connected
+        config.auto_stage_on_mismatch = "use_cluster"
+        table = project / "data" / "table.csv"
+        before = table.stat()
+        auto_stage._local_sha256(table)
+        table.write_text("a,b\n9,9\n")
+        os.utime(table, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+        with caplog.at_level("WARNING", logger="clustrix.auto_stage"):
+            args, _, plan = auto_stage.prepare(
+                connection, config, takes_paths, (table,), {}
+            )
+
+        (staged,) = plan.inputs
+        assert staged.how == "in place" and args == (table,)
+        assert "NOT what is here" in staged.why and "use_cluster" in staged.why
+        assert "is not what is here" in caplog.text
+        assert "has different content" in caplog.text
+        assert not (remote / "work" / auto_stage.STORE_DIRECTORY).exists()
+
+    def test_data_that_matches_draws_no_warning_under_use_cluster(
+        self, project, connected, caplog
+    ):
+        connection, config, _ = connected
+        config.auto_stage_on_mismatch = "use_cluster"
+
+        with caplog.at_level("WARNING", logger="clustrix.auto_stage"):
+            _, _, plan = auto_stage.prepare(
+                connection, config, takes_paths, (project / "data" / "table.csv",), {}
+            )
+
+        assert "same size and sha256" in plan.inputs[0].why
+        assert caplog.text == ""
+
     def test_a_directory_is_compared_member_by_member(self, project, connected):
         connection, _, _ = connected
         folder = project / "data"

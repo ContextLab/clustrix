@@ -343,6 +343,7 @@ def test_default_policy_refuses_unknown_host_then_accepts_a_known_one(tmp_path):
 
     with LocalSSHServer(root=str(root), password="hunter2") as server:
         config = ClusterConfig(
+            cluster_type="slurm",
             cluster_host=server.host,
             cluster_port=server.port,
             username="tester",

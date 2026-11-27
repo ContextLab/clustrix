@@ -68,7 +68,7 @@ from clustrix.credential_release import CredentialTarget
 environment = detect_environment()
 target = CredentialTarget(hostname={host!r}, username={user!r}, described_as="a test")
 config = (
-    ClusterConfig(cluster_host={host!r}, username={user!r}) if with_config else None
+    ClusterConfig(cluster_type='ssh', cluster_host={host!r}, username={user!r}) if with_config else None
 )
 password = get_cluster_password(target, config=config)
 with open(out, "w") as handle:
@@ -410,6 +410,7 @@ def ssh_server(tmp_path):
 
 def _config(server):
     return ClusterConfig(
+        cluster_type="slurm",
         cluster_host=server.host,
         cluster_port=server.port,
         username="testuser",
@@ -501,7 +502,8 @@ class TestSetupAuthWithFallback:
             "import json\n"
             "from clustrix.config import ClusterConfig\n"
             "from clustrix.ssh_utils import setup_ssh_keys_with_fallback\n"
-            f"config = ClusterConfig(cluster_host={HOST!r}, username={USER!r})\n"
+            f"config = ClusterConfig(cluster_type='ssh', cluster_host={HOST!r}, "
+            f"username={USER!r})\n"
             "print('RESULT ' + json.dumps(setup_ssh_keys_with_fallback(config)))\n"
         )
 

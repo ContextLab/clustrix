@@ -169,6 +169,20 @@ STYLESHEET = """
 .clustrix-widget .cx-row + .cx-hint,
 .clustrix-widget .cx-hint + .cx-row { margin-top: 12px; }
 
+/* A field with one line of explanation under it, and a row of two such
+   fields that are read as a pair: tops aligned, so that explanations of
+   different lengths do not push one field below the other. */
+.clustrix-widget .cx-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+    overflow: visible;
+}
+.clustrix-widget .cx-row.cx-pair { align-items: flex-start; }
+.clustrix-widget .cx-hint b { font-weight: 600; color: var(--cx-fg); }
+
 /* A field is one ipywidgets control whose own description is its label.
    ipywidgets lays the two out side by side with a fixed-width, truncating
    label; stacking them lets a label be as long as it needs to be and keeps

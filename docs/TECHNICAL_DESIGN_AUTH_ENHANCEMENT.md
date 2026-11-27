@@ -720,6 +720,7 @@ class TestAuthenticationManager:
         os.environ['TEST_CLUSTER_PASS'] = 'testpass123'
         
         config = ClusterConfig(
+            cluster_type='ssh',
             cluster_host='gpu.example.edu',
             username='testuser',
             use_env_password=True,
@@ -741,6 +742,7 @@ class TestAuthenticationManager:
             pytest.skip("Real cluster tests not enabled")
         
         config = ClusterConfig(
+            cluster_type='ssh',
             cluster_host='gpu.example.edu',
             username=os.environ.get('USER'),
             use_env_password=True,

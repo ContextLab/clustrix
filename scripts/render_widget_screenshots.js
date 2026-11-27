@@ -27,7 +27,9 @@ async function restartKernels() {
 async function open(browser, notebook, scheme) {
   await restartKernels();
   const context = await browser.newContext({
-    viewport: { width: WIDTH, height: 1500 },
+    // Taller than the tallest picture (SSH with Advanced open): Notebook
+    // scrolls its own panel, and a widget that does not fit is cut off.
+    viewport: { width: WIDTH, height: 2000 },
     deviceScaleFactor: 2,
     colorScheme: scheme,
   });

@@ -175,7 +175,13 @@ def test_config_file_saves_there_and_leaves_the_default_alone(tmp_path):
     target = tmp_path / "elsewhere.yml"
 
     result = clustrix(
-        "config", "--cluster-host", "box.example.edu", "--config-file", str(target)
+        "config",
+        "--cluster-type",
+        "ssh",
+        "--cluster-host",
+        "box.example.edu",
+        "--config-file",
+        str(target),
     )
 
     assert result.returncode == 0
@@ -190,7 +196,9 @@ def test_a_widget_profile_bundle_is_not_overwritten():
     text = "My Cluster:\n  cluster_type: ssh\n  cluster_host: mine.example.edu\n"
     bundle.write_text(text)
 
-    result = clustrix("config", "--cluster-host", "box.example.edu")
+    result = clustrix(
+        "config", "--cluster-type", "ssh", "--cluster-host", "box.example.edu"
+    )
 
     assert result.returncode == 1
     assert "named profiles" in result.stderr

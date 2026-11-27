@@ -298,8 +298,10 @@ class DataPlan:
 _BY_METADATA = "identified by size and time, not content"
 
 _WILL_NOT_GUESS = (
-    "clustrix will not guess which is right: remove or rename one, or "
-    "exclude it with no_data=[...] to use the cluster's copy as it is."
+    "clustrix will not guess which is right: remove or rename one, exclude "
+    "it with no_data=[...] to use the cluster's copy as it is, or set "
+    "configure(auto_stage_on_mismatch='use_cluster') to run on the "
+    "cluster's copy of every input that differs, with a warning."
 )
 
 
@@ -1440,26 +1442,27 @@ def prepare(
     # Already on the cluster at the same path? Then nothing moves -- once
     # it has been shown to be the same data, not merely the same path.
     present = _remote_sizes(connection, [str(c.path) for c, _, _ in candidates])
+    use_cluster = getattr(config, "auto_stage_on_mismatch", "error") == "use_cluster"
     to_upload: List[Tuple[Candidate, List[Tuple[str, Path]], int]] = []
     reasons: Dict[Path, str] = {}
     there: List[Tuple[Candidate, List[Tuple[str, Path]], int]] = []
+    #: What the cluster has at the same path and is known to be other data.
+    different: Dict[Path, str] = {}
     for candidate, files, size in candidates:
         remote_size = present[str(candidate.path)]
         if remote_size is None:
             to_upload.append((candidate, files, size))
             reasons[candidate.path] = "not readable at that path on the cluster"
-        elif candidate.path.is_file() and remote_size != size:
-            raise StagingError(
-                f"{candidate.path} exists on the cluster too, but as a "
-                f"different file ({_format_bytes(remote_size)} there, "
-                f"{_format_bytes(size)} here). {_WILL_NOT_GUESS}"
+        elif candidate.path.is_file() and remote_size not in (size, -1):
+            different[candidate.path] = (
+                f"a different file ({_format_bytes(remote_size)} there, "
+                f"{_format_bytes(size)} here)"
             )
         elif candidate.path.is_file() != (remote_size != -1):
-            raise StagingError(
-                f"{candidate.path} is a "
-                f"{'file' if candidate.path.is_file() else 'directory'} here "
+            different[candidate.path] = (
+                f"a {'file' if candidate.path.is_file() else 'directory'} here "
                 f"and a {'directory' if remote_size == -1 else 'file'} on the "
-                f"cluster. {_WILL_NOT_GUESS}"
+                "cluster"
             )
         else:
             there.append((candidate, files, size))
@@ -1473,25 +1476,46 @@ def prepare(
                 f"something is at that path on the cluster, but {verdict.detail}"
             )
         elif not verdict.same:
+            different[candidate.path] = f"not the same data: {verdict.detail}"
+    for candidate, files, size in candidates:
+        if candidate.path in reasons:
+            continue
+        detail = different.get(candidate.path)
+        if detail is not None and not use_cluster:
             raise StagingError(
-                f"{candidate.path} exists on the cluster too, but it is not "
-                f"the same data: {verdict.detail}. {_WILL_NOT_GUESS}"
+                f"{candidate.path} exists on the cluster too, but it is "
+                f"{detail}. {_WILL_NOT_GUESS}"
             )
+        if detail is None:
+            why = f"the cluster has it at the same path: {compared[candidate.path].detail}"
         else:
-            # The job does not run in this working directory, so a path
-            # written relative to it still needs a link, to where the file
-            # already is.
-            plan.inputs.append(
-                StagedInput(
-                    candidate.path,
-                    str(candidate.path),
-                    size,
-                    "in place",
-                    candidate.found_in,
-                    why=f"the cluster has it at the same path: {verdict.detail}",
-                    link=_relative_link(candidate),
-                )
+            # Asked for: the job reads what the cluster has. Said every
+            # time, because the result is computed from data this machine
+            # does not hold.
+            why = (
+                f"NOT what is here -- it is {detail}; used as the cluster has "
+                "it because auto_stage_on_mismatch='use_cluster'"
             )
+            logger.warning(
+                "%s on the cluster is not what is here: it is %s. The job "
+                "reads the cluster's copy (auto_stage_on_mismatch="
+                "'use_cluster').",
+                candidate.path,
+                detail,
+            )
+        # The job does not run in this working directory, so a path written
+        # relative to it still needs a link, to where the file already is.
+        plan.inputs.append(
+            StagedInput(
+                candidate.path,
+                str(candidate.path),
+                size,
+                "in place",
+                candidate.found_in,
+                why=why,
+                link=_relative_link(candidate),
+            )
+        )
 
     limit = int(getattr(config, "auto_stage_max_bytes", 0) or 0)
     total = sum(size for _, _, size in to_upload)

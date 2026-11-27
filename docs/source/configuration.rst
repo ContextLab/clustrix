@@ -374,12 +374,15 @@ Choosing a backend
      - Default
      - Effect
    * - ``cluster_type``
-     - ``"slurm"``
+     - ``"local"``
      - One of ``local``, ``ssh``, ``slurm``, ``huggingface``
        (``SUPPORTED_CLUSTER_TYPES``). Anything else raises a ``ValueError``
-       that names the supported set. Note the default is ``slurm``, but with
-       no ``cluster_host`` set the decorator still runs locally -- see
-       :ref:`execution-model`. PBS, SGE, Kubernetes and the cloud VM providers
+       that names the supported set. The default runs on this machine. A
+       ``cluster_host`` given without a ``cluster_type`` -- in
+       ``configure()``, a ``ClusterConfig`` or a file -- is refused, because
+       the host would be ignored: say ``ssh`` or ``slurm``. (Before 0.2.0
+       the default was ``slurm``.) An ``ssh`` or ``slurm`` configuration
+       with no host still runs locally -- see :ref:`execution-model`. PBS, SGE, Kubernetes and the cloud VM providers
        are not supported; see :ref:`removed-backends`. This is a
        *configuration* setting and not a ``@cluster`` keyword: passing
        ``@cluster(cluster_type=...)`` warns and has no effect.
@@ -678,7 +681,16 @@ Paths and the remote environment
    * - ``environment_variables``
      - ``{}``
      - ``export NAME=<quoted value>`` lines. Names are validated as shell
-       identifiers; values are quoted.
+       identifiers; values are quoted. For values that may be secret: never
+       written to a file unless asked, and masked in the widget. Use
+       ``plain_environment_variables`` for the rest.
+   * - ``plain_environment_variables``
+     - ``[]``
+     - ``NAME=value`` lines for variables that are **not secret**:
+       ``["OMP_NUM_THREADS=4"]``. Exported like ``environment_variables``,
+       but saved in configuration files and profiles and shown as typed in
+       the widget. A name set in both takes the value from
+       ``environment_variables``.
    * - ``pre_execution_commands``
      - ``[]``
      - Raw shell lines emitted before execution. Not validated, not quoted.
@@ -825,6 +837,12 @@ Two settings control automatic staging of input files on ``ssh`` and
      - ``1000000000``
      - A call naming more local input than this raises ``StagingError``
        before anything is copied.
+   * - ``auto_stage_on_mismatch``
+     - ``"error"``
+     - What happens when an input is on the cluster at the same path and is
+       not the same data. ``"error"`` stops the call and says what differs.
+       ``"use_cluster"`` runs the job on the cluster's copy as it is and
+       logs a warning naming each input that differs.
 
 Four control declared data packages (:doc:`data_packages`). Small packages
 travel inside the pickled payload; larger ones go to a private HuggingFace

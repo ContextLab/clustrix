@@ -52,7 +52,7 @@ refused. From a real IPython session, with the returned values left out:
    In [1]: %load_ext clustrix
 
    In [2]: %clustrix status
-   backend      : local (no cluster host set; cluster_type is 'slurm')
+   backend      : local
    resources    : 4 cores, 8GB, 01:00:00
 
    In [3]: %clustrix config nope
@@ -156,9 +156,51 @@ Controls
 **Advanced settings** adds: Package manager, Python executable, Existing
 conda environment (``conda_env_name``), "Install my local packages on the
 worker" (``replicate_local_environment``), "Delete job files on the host
-after success" (``cleanup_on_success``), Modules to load, Environment
-variables (this session only), Shell commands to run before the job, and
-the profiles file with **Export** and **Import**.
+after success" (``cleanup_on_success``), Modules to load, the two
+environment-variable fields described below, Shell commands to run before
+the job, and the profiles file with **Export** and **Import**.
+
+Variables for the job go in one of two fields, side by side, and which one
+decides what happens to the value:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 24 38 38
+
+   * -
+     - Environment variables
+     - Secret environment variables
+   * - Setting
+     - ``plain_environment_variables``
+     - ``environment_variables``
+   * - In the field
+     - shown exactly as typed
+     - ``NAME=••••`` once the field is left
+   * - On **Apply**
+     - saved in the profile, in plain text
+     - kept in memory for this session; never written
+   * - Export / Import
+     - travel with the profile
+     - not in the file
+   * - **Duplicate**
+     - copied to the new profile
+     - not copied, and no longer held
+   * - Notebook saved with widget state
+     - in the ``.ipynb``
+     - names only
+
+Both take ``NAME=value``, one per line. Put ``OMP_NUM_THREADS=4`` in the
+first and ``DB_PASSWORD=...`` in the second; nothing secret belongs in the
+first, because it is saved and displayed. A line in the first field that is
+not ``NAME=value`` is outlined and quoted in the result console, and Apply
+is refused until it is fixed.
+
+A name may be in both fields. The job gets the value from **Secret
+environment variables**; the other stays in the profile and is used when no
+secret one is held -- in a later session, for instance. The widget says so
+in the result console when the second field is left and again on Apply. It
+says the same of a name written twice in the first field, where the last
+line wins.
 
 .. image:: ../_static/widget/widget-advanced.png
    :alt: The widget with the advanced settings shown
@@ -189,8 +231,11 @@ the one your cluster's administrators publish before pressing it.
 Security note
 ~~~~~~~~~~~~~
 
-The widget never writes a password, a token or an environment variable to a
-profile or to an exported file. The notebook file is a different matter. If
+The widget never writes a password, a token or a secret environment variable
+to a profile or to an exported file. (What is typed into the plain
+**Environment variables** field is written to both, and to a notebook saved
+with widget state: that is what the field is for, and its help line says
+so.) The notebook file is a different matter. If
 JupyterLab's **Settings → Save Widget State Automatically** is on, the state
 of every widget -- whatever is *in* each field -- is stored in the ``.ipynb``
 file when the notebook is saved, where anyone who can read the file, or a
@@ -204,7 +249,7 @@ Password and Token
    while something is held and drops it. The field is always empty, so
    emptying it does not forget anything -- the button does.
 
-Environment variables
+Secret environment variables
    When you leave the field, each value is moved into memory and its line
    is rewritten as ``NAME=••••``. The names stay readable; a value is never
    shown again. To edit:
@@ -227,12 +272,16 @@ Environment variables
 With the setting on, a notebook saved after typing a password, a token and
 variables into the widget in a real Jupyter Notebook 7 contained none of
 the typed values (it does contain the variable *names*). That was checked in
-one browser, in the light theme only.
+one browser, in the light theme only. With the two variable fields, a
+notebook saved the same way contained what was typed into **Environment
+variables** and none of the values typed into **Secret environment
+variables**; that was checked in headless Chromium against Jupyter
+Notebook 7, in the light and the dark theme.
 
 What still applies: a secret typed anywhere else in a notebook -- a code
 cell, another widget -- is saved like any other text. If a notebook was
 saved with a secret in it, clear its outputs and widget state and change
-the secret. An SSH key, the environment-variable field, ``HF_TOKEN`` and
+the secret. An SSH key, the secret environment-variable field, ``HF_TOKEN`` and
 ``hf auth login`` avoid typing one at all.
 
 In code

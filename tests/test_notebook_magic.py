@@ -219,11 +219,11 @@ class TestStatus:
         assert captured.stdout.splitlines() == self.SUMMARY
 
     def test_the_default_configuration_is_reported_as_local(self, loaded):
-        """``cluster_type`` defaults to ``slurm`` and ``cluster_host`` to
-        nothing, and with no host ``@cluster`` runs the function here. The
-        status said ``cluster_type : slurm`` for that."""
+        """Nothing configured runs the function here, and the status says
+        so. (The default was once ``slurm``, which also ran here, and the
+        status said ``cluster_type : slurm`` for that.)"""
         fresh = ClusterConfig()
-        assert (fresh.cluster_type, fresh.cluster_host) == ("slurm", None)
+        assert (fresh.cluster_type, fresh.cluster_host) == ("local", None)
         configure(**_fields(fresh))
 
         with capture_output() as captured:
@@ -236,7 +236,7 @@ class TestStatus:
 
         assert where() == os.getpid(), "the premise: this configuration runs here"
         assert captured.stdout.splitlines() == [
-            "backend      : local (no cluster host set; cluster_type is 'slurm')",
+            "backend      : local",
             f"resources    : {fresh.default_cores} cores, "
             f"{fresh.default_memory}, {fresh.default_time}",
         ]
