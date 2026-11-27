@@ -62,6 +62,7 @@ import io
 import os
 import pickle
 import select
+import signal
 import struct
 import subprocess
 import sys
@@ -300,12 +301,19 @@ def worker_main() -> None:
     #: a variable one task set is not still there for the next.
     environment: Optional[Dict[str, str]] = None
     while True:
+        # Ctrl-C in a terminal, and a notebook kernel shutting down, signal
+        # every process of the group. An interrupt belongs to the task that
+        # is running; a worker with none has nothing to stop, and raising
+        # in the middle of a read would lose part of the next request and
+        # print a traceback for every idle worker.
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         request = _receive(requests)
         if request is None:
             return
         out, err = io.StringIO(), io.StringIO()
         caught: List[warnings.WarningMessage] = []
         try:
+            signal.signal(signal.SIGINT, signal.default_int_handler)
             with (
                 contextlib.redirect_stdout(out),
                 contextlib.redirect_stderr(err),
@@ -325,9 +333,11 @@ def worker_main() -> None:
             # BaseException on purpose: SystemExit and KeyboardInterrupt
             # raised by the task are the task's outcome, to be re-raised
             # where the user called it, not a reason to drop the connection.
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
             reply = _failure_reply(
                 error, traceback.format_exc(), _output(out, err, caught)
             )
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
         _send(replies, reply)
 
 

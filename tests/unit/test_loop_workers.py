@@ -722,3 +722,38 @@ def test_a_worker_whose_parent_is_alive_is_left_alone_between_calls():
         second = set(pool.map(pid_after_a_pause, [(0.5,), (0.5,)]))
 
     assert first == second and len(first) == 2
+
+
+def test_an_interrupt_stops_the_task_that_is_running_and_no_idle_worker():
+    """Ctrl-C in a terminal signals the whole process group, workers
+    included. Idle ones used to die in the middle of a read, each printing
+    a traceback."""
+    with WorkerPool(2) as pair:
+        pids = set(pair.map(napping, [(0.3,), (0.3,)]))
+        assert len(pids) == 2
+        for pid in pids:
+            os.kill(pid, signal.SIGINT)
+        time.sleep(0.5)
+
+        assert set(pair.map(napping, [(0.3,), (0.3,)])) == pids
+
+        busy = threading.Thread(
+            target=lambda: outcome.append(_raised_by(pair, napping, 30))
+        )
+        outcome = []
+        busy.start()
+        time.sleep(1.0)
+        for pid in pids:
+            os.kill(pid, signal.SIGINT)
+        busy.join(timeout=20)
+
+        assert outcome and isinstance(outcome[0], KeyboardInterrupt)
+        assert set(pair.map(napping, [(0.3,), (0.3,)])) == pids
+
+
+def _raised_by(pool, function, *arguments):
+    try:
+        pool.map(function, [arguments])
+    except BaseException as error:  # noqa: BLE001 - the outcome under test
+        return error
+    return None
