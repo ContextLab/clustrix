@@ -14,6 +14,7 @@ import shlex
 import time
 import tempfile
 import pickle
+import json
 import logging
 import threading
 from typing import Dict, Any, Optional
@@ -116,6 +117,12 @@ class SchedulerManager:
         self.connection_manager = connection_manager
         self.active_jobs: Dict[str, Any] = {}
         self.status_manager = SchedulerStatusManager(config, connection_manager)
+        # The environment each set of requirements resolved to, for the life
+        # of this manager. A loop divided into N jobs submits N payloads with
+        # the same requirements; without this each submission re-ran GPU
+        # detection and re-verified the same environment over SSH, which
+        # took longer than the jobs.
+        self._environments: Dict[str, Dict[str, Any]] = {}
 
     def _stage_job_directory(self, func_data: Dict[str, Any]) -> tuple:
         """Create the remote job directory and upload the function data.
@@ -185,6 +192,12 @@ class SchedulerManager:
         if getattr(self.config, "use_two_venv", True):
             from .utils import enhanced_setup_two_venv_environment
 
+            requirements = self._job_requirements(func_data)
+            environment_key = json.dumps(sorted(requirements.items()))
+            known = self._environments.get(environment_key)
+            if known is not None:
+                return config_for_job_script(self.config, known)
+
             logger.info("Setting up enhanced two-venv environment with GPU detection")
 
             # Use threading to implement timeout for venv setup
@@ -197,7 +210,7 @@ class SchedulerManager:
                     venv_info = enhanced_setup_two_venv_environment(
                         self.connection_manager.ssh_client,
                         remote_job_dir,
-                        self._job_requirements(func_data),
+                        requirements,
                         self.config,
                     )
                 except Exception as e:
@@ -231,6 +244,7 @@ class SchedulerManager:
             logger.info(
                 f"Two-venv setup successful, using: {venv_info['venv1_python']}"
             )
+            self._environments[environment_key] = venv_info
             return config_for_job_script(self.config, venv_info)
 
         logger.info("Two-venv setup disabled, using basic environment setup")

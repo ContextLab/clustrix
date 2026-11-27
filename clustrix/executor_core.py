@@ -23,6 +23,12 @@ from .utils import loads_remote_payload, verify_signed_payload
 logger = logging.getLogger(__name__)
 
 
+#: The wait before the first status poll, and how fast later waits grow
+#: towards ``ClusterConfig.job_poll_interval``, which is their ceiling.
+FIRST_POLL_SECONDS = 1.0
+POLL_BACKOFF = 1.5
+
+
 class ClusterExecutor:
     """Handles execution of jobs on various cluster types.
 
@@ -193,6 +199,11 @@ class ClusterExecutor:
         timeout = getattr(self.config, "job_wait_timeout", None)
         deadline = None if timeout is None else time.monotonic() + timeout
         status = "unknown"
+        # Polls start close together and spread out to job_poll_interval.
+        # A fixed 30-second interval made a one-second job take thirty to
+        # be noticed -- multiplied by every chunk of a divided loop -- while
+        # a job that runs for hours does not need asking about every second.
+        pause = min(FIRST_POLL_SECONDS, self.config.job_poll_interval)
 
         while True:
             status = self.scheduler_manager.check_job_status(job_id)
@@ -287,7 +298,8 @@ class ClusterExecutor:
                 )
 
             # Wait before next poll
-            time.sleep(self.config.job_poll_interval)
+            time.sleep(pause)
+            pause = min(pause * POLL_BACKOFF, self.config.job_poll_interval)
 
     def get_job_status(self, job_id: str) -> str:
         """Get job status (alias for _check_job_status)."""
