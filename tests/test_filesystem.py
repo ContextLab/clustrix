@@ -23,7 +23,7 @@ from clustrix.filesystem import (
     FileInfo,
     DiskUsage,
 )
-from clustrix.config import ClusterConfig, configure
+from clustrix.config import ClusterConfig, configure, get_config
 from tests.markers import needs_permission_denial
 from tests.ssh_server import LocalSSHServer
 
@@ -566,6 +566,116 @@ class TestErrorHandling:
             password="invalid-password",
             remote_work_dir="/tmp",
             ssh_connect_timeout=5,
+        )
+        fs = ClusterFilesystem(config)
+
+        with pytest.raises(OSError):
+            fs.ls(".")
+
+
+def _closed_port() -> int:
+    """A real port number with nothing listening on it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
+
+
+class TestRunningOnTheClusterItself:
+    """Asked from the cluster's own login node, the files are simply here.
+
+    ``ClusterFilesystem`` notices when the configured ``cluster_host`` is the
+    machine it is running on and the remote working directory is visible,
+    and reads the disk directly instead of opening an SSH connection to
+    itself. ``tests/test_packaging_integration.py`` gestured at this by
+    patching ``socket.gethostname`` and asserting a ZIP file existed.
+
+    Nothing is patched here: the configured host is this machine's real
+    hostname, and no SSH server is listening for it -- so an answer can
+    only have come from the local disk.
+    """
+
+    @pytest.fixture
+    def work_dir(self, tmp_path):
+        work = tmp_path / "scratch"
+        (work / "data").mkdir(parents=True)
+        (work / "data" / "one.csv").write_text("1")
+        (work / "top.txt").write_text("22")
+        return work
+
+    def _on_this_host(self, work_dir, **overrides):
+        settings = dict(
+            cluster_type="slurm",
+            cluster_host=socket.gethostname(),
+            username="testuser",
+            remote_work_dir=str(work_dir),
+            ssh_connect_timeout=5,
+        )
+        settings.update(overrides)
+        return ClusterConfig(**settings)
+
+    def test_paths_resolve_against_the_cluster_working_directory(
+        self, work_dir, tmp_path, monkeypatch
+    ):
+        """The same relative path must mean the same file on and off the cluster.
+
+        Off the cluster ``ls("data")`` is ``<remote_work_dir>/data``. On it,
+        the switch to local operations also switched the base directory to
+        the current directory, so the same call listed a different place.
+        """
+        elsewhere = tmp_path / "somewhere-else"
+        (elsewhere / "data").mkdir(parents=True)
+        (elsewhere / "data" / "wrong.csv").write_text("x")
+        monkeypatch.chdir(elsewhere)
+        fs = ClusterFilesystem(self._on_this_host(work_dir))
+
+        assert fs.ls(".") == ["data", "top.txt"]
+        assert fs.ls("data") == ["one.csv"]
+        assert fs.find("*.csv") == ["data/one.csv"]
+        assert fs.stat("top.txt").size == 2
+        assert fs.exists("data/wrong.csv") is False
+        assert fs.du(".") == DiskUsage(3, 2)
+
+    def test_looking_at_files_does_not_change_where_jobs_run(self, work_dir):
+        """A filesystem query must not rewrite the caller's configuration.
+
+        Detection used to set ``config.cluster_type = "local"`` on the
+        object it was handed -- and the convenience functions hand it the
+        global configuration. So on a login node one ``cluster_ls()`` turned
+        every later ``@cluster`` call from a SLURM submission into a
+        function run in the login node's own Python process.
+        """
+        configure(
+            cluster_type="slurm",
+            cluster_host=socket.gethostname(),
+            username="testuser",
+            remote_work_dir=str(work_dir),
+        )
+
+        assert cluster_ls(".") == ["data", "top.txt"]
+        assert cluster_exists("top.txt") is True
+
+        assert get_config().cluster_type == "slurm"
+
+    def test_a_working_directory_that_is_not_here_is_asked_for_over_ssh(self, tmp_path):
+        """Same name, no shared filesystem: this is not the cluster's disk."""
+        config = self._on_this_host(
+            tmp_path / "not-mounted-here", cluster_port=_closed_port()
+        )
+        fs = ClusterFilesystem(config)
+
+        with pytest.raises(OSError):
+            fs.ls(".")
+
+    def test_another_host_is_asked_over_ssh_even_if_the_path_exists_here(
+        self, work_dir
+    ):
+        """A path that happens to exist locally says nothing about that host.
+
+        The laptop-on-the-VPN case: ``/scratch`` exists on both machines and
+        they are different directories.
+        """
+        config = self._on_this_host(
+            work_dir, cluster_host="127.0.0.1", cluster_port=_closed_port()
         )
         fs = ClusterFilesystem(config)
 

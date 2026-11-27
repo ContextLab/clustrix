@@ -110,6 +110,10 @@ class ClusterFilesystem:
         self.config = config
         self._ssh_client: Optional[paramiko.SSHClient] = None
         self._sftp_client: Optional[paramiko.SFTPClient] = None
+        #: The cluster working directory, when it was found on this
+        #: machine's own disk; ``None`` otherwise. See
+        #: ``_auto_detect_cluster_location``.
+        self._on_cluster_work_dir: Optional[str] = None
 
         # Auto-detect if we're running on the target cluster (for shared filesystems)
         self._auto_detect_cluster_location()
@@ -160,14 +164,21 @@ class ClusterFilesystem:
             shared_filesystem = bool(work_dir) and os.path.isdir(work_dir)
 
             if same_host and shared_filesystem:
-                original_cluster_type = self.config.cluster_type
-                self.config.cluster_type = "local"
+                # Recorded on this object, never written into the config.
+                # This used to be ``self.config.cluster_type = "local"`` on
+                # the object the caller passed -- which for the convenience
+                # functions is the global configuration, so on a login node
+                # one ``cluster_ls()`` turned every later ``@cluster`` call
+                # into a function run in the login node's own process. It
+                # also moved the base directory for relative paths from the
+                # cluster working directory to the current directory.
+                self._on_cluster_work_dir = work_dir
                 logger.info(
                     "Running on %s with %s visible locally; using local "
                     "filesystem operations instead of %s.",
                     target_host,
                     work_dir,
-                    original_cluster_type,
+                    self.config.cluster_type,
                 )
             elif same_host:
                 logger.debug(
@@ -268,10 +279,20 @@ class ClusterFilesystem:
             self._sftp_client = ssh.open_sftp()
         return self._sftp_client
 
+    def _uses_local_disk(self) -> bool:
+        """Whether operations read this machine's disk rather than use SSH."""
+        return (
+            self.config.cluster_type == "local" or self._on_cluster_work_dir is not None
+        )
+
     def _get_full_path(self, path: str) -> str:
         """Get full path based on working directory."""
         if self.config.cluster_type == "local":
             base_dir = self.config.local_work_dir or os.getcwd()
+        elif self._on_cluster_work_dir is not None:
+            # On the cluster itself a relative path means what it means
+            # from anywhere else: relative to the cluster working directory.
+            base_dir = self._on_cluster_work_dir
         else:
             base_dir = self.config.remote_work_dir
 
@@ -285,63 +306,63 @@ class ClusterFilesystem:
 
     def ls(self, path: str = ".") -> List[str]:
         """List directory contents."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_ls(path)
         else:
             return self._remote_ls(path)
 
     def find(self, pattern: str, path: str = ".") -> List[str]:
         """Find files matching pattern."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_find(pattern, path)
         else:
             return self._remote_find(pattern, path)
 
     def stat(self, path: str) -> FileInfo:
         """Get file/directory information."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_stat(path)
         else:
             return self._remote_stat(path)
 
     def exists(self, path: str) -> bool:
         """Check if file/directory exists."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_exists(path)
         else:
             return self._remote_exists(path)
 
     def isdir(self, path: str) -> bool:
         """Check if path is a directory."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_isdir(path)
         else:
             return self._remote_isdir(path)
 
     def isfile(self, path: str) -> bool:
         """Check if path is a file."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_isfile(path)
         else:
             return self._remote_isfile(path)
 
     def glob(self, pattern: str, path: str = ".") -> List[str]:
         """Pattern matching for files."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_glob(pattern, path)
         else:
             return self._remote_glob(pattern, path)
 
     def du(self, path: str = ".") -> DiskUsage:
         """Get directory usage information."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_du(path)
         else:
             return self._remote_du(path)
 
     def count_files(self, path: str = ".", pattern: str = "*") -> int:
         """Count files in directory matching pattern."""
-        if self.config.cluster_type == "local":
+        if self._uses_local_disk():
             return self._local_count_files(path, pattern)
         else:
             return self._remote_count_files(path, pattern)

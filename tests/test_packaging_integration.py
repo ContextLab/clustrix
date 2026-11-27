@@ -11,7 +11,6 @@ import json
 import tempfile
 import zipfile
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 import pytest
 
 from clustrix.filesystem import (
@@ -276,74 +275,76 @@ class TestPackagingIntegration:
                 assert config_data["cluster_type"] == config.cluster_type
 
 
-class TestSharedFilesystemIntegration:
-    """Test integration with shared filesystem detection."""
+class TestThePackageActuallyRuns:
+    """Every other test here opens the ZIP and reads it. This one runs it.
 
-    def test_automatic_cluster_detection_in_packaging(self):
-        """Test that cluster detection works in packaging context."""
+    The two tests this replaces asserted that the generated ``execute.py``
+    contained the text ``setup_cluster_filesystem`` (it is in the template
+    unconditionally) and, with ``socket.gethostname`` patched, that a ZIP
+    file existed. Whether a package does what it is for -- run the function
+    somewhere else and produce its answer -- was never asked. The real test
+    of on-cluster detection is
+    ``tests/test_filesystem.py::TestRunningOnTheClusterItself``.
+    """
 
-        def shared_fs_function():
-            """Function that should work on shared filesystem."""
-            from clustrix import cluster_ls, cluster_exists
+    @pytest.mark.xfail(
+        strict=True,
+        reason="The package clustrix.file_packaging builds does not run: "
+        "execute.py fails with 'attempted relative import with no known "
+        "parent package' while setting up the bundled filesystem module. "
+        "Nothing on the execution path builds these packages (see "
+        "CLAUDE.md, 'Data staging'), which is how it went unnoticed. The "
+        "fix is in clustrix/file_packaging.py.",
+    )
+    def test_extracting_and_executing_a_package_gives_the_functions_answer(
+        self, tmp_path
+    ):
+        import subprocess
 
-            # Check if we're on a shared filesystem
-            files = cluster_ls(".")
+        work = tmp_path / "work"
+        (work / "data").mkdir(parents=True)
+        for name in ("a.csv", "b.csv", "c.json"):
+            (work / "data" / name).write_text("x" * 7)
 
-            # Look for a specific file that might exist
-            config_exists = cluster_exists("config.yml")
+        def summarise(scale, bonus=0):
+            from clustrix import cluster_ls, cluster_find, cluster_stat
 
-            return {"files_found": len(files), "has_config": config_exists}
-
-        # Test with cluster config that should trigger auto-detection
-        cluster_config = ClusterConfig(
-            cluster_type="slurm",
-            cluster_host="hpc2.example.edu",
-            username="testuser",
-        )
+            return {
+                "count": len(cluster_ls("data/")) * scale + bonus,
+                "csv": cluster_find("*.csv", "data/"),
+                "size": cluster_stat("data/a.csv").size,
+            }
 
         package_info = package_function_for_execution(
-            func=shared_fs_function,
-            cluster_config=cluster_config,
-            func_args=(),
-            func_kwargs={},
+            func=summarise,
+            cluster_config=ClusterConfig(
+                cluster_type="local", local_work_dir=str(work)
+            ),
+            func_args=(2,),
+            func_kwargs={"bonus": 1},
         )
-
-        # Verify packaging works
-        assert os.path.exists(package_info.package_path)
-
+        extracted = tmp_path / "extracted"
         with zipfile.ZipFile(package_info.package_path, "r") as zf:
-            # Check that execution script includes cluster detection logic
-            execute_content = zf.read("execute.py").decode()
-            assert "setup_cluster_filesystem" in execute_content
+            zf.extractall(extracted)
 
-    @patch("socket.gethostname")
-    def test_packaging_with_mocked_cluster_detection(self, mock_hostname):
-        """Test packaging with mocked cluster detection."""
-
-        # Mock hostname to simulate being on cluster
-        mock_hostname.return_value = "s17.hpc2.example.edu"
-
-        def cluster_aware_function():
-            """Function that benefits from cluster detection."""
-            from clustrix import cluster_ls, cluster_count_files
-
-            # Get directory listing
-            files = cluster_ls(".")
-            file_count = cluster_count_files(".", "*")
-
-            return {"total_files": file_count, "listed_files": len(files)}
-
-        config = ClusterConfig(cluster_type="slurm", cluster_host="hpc2.example.edu")
-
-        package_info = package_function_for_execution(
-            func=cluster_aware_function,
-            cluster_config=config,
-            func_args=(),
-            func_kwargs={},
+        completed = subprocess.run(
+            [sys.executable, "execute.py"],
+            cwd=extracted,
+            capture_output=True,
+            text=True,
+            timeout=300,
+            env={**os.environ, "CLUSTRIX_ORIGINAL_CWD": str(extracted)},
         )
+        print(completed.stdout)
+        print(completed.stderr)
 
-        # Verify packaging succeeded
-        assert os.path.exists(package_info.package_path)
+        assert completed.returncode == 0
+        (result_file,) = extracted.glob("result_summarise_*.json")
+        assert json.loads(result_file.read_text())["result"] == {
+            "count": 7,
+            "csv": ["a.csv", "b.csv"],
+            "size": 7,
+        }
 
 
 class TestPackagingErrorHandling:
