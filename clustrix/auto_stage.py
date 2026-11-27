@@ -884,7 +884,12 @@ def _compare_in_place(
       there too -- each with the same size and the same SHA-256.
 
     Sizes are compared before anything is hashed, so a different dataset is
-    usually found without reading it. Three round trips at most, however
+    usually found without reading it. Above ``_HASH_LIMIT_BYTES`` in all
+    nothing is hashed, here or there -- the same limit, for the same reason,
+    as naming an upload: a 500 GB dataset on a shared filesystem is not read
+    twice, once of them on a login node, before every first call. Such an
+    input is the same when its names and sizes are, and the plan says that
+    is all that was compared. Three round trips at most, however
     many candidates there are, and none for an input already compared in
     this process.
     """
@@ -906,9 +911,18 @@ def _compare_in_place(
     directories = [str(c.path) for c, _, _ in pending if c.path.is_dir()]
     listings = _remote_listing(connection, directories)
     to_hash: List[Tuple[Candidate, List[Tuple[str, Path]]]] = []
-    for candidate, files, _ in pending:
+    for candidate, files, size in pending:
+        too_big = size > _HASH_LIMIT_BYTES
+        unread = _Comparison(
+            True,
+            f"same names and sizes; {_format_bytes(size)} is too much to "
+            "read, so the contents were not compared",
+        )
         if not candidate.path.is_dir():
-            to_hash.append((candidate, files))
+            if too_big:
+                verdicts[candidate.path] = unread
+            else:
+                to_hash.append((candidate, files))
             continue
         listing = listings[str(candidate.path)]
         if listing is None:
@@ -924,6 +938,8 @@ def _compare_in_place(
         )
         if differences:
             verdicts[candidate.path] = _Comparison(False, _some(differences))
+        elif too_big:
+            verdicts[candidate.path] = unread
         else:
             to_hash.append((candidate, files))
 

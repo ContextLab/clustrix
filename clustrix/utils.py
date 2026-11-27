@@ -1844,148 +1844,6 @@ def get_environment_info() -> str:
     return ""
 
 
-def is_uv_available() -> bool:
-    """Check if uv package manager is available."""
-    try:
-        result = subprocess.run(
-            ["uv", "--version"], capture_output=True, text=True, timeout=10
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
-def is_conda_available() -> bool:
-    """Check if conda package manager is available."""
-    try:
-        result = subprocess.run(
-            ["conda", "--version"], capture_output=True, text=True, timeout=10
-        )
-        return result.returncode == 0
-    except (subprocess.TimeoutExpired, FileNotFoundError):
-        return False
-
-
-def get_package_manager_command(config: ClusterConfig) -> str:
-    """
-    Get the appropriate package manager command based on configuration.
-
-    Args:
-        config: Cluster configuration
-
-    Returns:
-        Package manager command (pip, uv, or conda)
-    """
-    if config.package_manager == "uv":
-        return "uv pip"
-    elif config.package_manager == "conda":
-        return "conda"
-    elif config.package_manager == "auto":
-        # Auto-detect: prefer uv if available, then conda, fallback to pip
-        if is_uv_available():
-            return "uv pip"
-        elif is_conda_available():
-            return "conda"
-        else:
-            return "pip"
-    else:
-        # Default to pip (handles "pip" and any unrecognized values)
-        return "pip"
-
-
-def setup_environment(
-    work_dir: str, requirements: Dict[str, str], config: ClusterConfig
-) -> str:
-    """
-    Setup Python environment on cluster.
-
-    Args:
-        work_dir: Working directory path
-        requirements: Package requirements
-        config: Cluster configuration
-
-    Returns:
-        Path to Python executable
-    """
-
-    existing_env = str(config.conda_env_name or "").strip()
-    if existing_env:
-        # Use an environment that already exists on the cluster. The name is
-        # user input reaching a command line, so it gets the same validation
-        # and quoting as it does on the job-script path (#164); a blank
-        # setting is not a request for an environment called "".
-        return (
-            "conda run -n "
-            f"{shlex.quote(validate_environment_name('conda_env_name', existing_env))} "
-            "python"
-        )
-
-    # Get package manager to determine environment type
-    pkg_manager = get_package_manager_command(config)
-
-    if pkg_manager == "conda":
-        # Create conda environment
-        env_name = f"clustrix_env_{hash(work_dir) % 10000}"
-        env_path = f"{work_dir}/conda_envs/{env_name}"
-
-        setup_commands = [
-            f"mkdir -p {work_dir}/conda_envs",
-            f"conda create -p {shlex.quote(env_path)} "
-            f"python={validate_shell_fragment('python_executable', config.python_executable).replace('python', '3.11')} -y",
-        ]
-
-        # Install requirements with conda
-        if requirements:
-            # Create conda environment.yml file
-            env_file = f"{work_dir}/environment.yml"
-            env_content = f"""name: {env_name}
-dependencies:
-  - python={config.python_executable.replace('python', '3.11')}
-  - pip
-  - pip:"""
-            for pkg, version in requirements.items():
-                env_content += f"\n    - {pkg}=={version}"
-
-            setup_commands.extend(
-                [
-                    f"echo {shlex.quote(env_content)} > {shlex.quote(env_file)}",
-                    f"conda env update -p {shlex.quote(env_path)} -f {shlex.quote(env_file)}",
-                ]
-            )
-
-        return f"conda run -p {shlex.quote(env_path)} python"
-
-    else:
-        # Create virtual environment (for pip/uv)
-        venv_path = f"{work_dir}/venv"
-
-        setup_commands = [
-            f"python -m venv {shlex.quote(venv_path)}",
-            # POSIX "." not bash "source": these lines run through the
-            # remote login shell, and Ubuntu's /bin/sh is dash, which
-            # has no `source` builtin (a mac CI node's sh is bash and
-            # hid this). Same for every activation below.
-            f". {venv_path}/bin/activate",
-        ]
-
-        # Install requirements
-        if requirements:
-            req_file = f"{work_dir}/requirements.txt"
-            req_content = "\n".join(
-                [f"{pkg}=={version}" for pkg, version in requirements.items()]
-            )
-
-            # This would need to be written to remote file
-            setup_commands.extend(
-                [
-                    f"echo {shlex.quote(req_content)} > {shlex.quote(req_file)}",
-                    f"{shlex.quote(venv_path)}/bin/{pkg_manager} install -r {shlex.quote(req_file)}",
-                ]
-            )
-
-        return f"{venv_path}/bin/python"
-
-
 # Bump when the recipe below changes what actually lands in an environment.
 # The key hashes the *inputs*; without this, a policy change (as when VENV2
 # stopped installing nine hardcoded packages and started mirroring the local
@@ -2221,13 +2079,31 @@ def _remote_has_uv(ssh_client, config: Optional[ClusterConfig]) -> bool:
     """Whether ``uv`` is a command on the remote host.
 
     ``package_manager`` describes how the *remote* environment is built, so
-    this asks the remote host. Asking the submitting machine -- as
-    ``is_uv_available`` does, for local use -- answered a different question.
+    this asks the remote host. Asking the submitting machine answered a
+    different question.
     """
     stdin, stdout, stderr = ssh_client.exec_command(
         _module_load_prefix(config) + "command -v uv"
     )
     return bool(stdout.read().decode().strip())
+
+
+def _builds_with_uv(ssh_client, config: ClusterConfig) -> bool:
+    """Whether a virtualenv on the remote host is to be built with ``uv``.
+
+    ``uv`` when it was asked for, or when ``auto`` finds it there; asking
+    for it where it is not installed is an error rather than a quiet pip.
+    """
+    manager = getattr(config, "package_manager", "pip") or "pip"
+    if manager not in ("uv", "auto"):
+        return False
+    present = _remote_has_uv(ssh_client, config)
+    if manager == "uv" and not present:
+        raise RuntimeError(
+            "package_manager is 'uv', but uv is not installed on the remote "
+            "host. Install it there, or set package_manager to 'pip' or 'auto'."
+        )
+    return present
 
 
 def _virtualenv_cache_root(work_dir: str, env_key: str) -> str:
@@ -2272,14 +2148,7 @@ def _build_virtualenv_pair(
             "on the remote host. Put what makes conda available in "
             "module_loads, or set package_manager to 'pip', 'uv' or 'auto'."
         )
-    use_uv = manager == "uv" or (
-        manager == "auto" and _remote_has_uv(ssh_client, config)
-    )
-    if manager == "uv" and not _remote_has_uv(ssh_client, config):
-        raise RuntimeError(
-            "package_manager is 'uv', but uv is not installed on the remote "
-            "host. Install it there, or set package_manager to 'pip' or 'auto'."
-        )
+    use_uv = _builds_with_uv(ssh_client, config)
 
     venv1 = f"{env_root}/venv1_serialization"
     venv2 = f"{env_root}/venv2_execution"
@@ -2932,7 +2801,10 @@ def setup_remote_environment(
     requirements: Dict[str, str],
     config: Optional[ClusterConfig] = None,
 ) -> str:
-    """Setup environment on remote cluster via SSH (original approach)."""
+    """Build one virtualenv in the job directory, for ``use_two_venv=False``.
+
+    The job script activates ``<work_dir>/venv``, so that is what is built.
+    """
 
     # Get appropriate package manager
     if config is None:
@@ -2940,88 +2812,64 @@ def setup_remote_environment(
 
         config = get_config()
 
-    pkg_manager = get_package_manager_command(config)
-
-    if pkg_manager == "conda":
-        # Create conda environment
-        env_name = f"clustrix_env_{hash(work_dir) % 10000}"
-        env_path = f"{work_dir}/conda_envs/{env_name}"
-
-        commands = [
-            f"cd {shlex.quote(work_dir)}",
-            "mkdir -p conda_envs",
-            f"conda create -p {shlex.quote(env_path)} "
-            f"python={validate_shell_fragment('python_executable', config.python_executable).replace('python', '3.11')} -y",
-        ]
-
-        if requirements:
-            # Create conda environment.yml file
-            env_content = f"""name: {env_name}
-dependencies:
-  - python={config.python_executable.replace('python', '3.11')}
-  - pip
-  - pip:"""
-            for pkg, version in requirements.items():
-                env_content += f"\n    - {pkg}=={version}"
-
-            # Write environment file
-            sftp = ssh_client.open_sftp()
-            with sftp.open(f"{work_dir}/environment.yml", "w") as f:
-                f.write(env_content)
-            sftp.close()
-
-            commands.append(
-                f"conda env update -p {shlex.quote(env_path)} -f environment.yml"
-            )
-
-    else:
-        # Create virtual environment (for pip/uv)
-        commands = [f"cd {shlex.quote(work_dir)}"]
-
-        # Module loads, environment variables and pre-execution commands, with
-        # the same quote-or-validate treatment the job scripts get.
-        commands.extend(environment_setup_lines(config))
-
-        # Now create the virtual environment. `python_executable` defaults to
-        # "python", which does not exist on most modern systems -- Python 3
-        # installs ship `python3`, and `python` is only present where someone
-        # added a compatibility symlink. Plenty of real hosts are
-        # where it is absent, so `python -m venv venv` failed, the venv was
-        # never created, and the job script then died on
-        # `source venv/bin/activate` with "python: command not found".
-        python_cmd = resolve_remote_python(ssh_client, config)
-        commands.extend(
-            [
-                f"{shlex.quote(python_cmd)} -m venv venv",
-                ". venv/bin/activate",
-            ]
+    if config.package_manager == "conda":
+        # This path builds one virtualenv in the job directory, and the job
+        # script activates exactly that. A conda environment created here
+        # was never the one the job ran in.
+        raise RuntimeError(
+            "package_manager='conda' needs use_two_venv=True (the default), "
+            "which builds conda environments the job runs in. With "
+            "use_two_venv=False, set package_manager to 'pip', 'uv' or 'auto', "
+            "or name an existing environment with conda_env_name."
         )
+    commands = [f"cd {shlex.quote(work_dir)}"]
 
-        # dill and cloudpickle are not optional: the job script deserializes
-        # the function with them, and without them it gets `func = None` and
-        # dies twenty lines into a remote traceback with
-        # "'NoneType' object is not callable" -- which names neither the
-        # missing package nor the failed install. So this must not be swallowed
-        # by `|| echo ... continuing`, as it was.
-        #
-        # Versions are pinned to the caller's when known, because dill embeds
-        # CPython bytecode and a mismatched pair is its own class of failure;
-        # an unpinned install is the fallback, not the default.
-        pinned = [
-            shlex.quote(f"{pkg}=={version}")
-            for pkg, version in (requirements or {}).items()
-            if pkg.lower() in ("dill", "cloudpickle")
+    # Module loads, environment variables and pre-execution commands, with
+    # the same quote-or-validate treatment the job scripts get.
+    commands.extend(environment_setup_lines(config))
+
+    # Now create the virtual environment. `python_executable` defaults to
+    # "python", which does not exist on most modern systems -- Python 3
+    # installs ship `python3`, and `python` is only present where someone
+    # added a compatibility symlink. Plenty of real hosts are
+    # where it is absent, so `python -m venv venv` failed, the venv was
+    # never created, and the job script then died on
+    # `source venv/bin/activate` with "python: command not found".
+    python_cmd = resolve_remote_python(ssh_client, config)
+    commands.extend(
+        [
+            f"{shlex.quote(python_cmd)} -m venv venv",
+            ". venv/bin/activate",
         ]
-        wanted = " ".join(pinned) if pinned else "dill cloudpickle"
-        # Which installer runs is a fact about the remote host. "auto" used
-        # to be decided by whether uv was installed on the *submitting*
-        # machine, and uv was then handed pip's --timeout flag, which it
-        # rejects -- so "auto" failed on any laptop that had uv.
-        use_uv = config.package_manager == "uv" or (
-            config.package_manager == "auto" and _remote_has_uv(ssh_client, config)
-        )
-        installer = "uv pip install" if use_uv else "pip install --timeout=120"
-        commands.append(f"{installer} {wanted} || {installer} dill cloudpickle")
+    )
+
+    # dill and cloudpickle are not optional: the job script deserializes
+    # the function with them, and without them it gets `func = None` and
+    # dies twenty lines into a remote traceback with
+    # "'NoneType' object is not callable" -- which names neither the
+    # missing package nor the failed install. So this must not be swallowed
+    # by `|| echo ... continuing`, as it was.
+    #
+    # Versions are pinned to the caller's when known, because dill embeds
+    # CPython bytecode and a mismatched pair is its own class of failure;
+    # an unpinned install is the fallback, not the default.
+    pinned = [
+        shlex.quote(f"{pkg}=={version}")
+        for pkg, version in (requirements or {}).items()
+        if pkg.lower() in ("dill", "cloudpickle")
+    ]
+    wanted = " ".join(pinned) if pinned else "dill cloudpickle"
+    # Which installer runs is a fact about the remote host. "auto" used
+    # to be decided by whether uv was installed on the *submitting*
+    # machine, and uv was then handed pip's --timeout flag, which it
+    # rejects -- so "auto" failed on any laptop that had uv.
+    use_uv = _builds_with_uv(ssh_client, config)
+    installer = "uv pip install" if use_uv else "pip install --timeout=120"
+    # Braces: `a && b || c` runs c when *a* fails. Unbraced, a virtualenv
+    # that was never created ended in an unpinned install with whatever pip
+    # was on PATH, outside any virtualenv, and its exit status was reported
+    # as a successful setup.
+    commands.append(f"{{ {installer} {wanted} || {installer} dill cloudpickle; }}")
 
     # Execute setup commands
     full_command = " && ".join(commands)

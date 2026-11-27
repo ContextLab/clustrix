@@ -876,41 +876,6 @@ class TestTheSilentBehaviourChangeIsAnnounced:
         assert "environment or config.conda_env_name" not in source
 
 
-class TestSetupEnvironmentValidatesTheNameToo:
-    """The second interpolation site for the same user input (utils.py:1168).
-
-    #164 blessed ``conda_env_name`` as user input on the job-script path and
-    left this one interpolating it bare. It is exported from ``__init__``.
-    """
-
-    def test_a_hostile_name_is_refused(self):
-        from clustrix.utils import setup_environment
-
-        config = make_config(conda_env_name="ev'il; touch /tmp/pwn")
-        with pytest.raises(ValueError) as excinfo:
-            setup_environment("/work", {}, config)
-        assert "conda_env_name" in str(excinfo.value)
-
-    def test_an_option_flag_is_refused(self):
-        from clustrix.utils import setup_environment
-
-        config = make_config(conda_env_name="--no-capture-output")
-        with pytest.raises(ValueError):
-            setup_environment("/work", {}, config)
-
-    def test_an_ordinary_name_is_quoted(self):
-        from clustrix.utils import setup_environment
-
-        config = make_config(conda_env_name="prod")
-        assert setup_environment("/work", {}, config) == "conda run -n prod python"
-
-    def test_a_blank_name_is_not_an_environment_called_nothing(self):
-        from clustrix.utils import setup_environment
-
-        config = make_config(conda_env_name="   ")
-        assert "conda run -n" not in setup_environment("/work", {}, config)
-
-
 class TestTheSchedulerDoesNotFeedVenv1sPythonToVenv2:
     """The round-two regression: `venv2_python` got an overwritten value.
 

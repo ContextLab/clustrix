@@ -981,6 +981,25 @@ class TestTheSameDataNotJustTheSamePath:
         )
         assert not (remote / "work" / auto_stage.STORE_DIRECTORY).exists()
 
+    def test_data_too_big_to_read_is_compared_by_names_and_sizes_and_says_so(
+        self, project, connected, monkeypatch
+    ):
+        """A dataset on a shared filesystem is not hashed on both sides, one
+        of them a login node, before the first call. The limit is lowered
+        here instead of writing 256 MB. A listing whose names or sizes
+        differ still stops the call, whatever the size."""
+        connection, config, remote = connected
+        monkeypatch.setattr(auto_stage, "_HASH_LIMIT_BYTES", 4)
+
+        _, _, plan = auto_stage.prepare(
+            connection, config, takes_folder, (str(project / "data"),), {}
+        )
+
+        assert plan.inputs[0].how == "in place"
+        assert "same names and sizes" in plan.inputs[0].why
+        assert "the contents were not compared" in plan.inputs[0].why
+        assert auto_stage._LOCAL_SHA256 == {}, "nothing was read to compare it"
+
     def test_a_file_of_the_same_size_and_different_content_stops_the_call(
         self, project, connected
     ):

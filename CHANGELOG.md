@@ -16,6 +16,17 @@ was not is marked.
 
 ### Breaking changes, and what to change
 
+- **`clustrix.setup_environment` is deleted**, with `utils.is_uv_available`,
+  `is_conda_available` and `get_package_manager_command`. It built a list of
+  commands, ran none of them and returned the path of an interpreter it had
+  not created; nothing called it. *Migration:* none needed; every remote
+  job builds its own environment.
+- **`package_manager="conda"` with `use_two_venv=False` raises.** That path
+  created a conda environment the job never ran in, at a Python version
+  made by replacing "python" with "3.11" in `python_executable`.
+  *Migration:* leave `use_two_venv` at its default, or name an existing
+  environment with `conda_env_name`.
+
 - **A divided loop returns the function's own return value.** The old
   protocol is gone: `@cluster` no longer passes `_chunk_range_<var>`,
   `_chunk_index` or `_parallel_<var>` keywords, and never returns a list of
@@ -234,6 +245,16 @@ was not is marked.
 
 ### Fixed
 
+- With `use_two_venv=False`, a virtualenv that could not be created was
+  reported as a successful setup: the unpinned install meant as a retry ran
+  outside any virtualenv and its exit status was the answer.
+  `package_manager="auto"` on that path chose conda because the *submitting*
+  machine had it.
+- A `uv` named in `package_manager` and missing on the cluster is an error
+  on both paths, not a quiet pip.
+- Idle local loop workers died with a traceback each on Ctrl-C and at
+  notebook kernel shutdown. They now ignore the interrupt; a running task
+  still receives it.
 - NumPy and other third-party objects as arguments or return values failed
   on `ssh` and `slurm` with `ModuleNotFoundError`.
 - An `ssh` job that was killed or called `sys.exit` appeared to be running

@@ -424,8 +424,9 @@ lives anywhere else:
 * the iteration order of a set of strings (or of anything else hashed by
   content or address): it depends on the process, as it does between two
   runs of Python. ``list(vocabulary)`` inside the loop and after it can
-  disagree. Sort such a set, or set ``PYTHONHASHSEED``, which the workers
-  inherit,
+  disagree. Sort such a set. Setting ``PYTHONHASHSEED`` is not enough: the
+  workers inherit it, but a set rebuilt from a pickle can still iterate in
+  a different order from the one it was copied from,
 * ``sys.argv`` and other state of the interpreter that started the program,
 * an object whose pickle leaves its state out (a custom ``__getstate__``):
   pickling is how a change is noticed.

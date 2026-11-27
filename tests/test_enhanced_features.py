@@ -13,7 +13,6 @@ from clustrix.utils import (
     get_environment_requirements,
     get_unreproducible_requirements,
     get_environment_info,
-    get_package_manager_command,
     setup_remote_environment,
 )
 from tests.ssh_server import LocalSSHServer
@@ -73,23 +72,6 @@ class TestEnhancedDependencyHandling:
 
         assert f"dill=={dill.__version__}" in listing
         assert f"pytest=={pytest.__version__}" in listing
-
-
-class TestUvPackageManagerSupport:
-    """Test uv package manager support and integration.
-
-    Detection of uv and conda, and what ``package_manager="auto"`` makes of
-    it, is in ``tests/test_utils.py::TestPackageManager``, against real
-    programs on a real ``PATH``.
-    """
-
-    def test_get_package_manager_command_unknown_fallback(self):
-        """Test fallback to pip for unknown package manager."""
-        config = ClusterConfig(package_manager="unknown")
-
-        result = get_package_manager_command(config)
-
-        assert result == "pip"
 
 
 PASSWORD = "wrong_password"
@@ -286,6 +268,65 @@ class TestRemoteEnvironmentSetup:
         assert "not found" in message
         assert not (remote_host.work / "venv").exists()
 
+    def test_a_virtualenv_that_was_never_created_is_a_failed_setup(self, remote_host):
+        """The host has pip but no Python, so ``python3 -m venv venv`` fails.
+
+        The install was ``... && pip install PINS || pip install dill
+        cloudpickle``. ``||`` binds looser than the ``&&`` chain, so any
+        earlier failure ran the unpinned retry outside the virtualenv, with
+        whatever pip was on PATH, and its exit status became the answer.
+        """
+        remote_host.has_installer("pip")
+
+        with pytest.raises(RuntimeError, match="Environment setup failed"):
+            remote_host.setup(dict(PINNED), package_manager="pip")
+
+        assert remote_host.installs() == [], "pip ran outside any virtualenv"
+
+    def test_auto_does_not_build_with_conda_because_this_machine_has_it(
+        self, remote_host, tmp_path, monkeypatch
+    ):
+        """The host has Python and pip and no conda; only this machine has conda."""
+        remote_host.has_python()
+        remote_host.has_installer("pip")
+        here = tmp_path / "local-bin"
+        here.mkdir()
+        _program(here, "conda", "exit 0")
+        monkeypatch.setenv("PATH", str(here))
+
+        remote_host.setup(dict(PINNED), package_manager="auto")
+
+        assert remote_host.installs() == [
+            "pip install --timeout=120 dill==0.3.8 cloudpickle==3.0.0"
+        ]
+        assert (remote_host.work / "venv" / "bin" / "activate").exists()
+
+    def test_uv_named_on_a_host_without_it_is_an_error_not_a_quiet_pip(
+        self, remote_host
+    ):
+        remote_host.has_python()
+        remote_host.has_installer("pip")
+
+        with pytest.raises(RuntimeError, match="uv is not installed on the remote"):
+            remote_host.setup(dict(PINNED), package_manager="uv")
+
+        assert remote_host.installs() == []
+
+    def test_conda_is_refused_here_because_the_job_would_not_run_in_it(
+        self, remote_host
+    ):
+        """This path's job script activates ``venv``. A conda environment
+        used to be created beside it, at a version made by replacing
+        "python" with "3.11" in ``python_executable``, and never used."""
+        remote_host.has_python()
+        remote_host.has_installer("pip")
+        remote_host.has_installer("conda")
+
+        with pytest.raises(RuntimeError, match="needs use_two_venv=True"):
+            remote_host.setup(dict(PINNED), package_manager="conda")
+
+        assert remote_host.installs() == []
+
 
 class TestConfigurationEnhancements:
     """Test enhanced configuration features."""
@@ -397,11 +438,3 @@ class TestBackwardCompatibility:
         # were here are gone with the fields themselves.
         assert config.package_manager == "pip"
         assert config.replicate_local_environment is True
-
-    def test_package_manager_command_unknown_input(self):
-        """Test graceful handling of unknown package manager configuration."""
-        config = ClusterConfig(package_manager="nonexistent")
-
-        # Should fallback to pip
-        result = get_package_manager_command(config)
-        assert result == "pip"

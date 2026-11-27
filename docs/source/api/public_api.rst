@@ -30,8 +30,7 @@ the page that documents it. The list on this page was compared with
    * - ``setup_ssh_keys``, ``setup_ssh_keys_with_fallback``,
        ``add_host_key``, ``find_ssh_keys``, ``list_ssh_keys``
      - :doc:`../ssh_setup` and below
-   * - ``ClusterExecutor``, ``setup_environment``, ``ProfileManager``,
-       ``adopt_profile_store``
+   * - ``ClusterExecutor``, ``ProfileManager``, ``adopt_profile_store``
      - Below
 
 There is no separate module to import for loop division or input staging.
@@ -93,14 +92,6 @@ directly to test a connection or to manage a job yourself.
 While waiting for a result the executor checks after one second and backs
 off from there; ``job_poll_interval`` is the longest it waits between checks,
 not the interval. ``job_wait_timeout`` bounds the whole wait.
-
-``setup_environment``
----------------------
-
-.. autofunction:: clustrix.setup_environment
-
-Every remote job calls this itself. Call it directly only to build an
-environment ahead of time.
 
 Profiles
 --------

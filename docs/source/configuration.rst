@@ -568,9 +568,11 @@ Paths and the remote environment
        clustrix never managed to ask.
    * - ``package_manager``
      - ``"pip"``
-     - ``"pip"``, ``"uv"`` (``uv pip``), ``"conda"``, or ``"auto"`` (uv, then
-       conda, then pip). Applies to the single-venv path
-       (``use_two_venv=False``).
+     - How the environment on the cluster is built: ``"pip"``, ``"uv"``,
+       ``"conda"``, or ``"auto"`` (uv if the *cluster* has it, else pip).
+       What is installed on the submitting machine plays no part. ``"uv"``
+       where the cluster has no uv is an error. ``"conda"`` needs
+       ``use_two_venv=True`` (the default).
    * - ``conda_env_name``
      - ``None``
      - Names a conda environment that **already exists on the cluster**. The

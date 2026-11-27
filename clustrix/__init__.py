@@ -2,7 +2,6 @@ from .decorator import cluster
 from .config import ClusterConfig, configure, get_config
 from .executor import ClusterExecutor
 from .parallelize import explain
-from .utils import setup_environment
 from .ssh_utils import (
     setup_ssh_keys,
     setup_ssh_keys_with_fallback,
@@ -56,7 +55,6 @@ __all__ = [
     "ClusterConfig",
     "ClusterExecutor",
     "explain",
-    "setup_environment",
     "setup_ssh_keys",
     "setup_ssh_keys_with_fallback",
     "find_ssh_keys",
