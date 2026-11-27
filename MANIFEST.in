@@ -1,0 +1,23 @@
+# What goes into the source distribution, stated rather than discovered.
+#
+# The package itself, pyproject.toml and README.md are included by setuptools.
+include LICENSE
+include CHANGELOG.md
+
+# The test suite is not shipped. Shipping part of it is worse than shipping
+# none: setuptools' default picks up tests/test*.py only, which is 35 modules
+# without the conftest.py, ssh_server.py and fixtures they import.
+prune tests
+
+# Repository furniture. Listed so the sdist is the same whether or not a
+# git-aware file finder (setuptools-scm) happens to be installed where it is
+# built; with one installed, every tracked file is a candidate.
+prune .claude
+prune .github
+prune docs
+prune examples
+prune notes
+prune scripts
+exclude .flake8 .gitignore .pre-commit-config.yaml .readthedocs.yaml
+exclude AGENTS.md CLAUDE.md CONTRIBUTING.md CONTRIBUTORS.md
+global-exclude __pycache__ *.py[cod] AGENTS.md

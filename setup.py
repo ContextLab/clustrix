@@ -1,124 +1,13 @@
-from setuptools import setup, find_packages
+"""Compatibility shim: every piece of project metadata lives in pyproject.toml.
 
-with open("README.md", "r", encoding="utf-8") as fh:
-    long_description = fh.read()
+This file used to repeat the name, version, classifiers, dependencies and
+extras, and the copies had drifted -- the ``dev`` extra here was missing
+packages the one in ``pyproject.toml`` listed. setuptools reads the
+``[project]`` table and ignores what a ``setup()`` call says about the same
+fields, so the copies were not even in effect; they were only wrong. It stays
+as a file because tools that predate PEP 517 still look for one.
+"""
 
-setup(
-    name="clustrix",
-    version="0.2.0",
-    author="Contextual Dynamics Laboratory",
-    author_email="contextualdynamics@gmail.com",
-    description="Seamless distributed computing for Python functions",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/ContextLab/clustrix",
-    packages=find_packages(),
-    classifiers=[
-        "Development Status :: 4 - Beta",
-        "Intended Audience :: Developers",
-        "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: MIT License",
-        "Operating System :: OS Independent",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.10",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Topic :: Scientific/Engineering",
-        "Topic :: Software Development :: Libraries :: Python Modules",
-        "Topic :: System :: Distributed Computing",
-    ],
-    # Must match pyproject.toml: four hard dependencies require >=3.10.
-    python_requires=">=3.10",
-    install_requires=[
-        "paramiko>=2.7.0",
-        "pyyaml>=5.4.0",
-        "cloudpickle>=3.0.0",  # 2.x breaks by-value packages that define a
-        # typing.NamedTuple; see pyproject.toml
-        "dill>=0.3.4",
-        "click>=8.0.0",
-        "requests>=2.25.0",  # For Lambda Cloud and general HTTP requests
-        # run_job / inspect_job / fetch_job_logs -- the whole Jobs API the
-        # huggingface backend is built on -- arrived well after 0.16.
-        "huggingface_hub>=0.34.0",
-        "python-dotenv>=1.0.0",  # credential_manager.py loads ~/.clustrix/.env
-    ],
-    extras_require={
-        "widget": [
-            "ipywidgets>=7.6.0",
-            "jupyter>=1.0",
-            "ipython>=7.0",
-        ],
-        "dev": [
-            "pytest>=6.0",
-            "pytest-cov>=2.0",
-            # tests/comprehensive/* and several tests/*_real.py modules import
-            # numpy and pandas at module scope; without them those modules
-            # raise ModuleNotFoundError during collection (see #130).
-            "numpy>=1.19",
-            "pandas>=1.1",
-            # tests/test_decorator_real.py trains a real model; see pyproject.
-            "scikit-learn>=1.0",
-            "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
-            # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
-            "flake8>=3.8",
-            "mypy>=0.812",
-            "types-PyYAML",
-            "types-requests",
-            "types-paramiko",
-            # The notebook widget suite imports these at module scope.
-            "ipywidgets>=7.6.0",
-            "ipython>=7.0.0",
-            # Several deadlock regression tests use @pytest.mark.timeout and
-            # hang forever without it.
-            "pytest-timeout>=2.0",
-            # test_edge_cases_real.py::test_memory_string_formats imports
-            # psutil in the function it submits, and is not marked real_world;
-            # nothing else here pulls psutil in. See pyproject.toml.
-            "psutil>=5.8",
-            # test_notebook_magic_extended.py imports traitlets.config
-            # directly; it only arrives transitively via ipython. See
-            # pyproject.toml.
-            "traitlets>=5.0",
-        ],
-        "test": [
-            "pytest>=6.0",
-            "pytest-cov>=2.0",
-            "coverage>=6.0",
-            "pytest-xdist>=2.0",  # For parallel test execution
-            "pytest-mock>=3.0",  # For better mocking support
-        ],
-        "docs": [
-            "sphinx>=4.0",
-            "sphinx-wagtail-theme>=6.0.0",
-            "sphinx-autodoc-typehints>=1.12",
-            "nbsphinx>=0.8",
-            "jupyter>=1.0",
-            "ipython>=7.0",
-        ],
-        "all": [
-            # Widget dependencies
-            "ipywidgets>=7.6.0",
-            "jupyter>=1.0",
-            "ipython>=7.0",
-            # Development dependencies
-            "pytest>=6.0",
-            "pytest-cov>=2.0",
-            "black==26.3.1",  # pinned to match pyproject.toml; earlier releases carry
-            # an arbitrary-file-write advisory (GHSA-3936-cmfr-pm3m)
-            "flake8>=3.8",
-            "mypy>=0.812",
-            # Documentation dependencies
-            "sphinx>=4.0",
-            "sphinx-wagtail-theme>=6.0.0",
-            "sphinx-autodoc-typehints>=1.12",
-            "nbsphinx>=0.8",
-        ],
-    },
-    entry_points={
-        "console_scripts": [
-            "clustrix=clustrix.cli:cli",
-        ],
-    },
-    include_package_data=True,
-    zip_safe=False,
-)
+from setuptools import setup
+
+setup()

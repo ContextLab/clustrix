@@ -1,5 +1,9 @@
 [build-system]
-requires = ["setuptools>=64", "setuptools-scm>=6.2", "wheel"]
+# No setuptools-scm. The version is the literal below, so nothing used scm
+# for versioning -- but merely being installed at build time registers its
+# file finder, which put every git-tracked file into the sdist: notes/,
+# .claude/, .github/ and all of tests/. What ships is decided by MANIFEST.in.
+requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -27,6 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Distributed Computing",
@@ -113,6 +118,9 @@ dev = [
     # this suite has without declaring; a direct import gets a direct
     # declaration, exactly as psutil above.
     "traitlets>=5.0",
+    # tests/unit/test_packaging_metadata.py builds a real sdist to check what
+    # ships in it.
+    "build>=1.0",
 ]
 test = [
     "pytest>=6.0",
@@ -276,6 +284,6 @@ skip_covered = false
 [tool.coverage.html]
 directory = "htmlcov"
 
-[tool.flake8]
-max-line-length = 88
-extend-ignore = ["E203", "W503"]
+# flake8 is configured in .flake8, and only there: flake8 does not read
+# pyproject.toml, so a [tool.flake8] table here said 88 columns while every
+# run used .flake8's 120. Enforced by tests/unit/test_packaging_metadata.py.
