@@ -3,13 +3,25 @@
 What the widget does lives here; how it looks lives in ``widget_style``.
 """
 
+import contextlib
 import html
+import io
 import logging
 import os
 import re
 import warnings
 from contextlib import contextmanager
-from typing import Any, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
+from typing import (
+    Any,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 if TYPE_CHECKING:
     import ipywidgets as widgets
@@ -65,6 +77,7 @@ WIDGET_MANAGED_FIELDS = frozenset(
         "default_cores",
         "default_memory",
         "default_time",
+        "default_partition",
         "cluster_host",
         "cluster_port",
         "username",
@@ -75,11 +88,14 @@ WIDGET_MANAGED_FIELDS = frozenset(
         "remote_work_dir",
         "hf_namespace",
         "hf_flavor",
+        "hf_job_timeout",
         "hf_token",
         "hf_allow_gpu_flavors",
         "package_manager",
         "python_executable",
+        "conda_env_name",
         "replicate_local_environment",
+        "cleanup_on_success",
         "environment_variables",
         "module_loads",
         "pre_execution_commands",
@@ -142,6 +158,7 @@ FORM_CONTROLS = (
     "cpus",
     "ram",
     "time",
+    "partition",
     "host",
     "port",
     "username",
@@ -151,11 +168,14 @@ FORM_CONTROLS = (
     "home_dir",
     "hf_namespace",
     "hf_flavor",
+    "hf_timeout",
     "hf_token",
     "hf_allow_gpu",
     "package_manager",
     "python_executable",
+    "conda_env",
     "clone_env",
+    "cleanup",
     "env_vars",
     "modules",
     "pre_exec_commands",
@@ -178,6 +198,17 @@ HF_FLAVORS = (
 )
 
 STATUS_STATES = ("idle", "busy", "ok", "error")
+
+#: Above this, a core count is a typo rather than a request.
+MAX_PLAUSIBLE_CORES = 4096
+
+
+def _is_walltime(text: str) -> bool:
+    """True for ``MM``, ``MM:SS``, ``HH:MM:SS`` or ``D-HH[:MM[:SS]]``."""
+    match = re.fullmatch(r"(?:(\d+)-)?(\d+)(?::(\d{1,2}))?(?::(\d{1,2}))?", text)
+    if not match:
+        return False
+    return all(part is None or int(part) < 60 for part in match.groups()[2:])
 
 
 def _parse_environment_variables(text: str) -> Tuple[Dict[str, str], List[str]]:
@@ -207,6 +238,17 @@ class ModernClustrixWidget:
     ``self.widgets`` maps a name to each control, so code and tests can read
     or set a field without walking the layout; ``get_widget()`` returns the
     one container that holds them all.
+
+    Three states are kept apart, because confusing them is how a form like
+    this misleads:
+
+    * what ``@cluster`` is using -- the live configuration, named in the
+      header and compared against by the *applied* pill;
+    * what each profile holds on disk;
+    * what is on screen, a **draft** of the selected profile. Editing never
+      changes a profile; **Apply** does, and makes it live in the same step.
+      A draft survives switching to another profile and back, for the life
+      of the widget, and **Revert** throws it away.
     """
 
     def __init__(self, profile_manager: Optional[ProfileManager] = None):
@@ -219,8 +261,17 @@ class ModernClustrixWidget:
         # Set while the widget is writing values into its own controls, so the
         # resulting change events are not mistaken for edits by the user.
         self._suspend_profile_capture = False
-        # The refused connection whose host key the user is being asked about.
+        # Unapplied edits, per profile name, as _config_data_from_widgets
+        # produced them. Held in memory only.
+        self._drafts: Dict[str, Dict[str, Any]] = {}
+        # What the form read as just after the selected profile was loaded.
+        self._baseline: Dict[str, Any] = {}
+        # The refused connection whose host key the user is being asked
+        # about, and the button to press again once it is trusted.
         self._untrusted_host: Optional[HostKeyVerificationError] = None
+        self._retry_after_trust: Optional[str] = None
+        # The profile whose deletion is awaiting a second click.
+        self._delete_armed_for: Optional[str] = None
         self.widgets: Dict[str, Any] = {}
 
         self._create_controls()
@@ -228,8 +279,7 @@ class ModernClustrixWidget:
         self._setup_observers()
         self._adopt_live_configuration()
         self._update_ui_for_cluster_type()
-        self._show_configuration_in_use()
-        self._show_whether_applied()
+        self._refresh_state()
 
     # -- construction ----------------------------------------------------
 
@@ -238,8 +288,8 @@ class ModernClustrixWidget:
         control = widgets.Text(
             description=description,
             placeholder=placeholder,
-            # Commit on blur or Enter. Per-keystroke events would persist a
-            # half-typed hostname to the profile store on every character.
+            # Commit on blur or Enter rather than on every keystroke: each
+            # commit re-evaluates the whole form.
             continuous_update=False,
         )
         control.add_class("cx-field")
@@ -264,18 +314,23 @@ class ModernClustrixWidget:
             options=self.profile_manager.get_profile_names(),
             value=self.profile_manager.active_profile,
         )
-        w["profile_name"] = self._text("Name")
+        w["profile_name"] = self._text("Rename to")
         w["profile_name"].value = self.profile_manager.active_profile or ""
         w["add_profile_btn"] = self._button(
-            "Duplicate", "Copy this profile, including the edits on screen"
+            "Duplicate", "Save what is on screen as a new profile"
+        )
+        w["revert_btn"] = self._button(
+            "Revert", "Discard the edits on screen and show the profile as saved"
         )
         w["remove_profile_btn"] = self._button("Delete", "Delete this profile")
         w["remove_profile_btn"].add_class("cx-danger")
+        w["profile_state"] = widgets.HTML()
+        w["profile_state"].add_class("cx-hint")
         # Typeable, so a file that does not exist yet can be saved to, and a
         # picker over the bundles that do exist, so loading one does not mean
         # remembering where it went.
         w["config_filename"] = widgets.Combobox(
-            description="Profiles file",
+            description="Profiles file (to move profiles between machines)",
             value=DEFAULT_PROFILE_STORE,
             options=self._discover_config_files(),
             placeholder=f"{DEFAULT_PROFILE_STORE}, or a path",
@@ -283,10 +338,10 @@ class ModernClustrixWidget:
             continuous_update=False,
         )
         w["save_btn"] = self._button(
-            "Save all", "Write every profile to this file (credentials are left out)"
+            "Export", "Write every saved profile to this file (no credentials)"
         )
         w["load_btn"] = self._button(
-            "Load", "Replace every profile with the ones in this file"
+            "Import", "Replace every profile with the ones in this file"
         )
 
         # Backend and resources
@@ -304,9 +359,10 @@ class ModernClustrixWidget:
         w["cluster_type"].add_class("cx-backend")
         w["backend_hint"] = widgets.HTML()
         w["backend_hint"].add_class("cx-hint")
-        w["cpus"] = widgets.IntText(description="CPUs", value=1)
-        w["ram"] = self._text("Memory", "16GB")
-        w["time"] = self._text("Walltime", "HH:MM:SS")
+        w["cpus"] = widgets.IntText(description="CPUs per job", value=1)
+        w["ram"] = self._text("Memory per job", "16GB")
+        w["time"] = self._text("Time limit per job", "HH:MM:SS")
+        w["partition"] = self._text("Partition", "the scheduler's default")
 
         # SSH connection (ssh and slurm)
         w["host"] = self._text("Host", "login.cluster.example.edu")
@@ -319,10 +375,14 @@ class ModernClustrixWidget:
             description="Password", placeholder="this session only, never saved"
         )
         w["local_env_var"] = self._text(
-            "Read password from environment variable", "MY_CLUSTER_PASSWORD", mono=True
+            "…or the environment variable that holds the password",
+            "MY_CLUSTER_PASSWORD",
+            mono=True,
         )
         w["home_dir"] = self._text(
-            "Remote work directory", ClusterConfig().remote_work_dir, mono=True
+            "Directory on the host for job files",
+            ClusterConfig().remote_work_dir,
+            mono=True,
         )
         w["auto_setup_ssh"] = self._button(
             "Set up SSH key",
@@ -334,15 +394,19 @@ class ModernClustrixWidget:
         )
 
         # HuggingFace Jobs
-        w["hf_namespace"] = self._text("Namespace", "user or organisation")
+        w["hf_namespace"] = self._text("Namespace", "your username, or an organisation")
         w["hf_flavor"] = widgets.Dropdown(
             description="Hardware", options=list(HF_FLAVORS), value=HF_FLAVORS[0]
         )
+        w["hf_timeout"] = self._text("Time limit per job", "e.g. 30m, 2h")
         w["hf_token"] = widgets.Password(
-            description="Token", placeholder="blank: HF_TOKEN or `hf auth login`"
+            description="Token (this session only, never saved)",
+            placeholder="blank: HF_TOKEN or `hf auth login`",
         )
         w["hf_allow_gpu"] = widgets.Checkbox(
-            description="Allow paid GPU hardware", value=False, indent=False
+            description="Allow GPU hardware, which is billed per second",
+            value=False,
+            indent=False,
         )
 
         # Advanced
@@ -353,8 +417,16 @@ class ModernClustrixWidget:
         )
         w["python_executable"] = self._text("Python executable", "python", mono=True)
         w["python_executable"].value = "python"
+        w["conda_env"] = self._text(
+            "Existing conda environment", "blank: build one", mono=True
+        )
         w["clone_env"] = widgets.Checkbox(
-            description="Replicate my local environment on the worker",
+            description="Install my local packages on the worker",
+            value=True,
+            indent=False,
+        )
+        w["cleanup"] = widgets.Checkbox(
+            description="Delete job files on the host after success",
             value=True,
             indent=False,
         )
@@ -368,8 +440,8 @@ class ModernClustrixWidget:
             "Modules to load", "space-separated, e.g. python/3.11 cuda", mono=True
         )
         w["pre_exec_commands"] = widgets.Textarea(
-            description="Commands to run before the job",
-            placeholder="one shell command per line",
+            description="Shell commands to run before the job",
+            placeholder="one per line, e.g. source ~/setup.sh",
             rows=3,
             continuous_update=False,
         )
@@ -385,13 +457,16 @@ class ModernClustrixWidget:
             "Run test job", "Run one tiny job end to end and show where it ran"
         )
         w["apply_btn"] = self._button(
-            "Apply", "Make @cluster use what is shown here", primary=True
+            "Apply",
+            "Save this profile and make @cluster use it from now on",
+            primary=True,
         )
         w["trust_host_btn"] = self._button(
             "Trust this host",
-            "Record the host key shown below in known_hosts, then connect",
+            "Record the host key shown above in known_hosts, then try again",
         )
         w["trust_host_btn"].layout.display = "none"
+        w["applied_pill"] = widgets.HTML()
         w["status_pill"] = widgets.HTML()
         w["in_use"] = widgets.HTML()
         w["output"] = widgets.Output()
@@ -410,7 +485,7 @@ class ModernClustrixWidget:
             "pre_exec_commands",
         ):
             w[key].add_class("cx-field")
-        for key in ("refresh_keys", "hf_allow_gpu", "clone_env"):
+        for key in ("refresh_keys", "hf_allow_gpu", "clone_env", "cleanup"):
             w[key].add_class("cx-check")
 
     @staticmethod
@@ -428,6 +503,13 @@ class ModernClustrixWidget:
         return row
 
     @staticmethod
+    def _group(*buttons: Any):
+        """Buttons that stay together when the row around them wraps."""
+        group = widgets.Box(list(buttons))
+        group.add_class("cx-group")
+        return group
+
+    @staticmethod
     def _section(heading: str, *children: Any):
         title = widgets.HTML(f"<div class='cx-heading'>{html.escape(heading)}</div>")
         section = widgets.VBox([title, *children])
@@ -443,28 +525,35 @@ class ModernClustrixWidget:
             [widgets.HTML("<span class='cx-title'>Clustrix</span>"), w["in_use"]]
         )
         brand.add_class("cx-brand")
-        header = widgets.Box([brand, w["status_pill"]])
+        header = widgets.Box([brand, w["applied_pill"]])
         header.add_class("cx-header")
 
         profile = self._section(
             "Profile",
             self._row(
-                (w["profile_dropdown"], "2 1 200px"),
-                (w["profile_name"], "2 1 200px"),
-                (w["add_profile_btn"], fixed),
-                (w["remove_profile_btn"], fixed),
+                (w["profile_dropdown"], "2 1 190px"),
+                (w["profile_name"], "2 1 190px"),
+                (
+                    self._group(
+                        w["add_profile_btn"], w["revert_btn"], w["remove_profile_btn"]
+                    ),
+                    fixed,
+                ),
             ),
+            w["profile_state"],
         )
 
+        w["resources_row"] = self._row(
+            (w["cpus"], "1 1 110px"),
+            (w["ram"], "1 1 110px"),
+            (w["time"], "1 1 110px"),
+            (w["partition"], "1 1 110px"),
+        )
         resources = self._section(
             "Where to run",
             self._row((w["cluster_type"], "1 1 100%")),
             w["backend_hint"],
-            self._row(
-                (w["cpus"], "1 1 90px"),
-                (w["ram"], "1 1 110px"),
-                (w["time"], "1 1 110px"),
-            ),
+            w["resources_row"],
         )
 
         w["remote_section"] = self._section(
@@ -475,61 +564,65 @@ class ModernClustrixWidget:
                 (w["username"], "2 1 140px"),
             ),
             self._row(
-                (w["ssh_key_file"], "1 1 240px"),
                 (w["password"], "1 1 240px"),
-            ),
-            self._row(
-                (w["home_dir"], "1 1 240px"),
                 (w["local_env_var"], "1 1 240px"),
             ),
-            self._row((w["auto_setup_ssh"], fixed), (w["refresh_keys"], fixed)),
+            self._row((w["ssh_key_file"], "1 1 240px")),
+            self._row((w["auto_setup_ssh"], fixed), (w["refresh_keys"], "1 1 240px")),
+            self._row((w["home_dir"], "1 1 240px")),
         )
 
         w["hf_section"] = self._section(
             "HuggingFace Jobs",
             self._row(
                 (w["hf_namespace"], "2 1 200px"),
-                (w["hf_flavor"], "1 1 160px"),
+                (w["hf_flavor"], "1 1 140px"),
+                (w["hf_timeout"], "1 1 140px"),
             ),
             self._row((w["hf_token"], "1 1 240px")),
-            self._row((w["hf_allow_gpu"], fixed)),
+            self._row((w["hf_allow_gpu"], "1 1 240px")),
         )
 
         w["advanced_section"] = self._section(
             "Advanced",
             self._row(
-                (w["package_manager"], "1 1 160px"),
-                (w["python_executable"], "2 1 200px"),
+                (w["package_manager"], "1 1 140px"),
+                (w["python_executable"], "1 1 160px"),
+                (w["conda_env"], "1 1 180px"),
             ),
-            self._row((w["clone_env"], fixed)),
+            self._row((w["clone_env"], "1 1 240px"), (w["cleanup"], "1 1 240px")),
             self._row((w["modules"], "1 1 240px")),
             self._row(
                 (w["env_vars"], "1 1 240px"),
                 (w["pre_exec_commands"], "1 1 240px"),
             ),
-            # Profiles are kept automatically; a file is for moving them to
-            # another machine, which is rare enough to live down here.
             self._row(
                 (w["config_filename"], "1 1 240px"),
-                (w["save_btn"], fixed),
-                (w["load_btn"], fixed),
+                (self._group(w["save_btn"], w["load_btn"]), fixed),
             ),
         )
         w["advanced_section"].layout.display = "none"
 
-        main_actions = widgets.Box(
-            [w["test_connect_btn"], w["test_submit_btn"], w["apply_btn"]]
+        action_row = widgets.Box(
+            [
+                w["advanced_toggle"],
+                self._group(
+                    w["test_connect_btn"], w["test_submit_btn"], w["apply_btn"]
+                ),
+            ]
         )
-        main_actions.add_class("cx-row")
-        main_actions.add_class("cx-actions-main")
-        action_row = widgets.Box([w["advanced_toggle"], main_actions])
         action_row.add_class("cx-row")
         action_row.add_class("cx-actions")
-        actions = widgets.VBox([action_row, w["output"], w["trust_host_btn"]])
+        result_bar = widgets.Box(
+            [widgets.HTML("<div class='cx-heading'>Result</div>"), w["status_pill"]]
+        )
+        result_bar.add_class("cx-result-bar")
+        actions = widgets.VBox(
+            [action_row, result_bar, w["output"], w["trust_host_btn"]]
+        )
+        actions.add_class("cx-section")
         w["trust_host_btn"].layout.margin = "10px 0 0 0"
         w["trust_host_btn"].layout.align_self = "flex-start"
-        actions.add_class("cx-section")
-        w["output"].layout.margin = "10px 0 0 0"
 
         body = widgets.VBox(
             [
@@ -557,6 +650,7 @@ class ModernClustrixWidget:
         w["profile_dropdown"].observe(self._on_profile_change, names="value")
         w["profile_name"].observe(self._on_rename_profile, names="value")
         w["add_profile_btn"].on_click(self._on_add_profile)
+        w["revert_btn"].on_click(self._on_revert_profile)
         w["remove_profile_btn"].on_click(self._on_remove_profile)
         w["save_btn"].on_click(self._on_save_config)
         w["load_btn"].on_click(self._on_load_config)
@@ -580,29 +674,46 @@ class ModernClustrixWidget:
         """Display the widget in the notebook."""
         display(self._container)
 
-    def set_status(self, state: str, text: str) -> None:
-        """Update the header pill: ``state`` picks the colour, ``text`` the words."""
+    @staticmethod
+    def _pill(state: str, text: str) -> str:
         if state not in STATUS_STATES:
             raise ValueError(
                 f"Unknown status state {state!r}; expected one of {STATUS_STATES}"
             )
-        self.widgets["status_pill"].value = (
-            f"<span class='cx-pill cx-pill-{state}'>{html.escape(text)}</span>"
-        )
+        return f"<span class='cx-pill cx-pill-{state}'>{html.escape(text)}</span>"
+
+    def set_status(self, state: str, text: str) -> None:
+        """Report the outcome of the last action, beside the console.
+
+        This is *not* the header pill. That one answers a different question
+        -- is what is on screen what ``@cluster`` is using? -- and a green
+        "connected" up there read as "applied" when nothing had been.
+        """
+        self.widgets["status_pill"].value = self._pill(state, text)
         output = self.widgets["output"]
         for other in STATUS_STATES:
             output.remove_class(f"cx-state-{other}")
         output.add_class(f"cx-state-{state}")
 
-    def _show_configuration_in_use(self) -> None:
-        """Say in the header what ``@cluster`` will do right now.
+    def _clear_result(self) -> None:
+        """Forget the last action's outcome: the form it described has changed."""
+        self.widgets["status_pill"].value = ""
+        output = self.widgets["output"]
+        output.clear_output()
+        for other in STATUS_STATES:
+            output.remove_class(f"cx-state-{other}")
+        self._forget_untrusted_host()
 
-        What is on screen is a draft until Apply is pressed; without this
-        line nothing distinguishes the draft from the live configuration.
-        """
+    def _forget_untrusted_host(self) -> None:
+        self._untrusted_host = None
+        self._retry_after_trust = None
+        self.widgets["trust_host_btn"].layout.display = "none"
+
+    def _show_configuration_in_use(self) -> None:
+        """Say in the header what ``@cluster`` will do right now."""
         live = get_config()
         if live.cluster_type == "huggingface":
-            where = f"huggingface ({live.hf_namespace or 'no namespace'})"
+            where = f"Hugging Face ({live.hf_namespace or 'no namespace'})"
         elif live.cluster_type in ("ssh", "slurm") and live.cluster_host:
             where = f"{live.cluster_type} on {live.cluster_host}"
         else:
@@ -616,34 +727,79 @@ class ModernClustrixWidget:
         )
 
     def _form_matches_live_configuration(self) -> bool:
-        """True when pressing Apply would change nothing."""
+        """True when pressing Apply would change nothing ``@cluster`` does."""
         settings, _ = split_config_kwargs(
             self._config_data_for_backend(), reset_fields=WIDGET_MANAGED_FIELDS
         )
         live = asdict(get_config())
         return all(live[name] == value for name, value in settings.items())
 
-    def _show_whether_applied(self) -> None:
-        """Say whether the form is what ``@cluster`` is using."""
+    def _is_edited(self) -> bool:
+        """True when the form differs from the selected profile as saved."""
+        return self._config_data_from_widgets() != self._baseline
+
+    def _refresh_state(self) -> None:
+        """Bring every indicator in line with the form, the profile and live."""
+        w = self.widgets
+        self._show_configuration_in_use()
         if self._form_matches_live_configuration():
-            self.set_status("ok", "in use")
+            w["applied_pill"].value = self._pill("ok", "in use")
         else:
-            self.set_status("idle", "not applied")
+            w["applied_pill"].value = self._pill("idle", "not applied")
+
+        edited = self._is_edited()
+        w["revert_btn"].disabled = not edited
+        w["profile_state"].value = (
+            "Edited. <b>Apply</b> saves these changes to the profile and uses "
+            "them; <b>Revert</b> discards them."
+            if edited
+            else ""
+        )
+        w["remove_profile_btn"].disabled = (
+            len(self.profile_manager.get_profile_names()) <= 1
+        )
+        self._disarm_delete()
+
+    def _split_user_at_host(self) -> None:
+        """Accept ``alice@login.example.edu`` typed or pasted into Host."""
+        w = self.widgets
+        user, at, host = str(w["host"].value).strip().rpartition("@")
+        if not at or not user or not host:
+            return
+        self._suspend_profile_capture = True
+        try:
+            w["host"].value = host
+            w["username"].value = user
+        finally:
+            self._suspend_profile_capture = False
 
     def _on_field_edit(self, change) -> None:
-        if not self._suspend_profile_capture:
-            self._show_whether_applied()
+        if self._suspend_profile_capture:
+            return
+        if change.get("owner") is self.widgets["host"]:
+            self._split_user_at_host()
+        # Whatever the console says was about the form as it was.
+        self._clear_result()
+        self._mark_invalid(())
+        self._refresh_state()
 
     def _update_ui_for_cluster_type(self) -> None:
-        """Show the section the chosen backend needs, and say what it does."""
-        cluster_type = self.widgets["cluster_type"].value
-        self.widgets["remote_section"].layout.display = (
-            None if cluster_type in ("ssh", "slurm") else "none"
-        )
-        self.widgets["hf_section"].layout.display = (
-            None if cluster_type == "huggingface" else "none"
-        )
-        self.widgets["backend_hint"].value = html.escape(
+        """Show the controls the chosen backend reads, and say what it does."""
+        w = self.widgets
+        cluster_type = w["cluster_type"].value
+
+        def show(key: str, visible: bool) -> None:
+            w[key].layout.display = None if visible else "none"
+
+        show("remote_section", cluster_type in ("ssh", "slurm"))
+        show("hf_section", cluster_type == "huggingface")
+        # HuggingFace Jobs takes its size from the hardware choice and its
+        # limit from its own timeout; CPUs, memory and walltime are not read.
+        show("resources_row", cluster_type != "huggingface")
+        show("partition", cluster_type == "slurm")
+        # Nothing to connect to, and a job "here" proves nothing.
+        show("test_connect_btn", cluster_type != "local")
+        w["backend_hint"].value = html.escape(
             BACKEND_DESCRIPTIONS.get(cluster_type, "")
         )
 
@@ -654,112 +810,99 @@ class ModernClustrixWidget:
         section = self.widgets["advanced_section"]
         opening = section.layout.display == "none"
         section.layout.display = None if opening else "none"
-        button.description = (
+        self.widgets["advanced_toggle"].description = (
             "Hide advanced settings" if opening else "Advanced settings"
         )
+
+    #: Buttons that start something. While one runs they are all disabled:
+    #: the kernel is busy, and a click then would queue silently behind it.
+    ACTION_BUTTONS = (
+        "apply_btn",
+        "test_connect_btn",
+        "test_submit_btn",
+        "auto_setup_ssh",
+        "save_btn",
+        "load_btn",
+        "add_profile_btn",
+        "remove_profile_btn",
+        "revert_btn",
+        "trust_host_btn",
+    )
 
     @contextmanager
     def _action(self, key: str, busy_label: str, busy_status: str) -> Iterator[None]:
         """Run the action behind button ``key``: clear, show progress, restore.
 
         The console is cleared first so the result on screen is always the
-        result of the button just pressed. It used to be an append-only log
-        in a fixed-height box, and the newest line -- the only one that
-        mattered -- was the one scrolled out of sight.
+        result of the button just pressed.
         """
-        output = self.widgets["output"]
-        output.clear_output()
-        self._untrusted_host = None
-        self.widgets["trust_host_btn"].layout.display = "none"
-        button = self.widgets[key]
+        w = self.widgets
+        self._clear_result()
+        button = w[key]
         original = button.description
+        was_disabled = {name: w[name].disabled for name in self.ACTION_BUTTONS}
+        for name in self.ACTION_BUTTONS:
+            w[name].disabled = True
         button.description = busy_label
-        button.disabled = True
         self.set_status("busy", busy_status)
         try:
-            with output:
+            with w["output"]:
                 yield
         finally:
             button.description = original
-            button.disabled = False
+            for name, disabled in was_disabled.items():
+                w[name].disabled = disabled
+            self._refresh_state()
 
-    def _report(self, *lines: str) -> None:
-        """Replace the console's contents with ``lines``."""
-        output = self.widgets["output"]
-        output.clear_output()
-        with output:
+    def _report(self, state: str, status: str, *lines: str) -> None:
+        """Replace the console's contents with ``lines`` and say how it went."""
+        self._clear_result()
+        with self.widgets["output"]:
             print("\n".join(lines))
+        self.set_status(state, status)
 
     def _adopt_live_configuration(self) -> None:
         """Open showing the configuration clustrix is actually using.
 
-        The widget only ever *wrote* on Apply: it never read `get_config()`, so
-        a session that had already called `configure(cluster_type="huggingface",
-        ...)` still opened on "Local single-core" with a blank namespace. The
-        displayed state contradicted the library's, and Apply would then
-        overwrite the real configuration with the defaults on screen.
-
-        A configuration that differs from the shipped defaults becomes its own
-        profile, so it is visible in the dropdown next to the templates rather
-        than silently replacing one.
+        A session that had already called ``configure(...)`` must not open on
+        an unrelated profile: the form would contradict the library, and
+        Apply would overwrite the real configuration with whatever happened
+        to be on screen. A live configuration that differs from the shipped
+        defaults becomes its own profile, visible in the dropdown next to
+        the templates.
         """
         live = get_config()
-        self._suspend_profile_capture = True
-        try:
-            if asdict(live) != asdict(ClusterConfig()):
-                # Never overwrite a profile of this name left by an earlier
-                # session: it may hold a token and settings the live config
-                # does not, and losing those to merely opening the widget is
-                # the worst kind of surprise.
-                name = LIVE_PROFILE_NAME
-                existing = self.profile_manager.get_profile_names()
-                if name in existing and asdict(
-                    self.profile_manager.load_profile(name)
-                ) != asdict(live):
-                    suffix = 2
-                    while f"{name} ({suffix})" in existing:
-                        suffix += 1
-                    name = f"{name} ({suffix})"
-                self.profile_manager.save_profile(name, live)
-                self._show_profile(name)
-            elif self.profile_manager.active_profile:
-                self._show_profile(self.profile_manager.active_profile)
-        finally:
-            self._suspend_profile_capture = False
+        if asdict(live) != asdict(ClusterConfig()):
+            # Never overwrite a profile of this name left by an earlier
+            # session: it may hold settings the live config does not.
+            name = LIVE_PROFILE_NAME
+            existing = self.profile_manager.get_profile_names()
+            if name in existing and asdict(
+                self.profile_manager.load_profile(name)
+            ) != asdict(live):
+                suffix = 2
+                while f"{name} ({suffix})" in existing:
+                    suffix += 1
+                name = f"{name} ({suffix})"
+            self._save_profile(name, live)
+            self._show_profile(name)
+        elif self.profile_manager.active_profile:
+            self._show_profile(self.profile_manager.active_profile)
 
     # -- profiles ----------------------------------------------------------
 
-    def _capture_current_profile(self, profile_name: Optional[str]) -> None:
-        """Store what is on screen into `profile_name`.
-
-        Without this the widget only ever reads profiles. Anything typed was
-        held nowhere but the controls themselves, so switching away threw it
-        out and switching back showed the old values -- which looks exactly
-        like a dropdown that does nothing.
-        """
-        if not profile_name or self._suspend_profile_capture:
-            return
-        try:
-            with warnings.catch_warnings():
-                # ProfileManager warns that secrets are not written to disk.
-                # The password and token fields say so themselves, and in a
-                # notebook the warning lands as a red block above the form.
-                warnings.filterwarnings(
-                    "ignore", message="Profiles are not a credential store"
-                )
-                self.profile_manager.save_profile(
-                    profile_name, self._get_config_from_widgets()
-                )
-        except (ValueError, OSError) as e:
-            self._report(f"Could not keep the changes to '{profile_name}': {e}")
-            self.set_status("error", "not saved")
+    def _save_profile(self, name: str, config: ClusterConfig) -> None:
+        with warnings.catch_warnings():
+            # ProfileManager warns that secrets are not written to disk. The
+            # password and token fields say so themselves, and in a notebook
+            # the warning lands as a red block above the form.
+            warnings.filterwarnings(
+                "ignore", message="Profiles are not a credential store"
+            )
+            self.profile_manager.save_profile(name, config)
 
     def _update_profile_dropdown(self) -> None:
-        """Re-read the profile names; the active profile stays selected.
-
-        Rebuilding the options fires change events that are not edits by the
-        user, so capture is suspended for the duration.
-        """
+        """Re-read the profile names; the active profile stays selected."""
         previous = self._suspend_profile_capture
         self._suspend_profile_capture = True
         try:
@@ -774,43 +917,72 @@ class ModernClustrixWidget:
             self._suspend_profile_capture = previous
 
     def _show_profile(self, name: str) -> None:
-        """Put profile `name` on screen, without treating that as an edit."""
+        """Put profile ``name`` on screen: as saved, then any draft over it."""
         config = self.profile_manager.set_active_profile(name)
         self._update_profile_dropdown()
         self._suspend_profile_capture = True
         try:
             self._load_config_to_widgets(config)
+            self._baseline = self._config_data_from_widgets()
+            draft = self._drafts.get(name)
+            if draft is not None:
+                self._load_data_to_widgets(draft)
             self._update_ui_for_cluster_type()
         finally:
             self._suspend_profile_capture = False
-        self._show_whether_applied()
+        self._mark_invalid(())
+        self._refresh_state()
+
+    def _keep_draft(self, name: Optional[str]) -> None:
+        """Remember unapplied edits to ``name`` for when it is shown again."""
+        if not name:
+            return
+        if self._is_edited():
+            self._drafts[name] = self._config_data_from_widgets()
+        else:
+            self._drafts.pop(name, None)
 
     def _on_profile_change(self, change) -> None:
         if self._suspend_profile_capture:
             return
-        # Keep the outgoing profile's edits before the new one overwrites the
-        # controls; `change["old"]` is the profile the user is leaving.
-        self._capture_current_profile(change.get("old"))
+        # `change["old"]` is the profile being left; its edits are kept as a
+        # draft, not written to it.
+        self._keep_draft(change.get("old"))
+        self._clear_result()
         if change["new"]:
             self._show_profile(change["new"])
+
+    def _on_revert_profile(self, button) -> None:
+        name = self.widgets["profile_dropdown"].value
+        if not name:
+            return
+        self._drafts.pop(name, None)
+        self._clear_result()
+        self._show_profile(name)
 
     def _on_rename_profile(self, change) -> None:
         if self._suspend_profile_capture:
             return
         old_name = self.widgets["profile_dropdown"].value
         new_name = (change["new"] or "").strip()
-        if not old_name or new_name == old_name:
+        if not old_name:
             return
+        if new_name == old_name:
+            # Only whitespace differed; show the name as it is.
+            self._update_profile_dropdown()
+            return
+        self._keep_draft(old_name)
         try:
             if not new_name:
                 raise ValueError("A profile needs a name")
-            self._capture_current_profile(old_name)
             self.profile_manager.rename_profile(old_name, new_name)
         except (ValueError, OSError) as e:
             self._show_profile(old_name)
-            self._report(f"Could not rename '{old_name}': {e}")
-            self.set_status("error", "not renamed")
+            self._report("error", "not renamed", f"Could not rename '{old_name}': {e}")
             return
+        if old_name in self._drafts:
+            self._drafts[new_name] = self._drafts.pop(old_name)
+        self._clear_result()
         self._show_profile(new_name)
 
     def _on_add_profile(self, button) -> None:
@@ -818,29 +990,55 @@ class ModernClustrixWidget:
         if not current:
             return
         try:
-            # Clone what the user is looking at, not the last saved copy.
-            self._capture_current_profile(current)
+            # What is on screen becomes the new profile; the one it was
+            # copied from keeps what it had.
+            config = self._get_config_from_widgets()
             new_name = self.profile_manager.clone_profile(current)
-        except (ValueError, OSError) as e:
-            self._report(f"Could not duplicate '{current}': {e}")
-            self.set_status("error", "not duplicated")
+            self._save_profile(new_name, config)
+        except (ValueError, TypeError, OSError) as e:
+            self._report(
+                "error", "not duplicated", f"Could not duplicate '{current}': {e}"
+            )
             return
+        self._drafts.pop(current, None)
         self._show_profile(new_name)
-        self._report(f"Created profile '{new_name}'. Rename it in the Name field.")
+        self._report(
+            "ok",
+            "profile created",
+            f"Created profile '{new_name}' from what was on screen.",
+            "Give it a name of your own in 'Rename to'.",
+        )
+
+    def _disarm_delete(self) -> None:
+        self._delete_armed_for = None
+        button = self.widgets["remove_profile_btn"]
+        button.description = "Delete"
+        button.remove_class("cx-armed")
 
     def _on_remove_profile(self, button) -> None:
+        """Delete the selected profile -- on the second click.
+
+        There is no undo, and the button sits beside two harmless ones, so
+        the first click only arms it. Anything else the user does disarms it.
+        """
         current = self.widgets["profile_dropdown"].value
         if not current:
+            return
+        delete_button = self.widgets["remove_profile_btn"]
+        if self._delete_armed_for != current:
+            self._delete_armed_for = current
+            delete_button.description = "Confirm delete"
+            delete_button.add_class("cx-armed")
             return
         try:
             self.profile_manager.remove_profile(current)
         except (ValueError, OSError) as e:
-            self._report(f"Could not delete '{current}': {e}")
-            self.set_status("error", "not deleted")
+            self._report("error", "not deleted", f"Could not delete '{current}': {e}")
             return
+        self._drafts.pop(current, None)
         remaining = self.profile_manager.get_profile_names()
         self._show_profile(self.profile_manager.active_profile or remaining[0])
-        self._report(f"Deleted profile '{current}'.")
+        self._report("ok", "profile deleted", f"Deleted profile '{current}'.")
 
     # -- profile files -----------------------------------------------------
 
@@ -947,8 +1145,11 @@ class ModernClustrixWidget:
         started -- for the test suite, that was the repository root. A path
         that names a directory, or an absolute one, is respected as written.
         """
-        if not filename:
-            filename = "clustrix.yml"
+        if not filename or not filename.strip():
+            # Not clustrix.yml: that is the library's own configuration file,
+            # in a different format.
+            filename = DEFAULT_PROFILE_STORE
+        filename = filename.strip()
         if os.path.isabs(filename) or os.sep in filename:
             return os.path.expanduser(filename)
         config_dir = get_config_dir()
@@ -959,27 +1160,30 @@ class ModernClustrixWidget:
         return str(config_dir / filename)
 
     def _on_save_config(self, button) -> None:
-        with self._action("save_btn", "Saving…", "saving…"):
+        """Export every saved profile to the named file."""
+        with self._action("save_btn", "Exporting…", "exporting…"):
             try:
                 filename = self._resolve_config_path(
                     self.widgets["config_filename"].value
                 )
-                self._capture_current_profile(self.widgets["profile_dropdown"].value)
                 self.profile_manager.save_to_file(filename)
             except (ValueError, OSError, yaml.YAMLError) as e:
-                print(f"Could not save: {e}")
-                self.set_status("error", "save failed")
+                print(f"Could not export: {e}")
+                self.set_status("error", "export failed")
                 return
             self._refresh_config_files()
             count = len(self.profile_manager.get_profile_names())
             # A bare filename resolves under the clustrix config directory, so
             # the full path is the only way to tell where it went.
-            print(f"Saved {count} profile(s) to {filename}")
+            print(f"Exported {count} profile(s) to {filename}")
             print("Passwords and tokens are never written to this file.")
-            self.set_status("ok", "saved")
+            if self._is_edited() or self._drafts:
+                print("Edits that have not been applied are not included.")
+            self.set_status("ok", "exported")
 
     def _on_load_config(self, button) -> None:
-        with self._action("load_btn", "Loading…", "loading…"):
+        """Replace every profile with the ones in the named file."""
+        with self._action("load_btn", "Importing…", "importing…"):
             try:
                 filename = self._resolve_config_path(
                     self.widgets["config_filename"].value
@@ -994,37 +1198,49 @@ class ModernClustrixWidget:
                     filename, source=config_source_for_discovered_path(filename)
                 )
             except (ValueError, OSError, yaml.YAMLError, json.JSONDecodeError) as e:
-                print(f"Could not load: {e}")
-                self.set_status("error", "load failed")
+                print(f"Could not import: {e}")
+                self.set_status("error", "import failed")
                 return
+            self._drafts.clear()
             names = self.profile_manager.get_profile_names()
-            active = self.profile_manager.active_profile or names[0]
-            self._show_profile(active)
-            print(f"Loaded {len(names)} profile(s) from {filename}:")
+            self._show_profile(self.profile_manager.active_profile or names[0])
+            print(f"Imported {len(names)} profile(s) from {filename}:")
             print("  " + ", ".join(names))
-            self.set_status("ok", "loaded")
+            self.set_status("ok", "imported")
 
     # -- apply and test ----------------------------------------------------
 
+    def _mark_invalid(self, keys: Iterable[str]) -> None:
+        """Outline exactly the controls named in ``keys`` as needing attention."""
+        wanted = set(keys)
+        for key in FORM_CONTROLS:
+            control = self.widgets[key]
+            if key in wanted:
+                control.add_class("cx-invalid")
+            else:
+                control.remove_class("cx-invalid")
+
     def _refuse_if_invalid(self, verb: str) -> bool:
-        """Print what is wrong with the form; True when something is."""
-        problems = self._validate_widget_values()
+        """Say what is wrong with the form, and where; True when something is."""
+        problems = self._validation_problems()
+        self._mark_invalid(key for key, _ in problems)
         if not problems:
             return False
-        print(f"Cannot {verb} this configuration:")
-        for problem in problems:
+        print(f"Cannot {verb} this configuration. The outlined fields need fixing:")
+        for _, problem in problems:
             print(f"  - {problem}")
         self.set_status("error", "invalid")
         return True
 
     def _on_apply_config(self, button) -> None:
-        """Make the displayed configuration the one ``@cluster`` uses."""
+        """Save the form to its profile and make ``@cluster`` use it."""
         with self._action("apply_btn", "Applying…", "applying…"):
             if self._refuse_if_invalid("apply"):
                 return
+            name = self.widgets["profile_dropdown"].value
             try:
-                # Kept in the profile too, so it survives the session.
-                self._capture_current_profile(self.widgets["profile_dropdown"].value)
+                if name:
+                    self._save_profile(name, self._get_config_from_widgets())
                 # Reset the fields this widget manages, then apply what is on
                 # screen. Merging only the non-empty values left a previous
                 # Apply's host in place after switching to a local profile;
@@ -1039,23 +1255,28 @@ class ModernClustrixWidget:
                 print(f"Not applied: {e}")
                 self.set_status("error", "not applied")
                 return
+            if name:
+                self._drafts.pop(name, None)
+                self._baseline = self._config_data_from_widgets()
 
             # Read back what @cluster will actually see, rather than echoing
             # the form: fields the chosen backend ignores were just reset.
             live = get_config()
-            self._show_configuration_in_use()
-            print(f"Applied. @cluster now runs on: {live.cluster_type}")
+            print(f"Applied. New @cluster calls run on: {live.cluster_type}")
             if live.cluster_host:
                 print(f"  host       {live.username}@{live.cluster_host}")
             if live.cluster_type == "huggingface":
                 print(f"  namespace  {live.hf_namespace} ({live.hf_flavor})")
-            print(
-                f"  resources  {live.default_cores} CPUs, {live.default_memory}, "
-                f"{live.default_time}"
-            )
+            else:
+                print(
+                    f"  per job    {live.default_cores} CPUs, {live.default_memory}, "
+                    f"{live.default_time}"
+                )
+            if name:
+                print(f"Saved to the profile '{name}'.")
             if unrecognised:
                 print("Ignored, not a clustrix setting: " + ", ".join(unrecognised))
-            self.set_status("ok", "in use")
+            self.set_status("ok", "applied")
 
     @staticmethod
     def _check_connection(config: ClusterConfig) -> List[str]:
@@ -1086,31 +1307,40 @@ class ModernClustrixWidget:
 
         from .executor import ClusterExecutor
 
-        with ClusterExecutor(config) as executor:
-            executor.connect()
-            run = executor.connection_manager.execute_remote_command
-            hostname, _ = run("hostname", check=True)
-            lines = [
-                f"Connected to {config.cluster_host} as {config.username} "
-                f"(remote hostname: {hostname.strip()})."
-            ]
-            if config.cluster_type == "slurm":
-                version, _ = run("sbatch --version", check=True)
-                lines.append(f"Scheduler found: {version.strip()}.")
+        # The connection layers narrate each credential source they try. In
+        # a console meant to answer "did it connect?", three paragraphs of
+        # that ahead of the answer bury it, so it is collected and dropped;
+        # a failure is reported by the exception, which says more.
+        with contextlib.redirect_stdout(io.StringIO()):
+            with ClusterExecutor(config) as executor:
+                executor.connect()
+                run = executor.connection_manager.execute_remote_command
+                hostname, _ = run("hostname", check=True)
+                lines = [
+                    f"Connected to {config.cluster_host} as {config.username} "
+                    f"(remote hostname: {hostname.strip()})."
+                ]
+                if config.cluster_type == "slurm":
+                    version, _ = run("sbatch --version", check=True)
+                    lines.append(f"Scheduler found: {version.strip()}.")
         return lines
 
-    def _explain_failure(self, error: Exception, what: str, status: str) -> None:
+    def _explain_failure(
+        self, error: Exception, what: str, status: str, retry: str
+    ) -> None:
         """Print why a connection or job failed, and offer the way forward.
 
         A host this machine has never connected to is the one failure every
         new user meets, and the remedy is a decision rather than a fix: the
-        fingerprint is shown and a button offers to trust exactly that key.
+        fingerprint is shown and a button offers to trust exactly that key,
+        then presses ``retry`` -- the button that was being pressed -- again.
         """
         if not isinstance(error, HostKeyVerificationError):
             print(f"{what}: {type(error).__name__}: {error}")
             self.set_status("error", status)
             return
         self._untrusted_host = error
+        self._retry_after_trust = retry
         self.widgets["trust_host_btn"].layout.display = None
         print(f"This machine has not connected to {error.hostname} before.")
         print(f"The host identified itself with the key:\n  {error.fingerprint}")
@@ -1122,17 +1352,21 @@ class ModernClustrixWidget:
         self.set_status("error", "unknown host")
 
     def _on_trust_host(self, button) -> None:
-        """Record the host key the user was just shown, then connect."""
-        error = self._untrusted_host
-        if error is None:
+        """Record the host key the user was just shown, then try again."""
+        error, retry = self._untrusted_host, self._retry_after_trust
+        if error is None or retry is None:
             return
         try:
             known_hosts = trust_offered_host_key(error)
         except OSError as e:
-            self._report(f"Could not record the host key: {e}")
-            self.set_status("error", "not trusted")
+            self._report("error", "not trusted", f"Could not record the host key: {e}")
             return
-        self._on_test_connect(None)
+        handlers = {
+            "test_connect_btn": self._on_test_connect,
+            "test_submit_btn": self._on_test_submit,
+            "auto_setup_ssh": self._on_auto_setup_ssh,
+        }
+        handlers[retry](None)
         with self.widgets["output"]:
             print(f"Recorded the key for {error.hostname} in {known_hosts}.")
 
@@ -1149,7 +1383,9 @@ class ModernClustrixWidget:
                 # stops a connection -- DNS, a refused host key, a rejected
                 # token -- and each of those raises a different type from a
                 # different library.
-                self._explain_failure(e, "Connection failed", "not connected")
+                self._explain_failure(
+                    e, "Connection failed", "not connected", "test_connect_btn"
+                )
                 return
             print("\n".join(lines))
             self.set_status("ok", "connected")
@@ -1185,13 +1421,16 @@ class ModernClustrixWidget:
                                 "cores": config.default_cores,
                                 "memory": config.default_memory,
                                 "time": config.default_time,
+                                "partition": config.default_partition,
                             },
                         )
                         print(f"Submitted job {job_id}; waiting for the result…")
                         result = executor.wait_for_result(job_id)
             except Exception as e:  # noqa: BLE001 - reported to the user below
                 # Broad for the same reason as _on_test_connect.
-                self._explain_failure(e, "Test job failed", "job failed")
+                self._explain_failure(
+                    e, "Test job failed", "job failed", "test_submit_btn"
+                )
                 return
 
             print(f"Test job succeeded on {config.cluster_type}.")
@@ -1207,9 +1446,10 @@ class ModernClustrixWidget:
                 return
             password = self.widgets["password"].value
             if not password:
+                self._mark_invalid(("password",))
                 print(
-                    "Enter the account password above first: it is used once, "
-                    "to install the new key on the host."
+                    "Enter the account password first: it is used once, to "
+                    "install the new key on the host."
                 )
                 self.set_status("error", "password needed")
                 return
@@ -1217,9 +1457,21 @@ class ModernClustrixWidget:
             from .ssh_utils import setup_ssh_keys
 
             config = self._config_for_backend()
-            result = setup_ssh_keys(
-                config, password, force_refresh=self.widgets["refresh_keys"].value
-            )
+            try:
+                # Connect first, the way a job would. Key setup reports an
+                # unknown host as a line of text; this reports it as the
+                # decision it is, with the fingerprint and the button.
+                self._check_connection(config)
+            except Exception as e:  # noqa: BLE001 - reported to the user below
+                self._explain_failure(
+                    e, "Could not reach the host", "not connected", "auto_setup_ssh"
+                )
+                return
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = setup_ssh_keys(
+                    config, password, force_refresh=self.widgets["refresh_keys"].value
+                )
             if not result["success"]:
                 print(f"SSH key setup failed: {result['error']}")
                 self.set_status("error", "key not set up")
@@ -1227,75 +1479,119 @@ class ModernClustrixWidget:
 
             # The key now works, so use it: leaving the password in place
             # would keep authenticating with the thing the key replaces.
-            self.widgets["ssh_key_file"].value = result["key_path"]
-            self.widgets["password"].value = ""
+            self._suspend_profile_capture = True
+            try:
+                self.widgets["ssh_key_file"].value = result["key_path"]
+                self.widgets["password"].value = ""
+            finally:
+                self._suspend_profile_capture = False
             if result["key_already_existed"]:
-                print(f"A key that already works was found: {result['key_path']}")
+                print(f"A key that already works was found:\n  {result['key_path']}")
             else:
-                print(f"Installed a new key on the host: {result['key_path']}")
-            print("The SSH key file field now points at it; press Apply to use it.")
+                print(f"Installed a new key on the host:\n  {result['key_path']}")
+            print("The SSH key file field now points at it. Press Apply to use it.")
             self.set_status("ok", "key ready")
 
     # -- form <-> configuration --------------------------------------------
 
-    def _validate_widget_values(self) -> List[str]:
-        """Return every problem with what is currently on screen.
+    def _validation_problems(self) -> List[Tuple[str, str]]:
+        """Every problem with the form, as ``(control, what is wrong)``.
 
-        The widget used to accept cores=0, memory="banana", time="soon", an
-        out-of-range port and an empty host for a remote cluster, and hand all
-        of it to ClusterConfig. Nothing complained until the job failed on the
-        cluster, minutes later, with an error that named none of it.
+        Checked here, before anything is sent anywhere, because the
+        alternative is a job that fails on the cluster minutes later with an
+        error that names none of it.
         """
-        problems: List[str] = []
-        cluster_type = self.widgets["cluster_type"].value
+        w = self.widgets
+        problems: List[Tuple[str, str]] = []
+        cluster_type = w["cluster_type"].value
 
-        cores = self.widgets["cpus"].value
-        # -1 is meaningful: "use every core on the node".
-        if cores == 0 or (isinstance(cores, int) and cores < -1):
-            problems.append(f"CPUs must be positive (or -1 for all); got {cores}")
-
-        memory = str(self.widgets["ram"].value).strip()
-        if not memory:
-            problems.append("Memory is required")
-        elif not MEMORY_PATTERN.match(memory):
-            problems.append(
-                f"Memory {memory!r} is not a size; expected something like "
-                "'16GB', '512Mi' or '8G'"
-            )
-
-        walltime = str(self.widgets["time"].value).strip()
-        if not walltime:
-            problems.append("Walltime is required")
-        elif not re.match(r"^\d+(:\d{1,2}){0,2}$|^\d+-\d+(:\d{1,2}){0,2}$", walltime):
-            problems.append(
-                f"Walltime {walltime!r} is not a duration; expected HH:MM:SS "
-                "(or D-HH:MM:SS)"
-            )
-
-        if cluster_type in ("ssh", "slurm"):
-            if not str(self.widgets["host"].value).strip():
-                problems.append(f"A host is required for a {cluster_type} cluster")
-            if not str(self.widgets["username"].value).strip():
-                problems.append(f"A username is required for a {cluster_type} cluster")
-            port = self.widgets["port"].value
-            if not isinstance(port, int) or not 1 <= port <= 65535:
-                problems.append(f"Port must be between 1 and 65535; got {port}")
-
-        if cluster_type == "huggingface":
-            if not str(self.widgets["hf_namespace"].value).strip():
+        if cluster_type != "huggingface":
+            cores = w["cpus"].value
+            # -1 is meaningful: "use every core on the node".
+            if not isinstance(cores, int) or cores == 0 or cores < -1:
                 problems.append(
-                    "A HuggingFace namespace is required (usually an org, not "
-                    "your personal account)"
+                    ("cpus", f"CPUs must be positive (or -1 for all); got {cores}")
+                )
+            elif cores > MAX_PLAUSIBLE_CORES:
+                problems.append(
+                    ("cpus", f"{cores} CPUs is more than any single job can use")
                 )
 
-        _, malformed = _parse_environment_variables(self.widgets["env_vars"].value)
+            memory = str(w["ram"].value).strip()
+            matched = MEMORY_PATTERN.match(memory)
+            if not memory:
+                problems.append(("ram", "Memory is required"))
+            elif not matched or not matched.group(2) or float(matched.group(1)) <= 0:
+                problems.append(
+                    (
+                        "ram",
+                        f"Memory {memory!r} is not a size; expected a number "
+                        "and a unit, like '16GB' or '512MB'",
+                    )
+                )
+
+            walltime = str(w["time"].value).strip()
+            if not walltime:
+                problems.append(("time", "A time limit is required"))
+            elif not _is_walltime(walltime):
+                problems.append(
+                    (
+                        "time",
+                        f"Time limit {walltime!r} is not a duration; expected "
+                        "HH:MM:SS (or D-HH:MM:SS) with minutes and seconds "
+                        "below 60",
+                    )
+                )
+
+        if cluster_type in ("ssh", "slurm"):
+            backend = BACKEND_TILES[cluster_type][0]
+            if not str(w["host"].value).strip():
+                problems.append(("host", f"{backend} needs a host"))
+            if not str(w["username"].value).strip():
+                problems.append(("username", f"{backend} needs a username"))
+            port = w["port"].value
+            if not isinstance(port, int) or not 1 <= port <= 65535:
+                problems.append(
+                    ("port", f"Port must be between 1 and 65535; got {port}")
+                )
+
+        if cluster_type == "huggingface":
+            if not str(w["hf_namespace"].value).strip():
+                problems.append(
+                    (
+                        "hf_namespace",
+                        "A HuggingFace namespace is required: your username, "
+                        "or an organisation you can run jobs in",
+                    )
+                )
+            timeout = str(w["hf_timeout"].value).strip()
+            if timeout and not re.fullmatch(r"\d+(\.\d+)?[smhd]?", timeout):
+                problems.append(
+                    (
+                        "hf_timeout",
+                        f"Time limit {timeout!r} is not a duration; expected "
+                        "something like '30m', '2h' or '1d'",
+                    )
+                )
+
+        if not str(w["python_executable"].value).strip():
+            problems.append(("python_executable", "A Python executable is required"))
+
+        _, malformed = _parse_environment_variables(w["env_vars"].value)
         for entry in malformed:
             problems.append(
-                f"Environment variable line {entry!r} is not KEY=value with a "
-                "name made of letters, digits and underscores"
+                (
+                    "env_vars",
+                    f"Environment variable line {entry!r} is not KEY=value with "
+                    "a name made of letters, digits and underscores",
+                )
             )
 
         return problems
+
+    def _validate_widget_values(self) -> List[str]:
+        """Every problem with what is currently on screen, in words."""
+        return [problem for _, problem in self._validation_problems()]
 
     #: Fields that only mean something for particular backends. A profile
     #: keeps all of them so nothing is lost while editing, but the applied
@@ -1347,6 +1643,7 @@ class ModernClustrixWidget:
     #: of this set is unrecoverable, because the reset only clears the
     #: *setting* and every control still shows its value afterwards.
     BACKEND_ONLY_FIELDS = {
+        ("slurm",): ("default_partition",),
         ("ssh", "slurm"): (
             "cluster_host",
             "cluster_port",
@@ -1358,6 +1655,7 @@ class ModernClustrixWidget:
         ("huggingface",): (
             "hf_namespace",
             "hf_flavor",
+            "hf_job_timeout",
             "hf_token",
             "hf_allow_gpu_flavors",
         ),
@@ -1392,129 +1690,120 @@ class ModernClustrixWidget:
     def _config_data_from_widgets(self) -> Dict[str, Any]:
         """The configuration currently shown, as the fields the widget set.
 
-        Apply needs the *keys*, not just the values: a field this widget
-        manages but did not set for the current backend has to be reset, while
-        a field it does not manage at all must be left alone.
-        """
-        # Malformed lines are reported by _validate_widget_values; the valid
-        # ones are still recorded so a typo does not cost the rest.
-        env_vars, _ = _parse_environment_variables(self.widgets["env_vars"].value)
-        modules = self.widgets["modules"].value.replace(",", " ").split()
+        Every managed field, every time -- not just the current backend's --
+        so that a profile keeps its SSH settings while its Hugging Face ones
+        are being looked at. ``_config_data_for_backend`` is what narrows
+        this to the backend in use.
 
-        # Every managed field, every time -- not just the current backend's.
-        # Gating these on cluster_type meant merely glancing at another type
-        # before switching profiles erased the host, username and work
-        # directory from the profile being left. The controls already hold the
-        # selected profile's values, so recording all of them is lossless, and
-        # a local profile carrying an unused host is harmless.
-        config_data = {
-            "cluster_type": self.widgets["cluster_type"].value,
-            "default_cores": self.widgets["cpus"].value,
-            "default_memory": self.widgets["ram"].value,
-            "default_time": self.widgets["time"].value,
-            # Remote / SSH
-            "cluster_host": self.widgets["host"].value or None,
-            "cluster_port": self.widgets["port"].value,
-            "username": self.widgets["username"].value or None,
-            # Collected and then dropped: connection tests passed the password
-            # explicitly and succeeded, while the job itself authenticated from
-            # config.password and failed.
-            "password": self.widgets["password"].value or None,
-            "key_file": self.widgets["ssh_key_file"].value or None,
-            "password_env_var": self.widgets["local_env_var"].value,
-            # Setting the variable name only takes effect if clustrix is told
-            # to look it up; without the flag the field did nothing at all.
-            "use_env_password": bool(self.widgets["local_env_var"].value),
-            # "Remote work directory" was collected and dropped on the floor --
-            # typing /scratch/alice/clustrix still ran the job in ~/.clustrix.
-            "remote_work_dir": (
-                self.widgets["home_dir"].value.strip()
-                or ClusterConfig().remote_work_dir
-            ),
+        Text is stripped: a host pasted with a trailing space is the same
+        host, and the error for the unstripped one ("Name or service not
+        known") does not say why.
+        """
+        w = self.widgets
+
+        def text(key: str) -> str:
+            return str(w[key].value).strip()
+
+        # Malformed lines are reported by validation; the valid ones are
+        # still recorded so a typo does not cost the rest.
+        env_vars, _ = _parse_environment_variables(w["env_vars"].value)
+        return {
+            "cluster_type": w["cluster_type"].value,
+            "default_cores": w["cpus"].value,
+            "default_memory": text("ram"),
+            "default_time": text("time"),
+            "default_partition": text("partition") or None,
+            # SSH
+            "cluster_host": text("host") or None,
+            "cluster_port": w["port"].value,
+            "username": text("username") or None,
+            "password": w["password"].value or None,
+            "key_file": text("ssh_key_file") or None,
+            "password_env_var": text("local_env_var"),
+            # Naming the variable only takes effect if clustrix is also told
+            # to look it up.
+            "use_env_password": bool(text("local_env_var")),
+            "remote_work_dir": text("home_dir") or ClusterConfig().remote_work_dir,
             # HuggingFace
-            "hf_namespace": self.widgets["hf_namespace"].value or None,
-            "hf_flavor": self.widgets["hf_flavor"].value,
-            "hf_token": self.widgets["hf_token"].value or None,
-            "hf_allow_gpu_flavors": self.widgets["hf_allow_gpu"].value,
+            "hf_namespace": text("hf_namespace") or None,
+            "hf_flavor": w["hf_flavor"].value,
+            "hf_job_timeout": text("hf_timeout") or None,
+            "hf_token": w["hf_token"].value or None,
+            "hf_allow_gpu_flavors": bool(w["hf_allow_gpu"].value),
             # Advanced
-            "package_manager": self.widgets["package_manager"].value,
-            "python_executable": self.widgets["python_executable"].value,
-            # The checkbox had no effect: unticking it still replicated the
-            # local environment on the worker.
-            "replicate_local_environment": bool(self.widgets["clone_env"].value),
+            "package_manager": w["package_manager"].value,
+            "python_executable": text("python_executable"),
+            "conda_env_name": text("conda_env") or None,
+            "replicate_local_environment": bool(w["clone_env"].value),
+            "cleanup_on_success": bool(w["cleanup"].value),
             "environment_variables": env_vars,
-            "module_loads": modules,
+            "module_loads": w["modules"].value.replace(",", " ").split(),
             "pre_execution_commands": [
                 line.strip()
-                for line in self.widgets["pre_exec_commands"].value.splitlines()
+                for line in w["pre_exec_commands"].value.splitlines()
                 if line.strip()
             ],
         }
 
-        return config_data
-
     def _load_config_to_widgets(self, config: ClusterConfig) -> None:
-        """Show `config` in the controls.
+        """Show ``config`` in the controls."""
+        self._load_data_to_widgets(asdict(config))
 
-        This must mirror `_get_config_from_widgets` field for field, including
-        resetting a control to its default when the config does not set it.
-        It used to restore only a subset -- no HuggingFace settings, no
-        remote work directory, no password -- and to leave
-        environment variables and modules untouched when the incoming config
-        had none. Combined with saving the visible state on the way out, that
-        meant clicking through the profile dropdown overwrote each profile with
-        whatever the previous one happened to leave on screen.
+    def _load_data_to_widgets(self, data: Mapping[str, Any]) -> None:
+        """Show configuration ``data`` in the controls.
+
+        The exact inverse of ``_config_data_from_widgets``, field for field,
+        including resetting a control when ``data`` does not set its field:
+        a control left holding the previous profile's value is how settings
+        migrated between profiles. It takes a mapping rather than a
+        ``ClusterConfig`` so that a draft -- which may hold a value the
+        config class would refuse -- can be put back on screen as typed.
         """
-        # A bare assignment, not set_choice, and deliberately: cluster_type is
-        # the one field with an enforced domain, so this menu is authoritative
-        # and the value is what can be wrong. It cannot be wrong here -- the
-        # argument is a ClusterConfig, whose __post_init__ already rejected
-        # anything outside SUPPORTED_CLUSTER_TYPES.
-        self.widgets["cluster_type"].value = config.cluster_type
+        w = self.widgets
+        defaults = ClusterConfig()
 
-        self.widgets["cpus"].value = config.default_cores
-        self.widgets["ram"].value = (
-            config.default_memory if isinstance(config.default_memory, str) else "16GB"
-        )
-        self.widgets["time"].value = config.default_time
+        # cluster_type is the one field with an enforced domain, so this menu
+        # is authoritative; everything reaching here has passed
+        # SUPPORTED_CLUSTER_TYPES already.
+        w["cluster_type"].value = data["cluster_type"]
+        w["cpus"].value = data.get("default_cores") or defaults.default_cores
+        w["ram"].value = str(data.get("default_memory") or defaults.default_memory)
+        w["time"].value = str(data.get("default_time") or defaults.default_time)
+        w["partition"].value = data.get("default_partition") or ""
 
-        # Remote / SSH
-        self.widgets["host"].value = config.cluster_host or ""
-        self.widgets["port"].value = config.cluster_port or 22
-        self.widgets["username"].value = config.username or ""
-        self.widgets["password"].value = config.password or ""
-        # Empty, not "~/.ssh/id_rsa". That placeholder was written back as a
-        # real setting, and executor_connections tries key_file first and only
-        # falls back to a password when it is falsy -- so filling in a password
-        # authenticated against a key file that does not exist.
-        self.widgets["ssh_key_file"].value = config.key_file or ""
-        self.widgets["local_env_var"].value = config.password_env_var or ""
-        self.widgets["home_dir"].value = config.remote_work_dir or ""
+        # SSH
+        w["host"].value = data.get("cluster_host") or ""
+        w["port"].value = data.get("cluster_port") or defaults.cluster_port
+        w["username"].value = data.get("username") or ""
+        w["password"].value = data.get("password") or ""
+        # Empty, never a placeholder path: a key file that is set is tried
+        # first, and a made-up one shadows the password.
+        w["ssh_key_file"].value = data.get("key_file") or ""
+        w["local_env_var"].value = data.get("password_env_var") or ""
+        w["home_dir"].value = data.get("remote_work_dir") or ""
 
-        # HuggingFace
-        self.widgets["hf_namespace"].value = config.hf_namespace or ""
-        # set_choice, not a bare assignment: ClusterConfig validates neither
-        # hf_flavor nor package_manager, so a config naming a flavor newer
-        # than this dropdown made the widget impossible to open.
-        set_choice(self.widgets["hf_flavor"], config.hf_flavor or "cpu-basic")
-        self.widgets["hf_token"].value = config.hf_token or ""
-        self.widgets["hf_allow_gpu"].value = bool(config.hf_allow_gpu_flavors)
+        # HuggingFace. set_choice, not assignment: neither hf_flavor nor
+        # package_manager is validated, so a saved value newer than these
+        # menus must widen them rather than make the widget unopenable.
+        w["hf_namespace"].value = data.get("hf_namespace") or ""
+        set_choice(w["hf_flavor"], data.get("hf_flavor") or HF_FLAVORS[0])
+        w["hf_timeout"].value = data.get("hf_job_timeout") or ""
+        w["hf_token"].value = data.get("hf_token") or ""
+        w["hf_allow_gpu"].value = bool(data.get("hf_allow_gpu_flavors"))
 
         # Advanced
-        set_choice(self.widgets["package_manager"], config.package_manager or "auto")
-        self.widgets["python_executable"].value = config.python_executable or "python"
-        self.widgets["clone_env"].value = bool(
-            getattr(config, "replicate_local_environment", True)
+        set_choice(w["package_manager"], data.get("package_manager") or "auto")
+        w["python_executable"].value = data.get("python_executable") or "python"
+        w["conda_env"].value = data.get("conda_env_name") or ""
+        w["clone_env"].value = bool(data.get("replicate_local_environment", True))
+        w["cleanup"].value = bool(data.get("cleanup_on_success", True))
+        w["env_vars"].value = "\n".join(
+            f"{key}={value}"
+            for key, value in (data.get("environment_variables") or {}).items()
         )
-
-        # Assigned unconditionally: leaving the previous profile's entries in
-        # place is how they migrated between profiles.
-        self.widgets["env_vars"].value = "\n".join(
-            f"{k}={v}" for k, v in (config.environment_variables or {}).items()
-        )
-        self.widgets["modules"].value = " ".join(config.module_loads or [])
-        self.widgets["pre_exec_commands"].value = "\n".join(
-            config.pre_execution_commands or []
+        w["modules"].value = " ".join(data.get("module_loads") or [])
+        w["pre_exec_commands"].value = "\n".join(
+            data.get("pre_execution_commands") or []
         )
 
 

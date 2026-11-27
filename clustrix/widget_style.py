@@ -21,17 +21,27 @@ width, height or margin on the same element.
 STYLESHEET = """
 <style>
 .clustrix-widget {
-    --cx-fg:        var(--jp-ui-font-color1, rgba(0, 0, 0, .87));
-    --cx-fg-muted:  var(--jp-ui-font-color2, rgba(0, 0, 0, .60));
-    --cx-bg:        var(--jp-layout-color1, #fff);
-    --cx-bg-sunken: var(--jp-layout-color2, #f3f3f3);
-    --cx-border:    var(--jp-border-color1, #bdbdbd);
-    --cx-rule:      var(--jp-border-color2, #e0e0e0);
-    --cx-accent:    var(--jp-brand-color1, #1976d2);
+    /* Used only where the host defines no --jp-* tokens (VS Code, Colab). */
+    --cx-fb-fg: #1f1f1f;
+    --cx-fb-bg: #ffffff;
+    --cx-fb-sunken: #f3f3f3;
+    --cx-fb-border: #a8a8a8;
+    --cx-fb-rule: #dedede;
+    --cx-fb-accent: #1967d2;
+
+    --cx-fg:        var(--jp-ui-font-color1, var(--cx-fb-fg));
+    --cx-bg:        var(--jp-layout-color1, var(--cx-fb-bg));
+    --cx-bg-sunken: var(--jp-layout-color2, var(--cx-fb-sunken));
+    --cx-border:    var(--jp-border-color1, var(--cx-fb-border));
+    --cx-rule:      var(--jp-border-color2, var(--cx-fb-rule));
+    --cx-accent:    var(--jp-brand-color1, var(--cx-fb-accent));
     --cx-on-accent: var(--jp-ui-inverse-font-color1, #fff);
-    --cx-ok:        var(--jp-success-color1, #388e3c);
+    --cx-ok:        var(--jp-success-color1, #2e7d32);
     --cx-err:       var(--jp-error-color1, #d32f2f);
-    --cx-warn:      var(--jp-warn-color1, #f57c00);
+    --cx-warn:      var(--jp-warn-color1, #ef6c00);
+    /* Secondary text is mixed from the two theme colours rather than taken
+       from --jp-ui-font-color2, which is below 4.5:1 on a sunken panel. */
+    --cx-fg-muted:  color-mix(in srgb, var(--cx-fg) 70%, var(--cx-bg));
     --cx-font:      var(--jp-ui-font-family, system-ui, -apple-system,
                     "Segoe UI", Helvetica, Arial, sans-serif);
     --cx-mono:      var(--jp-code-font-family, ui-monospace, SFMono-Regular,
@@ -51,6 +61,17 @@ STYLESHEET = """
     border-radius: 10px;
     box-shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 16px rgba(0, 0, 0, .05);
     overflow: hidden;
+    container-type: inline-size;
+}
+@media (prefers-color-scheme: dark) {
+    .clustrix-widget {
+        --cx-fb-fg: #e6e6e6;
+        --cx-fb-bg: #1e1e1e;
+        --cx-fb-sunken: #2a2a2a;
+        --cx-fb-border: #6b6b6b;
+        --cx-fb-rule: #3a3a3a;
+        --cx-fb-accent: #6ea8fe;
+    }
 }
 .clustrix-widget *,
 .clustrix-widget *::before,
@@ -96,27 +117,30 @@ STYLESHEET = """
 .clustrix-widget .cx-in-use b { font-weight: 600; color: var(--cx-fg); }
 
 .clustrix-widget .cx-pill {
+    --cx-pill: var(--cx-fg-muted);
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 3px 10px;
     border-radius: 999px;
-    background: color-mix(in srgb, currentColor 12%, transparent);
     font-size: 12px;
     font-weight: 500;
     white-space: nowrap;
+    /* The words stay in the text colour; only the dot and the wash carry
+       the state, so the label is readable in either theme. */
+    color: var(--cx-fg);
+    background: color-mix(in srgb, var(--cx-pill) 16%, var(--cx-bg));
 }
 .clustrix-widget .cx-pill::before {
     content: "";
-    width: 7px;
-    height: 7px;
+    width: 8px;
+    height: 8px;
     border-radius: 50%;
-    background: currentColor;
+    background: var(--cx-pill);
 }
-.clustrix-widget .cx-pill-idle  { color: var(--cx-fg-muted); }
-.clustrix-widget .cx-pill-busy  { color: var(--cx-warn); }
-.clustrix-widget .cx-pill-ok    { color: var(--cx-ok); }
-.clustrix-widget .cx-pill-error { color: var(--cx-err); }
+.clustrix-widget .cx-pill-busy  { --cx-pill: var(--cx-warn); }
+.clustrix-widget .cx-pill-ok    { --cx-pill: var(--cx-ok); }
+.clustrix-widget .cx-pill-error { --cx-pill: var(--cx-err); }
 
 /* Sections ----------------------------------------------------------- */
 .clustrix-widget .cx-body { padding: 4px 20px 20px; }
@@ -193,8 +217,27 @@ STYLESHEET = """
     border-radius: var(--cx-radius);
     box-shadow: none;
 }
-/* The select keeps ipywidgets' background-image: that is its arrow. */
-.clustrix-widget .cx-field select { padding-right: 24px; }
+/* The arrow is drawn from the theme's text colour. ipywidgets' own is a
+   fixed dark image, which disappears on a dark background. */
+.clustrix-widget .cx-field select {
+    padding-right: 28px;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image:
+        linear-gradient(45deg, transparent 50%, var(--cx-fg-muted) 50%),
+        linear-gradient(135deg, var(--cx-fg-muted) 50%, transparent 50%);
+    background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+}
+/* A field the last action could not accept. */
+.clustrix-widget .cx-field.cx-invalid input,
+.clustrix-widget .cx-field.cx-invalid select,
+.clustrix-widget .cx-field.cx-invalid textarea {
+    border-color: var(--cx-err);
+    box-shadow: 0 0 0 1px var(--cx-err);
+}
+.clustrix-widget .cx-field.cx-invalid > .widget-label { color: var(--cx-err); }
 .clustrix-widget .cx-field textarea {
     height: auto;
     padding: 6px 8px;
@@ -205,7 +248,7 @@ STYLESHEET = """
 }
 .clustrix-widget .cx-mono input { font-family: var(--cx-mono); font-size: 12px; }
 .clustrix-widget .cx-field input::placeholder,
-.clustrix-widget .cx-field textarea::placeholder { color: var(--cx-fg-muted); opacity: .75; }
+.clustrix-widget .cx-field textarea::placeholder { color: var(--cx-fg-muted); opacity: 1; }
 .clustrix-widget .cx-field input:focus,
 .clustrix-widget .cx-field select:focus,
 .clustrix-widget .cx-field textarea:focus,
@@ -230,6 +273,10 @@ STYLESHEET = """
     color: var(--cx-fg);
 }
 .clustrix-widget .cx-check input[type="checkbox"] { margin: 0; accent-color: var(--cx-accent); }
+.clustrix-widget .cx-check input[type="checkbox"]:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--cx-accent) 25%, transparent);
+}
 
 /* Buttons ------------------------------------------------------------ */
 .clustrix-widget .jupyter-button {
@@ -260,6 +307,19 @@ STYLESHEET = """
     font-weight: 600;
 }
 .clustrix-widget .jupyter-button.cx-danger { color: var(--cx-err); }
+/* Delete, after its first click: the next click is the real one. */
+.clustrix-widget .jupyter-button.cx-danger.cx-armed {
+    color: #fff;
+    background-color: var(--cx-err);
+    border-color: var(--cx-err);
+}
+/* Buttons that belong together stay on one line when their row wraps. */
+.clustrix-widget .cx-group {
+    display: flex;
+    flex-flow: row nowrap;
+    gap: 8px;
+    overflow: visible;
+}
 .clustrix-widget .jupyter-button.cx-primary:hover:enabled {
     background-color: var(--cx-accent);
     filter: brightness(1.1);
@@ -271,9 +331,13 @@ STYLESHEET = """
 .clustrix-widget .cx-backend { width: 100%; height: auto; overflow: visible; }
 .clustrix-widget .cx-backend > div {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
     width: 100%;
+}
+/* Two by two in a narrow panel, never three and one. */
+@container (max-width: 560px) {
+    .clustrix-widget .cx-backend > div { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .clustrix-widget .cx-backend .widget-toggle-button {
     display: block;
@@ -304,14 +368,22 @@ STYLESHEET = """
 
 /* Actions ------------------------------------------------------------ */
 .clustrix-widget .cx-actions { justify-content: space-between; align-items: center; }
-.clustrix-widget .cx-actions-main { gap: 8px; justify-content: flex-end; flex: 1 1 auto; }
+.clustrix-widget .cx-result-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: 24px;
+    margin: 16px 0 8px;
+    overflow: visible;
+}
+.clustrix-widget .cx-result-bar .cx-heading { margin: 0; }
 
 /* Output -------------------------------------------------------------
    Framed and given a floor height, so an idle widget reads as a console
    waiting for a result rather than as a gap in the layout. */
 .clustrix-widget .cx-output {
     min-height: 44px;
-    max-height: 240px;
+    max-height: 360px;
     padding: 10px 12px;
     background: var(--cx-bg-sunken);
     border-left: 3px solid var(--cx-rule);
