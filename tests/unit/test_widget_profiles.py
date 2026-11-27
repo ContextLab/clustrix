@@ -497,9 +497,18 @@ class TestOpeningTheWidgetIsSafe:
 
 
 class TestTheStoreSurvivesBadInput:
-    def test_a_corrupt_profile_does_not_wipe_the_built_ins(self, tmp_path):
+    def test_a_corrupt_profile_costs_only_itself(self, tmp_path):
         """Clearing then repopulating meant one bad entry left a partial set
-        with the templates gone and active_profile naming nothing."""
+        with the templates gone and active_profile naming nothing.
+
+        This used to assert the opposite extreme -- that one bad entry made
+        the manager discard the whole store and show only the built-ins.
+        That was the first half of a data-loss bug (the next save then wrote
+        the built-ins over the store), so the assertion is corrected rather
+        than kept: the readable profile loads, the unreadable one is named,
+        and tests/unit/test_profile_store_is_never_overwritten_unread.py
+        covers what happens to the file.
+        """
         import warnings
 
         from clustrix.profile_manager import ProfileManager as PM
@@ -514,9 +523,11 @@ class TestTheStoreSurvivesBadInput:
             warnings.simplefilter("always")
             manager = PM(config_dir=str(store))
 
-        assert set(manager.get_profile_names()) >= set(PM.BUILTIN_PROFILES)
+        assert manager.get_profile_names() == ["A"]
         assert manager.active_profile in manager.get_profile_names()
-        assert caught, "a store that could not be read should say so"
+        assert any(
+            "B" in str(w.message) and "nope" in str(w.message) for w in caught
+        ), "a profile that could not be read should be named"
 
     def test_active_profile_always_names_something_that_exists(self, tmp_path):
         from clustrix.profile_manager import ProfileManager as PM

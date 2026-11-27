@@ -1,7 +1,9 @@
 """Profile management system for cluster configurations."""
 
 import json
+import os
 import stat
+import time
 import warnings
 import yaml
 from pathlib import Path
@@ -364,6 +366,9 @@ class ProfileManager:
         self.profiles: Dict[str, ClusterConfig] = {}
         self.active_profile: Optional[str] = None
         self._announced_dropped_secrets = False
+        #: True while the store on disk holds something ``_restore`` could
+        #: not read. ``_persist`` sets the file aside before writing over it.
+        self._store_holds_unread_data = False
         self._load_default_profiles()
         self._restore()
 
@@ -463,27 +468,89 @@ class ProfileManager:
         """
         if not self.store_path.exists():
             return
+        problems: Dict[str, str] = {}
         try:
             self.load_from_file(
                 str(self.store_path),
                 source=config_source_for_discovered_path(self.store_path),
+                problems=problems,
             )
         except Exception as e:  # noqa: BLE001
-            import warnings
+            self._store_holds_unread_data = True
+            warnings.warn(
+                f"Could not read saved profiles from {self.store_path}: {e}. "
+                "The built-in profiles are shown instead. The file has not "
+                "been changed, and it will be moved aside to a .bak file "
+                "next to it before any new profile is saved."
+            )
+            return
+        if problems:
+            # The readable profiles are loaded; the others exist only in the
+            # file, so the file is still not safe to write over.
+            self._store_holds_unread_data = True
+            details = "; ".join(f"{name}: {why}" for name, why in problems.items())
+            warnings.warn(
+                f"{len(problems)} saved profile(s) in {self.store_path} could "
+                f"not be read and were skipped ({details}). The file has not "
+                "been changed, and it will be moved aside to a .bak file "
+                "next to it before any profile is saved."
+            )
 
-            warnings.warn(f"Could not read saved profiles from {self.store_path}: {e}")
+    def _set_unread_store_aside(self) -> None:
+        """Move a store ``_restore`` could not fully read out of the way.
+
+        ``_persist`` writes what is in memory, and after a failed restore
+        that is the built-in templates -- so the first mutation used to
+        replace every profile the user had saved with six templates. One
+        unknown key in one profile was enough. A file that could not be read
+        is never written over: it is renamed, in place and with its mode, to
+        a name that says what it is, and the user is told where it went.
+        """
+        stamp = time.strftime("%Y%m%dT%H%M%S")
+        backup = self.store_path.with_name(
+            f"{self.store_path.name}.unreadable-{stamp}.bak"
+        )
+        attempt = 1
+        while backup.exists():
+            attempt += 1
+            backup = self.store_path.with_name(
+                f"{self.store_path.name}.unreadable-{stamp}-{attempt}.bak"
+            )
+        os.replace(self.store_path, backup)
+        self._store_holds_unread_data = False
+        warnings.warn(
+            f"{self.store_path} held profiles clustrix could not read, so it "
+            f"was kept as {backup} rather than overwritten. Fix that file "
+            "and copy it back to recover them."
+        )
 
     def _persist(self) -> None:
         """Write profiles out so the next session starts where this one left off."""
         try:
+            if self._store_holds_unread_data and self.store_path.exists():
+                self._set_unread_store_aside()
             self.save_to_file(str(self.store_path))
         except Exception as e:  # noqa: BLE001
-            import warnings
-
             warnings.warn(f"Could not save profiles to {self.store_path}: {e}")
+
+    def _check_new_profile(self, name: Any, config: Any = None) -> None:
+        """Refuse a profile that could not be saved or selected afterwards.
+
+        An empty name is a dropdown entry nobody can see, and a ``dict`` in
+        place of a ``ClusterConfig`` was accepted here and then failed inside
+        every later ``_persist`` -- for every profile, not just that one.
+        """
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("A profile name must be a non-empty string")
+        if config is not None and not isinstance(config, ClusterConfig):
+            raise TypeError(
+                f"Profile {name!r} must be a ClusterConfig, not "
+                f"{type(config).__name__}; build one with ClusterConfig(**settings)"
+            )
 
     def create_profile(self, name: str, config: ClusterConfig) -> None:
         """Create a new configuration profile."""
+        self._check_new_profile(name, config)
         if name in self.profiles:
             raise ValueError(f"Profile '{name}' already exists")
 
@@ -506,6 +573,7 @@ class ProfileManager:
                 new_name = f"{base_name} {counter}"
                 counter += 1
 
+        self._check_new_profile(new_name)
         if new_name in self.profiles:
             raise ValueError(f"Profile '{new_name}' already exists")
 
@@ -550,6 +618,7 @@ class ProfileManager:
 
     def save_profile(self, name: str, config: ClusterConfig) -> None:
         """Save/update a profile configuration."""
+        self._check_new_profile(name, config)
         self.profiles[name] = config
         if self.active_profile is None:
             self.active_profile = name
@@ -561,6 +630,7 @@ class ProfileManager:
         if old_name not in self.profiles:
             raise ValueError(f"Profile '{old_name}' does not exist")
 
+        self._check_new_profile(new_name)
         if new_name in self.profiles:
             raise ValueError(f"Profile '{new_name}' already exists")
 
@@ -694,7 +764,11 @@ class ProfileManager:
         write_config_file_securely(Path(filepath), data)
 
     def load_from_file(
-        self, filepath: str, source: str = CONFIG_SOURCE_EXPLICIT_FILE
+        self,
+        filepath: str,
+        source: str = CONFIG_SOURCE_EXPLICIT_FILE,
+        *,
+        problems: Optional[Dict[str, str]] = None,
     ) -> None:
         """Replace the current profiles with those in `filepath`.
 
@@ -709,6 +783,12 @@ class ProfileManager:
         rather than with ``__post_init__``'s ``runtime``. ``_restore`` passes
         the provenance of the directory it found the store in, since nobody
         named that one.
+
+        ``problems``, when given, turns a profile that cannot be built from
+        a failure of the whole load into an entry in that mapping (name to
+        reason) and the rest are loaded. ``_restore`` passes it, so one
+        profile written by a newer clustrix does not hide the others; a
+        caller who does not pass it keeps the all-or-nothing behaviour.
         """
         filepath_obj = Path(filepath)
         if not filepath_obj.exists():
@@ -728,27 +808,36 @@ class ProfileManager:
             recorded_sources = {}
 
         loaded: Dict[str, ClusterConfig] = {}
-        for name, config_dict in (data.get("profiles") or {}).items():
-            if not isinstance(config_dict, dict):
-                raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
-            known = {f.name for f in dataclass_fields(ClusterConfig)}
-            unknown = set(config_dict) - known
-            if unknown:
-                raise ValueError(
-                    f"Profile {name!r} in {filepath} has unknown setting(s): "
-                    f"{', '.join(sorted(unknown))}"
+        known = {f.name for f in dataclass_fields(ClusterConfig)}
+        profiles_section = data.get("profiles") or {}
+        if not isinstance(profiles_section, dict):
+            raise ValueError(f"'profiles' in {filepath} is not a mapping")
+        for name, config_dict in profiles_section.items():
+            try:
+                if not isinstance(config_dict, dict):
+                    raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
+                unknown = set(config_dict) - known
+                if unknown:
+                    raise ValueError(
+                        f"Profile {name!r} in {filepath} has unknown setting(s): "
+                        f"{', '.join(sorted(unknown))}"
+                    )
+                # ``from_file_content`` takes the source as an argument, so
+                # this loader cannot forget to say where the bytes came from
+                # -- which is exactly what it used to do. It also makes the
+                # permanent claim on the hostname: this loader opened the
+                # file, unlike ``__post_init__``, which infers a source and
+                # may therefore only mark one object. A later rebuild
+                # (Apply's ``configure(**asdict(cfg))``,
+                # ``dataclasses.replace``) cannot launder it back to
+                # ``runtime``.
+                loaded[name] = ClusterConfig.from_file_content(
+                    config_dict, source, origin=f"Profile {name!r} in {filepath}"
                 )
-            # ``from_file_content`` takes the source as an argument, so this
-            # loader cannot forget to say where the bytes came from -- which
-            # is exactly what it used to do. It also makes the permanent
-            # claim on the hostname: this loader opened the file, unlike
-            # ``__post_init__``, which infers a source and may therefore
-            # only mark one object. A later rebuild (Apply's
-            # ``configure(**asdict(cfg))``, ``dataclasses.replace``) cannot
-            # launder it back to ``runtime``.
-            loaded[name] = ClusterConfig.from_file_content(
-                config_dict, source, origin=f"Profile {name!r} in {filepath}"
-            )
+            except (TypeError, ValueError) as e:
+                if problems is None:
+                    raise
+                problems[str(name)] = str(e)
 
         # The store's own per-profile record is applied on top of ``source``,
         # and may only *lower* it -- see ``_restored_profile_source``.
@@ -859,6 +948,7 @@ class ProfileManager:
         # Generate profile name if not provided
         if profile_name is None:
             profile_name = filepath_obj.stem
+        self._check_new_profile(profile_name)
 
         # Ensure unique name
         original_name = profile_name
