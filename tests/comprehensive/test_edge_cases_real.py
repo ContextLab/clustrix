@@ -7,6 +7,7 @@ using actual infrastructure without mocks.
 
 import pytest
 import os
+import socket
 import sys
 import time
 import tempfile
@@ -16,6 +17,18 @@ from pathlib import Path
 from clustrix import cluster, configure
 from clustrix.config import ClusterConfig
 from clustrix.executor import ClusterExecutor
+
+
+def _closed_port() -> int:
+    """A TCP port on 127.0.0.1 that nothing is listening on right now.
+
+    Asked of the kernel rather than assumed: a fixed number is only closed
+    until something opens it, and 2222 -- which this module used to name --
+    is where a local test sshd conventionally listens.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 class TestSerializationEdgeCases:
@@ -379,7 +392,8 @@ class TestNetworkEdgeCases:
 
         Connections that drop during execution.
 
-        Nothing listens on localhost:2222, so the real submission attempt
+        Nothing listens on the port used here (``_closed_port`` asks the
+        kernel for one), so the real submission attempt
         raises `paramiko.ssh_exception.NoValidConnectionsError` -- an
         `OSError` subclass, but NOT a `ConnectionError` subclass (Python's
         `ConnectionError` covers only `BrokenPipeError`/
@@ -405,8 +419,8 @@ class TestNetworkEdgeCases:
         """
         configure(
             cluster_type="ssh",
-            cluster_host="localhost",
-            cluster_port=2222,
+            cluster_host="127.0.0.1",
+            cluster_port=_closed_port(),
             username="testuser",
             password="testpass",
         )
@@ -430,14 +444,11 @@ class TestNetworkEdgeCases:
 
             return {"completed": len(results), "sum": sum(results)}
 
-        # Test with retries
-        try:
-            result = flaky_network_task(10)
-            assert result["completed"] <= 10
-        except OSError:
-            # Expected if network issues occur (no SSH server on
-            # localhost:2222 in this environment)
-            pass
+        # The port is closed, so there is exactly one possible outcome. This
+        # used to accept a result *or* an OSError, which was only ever right
+        # by accident of what happened to be listening on a fixed port.
+        with pytest.raises(OSError):
+            flaky_network_task(10)
 
     def test_large_data_transfer(self):
         """
