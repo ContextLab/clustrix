@@ -2078,6 +2078,10 @@ def _compiles_to(node: ast.FunctionDef, func: Callable) -> bool:
     return False
 
 
+class _NotItsSource(Exception):
+    """There is source, and it is not the program the function runs."""
+
+
 def _function_source(func: Callable) -> ast.FunctionDef:
     lines, first_line = inspect.getsourcelines(func)
     tree = ast.parse(textwrap.dedent("".join(lines)))
@@ -2111,7 +2115,7 @@ def _function_source(func: Callable) -> ast.FunctionDef:
             if list(declared) != written:
                 raise ValueError("the source found does not belong to this function")
             if not _compiles_to(node, func):
-                raise ValueError(
+                raise _NotItsSource(
                     "the source found is not what the function runs: the "
                     "file changed after it was loaded, or the function uses "
                     "super() or a class-private name"
@@ -2147,6 +2151,9 @@ def plan(func: Callable) -> ParallelPlan:
         return result
     try:
         function = _function_source(func)
+    except _NotItsSource as error:
+        result.unavailable = str(error)
+        return result
     except (
         OSError,
         TypeError,
