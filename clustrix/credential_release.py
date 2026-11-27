@@ -720,6 +720,13 @@ class CredentialRelease:
     local_identities: bool = False
 
     def __post_init__(self) -> None:
+        if self.key_path:
+            # ``key_file: ~/.ssh/id_x`` is how a key is written in a config
+            # file, and paramiko opens the path as given: without this the
+            # connection failed with "No such file: '~/.ssh/id_x'". Here,
+            # and nowhere else, because every key path that reaches a
+            # connection is carried by this object.
+            object.__setattr__(self, "key_path", os.path.expanduser(self.key_path))
         has_secret = bool(self.password) or bool(self.key_path) or bool(self.token)
         if has_secret and self.refusal is not None:
             raise ValueError(

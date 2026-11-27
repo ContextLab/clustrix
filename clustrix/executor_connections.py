@@ -8,7 +8,7 @@ connection and ``huggingface`` talks to an HTTP API.)
 import os
 import logging
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 import paramiko
 
@@ -20,6 +20,38 @@ logger = logging.getLogger(__name__)
 #: How long to wait for the TCP connection, the SSH banner and authentication,
 #: each. Generous for a busy login node; short enough to be an answer.
 CONNECT_TIMEOUT_SECONDS = 30
+
+
+def is_home_relative(path: str) -> bool:
+    """Whether ``path`` is ``~`` or starts with ``~/``.
+
+    ``~otheruser/...`` is deliberately not included: see
+    :meth:`ConnectionManager.resolve_remote_path`.
+    """
+    return path == "~" or path.startswith("~/")
+
+
+def remote_home_directory(run: Callable[[str], str], path: str) -> str:
+    """Ask the remote shell for the account's home directory.
+
+    ``run`` executes one command on the host and returns its stdout;
+    ``path`` is the path being resolved, named in the error. Shared by the
+    execution path and ``clustrix.filesystem`` so that the two cannot ask,
+    or read the answer, differently.
+    """
+    stdout = run("echo $HOME")
+    # Take the LAST line: an interactive-style profile can print a
+    # login banner ahead of the value, and prepending "*** Welcome ***"
+    # to a path produces a directory nobody can explain.
+    candidates = [ln.strip() for ln in (stdout or "").splitlines() if ln.strip()]
+    home = candidates[-1] if candidates else ""
+    if not home.startswith("/"):
+        raise RuntimeError(
+            "Could not determine the remote home directory (got "
+            f"{home!r}), so the remote path {path!r} cannot be "
+            "resolved. Use an absolute path."
+        )
+    return home.rstrip("/")
 
 
 class ConnectionManager:
@@ -243,28 +275,14 @@ class ConnectionManager:
 
         The remote home directory is resolved once and cached per connection.
         """
-        if path != "~" and not path.startswith("~/"):
+        if not is_home_relative(path):
             return path
 
         if self._remote_home is None:
-            stdout, _ = self.execute_remote_command("echo $HOME")
-            # Take the LAST line: an interactive-style profile can print a
-            # login banner ahead of the value, and prepending "*** Welcome ***"
-            # to a path produces a directory nobody can explain.
-            candidates = [
-                ln.strip() for ln in (stdout or "").splitlines() if ln.strip()
-            ]
-            home = candidates[-1] if candidates else ""
-            if not home.startswith("/"):
-                raise RuntimeError(
-                    "Could not determine the remote home directory (got "
-                    f"{home!r}), so remote_work_dir={path!r} cannot be "
-                    "resolved. Set remote_work_dir to an absolute path."
-                )
-            self._remote_home = home.rstrip("/")
+            self._remote_home = remote_home_directory(
+                lambda command: self.execute_remote_command(command)[0], path
+            )
 
-        if path == "~":
-            return self._remote_home
         return self._remote_home + path[1:]
 
     def upload_file(self, local_path: str, remote_path: str):

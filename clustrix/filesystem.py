@@ -18,6 +18,7 @@ import paramiko
 
 from .config import ClusterConfig
 from .credential_release import CredentialTarget, release_credential
+from .executor_connections import is_home_relative, remote_home_directory
 from .ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
@@ -110,6 +111,8 @@ class ClusterFilesystem:
         self.config = config
         self._ssh_client: Optional[paramiko.SSHClient] = None
         self._sftp_client: Optional[paramiko.SFTPClient] = None
+        #: The remote account's home directory, once asked for.
+        self._remote_home: Optional[str] = None
         #: The cluster working directory, when it was found on this
         #: machine's own disk; ``None`` otherwise. See
         #: ``_auto_detect_cluster_location``.
@@ -205,6 +208,7 @@ class ClusterFilesystem:
         if self._ssh_client:
             self._ssh_client.close()
             self._ssh_client = None
+        self._remote_home = None
 
     def _get_ssh_client(self) -> paramiko.SSHClient:
         """Get or create SSH client connection."""
@@ -286,21 +290,45 @@ class ClusterFilesystem:
         )
 
     def _get_full_path(self, path: str) -> str:
-        """Get full path based on working directory."""
-        if self.config.cluster_type == "local":
-            base_dir = self.config.local_work_dir or os.getcwd()
-        elif self._on_cluster_work_dir is not None:
-            # On the cluster itself a relative path means what it means
-            # from anywhere else: relative to the cluster working directory.
-            base_dir = self._on_cluster_work_dir
-        else:
-            base_dir = self.config.remote_work_dir
+        """The path an operation acts on: ``~`` expanded, then made absolute.
 
-        # Handle absolute paths
-        if os.path.isabs(path):
+        Every operation resolves its path here, so this is the one place a
+        leading ``~`` is expanded. SFTP does not expand it -- it reads
+        ``~/data`` as a relative directory literally named ``~`` -- which is
+        why ``cluster_ls("~/data", config)`` returned ``[]`` for a directory
+        that was plainly there, and why every relative path did the same
+        under the default ``remote_work_dir`` of ``~/.clustrix/jobs``.
+        """
+        if self._uses_local_disk():
+            if self.config.cluster_type == "local":
+                base_dir = self.config.local_work_dir or os.getcwd()
+            else:
+                # On the cluster itself a relative path means what it means
+                # from anywhere else: relative to the cluster working
+                # directory.
+                base_dir = str(self._on_cluster_work_dir)
+            path = os.path.expanduser(path)
+            if os.path.isabs(path):
+                return path
+            return os.path.join(base_dir, path)
+
+        path = self._expand_remote_home(path)
+        if posixpath.isabs(path):
             return path
+        return posixpath.join(
+            self._expand_remote_home(self.config.remote_work_dir), path
+        )
 
-        return os.path.join(base_dir, path)
+    def _expand_remote_home(self, path: str) -> str:
+        """``~`` and ``~/...`` against the remote account's home directory.
+
+        The home directory is asked for once per connection.
+        """
+        if not is_home_relative(path):
+            return path
+        if self._remote_home is None:
+            self._remote_home = remote_home_directory(self._run_remote, path)
+        return self._remote_home + path[1:]
 
     # ===== Core Operations =====
 
