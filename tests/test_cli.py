@@ -454,11 +454,14 @@ class TestCredentials:
         assert "SSH credentials valid" in result.stdout
         assert ("testuser", "publickey") in ssh_server.authentications
 
-    def test_test_with_nothing_stored_says_so_for_each_provider(self):
+    def test_test_with_nothing_stored_says_so_and_does_not_report_success(self):
+        """It used to exit 0 here, so a script could not tell "every
+        credential works" from "there are none"."""
         result = clustrix("credentials", "test")
 
-        assert result.returncode == 0
+        assert result.returncode == 1
         assert result.stdout.count("No credentials found") == 2
+        assert "No credentials are configured" in result.stdout
 
     def test_list_names_the_stored_fields_and_never_their_values(
         self, ssh_server, env_file

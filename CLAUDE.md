@@ -75,7 +75,7 @@ pytest --cov=clustrix    # Run tests with coverage
 
    **Where the chunks run.** Locally: `clustrix/loop_workers.py`, a pool of plain subprocess workers kept between calls — *not* `multiprocessing`, whose `spawn` start method re-imports `__main__` in each worker and so re-runs an unguarded analysis script. `cores` is the number of workers (`-1`: every CPU this process may use; `SLURM_CPUS_PER_TASK` is honoured before the affinity mask). On `ssh`/`slurm`: one job per chunk through `ClusterExecutor`, at most `max_parallel_jobs`, each with the resources the decorator names; the code around the loop runs as its own job unless it only unpacks arguments or returns what was collected (`ParallelPlan.pre_is_cheap`/`post_is_cheap`). There are no SLURM job arrays yet — each chunk is its own `sbatch`. The old protocol (a function accepting hidden `_chunk_range_<var>` keywords and returning a list of chunk results) and `clustrix/loop_analysis.py` are gone; do not document either.
 
-   **`cluster_type` is not a `@cluster` keyword.** `@cluster(cores=8, cluster_type="local")` logs `@cluster received unrecognised option(s)` on every call and is ignored. The backend is set with `configure(cluster_type=...)`. The only extra keywords the decorator accepts are `hf_token`, `hf_username`, `hf_flavor`, `hf_timeout`, `hf_namespace`, `key_file`, and `data` / `no_data` (paths to add to, or keep out of, the inputs staged for a call); check every example you write for this mistake.
+   **`cluster_type` is not a `@cluster` keyword.** `@cluster(cores=8, cluster_type="local")` logs `@cluster received unrecognised option(s)` on every call and is ignored. The backend is set with `configure(cluster_type=...)`. The only extra keywords the decorator accepts are `hf_flavor` and `hf_timeout` (read by the HuggingFace backend) and `data` / `no_data` (paths to add to, or keep out of, the inputs staged for a call). `hf_token`, `hf_username`, `hf_namespace` and `key_file` were once listed as accepted, but no backend ever read them per call; they are configuration and now get the same "no effect" warning. Check every example you write for this mistake.
 
    **`auto_gpu_parallel` does nothing.** It is accepted, it warns, and there is no automatic cross-GPU parallelization to select. `loop_workers.WorkerPool` can give each worker its own environment (which is how one GPU per worker would be pinned with `CUDA_VISIBLE_DEVICES`), but nothing in `@cluster` uses that yet and **no GPU path has been run on real hardware**.
 
@@ -89,7 +89,7 @@ pytest --cov=clustrix    # Run tests with coverage
 3. **Configuration System** (`clustrix/config.py`): Singleton configuration management supporting:
    - YAML/JSON file loading
    - Hierarchical configuration (defaults → file → runtime)
-   - Standard location discovery (`~/.clustrix/`, `/etc/clustrix/`)
+   - Standard location discovery (the config directory, then the working directory)
 
 **Code, dependencies and data.** What travels with a job, and how it is found:
 
@@ -223,7 +223,7 @@ def process_datasets(config):
 
 ### Configuration Priority
 1. Runtime parameters — `configure(...)` and `@cluster(...)` keywords (highest priority)
-2. Configuration file (`clustrix.yml`, discovered in `~/.clustrix/` and `/etc/clustrix/`)
+2. Configuration file: `config.yml` / `config.yaml` / `config.json` in the config directory (`~/.clustrix/`, or `$CLUSTRIX_CONFIG_DIR`), then `clustrix.yml` in the working directory. `/etc/clustrix/` is **not** searched. `clustrix config ...` and `clustrix load` write the first of these
 3. Default values (lowest priority)
 
 There is no environment-variable level. Nothing reads a `CLUSTRIX_<FIELD>`

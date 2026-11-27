@@ -972,3 +972,66 @@ def test_an_import_that_fails_in_the_caller_is_retried_where_the_work_runs():
     # With nowhere else to run it, the ImportError is the user's to see.
     with pytest.raises(ImportError):
         parallelize.run(plan, needs_a_remote_library, ([1],), {}, in_process, 2)
+
+
+# -- defects found while writing the documentation ----------------------------
+
+
+def test_a_loop_variable_reused_by_a_later_loop_does_not_block_the_first():
+    """``i`` after the first loop is not the value it left: the second loop
+    assigns it before anything reads it."""
+
+    def two_passes(xs, ys):
+        firsts = []
+        for i in xs:
+            firsts.append(i * 2)
+        seconds = []
+        for i in ys:
+            seconds.append(i + 1)
+        return firsts, seconds
+
+    plan = parallelize.plan(two_passes)
+
+    assert plan.loops[0].parallelizable, plan.explain()
+    assert split_run(two_passes, [1, 2, 3], [7, 8]) == two_passes([1, 2, 3], [7, 8])
+
+
+def test_a_value_genuinely_used_after_the_loop_still_blocks_it():
+    def reads_the_last(xs):
+        for x in xs:
+            last = x
+        print(last)
+        for x in xs:
+            pass
+        return last
+
+    plan = parallelize.plan(reads_the_last)
+
+    assert not plan.loops[0].parallelizable
+    assert "last" in plan.loops[0].blockers[0].reason
+
+
+def test_source_that_belongs_to_another_function_is_not_used():
+    """A function compiled from a string keeps a file name and line number
+    that ``inspect`` may resolve to unrelated text. ``plan`` must decline --
+    not raise (``tokenize.TokenError`` escaped here), and not split one
+    function by another's source."""
+    namespace = {}
+    code = compile(
+        "def squares(different, names):\n    return [n for n in names]\n",
+        __file__,  # a real file: inspect will happily read *this* module
+        "exec",
+    )
+    exec(code, namespace)
+
+    plan = parallelize.plan(namespace["squares"])
+
+    assert not plan.parallelizable
+    assert plan.unavailable and "source" in plan.unavailable
+
+
+def test_explain_names_a_comprehension_s_variables_as_the_source_does():
+    report = parallelize.explain(filtered_comprehension)
+
+    assert "__cx_" not in report
+    assert "for x in xs" in report

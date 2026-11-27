@@ -96,7 +96,12 @@ def cluster(
             clustrix's own serialization environment is unaffected.
             Falls back to ``config.conda_env_name``.
         async_submit: Whether to submit jobs asynchronously (non-blocking)
-        **kwargs: Additional job parameters
+        **kwargs: ``hf_flavor`` and ``hf_timeout`` override the HuggingFace
+            hardware and time limit for this function. ``data=[...]`` adds
+            paths to the input files staged on an ssh or slurm cluster for
+            each call, and ``no_data=[...]`` keeps a path -- and everything
+            under it -- from being staged (see ``clustrix.auto_stage``).
+            Any other keyword has no effect and is reported.
 
     Returns:
         Decorated function that executes on cluster
@@ -157,14 +162,13 @@ def cluster(
             # Per-job overrides the backends read off job_config. hf_jobs.py
             # already reads hf_flavor/hf_timeout, they were simply never put
             # there, so the documented @cluster(hf_flavor=...) was dropped.
-            passthrough_params = [
-                "hf_token",
-                "hf_username",
-                "hf_flavor",
-                "hf_timeout",
-                "hf_namespace",
-                "key_file",
-            ]
+            # Only the two a backend reads (hf_jobs.py). ``hf_token``,
+            # ``hf_username``, ``hf_namespace`` and ``key_file`` used to be
+            # listed here as well: they were copied into job_config, nothing
+            # ever read them there, and the caller was told nothing. They
+            # are configuration -- set them with configure() -- and passing
+            # one here now gets the "no effect" warning below.
+            passthrough_params = ["hf_flavor", "hf_timeout"]
 
             for param in passthrough_params:
                 if param in kwargs:

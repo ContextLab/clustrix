@@ -365,8 +365,15 @@ def list_credentials_command():
         )
 
 
-def test_credentials_command():
-    """Test all configured credentials by attempting real API calls."""
+def test_credentials_command() -> bool:
+    """Test every configured credential with a real connection.
+
+    Returns whether the run is a pass: at least one credential is
+    configured, and every configured one worked. With nothing configured
+    there is nothing that passed, and the command used to exit 0 all the
+    same -- so a script checking it could not tell "working" from "absent".
+    """
+    working, broken = [], []
     print("🧪 Testing Clustrix Credentials")
     print("=" * 50)
 
@@ -393,6 +400,7 @@ def test_credentials_command():
                 print(
                     "  ❌ Missing required SSH credentials (need host, username, and password or private_key_path)"
                 )
+                broken.append(provider)
                 continue
             # The credential file naming SSH_HOST *is* the user authorising
             # that host, which is rule 1 of the release rules. So the target
@@ -406,6 +414,7 @@ def test_credentials_command():
             release = release_credential(target, provider="ssh")
             if release.refusal is not None:
                 print(f"  ❌ {release.refusal}")
+                broken.append(provider)
                 continue
             # ``_validate_ssh_credentials_real`` reads the ``SSH_*`` spelling
             # of the credential file, and this passed it the lower-case field
@@ -425,6 +434,7 @@ def test_credentials_command():
                 print(
                     "  ❌ Missing required SSH credentials (need host, username, and password or private_key_path)"
                 )
+                broken.append(provider)
                 continue
             success = _validate_ssh_credentials_real(ssh_credentials)
         elif provider == "huggingface":
@@ -441,14 +451,21 @@ def test_credentials_command():
                 )
             else:
                 print("  ❌ Missing required HuggingFace credentials (need token)")
+                broken.append(provider)
                 continue
         else:
             success = True  # Unknown provider, assume valid
 
         if success:
+            working.append(provider)
             print(f"  ✅ {provider.upper()} credentials valid")
         else:
+            broken.append(provider)
             print(f"  ❌ {provider.upper()} credentials invalid or inaccessible")
+
+    if not working and not broken:
+        print("\nNo credentials are configured; run `clustrix credentials setup`.")
+    return bool(working) and not broken
 
 
 def edit_credentials_command():

@@ -325,8 +325,9 @@ def credentials_list():
 
 @credentials.command("test")
 def credentials_test():
-    """Test all configured credentials."""
-    test_credentials_command()
+    """Test all configured credentials; exit 1 unless every one works."""
+    if not test_credentials_command():
+        raise SystemExit(1)
 
 
 @credentials.command("edit")

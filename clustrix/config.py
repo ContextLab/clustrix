@@ -690,6 +690,26 @@ def _validate_config_values(values: Mapping[str, Any], origin: str = "") -> None
                 f"positive number of cores, or -1 for every core available."
             )
 
+    # Waits and limits measured in seconds or bytes: zero or less is never
+    # what anyone means, and a negative poll interval is a busy loop.
+    for name in ("job_poll_interval", "venv_setup_timeout", "auto_stage_max_bytes"):
+        if name in values and values[name] is not None and values[name] <= 0:
+            raise ValueError(
+                f"{label(name)}={values[name]!r} is not valid: it must be "
+                "greater than zero."
+            )
+    if values.get("job_wait_timeout") is not None and values["job_wait_timeout"] <= 0:
+        raise ValueError(
+            f"{label('job_wait_timeout')}={values['job_wait_timeout']!r} is not "
+            "valid: use a number of seconds greater than zero, or None to "
+            "wait indefinitely."
+        )
+    if "max_parallel_jobs" in values and values["max_parallel_jobs"] < 1:
+        raise ValueError(
+            f"{label('max_parallel_jobs')}={values['max_parallel_jobs']!r} is "
+            "not valid: a divided loop needs at least one job."
+        )
+
     if "cluster_type" in values:
         validate_cluster_type(values["cluster_type"], source=label("cluster_type"))
 

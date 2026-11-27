@@ -89,8 +89,10 @@ import ast
 import builtins
 import copy
 import inspect
+import re
 import textwrap
 import time
+import tokenize
 import types
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
@@ -213,10 +215,10 @@ class ParallelPlan:
         lines = [f"{self.func_name}:"]
         if self.unavailable:
             lines.append(f"  not analysed: {self.unavailable}")
-            return "\n".join(lines)
+            return _as_written("\n".join(lines))
         if not self.loops:
             lines.append("  no loop at the top level of the function to split")
-            return "\n".join(lines)
+            return _as_written("\n".join(lines))
         for loop in self.loops:
             verdict = "SPLIT" if loop is self.chosen else "not split"
             if loop.parallelizable and loop is not self.chosen:
@@ -244,7 +246,7 @@ class ParallelPlan:
             where_post = "in the caller" if self.post_is_cheap else "as its own job"
             lines.append(f"  code before the loop runs {where_pre}")
             lines.append(f"  code after the loop runs {where_post}")
-        return "\n".join(lines)
+        return _as_written("\n".join(lines))
 
 
 # --------------------------------------------------------------------------
@@ -724,6 +726,13 @@ def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
     ]
 
 
+def _as_written(text: str) -> str:
+    """Undo the renaming a comprehension's variables get when it is rewritten
+    as a loop, so a report names things the way the user's source does."""
+    text = re.sub(rf"{_P}c\d+_(\w+)", r"\1", text)
+    return re.sub(rf"{_P}comp\d+", "the comprehension's result", text)
+
+
 def _analyse_loop(
     loop: ast.For,
     before: Sequence[ast.stmt],
@@ -732,7 +741,7 @@ def _analyse_loop(
     declared_outer: Set[str],
     resolve: Callable[[str], Tuple[bool, Any]],
 ) -> Tuple[LoopAnalysis, List[_Site]]:
-    header = f"for {ast.unparse(loop.target)} in {ast.unparse(loop.iter)}"
+    header = _as_written(f"for {ast.unparse(loop.target)} in {ast.unparse(loop.iter)}")
     analysis = LoopAnalysis(line=loop.lineno, header=header)
     block = analysis.blockers
     body = loop.body
@@ -784,7 +793,12 @@ def _analyse_loop(
     target_names = _stored([loop.target])
     assigned_in_body = _stored(body) | target_names
     read_in_body = _loaded(body)
-    read_after = _loaded(after)
+    # What the code after the loop reads *before assigning it*. Merely
+    # being read there is not enough: the variable of a second loop is
+    # assigned first, so it is not the value this loop left behind.
+    liveness = _ReadBeforeAssigned(assigned_in_body)
+    liveness.block(after, set())
+    used_after = set(liveness.violations)
     read_in_header = _loaded([loop.iter])
 
     for name in sorted(assigned_in_body & declared_outer):
@@ -848,7 +862,7 @@ def _analyse_loop(
         if name in accumulators:
             continue
         if name in defined_before:
-            if name in assigned_in_body and name not in read_after:
+            if name in assigned_in_body and name not in used_after:
                 # Reassigned in the body: judged below as iteration-local.
                 continue
             block.append(
@@ -882,7 +896,7 @@ def _analyse_loop(
                     "carries a value from the previous iteration",
                 )
             )
-        elif name in read_after:
+        elif name in used_after:
             block.append(
                 Blocker(
                     loop.lineno,
@@ -1379,6 +1393,31 @@ def _function_source(func: Callable) -> ast.FunctionDef:
     ast.increment_lineno(tree, first_line - 1)
     for node in tree.body:
         if isinstance(node, ast.FunctionDef) and node.name == func.__name__:
+            # ``inspect`` finds source by file name and line number. For a
+            # function compiled from a string under a made-up file name it
+            # can come back with some *other* text entirely; splitting a
+            # function according to source that is not its own would run
+            # the wrong code.
+            code = func.__code__
+            declared = code.co_varnames[
+                : code.co_argcount
+                + code.co_kwonlyargcount
+                + bool(code.co_flags & inspect.CO_VARARGS)
+                + bool(code.co_flags & inspect.CO_VARKEYWORDS)
+            ]
+            arguments = node.args
+            written = [
+                argument.arg
+                for argument in [
+                    *arguments.posonlyargs,
+                    *arguments.args,
+                    *arguments.kwonlyargs,
+                    *([arguments.vararg] if arguments.vararg else []),
+                    *([arguments.kwarg] if arguments.kwarg else []),
+                ]
+            ]
+            if list(declared) != written:
+                raise ValueError("the source found does not belong to this function")
             return node
     raise ValueError("the source does not contain a plain function definition")
 
@@ -1403,7 +1442,14 @@ def plan(func: Callable) -> ParallelPlan:
         return result
     try:
         function = _function_source(func)
-    except (OSError, TypeError, SyntaxError, ValueError, IndentationError) as error:
+    except (
+        OSError,
+        TypeError,
+        SyntaxError,
+        ValueError,
+        IndentationError,
+        tokenize.TokenError,
+    ) as error:
         result.unavailable = f"its source is not available ({error})"
         return result
 
