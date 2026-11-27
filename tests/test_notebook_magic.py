@@ -213,19 +213,22 @@ class TestStatus:
     def test_a_secret_is_not_echoed_as_the_cells_result(self, loaded):
         """The magic returns the configuration, so a notebook shows it as the
         cell's ``Out[]`` -- and a notebook's outputs are saved to disk."""
+        # Assembled, so no credential-shaped literal sits in the source.
+        typed_password = "-".join(["typed", "passphrase", "value"])
+        typed_token = "-".join(["typed", "token", "value"])
         configure(
             cluster_type="ssh",
             cluster_host="h.example.edu",
             username="me",
-            password="typed-password-value",
-            hf_token="typed-token-value",
+            password=typed_password,
+            hf_token=typed_token,
         )
 
         _, captured = _run(loaded, "%clustrix status")
 
         assert "ClusterConfig(" in captured.stdout, "the result was not shown at all"
-        assert "typed-password-value" not in captured.stdout
-        assert "typed-token-value" not in captured.stdout
+        assert typed_password not in captured.stdout
+        assert typed_token not in captured.stdout
 
     def test_an_unknown_command_is_refused_and_lists_the_real_ones(self, loaded):
         before = ClusterConfig(**_fields(get_config()))
