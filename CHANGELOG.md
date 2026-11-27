@@ -70,15 +70,26 @@ was not is marked.
   uses every CPU available to the process), or into one job per piece, at
   most `max_parallel_jobs`, on `ssh` and `slurm`. Writes to collected values
   are replayed in iteration order, so the result is the sequential one.
-  Limits: only a top-level loop of the decorated function; no split when a
-  value is carried between iterations, on `break`, on `return` in the loop,
-  when a value assigned in the loop is used after it, on a write to a global,
-  or on the unseeded global random generator. Run-time checks catch a
-  modified shared value and moved global random state and fall back to the
-  sequential loop. No check sees module caches, files, databases or GPU
-  random state. There are no SLURM job arrays, and no GPU path was verified
-  on real hardware. One job per piece on HuggingFace Jobs follows from the
-  same code path and was **not run**.
+  Objects that existed before the loop are collected as themselves, not as
+  copies. Limits: only a top-level loop of the decorated function. No split
+  when a value is carried between iterations, on `break`, on `return` in the
+  loop, when a value assigned in the loop is used or deleted after it, when
+  the loop changes anything the function did not create, on any direct use of
+  the global random generators (seeding included), or when a function defined
+  before the loop reads a variable assigned later. Not analysed at all: a
+  function with a `global` or `nonlocal` statement, one wrapped by another
+  decorator, a method using `super()` or a class-private name, a function
+  whose file changed after import. Run-time checks catch a value the loop
+  reads that can reach what it collects into, a modified shared value, moved
+  global random state, a collected value that cannot be copied, and a
+  function created in the loop that outlives its iteration; each falls back
+  to the sequential loop. No check sees module caches, files, databases, GPU
+  random state, process-wide settings such as the `decimal` context, or an
+  object whose pickle omits its state. The checks cost time proportional to
+  the data the loop reads (about 2 s per million small objects). There are
+  no SLURM job arrays, and no GPU path was verified on real hardware. One job
+  per piece on HuggingFace Jobs follows from the same code path and was
+  **not run**.
 - **`clustrix.explain(function)`** returns the decision and, for a loop that
   is not divided, the line and the reason.
 - **Local timing.** A function's first local call divides its loop and
@@ -170,10 +181,10 @@ was not is marked.
   block of yours with the same alias is left unchanged.
 - **Passwords in the credential file round-trip exactly**; a value containing
   spaces or `#` used to be truncated.
-- **Note for notebook users:** with JupyterLab's "Save Widget State
-  Automatically" on, text typed into the widget's Password or Token field is
-  stored in the `.ipynb` file. Turn the setting off or do not type secrets
-  into the widget.
+- **A password or token typed into the notebook widget is not left in the
+  form.** With "Save Widget State Automatically" on, Jupyter writes every
+  field's content into the `.ipynb` file. The widget now moves a typed secret
+  into memory and empties the field as soon as it is entered.
 
 ## [0.2.0] — unreleased
 
