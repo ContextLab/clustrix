@@ -1,0 +1,85 @@
+clustrix 0.2.0, Python 3.13.18, 4 CPUs available here
+
+== CPU-bound recurrence: hash_chain
+     line 43: `for seed in seeds` -- SPLIT
+         collected in order: finals, pids
+         read-only (checked at run time): length, os
+         private to each iteration: seed, step, value
+     code before the loop runs in the caller
+     code after the loop runs in the caller
+   direct call              3.96s
+   local  first call equal       1.57s  in 4 process(es)
+   local  again      equal       1.02s  in 4 process(es)
+   ssh    first call equal       5.85s  in 4 process(es)
+   ssh    again      equal       5.90s  in 4 process(es)
+   slurm  first call equal       9.25s  in 4 process(es)
+   slurm  again      equal       9.48s  in 4 process(es)
+
+== Monte Carlo, seeded per replicate: monte_carlo_pi
+     line 57: `for replicate in range(replicates)` -- SPLIT
+         collected in order: estimates, pids
+         read-only (checked at run time): os, samples
+         private to each iteration: points, replicate, rng
+     code before the loop runs in the caller
+     code after the loop runs in the caller
+   direct call              3.05s
+   local  first call equal       1.32s  in 4 process(es)
+   local  again      equal       0.65s  in 4 process(es)
+   ssh    first call equal       6.10s  in 4 process(es)
+   ssh    again      equal       6.00s  in 4 process(es)
+   slurm  first call equal       9.18s  in 4 process(es)
+   slurm  again      equal       8.28s  in 4 process(es)
+
+== scikit-learn sweep over C: model_sweep
+     line 78: `for strength in strengths` -- SPLIT
+         collected in order: pids, scores
+         read-only (checked at run time): LogisticRegression, cross_val_score, features, labels, os
+         private to each iteration: model, strength
+     code before the loop runs as its own job
+     code after the loop runs in the caller
+   direct call              9.37s
+   local  first call equal       1.64s  in 4 process(es)
+   local  again      equal       0.54s  in 4 process(es)
+   ssh    first call equal      20.46s  in 4 process(es)
+   ssh    again      equal      20.25s  in 4 process(es)
+   slurm  first call equal      22.87s  in 4 process(es)
+   slurm  again      equal      23.36s  in 4 process(es)
+
+== per-subject files (staged): per_subject_statistics
+     line 91: `for name in sorted(os.listdir(folder))` -- SPLIT
+         collected in order: pids, statistics
+         read-only (checked at run time): folder, os
+         private to each iteration: name, table
+     code before the loop runs as its own job
+     code after the loop runs in the caller
+   direct call              0.01s
+   local  first call equal       0.02s  in 4 process(es)
+   local  again      equal       0.01s  in 1 process(es)
+   ssh    first call equal       8.16s  in 4 process(es)
+   ssh    again      equal       8.51s  in 4 process(es)
+   slurm  first call equal      11.91s  in 4 process(es)
+   slurm  again      equal      11.69s  in 4 process(es)
+
+== running balance (must not split): running_balance
+     line 101: `for deposit in deposits` -- not split
+         line 102: balance is read before the iteration assigns it, so it carries a value from the previous iteration
+   direct call              0.00s
+   local  first call equal       0.00s  in 1 process(es)
+   local  again      equal       0.00s  in 1 process(es)
+   ssh    first call equal       2.90s  in 1 process(es)
+   ssh    again      equal       3.04s  in 1 process(es)
+   slurm  first call equal       3.04s  in 1 process(es)
+   slurm  again      equal       7.04s  in 1 process(es)
+
+== set mutated in the loop (must fall back): deduplicate
+     line 110: `for record in records` -- not split
+         line 112: seen is modified in the loop and also read in it, so an iteration can see what an earlier one did
+   direct call              0.00s
+   local  first call equal       0.00s  in 1 process(es)
+   local  again      equal       0.00s  in 1 process(es)
+   ssh    first call equal       2.64s  in 1 process(es)
+   ssh    again      equal       3.06s  in 1 process(es)
+   slurm  first call equal       3.03s  in 1 process(es)
+   slurm  again      equal       6.71s  in 1 process(es)
+
+ALL EQUAL
