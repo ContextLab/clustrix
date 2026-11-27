@@ -92,3 +92,29 @@ a[href*="colab"]:hover {
 .viewcode-link:hover {
     color: #333;
 }
+/* Notebook output cells. The theme colours every <pre> white for its dark
+   code blocks, and an nbsphinx output area has no dark background, so the
+   output of every executed cell was white text on a white page. */
+div.nboutput div.output_area pre {
+    color: #1f2328;
+    background-color: #f6f8fa;
+    border: 1px solid #e1e4e5;
+    border-radius: 4px;
+    padding: 8px 3.2em 8px 12px;  /* room for the copy button */
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+div.nboutput div.output_area.stderr pre {
+    background-color: #fff5f0;
+    border-color: #f1d3c4;
+}
+
+/* Widget screenshots are captured at twice the device resolution. */
+div.nbinput + div.nboutput img,
+.rst-content img[src*="_static/widget/"],
+img[src*="_static/widget/"] {
+    max-width: 100%;
+    height: auto;
+}
