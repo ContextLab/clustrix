@@ -101,10 +101,16 @@ What happens to a file that was found
        with ``sha256sum`` (or ``shasum``); a directory must hold the same
        files, each with the same size and SHA-256. Files left out here
        (credentials, ``no_data``, symbolic links) may be there too.
-       Above 256 MB in all nothing is hashed on either side, so that a large
-       dataset on a shared filesystem is not read twice before the first
-       call: names and sizes are compared, and the logged reason says the
-       contents were not.
+       Above 256 MB in all the input is not read whole on either side, so
+       that a large dataset on a shared filesystem is not read twice before
+       the first call. Its names and sizes must match, and then up to 64
+       blocks of 1 MB are hashed on both sides: the first and last block of
+       each file, and the rest at offsets drawn at random for that
+       comparison (of a random selection of the files, when there are more
+       than 32). That finds a different version of a file. It does not find
+       a small change inside a file that is otherwise the same, and the
+       logged reason says how much was read. If that matters, name the
+       choice: ``no_data=[path]`` for the cluster's copy.
    * - The same absolute path exists on the cluster and holds something else
      - ``StagingError``, naming what differs. Clustrix does not guess which
        copy is right. ``no_data=[path]`` uses the cluster's copy as it is.

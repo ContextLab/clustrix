@@ -981,24 +981,106 @@ class TestTheSameDataNotJustTheSamePath:
         )
         assert not (remote / "work" / auto_stage.STORE_DIRECTORY).exists()
 
-    def test_data_too_big_to_read_is_compared_by_names_and_sizes_and_says_so(
-        self, project, connected, monkeypatch
-    ):
-        """A dataset on a shared filesystem is not hashed on both sides, one
-        of them a login node, before the first call. The limit is lowered
-        here instead of writing 256 MB. A listing whose names or sizes
-        differ still stops the call, whatever the size."""
-        connection, config, remote = connected
+    @pytest.fixture
+    def small_blocks(self, monkeypatch):
+        """The limits lowered, instead of writing 256 MB: anything over 4
+        bytes is "too big to read whole", and a block is 16 bytes."""
         monkeypatch.setattr(auto_stage, "_HASH_LIMIT_BYTES", 4)
+        monkeypatch.setattr(auto_stage, "_SAMPLE_BLOCK_BYTES", 16)
+
+    def test_data_too_big_to_read_whole_is_compared_by_sampled_blocks(
+        self, project, connected, small_blocks
+    ):
+        connection, config, remote = connected
+        big = project / "data" / "big.bin"
+        big.write_bytes(os.urandom(16 * 40 + 5))
 
         _, _, plan = auto_stage.prepare(
             connection, config, takes_folder, (str(project / "data"),), {}
         )
 
-        assert plan.inputs[0].how == "in place"
-        assert "same names and sizes" in plan.inputs[0].why
-        assert "the contents were not compared" in plan.inputs[0].why
-        assert auto_stage._LOCAL_SHA256 == {}, "nothing was read to compare it"
+        (staged,) = plan.inputs
+        assert staged.how == "in place"
+        assert "same names and sizes, and the same sha256 of" in staged.why
+        assert "sampled block(s) of 4 of 4 file(s)" in staged.why
+        assert "the rest was not compared" in staged.why
+        assert auto_stage._LOCAL_SHA256 == {}, "no file was read whole"
+
+    def test_the_cluster_hashes_the_same_blocks_this_side_does(
+        self, tmp_path, connected, small_blocks
+    ):
+        """Real ``dd`` and a real SHA-256 command on the far side, for
+        whole blocks, a short last block, a block read twice over the
+        choices, and a file with nothing in it."""
+        connection, _, _ = connected
+        data = tmp_path / "data.bin"
+        data.write_bytes(os.urandom(16 * 10 + 7))
+        empty = tmp_path / "empty.bin"
+        empty.write_bytes(b"")
+        choices = [[0, 10], [0, 3, 4, 9, 10], [5], [10]]
+
+        there = auto_stage._remote_sample_digests(
+            connection,
+            [(str(data), blocks) for blocks in choices] + [(str(empty), [0])],
+        )
+
+        here = [auto_stage._local_sample_digest(data, blocks) for blocks in choices]
+        assert there == here + [auto_stage._local_sample_digest(empty, [0])]
+        assert len(set(here)) == len(here), "different blocks, different digests"
+
+    def test_one_changed_byte_in_a_sampled_block_is_a_different_digest(
+        self, tmp_path, connected, small_blocks
+    ):
+        """What a stale copy of the same size looks like. One machine cannot
+        hold two files at one path, so the copy has another name."""
+        connection, _, _ = connected
+        content = bytearray(os.urandom(16 * 10))
+        ours = tmp_path / "ours.bin"
+        ours.write_bytes(content)
+        content[16 * 6 + 3] ^= 1
+        theirs = tmp_path / "theirs.bin"
+        theirs.write_bytes(content)
+
+        hit, missed, unreadable = auto_stage._remote_sample_digests(
+            connection,
+            [
+                (str(theirs), [0, 6, 9]),
+                (str(theirs), [0, 5, 9]),
+                (str(tmp_path / "absent.bin"), [0]),
+            ],
+        )
+
+        assert hit != auto_stage._local_sample_digest(ours, [0, 6, 9])
+        # The limit of sampling, on purpose: a block not drawn is not seen.
+        assert missed == auto_stage._local_sample_digest(ours, [0, 5, 9])
+        assert unreadable is None
+
+    def test_the_blocks_chosen_cover_both_ends_and_stay_within_the_budget(
+        self, tmp_path, small_blocks
+    ):
+        import random
+
+        files = []
+        for number in range(100):
+            file = tmp_path / f"{number:03}.bin"
+            file.write_bytes(b"x" * (16 * (number % 7) + number % 3))
+            files.append((file.name, file))
+        large = tmp_path / "large.bin"
+        large.write_bytes(b"y" * (16 * 1000))
+
+        many = auto_stage._choose_samples(files, random.Random(1))
+        one = auto_stage._choose_samples([("", large)], random.Random(1))
+        again = auto_stage._choose_samples([("", large)], random.Random(2))
+
+        assert len(many) == auto_stage._SAMPLE_BLOCKS // 2
+        assert sum(len(blocks) for _, _, blocks in many) <= auto_stage._SAMPLE_BLOCKS
+        for _, file, blocks in many:
+            last = max(1, -(-file.stat().st_size // 16)) - 1
+            assert blocks[0] == 0 and blocks[-1] == last
+        (_, _, blocks), (_, _, other) = one[0], again[0]
+        assert blocks[0] == 0 and blocks[-1] == 999
+        assert 32 < len(blocks) <= auto_stage._SAMPLE_BLOCKS
+        assert blocks != other, "drawn afresh each time"
 
     def test_a_file_of_the_same_size_and_different_content_stops_the_call(
         self, project, connected
@@ -1129,7 +1211,7 @@ class TestTheSameDataNotJustTheSamePath:
             )
 
         assert "same size and sha256" in why()
-        assert "compared earlier in this session" in why()
+        assert "found to be the same earlier in this session" in why()
         table.write_text("a,b\n1,2\n3,4\n")
         assert "same size and sha256" in why()
 

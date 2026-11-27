@@ -160,8 +160,11 @@ was not is marked.
   An input already on the cluster at the same path is used in place only
   when it is shown to be the same data: same size and SHA-256 for a file,
   the same files with the same sizes and SHA-256 for a directory, computed
-  on the cluster. Different data stops the call with what differs; a
-  cluster that cannot hash gets an upload. Otherwise the input is uploaded
+  on the cluster. Above 256 MB an input is not read whole: names and sizes
+  must match, and up to 64 blocks of 1 MB (both ends of each file, the rest
+  at random offsets) are hashed on both sides, which finds a different
+  version of a file but not a small change inside one. Different data stops
+  the call with what differs; a cluster that cannot hash gets an upload. Otherwise the input is uploaded
   once over SSH and linked at the path the code uses. Limits: a path found
   in code must be inside the project, and the code must be the project's
   own (nothing under `site-packages`/`dist-packages`); the home directory,

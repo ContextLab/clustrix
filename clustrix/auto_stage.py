@@ -118,8 +118,10 @@ other object are not searched and not rewritten: pass the path itself.
 """
 
 import copy
+import hashlib
 import logging
 import os
+import random
 import re
 import shlex
 import subprocess
@@ -181,6 +183,13 @@ _MAX_FUNCTIONS = 60
 #: Files up to this size are identified by content; larger ones by name,
 #: size and modification time, so a 50 GB file is not read just to name it.
 _HASH_LIMIT_BYTES = 256 * 1024 * 1024
+
+#: An input too big to hash whole is compared with the cluster's copy by
+#: blocks of this size ...
+_SAMPLE_BLOCK_BYTES = 1024 * 1024
+
+#: ... and at most this many of them, however big the input is.
+_SAMPLE_BLOCKS = 64
 
 #: Directory under ``remote_work_dir`` that holds uploaded inputs.
 STORE_DIRECTORY = "data"
@@ -850,6 +859,82 @@ def _remote_hashes(
     return hashes
 
 
+#: One file's part in a sampled comparison: its name within the input
+#: ("" for an input that is a file), where it is, and which blocks to read.
+_Sample = Tuple[str, Path, List[int]]
+
+
+def _choose_samples(files: List[Tuple[str, Path]], rng: random.Random) -> List[_Sample]:
+    """Which blocks of which files stand for an input too big to read.
+
+    The first and last block of a file are always among them: that is where
+    formats keep headers, indexes and checksums, so a regenerated file of
+    the same size differs there if it differs anywhere predictable. The rest
+    are drawn at random, in proportion to size, by the caller -- afresh for
+    each comparison, so a copy that agrees at one set of offsets does not
+    pass for ever. With more files than the budget covers, a random
+    selection of the files is sampled.
+    """
+    at_most = max(1, _SAMPLE_BLOCKS // 2)
+    chosen = files if len(files) <= at_most else rng.sample(files, at_most)
+    blocks: Dict[str, Set[int]] = {}
+    counts: Dict[str, int] = {}
+    for relative, file in chosen:
+        size = file.stat().st_size
+        counts[relative] = max(1, -(-size // _SAMPLE_BLOCK_BYTES))
+        blocks[relative] = {0, counts[relative] - 1}
+    spare = _SAMPLE_BLOCKS - sum(len(found) for found in blocks.values())
+    names = [relative for relative, _ in chosen]
+    for relative in rng.choices(
+        names, weights=[counts[name] for name in names], k=max(0, spare)
+    ):
+        blocks[relative].add(rng.randrange(counts[relative]))
+    return [(relative, file, sorted(blocks[relative])) for relative, file in chosen]
+
+
+def _local_sample_digest(file: Path, blocks: Sequence[int]) -> str:
+    digest = hashlib.new(_COMPARED_BY)
+    with open(file, "rb") as handle:
+        for block in blocks:
+            handle.seek(block * _SAMPLE_BLOCK_BYTES)
+            digest.update(handle.read(_SAMPLE_BLOCK_BYTES))
+    return digest.hexdigest()
+
+
+def _remote_sample_digests(
+    connection, samples: Sequence[Tuple[str, Sequence[int]]]
+) -> List[Optional[str]]:
+    """SHA-256 of the named blocks of each remote ``(path, blocks)``.
+
+    ``dd`` reads each block and the cluster's own SHA-256 command hashes
+    them in order, so nothing but a shell is needed there. ``None`` for a
+    file whose answer could not be had. One round trip.
+    """
+    if not samples:
+        return []
+    commands = [_FIND_REMOTE_HASHER]
+    for index, (path, blocks) in enumerate(samples):
+        reads = "; ".join(
+            f"dd if={shlex.quote(path)} bs={_SAMPLE_BLOCK_BYTES} "
+            f"skip={block} count=1 2>/dev/null"
+            for block in blocks
+        )
+        commands.append(
+            f"echo {_ANSWER_MARK} {index} BEGIN; "
+            f'if [ -n "$H" ] && [ -r {shlex.quote(path)} ]; '
+            f"then ({reads}) | $H; else false; fi; "
+            f"echo {_ANSWER_MARK} {index} END $?"
+        )
+    output, _ = connection.execute_remote_command("; ".join(commands))
+    answers = _answers(output)
+    digests: List[Optional[str]] = []
+    for index in range(len(samples)):
+        lines, status = answers.get(index, ([], "missing"))
+        match = re.match(r"([0-9a-f]{64})\b", lines[0]) if len(lines) == 1 else None
+        digests.append(match.group(1) if match and status == "0" else None)
+    return digests
+
+
 def _local_sha256(file: Path) -> str:
     stat = file.stat()
     key = (str(file), stat.st_size, stat.st_mtime_ns)
@@ -884,12 +969,15 @@ def _compare_in_place(
       there too -- each with the same size and the same SHA-256.
 
     Sizes are compared before anything is hashed, so a different dataset is
-    usually found without reading it. Above ``_HASH_LIMIT_BYTES`` in all
-    nothing is hashed, here or there -- the same limit, for the same reason,
-    as naming an upload: a 500 GB dataset on a shared filesystem is not read
-    twice, once of them on a login node, before every first call. Such an
-    input is the same when its names and sizes are, and the plan says that
-    is all that was compared. Three round trips at most, however
+    usually found without reading it. Above ``_HASH_LIMIT_BYTES`` in all an
+    input is not read whole, here or there -- a 500 GB dataset on a shared
+    filesystem would be read twice, once of them on a login node, before
+    every first call. Its names and sizes must match, and then the same
+    randomly chosen blocks are hashed on both sides
+    (:func:`_choose_samples`). That finds a different version of a file; it
+    does not find a small change inside a file that is otherwise the same,
+    and the reason given says how much was read. Four round trips at most,
+    however
     many candidates there are, and none for an input already compared in
     this process.
     """
@@ -904,23 +992,19 @@ def _compare_in_place(
         keys[candidate.path] = (where, str(candidate.path), tuple(described))
         if keys[candidate.path] in _SAME_IN_PLACE:
             verdicts[candidate.path] = _Comparison(
-                True, f"same {_COMPARED_BY}, compared earlier in this session"
+                True, "found to be the same earlier in this session"
             )
     pending = [entry for entry in candidates if entry[0].path not in verdicts]
 
     directories = [str(c.path) for c, _, _ in pending if c.path.is_dir()]
     listings = _remote_listing(connection, directories)
     to_hash: List[Tuple[Candidate, List[Tuple[str, Path]]]] = []
+    to_sample: List[Tuple[Candidate, List[Tuple[str, Path]], int]] = []
     for candidate, files, size in pending:
         too_big = size > _HASH_LIMIT_BYTES
-        unread = _Comparison(
-            True,
-            f"same names and sizes; {_format_bytes(size)} is too much to "
-            "read, so the contents were not compared",
-        )
         if not candidate.path.is_dir():
             if too_big:
-                verdicts[candidate.path] = unread
+                to_sample.append((candidate, files, size))
             else:
                 to_hash.append((candidate, files))
             continue
@@ -939,9 +1023,46 @@ def _compare_in_place(
         if differences:
             verdicts[candidate.path] = _Comparison(False, _some(differences))
         elif too_big:
-            verdicts[candidate.path] = unread
+            to_sample.append((candidate, files, size))
         else:
             to_hash.append((candidate, files))
+
+    rng = random.SystemRandom()
+    sampled = [(entry, _choose_samples(entry[1], rng)) for entry in to_sample]
+    answers = iter(
+        _remote_sample_digests(
+            connection,
+            [
+                (str(candidate.path / relative), blocks)
+                for (candidate, _, _), samples in sampled
+                for relative, _, blocks in samples
+            ],
+        )
+    )
+    for (candidate, files, size), samples in sampled:
+        remote_digests = [next(answers) for _ in samples]
+        if None in remote_digests:
+            verdicts[candidate.path] = _Comparison(
+                None, f"the cluster could not compute a {_COMPARED_BY} of its copy"
+            )
+            continue
+        differences = [
+            f"{relative or candidate.path.name} has different content"
+            for (relative, file, blocks), remote_digest in zip(samples, remote_digests)
+            if _local_sample_digest(file, blocks) != remote_digest
+        ]
+        if differences:
+            verdicts[candidate.path] = _Comparison(False, _some(differences))
+            continue
+        read = sum(len(blocks) for _, _, blocks in samples)
+        _SAME_IN_PLACE.add(keys[candidate.path])
+        verdicts[candidate.path] = _Comparison(
+            True,
+            f"same names and sizes, and the same {_COMPARED_BY} of {read} "
+            f"sampled block(s) of {len(samples)} of {len(files)} file(s); "
+            f"{_format_bytes(size)} is too much to read whole, so the rest "
+            "was not compared",
+        )
 
     hashes = _remote_hashes(
         connection, [(str(c.path), c.path.is_dir()) for c, _ in to_hash]
