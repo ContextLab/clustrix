@@ -17,6 +17,10 @@ from clustrix.ssh_security import configure_host_key_policy
 
 logger = logging.getLogger(__name__)
 
+#: How long to wait for the TCP connection, the SSH banner and authentication,
+#: each. Generous for a busy login node; short enough to be an answer.
+CONNECT_TIMEOUT_SECONDS = 30
+
 
 class ConnectionManager:
     """Manages SSH connections for cluster execution."""
@@ -179,7 +183,25 @@ class ConnectionManager:
                 connect_kwargs["key_filename"] = release.key_path
                 logger.info("Using SSH key from %s", release.method)
 
-        self.ssh_client.connect(**connect_kwargs)
+        # Bounded. With no timeout a host that silently drops packets -- a
+        # firewalled login node, a VPN that is not up -- held the caller for
+        # the kernel's own TCP timeout, two minutes or more, with nothing to
+        # say what it was waiting for.
+        connect_kwargs["timeout"] = CONNECT_TIMEOUT_SECONDS
+        connect_kwargs["banner_timeout"] = CONNECT_TIMEOUT_SECONDS
+        connect_kwargs["auth_timeout"] = CONNECT_TIMEOUT_SECONDS
+
+        try:
+            self.ssh_client.connect(**connect_kwargs)
+        except TimeoutError as exc:
+            # The bare exception says "timed out" and nothing else.
+            raise TimeoutError(
+                f"No answer from {self.config.cluster_host} port "
+                f"{self.config.cluster_port} within {CONNECT_TIMEOUT_SECONDS}s. "
+                "The host is unreachable from here (wrong address, a firewall, "
+                "or a VPN that is not connected) or too busy to accept the "
+                "connection."
+            ) from exc
 
     def execute_remote_command(self, command: str, check: bool = False) -> tuple:
         """Execute command on remote cluster.

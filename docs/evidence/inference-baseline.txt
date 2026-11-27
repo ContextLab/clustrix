@@ -1,0 +1,73 @@
+# What automatic loop parallelisation and data-file inference do today (measured, not built)
+#
+# Captured 2026-11-27T06:15:37Z. Each block is the output of a throwaway script that calls
+# the shipped analysers and the shipped @cluster path; the ssh rows ran against the real
+# sshd described in local-sshd-slurm-evidence.txt. This is a baseline for the work that
+# builds these features, not a claim that they work.
+
+## 1. clustrix.loop_analysis verdicts, and what @cluster(cores=4, parallel=True) then did locally
+##    columns: (loop type, variable, iterable, is_parallelizable, resolved range, outer names written)
+pure_range         loops=[('for', 'i', 'range(n)', False, {'start': 0, 'stop': 8, 'step': 1}, ['out'])]
+                   parallelizable=[] expected=[0, 1, 4, 9, 16, 25, 36, 49] got=[0, 1, 4, 9, 16, 25, 36, 49]
+pure_range_kw      loops=[('for', 'i', '_parallel_i if _parallel_i is not None else range(n)', False, None, ['os', 'out'])]
+                   parallelizable=[] expected=[(0, 9130), (1, 9130), (4, 9130), (9, 9130), (16, 9130), (25 got=[(0, 9130), (1, 9130), (4, 9130), (9, 9130), (16, 9130), (25, 9130), (36, 9130), (49, 9130
+assign_only        loops=[('for', 'i', 'range(n)', False, {'start': 0, 'stop': 8, 'step': 1}, ['out'])]
+                   parallelizable=[] expected=[0, 1, 4, 9, 16, 25, 36, 49] got=[0, 1, 4, 9, 16, 25, 36, 49]
+no_write           loops=[('for', 'i', 'range(n)', True, {'start': 0, 'stop': 8, 'step': 1}, [])]
+                   parallelizable=['i'] expected=49 got=49
+over_list          loops=[('for', 'x', 'items', False, None, ['out'])]
+                   parallelizable=[] expected=[2, 4, 6] got=[2, 4, 6]
+enum_zip           loops=[]
+                   parallelizable=[] expected=[3] got=[3]
+comprehension      loops=[]
+                   parallelizable=[] expected=[0, 1, 4, 9, 16, 25, 36, 49] got=[0, 1, 4, 9, 16, 25, 36, 49]
+nested             loops=[('for', 'i', 'range(n)', False, {'start': 0, 'stop': 4, 'step': 1}, ['j', 'out']), ('for', 'j', 'range(m)', False, {'start': 0, 'stop': 2, 'step': 1}, ['i', 'out'])]
+                   parallelizable=[] expected=[(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, got=[(0, 0), (0, 1), (1, 0), (1, 1), (2, 0), (2, 1), (3, 0), (3, 1)]
+running_sum        loops=[('for', 'i', 'range(n)', False, {'start': 0, 'stop': 8, 'step': 1}, ['total'])]
+                   parallelizable=[] expected=28 got=28
+running_sum_kw     loops=[('for', 'i', '_parallel_i if _parallel_i is not None else range(n)', False, None, ['total'])]
+                   parallelizable=[] expected=28 got=28
+while_loop         loops=[('while', None, 'i < n', False, None, ['i'])]
+                   parallelizable=[] expected=8 got=8
+literal_no_write   loops=[('for', 'i', 'range(8)', True, {'start': 0, 'stop': 8, 'step': 1}, [])]
+                   parallelizable=['i'] expected=1 got=1
+
+## 2. The same shapes submitted over ssh: how many remote jobs each call became
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops={'variable': 'i', 'iterable': 'range(8)', 'range': 'range(0, 8)'}
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops={'variable': 'i', 'iterable': '_parallel_i if _parallel_i is ', 'range': 'range(0, 8)'}
+                         run[ssh]: correct=False distinct_pids=8 GOT=[[(0, 9619)], [(1, 9702)], [(4, 9782)], [(9, 9898)], [(16, 10001)], [(25, 10121)], [(36, 10257)], [(49, 10389)]] remote_jobs=8
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+                         detect_loops=None
+                         run[ssh]: correct=True distinct_pids=1 remote_jobs=1
+
+## 3. A loop-carried dependency, hand-instrumented with the chunk keywords, over ssh
+sequential answer 28; clustrix returned: [0, 1, 2, 3, 4, 5, 6, 7]
+
+## 4. clustrix.dependency_analysis.analyze_function_dependencies on file-access shapes
+open_literal -> {'data_files': ['data/input.csv', '<unknown>'], 'file_references': [{'path': 'data/input.csv', 'operation': 'open', 'lineno': 2, 'is_relative': True}, {'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}, {'path': 'data/input.csv', 'operation': 'reference', 'lineno': 2, 'is_relative': True}], }
+open_write -> {'data_files': ['<unknown>', 'out/result.txt'], 'file_references': [{'path': 'out/result.txt', 'operation': 'open', 'lineno': 2, 'is_relative': True}, {'path': '<unknown>', 'operation': 'write', 'lineno': 2, 'is_relative': True}, {'path': 'out/result.txt', 'operation': 'reference', 'lineno': 2, 'is_relative': True}], }
+pandas_arg -> {'imports': [{'module': 'pandas', 'names': ['pandas'], 'alias': 'pd', 'is_from_import': False, 'lineno': 2}], }
+pandas_literal -> {'data_files': ['data/table.csv'], 'file_references': [{'path': 'data/table.csv', 'operation': 'reference', 'lineno': 3, 'is_relative': True}], 'imports': [{'module': 'pandas', 'names': ['pandas'], 'alias': 'pd', 'is_from_import': False, 'lineno': 2}], }
+numpy_load -> {'data_files': ['arrays/x.npy'], 'file_references': [{'path': 'arrays/x.npy', 'operation': 'reference', 'lineno': 3, 'is_relative': True}], 'imports': [{'module': 'numpy', 'names': ['numpy'], 'alias': 'np', 'is_from_import': False, 'lineno': 2}], }
+join_path -> {'data_files': ['<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}], }
+join_literals -> {'data_files': ['<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}], }
+fstring -> {'data_files': ['<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}], }
+pathlib_div -> {}
+pathlib_open -> {'data_files': ['data/notes.txt', '<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}, {'path': 'data/notes.txt', 'operation': 'reference', 'lineno': 2, 'is_relative': True}], }
+arg_path -> {'data_files': ['<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}], }
+global_const -> {'data_files': ['<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}], }
+glob_pattern -> {'data_files': ['data/*.csv', '<unknown>'], 'file_references': [{'path': '<unknown>', 'operation': 'read', 'lineno': 2, 'is_relative': True}, {'path': 'data/*.csv', 'operation': 'reference', 'lineno': 2, 'is_relative': True}], }
+not_a_file -> {'data_files': ['s3://bucket/notes.log'], 'file_references': [{'path': 's3://bucket/notes.log', 'operation': 'reference', 'lineno': 2, 'is_relative': True}], }
+helper_opens -> {'local_function_calls': [{'function_name': 'open_literal', 'lineno': 2, 'defined_in_scope': True, 'source_file': '/tmp/claude-0/-home-user-clustrix/ee8a497e-b8d6-5298-9bc4-84fc5cd454b8/scratchpad/core/c4.py'}], }

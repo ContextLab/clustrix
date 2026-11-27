@@ -1,0 +1,118 @@
+# End-to-end evidence: clustrix against a real sshd and a real single-node SLURM
+#
+# Regenerate: sudo scripts/setup_local_slurm.sh, export the four CLUSTRIX_TEST_SSH_*
+# variables it prints, then run the pytest command below. Nothing in this file is
+# simulated: the sshd is OpenSSH, the scheduler is slurmctld/slurmd with slurmdbd
+# accounting, and every test drives the shipped @cluster path.
+#
+# Captured 2026-11-27T06:00:15Z at commit c7f88c3 plus the working tree.
+
+$ ssh clx@127.0.0.1 -p 2222 "ssh -V; sinfo --version; sinfo; python3 --version; sacctmgr -n show cluster format=cluster"
+OpenSSH_9.6p1 Ubuntu-3ubuntu13.20, OpenSSL 3.0.13 30 Jan 2024
+slurm-wlm 23.11.4
+PARTITION AVAIL  TIMELIMIT  NODES  STATE NODELIST
+debug*       up   infinite      1   idle vm
+Python 3.13.18
+clustrixl+ 
+
+$ python --version   # the submitting interpreter
+Python 3.13.18
+
+$ pytest tests/real_world/test_local_sshd_slurm.py -m real_world -v -p no:cacheprovider
+tests/real_world/test_local_sshd_slurm.py::test_a_function_runs_remotely_and_returns_its_value[ssh] PASSED [  2%]
+tests/real_world/test_local_sshd_slurm.py::test_a_function_runs_remotely_and_returns_its_value[slurm] PASSED [  4%]
+tests/real_world/test_local_sshd_slurm.py::test_helpers_closures_and_classes_from_this_file_travel[ssh] PASSED [  6%]
+tests/real_world/test_local_sshd_slurm.py::test_helpers_closures_and_classes_from_this_file_travel[slurm] PASSED [  9%]
+tests/real_world/test_local_sshd_slurm.py::test_third_party_arguments_and_results_cross_both_ways[ssh] PASSED [ 11%]
+tests/real_world/test_local_sshd_slurm.py::test_third_party_arguments_and_results_cross_both_ways[slurm] PASSED [ 13%]
+tests/real_world/test_local_sshd_slurm.py::test_declared_data_arrives_on_the_worker[ssh] PASSED [ 15%]
+tests/real_world/test_local_sshd_slurm.py::test_declared_data_arrives_on_the_worker[slurm] PASSED [ 18%]
+tests/real_world/test_local_sshd_slurm.py::test_only_what_the_job_imports_is_installed_when_mirroring_is_off[ssh] PASSED [ 20%]
+tests/real_world/test_local_sshd_slurm.py::test_only_what_the_job_imports_is_installed_when_mirroring_is_off[slurm] PASSED [ 22%]
+tests/real_world/test_local_sshd_slurm.py::test_the_second_job_reuses_the_environment_the_first_built[ssh] PASSED [ 25%]
+tests/real_world/test_local_sshd_slurm.py::test_the_second_job_reuses_the_environment_the_first_built[slurm] PASSED [ 27%]
+tests/real_world/test_local_sshd_slurm.py::test_environment_settings_reach_the_job[ssh] PASSED [ 29%]
+tests/real_world/test_local_sshd_slurm.py::test_environment_settings_reach_the_job[slurm] PASSED [ 31%]
+tests/real_world/test_local_sshd_slurm.py::test_the_job_directory_is_removed_on_success_unless_asked_not_to[ssh] PASSED [ 34%]
+tests/real_world/test_local_sshd_slurm.py::test_the_job_directory_is_removed_on_success_unless_asked_not_to[slurm] PASSED [ 36%]
+tests/real_world/test_local_sshd_slurm.py::test_an_exception_arrives_as_itself_with_the_remote_traceback[ssh] PASSED [ 38%]
+tests/real_world/test_local_sshd_slurm.py::test_an_exception_arrives_as_itself_with_the_remote_traceback[slurm] PASSED [ 40%]
+tests/real_world/test_local_sshd_slurm.py::test_a_function_that_exits_is_a_failure_that_says_so[ssh] PASSED [ 43%]
+tests/real_world/test_local_sshd_slurm.py::test_a_function_that_exits_is_a_failure_that_says_so[slurm] PASSED [ 45%]
+tests/real_world/test_local_sshd_slurm.py::test_a_killed_function_is_a_failure_not_a_hang[ssh] PASSED [ 47%]
+tests/real_world/test_local_sshd_slurm.py::test_a_killed_function_is_a_failure_not_a_hang[slurm] PASSED [ 50%]
+tests/real_world/test_local_sshd_slurm.py::test_an_unpicklable_result_is_reported_as_that[ssh] PASSED [ 52%]
+tests/real_world/test_local_sshd_slurm.py::test_an_unpicklable_result_is_reported_as_that[slurm] PASSED [ 54%]
+tests/real_world/test_local_sshd_slurm.py::test_output_on_stderr_is_not_a_failure[ssh] PASSED [ 56%]
+tests/real_world/test_local_sshd_slurm.py::test_output_on_stderr_is_not_a_failure[slurm] PASSED [ 59%]
+tests/real_world/test_local_sshd_slurm.py::test_five_jobs_at_once_do_not_collide[ssh] PASSED [ 61%]
+tests/real_world/test_local_sshd_slurm.py::test_five_jobs_at_once_do_not_collide[slurm] PASSED [ 63%]
+tests/real_world/test_local_sshd_slurm.py::test_async_submit_returns_a_handle_that_resolves[ssh] PASSED [ 65%]
+tests/real_world/test_local_sshd_slurm.py::test_async_submit_returns_a_handle_that_resolves[slurm] PASSED [ 68%]
+tests/real_world/test_local_sshd_slurm.py::test_cancel_stops_the_remote_process[ssh] PASSED [ 70%]
+tests/real_world/test_local_sshd_slurm.py::test_cancel_stops_the_remote_process[slurm] PASSED [ 72%]
+tests/real_world/test_local_sshd_slurm.py::test_configure_after_decorating_changes_where_the_next_call_runs[ssh] PASSED [ 75%]
+tests/real_world/test_local_sshd_slurm.py::test_configure_after_decorating_changes_where_the_next_call_runs[slurm] PASSED [ 77%]
+tests/real_world/test_local_sshd_slurm.py::test_running_past_the_time_limit_is_reported_as_a_timeout[ssh] SKIPPED [ 79%]
+tests/real_world/test_local_sshd_slurm.py::test_running_past_the_time_limit_is_reported_as_a_timeout[slurm] PASSED [ 81%]
+tests/real_world/test_local_sshd_slurm.py::test_a_request_the_scheduler_refuses_is_reported_with_its_reason[ssh] SKIPPED [ 84%]
+tests/real_world/test_local_sshd_slurm.py::test_a_request_the_scheduler_refuses_is_reported_with_its_reason[slurm] PASSED [ 86%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[ssh-wrong-port] PASSED [ 88%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[ssh-missing-key] PASSED [ 90%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[ssh-unknown-host-key] PASSED [ 93%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[slurm-wrong-port] PASSED [ 95%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[slurm-missing-key] PASSED [ 97%]
+tests/real_world/test_local_sshd_slurm.py::test_a_connection_that_cannot_be_made_fails_promptly[slurm-unknown-host-key] PASSED [100%]
+================== 42 passed, 2 skipped in 299.48s (0:04:59) ===================
+
+$ ssh clx@127.0.0.1 -p 2222 "sacct -X -n -o JobID,State,ExitCode,Elapsed | tail -30"   # what the scheduler recorded
+62            COMPLETED      0:0   00:00:01 
+63            COMPLETED      0:0   00:00:01 
+64            COMPLETED      0:0   00:00:00 
+65               FAILED      1:0   00:00:01 
+66           CANCELLED+      0:0   00:00:11 
+67            COMPLETED      0:0   00:00:01 
+68            COMPLETED      0:0   00:00:01 
+69            COMPLETED      0:0   00:00:01 
+70            COMPLETED      0:0   00:00:01 
+71            COMPLETED      0:0   00:00:01 
+72            COMPLETED      0:0   00:00:01 
+73            COMPLETED      0:0   00:00:01 
+74            COMPLETED      0:0   00:00:01 
+75            COMPLETED      0:0   00:00:01 
+76            COMPLETED      0:0   00:00:00 
+77               FAILED      1:0   00:00:01 
+78               FAILED      3:0   00:00:01 
+79               FAILED      9:0   00:00:01 
+80               FAILED      1:0   00:00:01 
+81            COMPLETED      0:0   00:00:05 
+82            COMPLETED      0:0   00:00:02 
+83            COMPLETED      0:0   00:00:01 
+84            COMPLETED      0:0   00:00:01 
+85            COMPLETED      0:0   00:00:01 
+86            COMPLETED      0:0   00:00:01 
+87            COMPLETED      0:0   00:00:01 
+88           CANCELLED+      0:0   00:00:02 
+89            COMPLETED      0:0   00:00:01 
+90            COMPLETED      0:0   00:00:01 
+91              TIMEOUT      0:0   00:01:13 
+
+$ ssh clx@127.0.0.1 -p 2222 "ls ~/clustrix-realworld-tests ~/clustrix-realworld-tests/envs"
+/home/clx/clustrix-realworld-tests:
+envs
+job_1795759312_6991e382
+job_1795759315_e7bea66b
+job_1795759318_8be0aaef
+job_1795759321_f8fff1c0
+job_1795759324_6c5a7cb5
+job_1795759327_391474bb
+job_1795759330_cb89bb6e
+job_1795759333_073cf4e3
+job_1795759412_d95d3db2
+job_1795759414_1ab4438a
+job_1795759433_13d4835e
+job_1795759511_5e872c4a
+
+/home/clx/clustrix-realworld-tests/envs:
+py313_665c6d5044fa
+py313_9a4ceb72342d

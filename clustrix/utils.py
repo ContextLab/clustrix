@@ -1273,8 +1273,9 @@ def _dumps_by_value(
             parts = name.split(".")
             for depth in range(1, len(parts) + 1):
                 link = ".".join(parts[:depth])
-                if link in sys.modules:
-                    lazy_local_modules[link] = sys.modules[link]
+                loaded = sys.modules.get(link)
+                if loaded is not None:
+                    lazy_local_modules[link] = loaded
     if imports is not None:
         imports |= _payload_import_names(payload)
     return payload
@@ -2995,10 +2996,15 @@ dependencies:
             if pkg.lower() in ("dill", "cloudpickle")
         ]
         wanted = " ".join(pinned) if pinned else "dill cloudpickle"
-        commands.append(
-            f"{pkg_manager} install {wanted} --timeout=120 "
-            f"|| {pkg_manager} install dill cloudpickle --timeout=120"
+        # Which installer runs is a fact about the remote host. "auto" used
+        # to be decided by whether uv was installed on the *submitting*
+        # machine, and uv was then handed pip's --timeout flag, which it
+        # rejects -- so "auto" failed on any laptop that had uv.
+        use_uv = config.package_manager == "uv" or (
+            config.package_manager == "auto" and _remote_has_uv(ssh_client, config)
         )
+        installer = "uv pip install" if use_uv else "pip install --timeout=120"
+        commands.append(f"{installer} {wanted} || {installer} dill cloudpickle")
 
     # Execute setup commands
     full_command = " && ".join(commands)
