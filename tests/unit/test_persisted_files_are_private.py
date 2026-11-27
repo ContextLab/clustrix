@@ -404,12 +404,13 @@ def _exercise_credential_writers(home):
 
 
 def _exercise_notebook_widget(home):
-    """Everything the notebook widget writes: Save all, and its own store.
+    """Everything the notebook widget writes: Export, and its own store.
 
-    Included because a widget save is a mutator, not an export: the store
-    under ``~/.clustrix/profiles`` is rewritten from ordinary editing rather
-    than from anyone asking to persist a secret, and one file holds every
-    profile, so a single wide file is N credentials at once.
+    Included because Apply is a mutator, not an export: it rewrites the store
+    under ``~/.clustrix/profiles`` from a form that has a password typed
+    into it, by someone who asked to *use* a configuration rather than to
+    persist a secret, and one file holds every profile, so a single wide
+    file is N credentials at once.
 
     Returns the one path that is *supposed* to hold sentinels: a bundle this
     exercise wrote by hand, as input.
@@ -432,14 +433,20 @@ def _exercise_notebook_widget(home):
         # sentinel reaches the store through the profile below instead.
         if "\n" not in value
     )
-    # Switching away captures that profile into the store. A HuggingFace
-    # token is a credential the SSH section never produces.
+    # Apply is what saves the form to its profile, and so to the store.
+    widget._on_apply_config(controls["apply_btn"])
+    # A HuggingFace token is a credential the SSH section never produces.
     controls["profile_dropdown"].value = "HuggingFace Jobs (CPU)"
     controls["hf_namespace"].value = "contextlab"
     controls["hf_token"].value = SENTINELS["hf_token"]
+    widget._on_apply_config(controls["apply_btn"])
+    # And one left typed but unapplied: a draft, which is memory only.
+    controls["profile_dropdown"].value = "SLURM cluster"
+    controls["password"].value = SENTINELS["password"]
+    controls["profile_dropdown"].value = "Local single-core"
 
     # A profile the user never looks at, holding every credential a
-    # ClusterConfig can -- awkward values included. Save all writes it from
+    # ClusterConfig can -- awkward values included. Export writes it from
     # the store rather than from the form.
     widget.profile_manager.save_profile("widget-held", _a_config())
 

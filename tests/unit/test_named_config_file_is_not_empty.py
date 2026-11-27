@@ -43,6 +43,9 @@ from tests.widget_console import pill, press  # noqa: E402
 
 WIDGET_LOGGER = "clustrix.modern_notebook_widget"
 
+#: A core count no built-in profile has, typed and left unapplied.
+DRAFT_CORES = 23
+
 running_as_root = pytest.mark.skipif(
     hasattr(os, "geteuid") and os.geteuid() == 0,
     reason="root can read a 0o000 file, so there is nothing to fail on",
@@ -63,7 +66,12 @@ def _load(path, capsys):
     widget = ModernClustrixWidget()
     widget.widgets["profile_dropdown"].value = "SLURM cluster"
     widget.widgets["host"].value = "kept.example.edu"
+    widget.widgets["username"].value = "researcher"
+    # Saved: Apply is what writes the form to the profile.
+    widget._on_apply_config(widget.widgets["apply_btn"])
+    # And an edit that is not saved, on another profile.
     widget.widgets["profile_dropdown"].value = "Local single-core"
+    widget.widgets["cpus"].value = DRAFT_CORES
     before = dict(widget.profile_manager.profiles)
     widget.widgets["config_filename"].value = str(path)
     told = press(
@@ -82,6 +90,9 @@ def _assert_nothing_was_lost(widget, before):
     assert before["SLURM cluster"].cluster_host == "kept.example.edu"
     assert list(widget.widgets["profile_dropdown"].options) == list(before)
     assert widget.widgets["profile_dropdown"].value == "Local single-core"
+    # Nor did it cost the edits that had not been applied yet.
+    assert widget.widgets["cpus"].value == DRAFT_CORES
+    assert widget.widgets["revert_btn"].disabled is False
 
 
 class TestANamedFileThatCannotBeLoadedSaysSo:
@@ -92,8 +103,8 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, before = _load(bad, capsys)
 
-        assert pill(widget) == "load failed"
-        assert "Could not load" in told
+        assert pill(widget) == "import failed"
+        assert "Could not import" in told
         _assert_nothing_was_lost(widget, before)
 
     def test_malformed_json_is_reported_and_costs_nothing(self, tmp_path, capsys):
@@ -101,8 +112,8 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, before = _load(bad, capsys)
 
-        assert pill(widget) == "load failed"
-        assert "Could not load" in told
+        assert pill(widget) == "import failed"
+        assert "Could not import" in told
         _assert_nothing_was_lost(widget, before)
 
     def test_a_missing_file_is_reported_rather_than_read_as_empty(
@@ -112,7 +123,7 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, before = _load(missing, capsys)
 
-        assert pill(widget) == "load failed"
+        assert pill(widget) == "import failed"
         assert str(missing) in told, "the message must name the file it looked for"
         _assert_nothing_was_lost(widget, before)
 
@@ -130,7 +141,7 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
         finally:
             os.chmod(locked, stat.S_IRUSR | stat.S_IWUSR)
 
-        assert pill(widget) == "load failed"
+        assert pill(widget) == "import failed"
         assert "Permission denied" in told
         _assert_nothing_was_lost(widget, before)
 
@@ -140,8 +151,8 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, before = _load(bad, capsys)
 
-        assert pill(widget) == "load failed"
-        assert "Could not load" in told
+        assert pill(widget) == "import failed"
+        assert "Could not import" in told
         _assert_nothing_was_lost(widget, before)
 
     @pytest.mark.parametrize(
@@ -158,8 +169,8 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, before = _load(empty, capsys)
 
-        assert pill(widget) == "load failed"
-        assert "Could not load" in told
+        assert pill(widget) == "import failed"
+        assert "Could not import" in told
         assert str(empty) in told, "the refusal must name the file"
         _assert_nothing_was_lost(widget, before)
 
@@ -172,10 +183,10 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, told, _ = _load(good, capsys)
 
-        assert pill(widget) == "loaded"
+        assert pill(widget) == "imported"
         assert widget.profile_manager.get_profile_names() == ["mine"]
         assert widget.widgets["profile_dropdown"].value == "mine"
-        assert "Loaded 1 profile(s)" in told and "mine" in told
+        assert "Imported 1 profile(s)" in told and "mine" in told
 
     def test_a_readable_json_bundle_still_loads(self, tmp_path, capsys):
         good = _write(
@@ -185,7 +196,7 @@ class TestANamedFileThatCannotBeLoadedSaysSo:
 
         widget, _, _ = _load(good, capsys)
 
-        assert pill(widget) == "loaded"
+        assert pill(widget) == "imported"
         assert widget.profile_manager.get_profile_names() == ["mine"]
 
 

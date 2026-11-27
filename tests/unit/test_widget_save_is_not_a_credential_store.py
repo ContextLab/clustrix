@@ -1,11 +1,11 @@
 """Nothing the widget writes may contain a secret, however it is spelled.
 
-Two files are written from the form. ``Save all`` writes a bundle wherever
-the user says; and, without any button being pressed, every edit is kept in
-the widget's own store under ``~/.clustrix/profiles`` so that profiles
-survive the session. A password typed to test a connection must reach
-neither. ``password_env_var`` is the supported way to supply a password
-without writing it down, so there is no opt-in here.
+Two files are written from the form. **Apply** saves the form to the selected
+profile in the widget's own store under ``~/.clustrix/profiles``, so that
+profiles survive the session; **Export** writes every saved profile to a
+bundle wherever the user says. A password typed to reach a cluster must
+arrive in neither. ``password_env_var`` is the supported way to supply a
+password without writing it down, so there is no opt-in here.
 
 ``tests/unit/test_persisted_files_are_private.py`` is the guarantee for the
 tree as a whole -- it walks every file clustrix writes and checks modes and
@@ -50,6 +50,7 @@ SENTINEL_ENVIRONMENT = {
 
 SENTINELS = {
     "password": _sentinel("password"),
+    "draft_password": _sentinel("draftpassword"),
     "hf_token": _sentinel("hftoken"),
     **SENTINEL_ENVIRONMENT,
 }
@@ -60,12 +61,12 @@ def _sentinels_in(text):
 
 
 def _widget_holding_every_secret():
-    """Two profiles, each with every credential the form accepts typed in.
+    """Two applied profiles and one draft, each holding credentials.
 
-    Two, because one file carries every profile: the one on screen is
-    rebuilt from the controls when Save is pressed, and the other is written
-    from what was captured when the user switched away from it. Both paths
-    have to withhold.
+    Applied, because Apply is the only thing that saves the form to a
+    profile -- and a saved profile is what both files are written from. The
+    third profile is left as an unapplied draft with a sentinel of its own
+    typed in: a draft lives in memory only, and nothing may change that.
     """
     widget = ModernClustrixWidget()
     controls = widget.widgets
@@ -80,12 +81,18 @@ def _widget_holding_every_secret():
     controls["env_vars"].value = "OMP_NUM_THREADS=4\n" + "\n".join(
         f"{key}={value}" for key, value in SENTINEL_ENVIRONMENT.items()
     )
+    widget._on_apply_config(controls["apply_btn"])
+    assert pill(widget) == "applied"
 
-    # Switching away is what captures the profile above into the store.
+    controls["profile_dropdown"].value = "SLURM cluster"
+    controls["password"].value = SENTINELS["draft_password"]
+
     controls["profile_dropdown"].value = "HuggingFace Jobs (CPU)"
     controls["hf_namespace"].value = "contextlab"
     controls["hf_token"].value = SENTINELS["hf_token"]
     controls["env_vars"].value = f"HF_HUB_TOKEN_COPY={SENTINELS['GITHUB_PAT']}"
+    widget._on_apply_config(controls["apply_btn"])
+    assert pill(widget) == "applied"
     return widget
 
 
@@ -110,7 +117,8 @@ class TestTheSentinelsWerePlanted:
         manager = widget.profile_manager
 
         ssh = manager.load_profile("SSH remote machine")
-        huggingface = widget._get_config_from_widgets()
+        huggingface = manager.load_profile("HuggingFace Jobs (CPU)")
+        draft = widget._drafts["SLURM cluster"]
 
         assert ssh.password == SENTINELS["password"]
         assert ssh.environment_variables == {
@@ -118,7 +126,10 @@ class TestTheSentinelsWerePlanted:
             **SENTINEL_ENVIRONMENT,
         }
         assert huggingface.hf_token == SENTINELS["hf_token"]
-        held = yaml.safe_dump([ssh.__dict__, huggingface.__dict__], default_style='"')
+        assert draft["password"] == SENTINELS["draft_password"]
+        held = yaml.safe_dump(
+            [ssh.__dict__, huggingface.__dict__, draft], default_style='"'
+        )
         assert _sentinels_in(held) == sorted(SENTINELS)
 
 
@@ -129,15 +140,13 @@ class TestNoSentinelReachesDisk:
 
         _save(widget, target, capsys)
 
-        assert pill(widget) == "saved"
+        assert pill(widget) == "exported"
         leaked = _sentinels_in(target.read_text(encoding="utf-8"))
         assert not leaked, f"values planted under {leaked} were written to {target}"
 
     def test_the_widgets_own_store_holds_no_sentinel(self):
-        """No button at all: the store is rewritten on every captured edit."""
+        """Written by Apply, twice by now, with credentials on the form."""
         widget = _widget_holding_every_secret()
-        # Capture the profile on screen too, the way leaving it does.
-        widget.widgets["profile_dropdown"].value = "Local single-core"
 
         store = widget.profile_manager.store_path
         assert store.exists(), f"the widget kept nothing at {store}"
@@ -151,7 +160,7 @@ class TestNoSentinelReachesDisk:
 
         _save(widget, target, capsys)
 
-        assert pill(widget) == "saved"
+        assert pill(widget) == "exported"
         assert not _sentinels_in(target.read_text(encoding="utf-8"))
 
 
@@ -192,6 +201,8 @@ class TestWhatSurvives:
         _save(widget, tmp_path / "bundle.yml", capsys)
 
         assert widget.widgets["hf_token"].value == SENTINELS["hf_token"]
+        widget.widgets["profile_dropdown"].value = "SLURM cluster"
+        assert widget.widgets["password"].value == SENTINELS["draft_password"]
         widget.widgets["profile_dropdown"].value = "SSH remote machine"
         assert widget.widgets["password"].value == SENTINELS["password"]
         assert SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"] in (
@@ -206,7 +217,7 @@ class TestWhatTheUserIsTold:
 
         told = _save(widget, tmp_path / "announced.yml", capsys)
 
-        assert "Saved" in told
+        assert "Exported" in told
         assert "Passwords and tokens are never written to this file" in told
 
     def test_no_sentinel_is_echoed_while_saying_so(self, tmp_path, capsys):
