@@ -23,9 +23,9 @@ from .loop_workers import (
     timed_call,
 )
 from .utils import (
-    detect_gpu_capabilities,
     gpu_device_groups,
-    local_gpu_count,
+    local_gpu_devices,
+    remote_gpu_devices,
     serialize_function,
 )
 
@@ -101,8 +101,11 @@ def cluster(
         partition: Cluster partition to use
         gpus: Number of GPUs each job needs. On SLURM it becomes
             ``--gres=gpu:N`` and the scheduler assigns the devices. On an
-            ``ssh`` host and locally there is no scheduler, so when a loop
-            is divided each piece is given its own devices through
+            ``ssh`` host and locally there is no scheduler, so every call
+            first checks that the machine has that many -- of the devices
+            ``CUDA_VISIBLE_DEVICES`` allows, if it is set -- and raises
+            ``ValueError`` if not, whether or not a loop is divided. When
+            one is, each piece is given its own of those devices through
             ``CUDA_VISIBLE_DEVICES`` and no more pieces run at once than
             there are devices for; a function that is not divided is left
             to use whatever it finds. For HuggingFace Jobs choose a GPU
@@ -303,6 +306,12 @@ def cluster(
                     auto_gpu_parallel,
                 )
 
+            # Where no scheduler stands between a GPU request and the
+            # hardware, clustrix is the only thing that can say the request
+            # cannot be met. Every route below goes through this one check,
+            # divided loop or not.
+            gpu_devices = _gpu_devices_for(job_config["gpus"], config, execution_mode)
+
             if execution_mode == "local":
                 if use_async:
                     # Async local execution
@@ -312,7 +321,12 @@ def cluster(
                     )
                 elif should_parallelize:
                     return _run_split_locally(
-                        func, args, func_kwargs, job_config, requested=requested
+                        func,
+                        args,
+                        func_kwargs,
+                        job_config,
+                        requested=requested,
+                        gpu_devices=gpu_devices,
                     )
                 else:
                     # Execute locally without parallelization
@@ -377,6 +391,7 @@ def cluster(
                                 func_kwargs,
                                 job_config,
                                 should_parallelize,
+                                gpu_devices,
                             )
                     except PermissionError as error:
                         note = auto_stage.staged_read_only(error, data_plan)
@@ -499,6 +514,7 @@ def _run_remotely(
     kwargs: dict,
     job_config: dict,
     should_parallelize: bool,
+    gpu_devices: Optional[List[str]] = None,
 ) -> Any:
     """Run ``func`` on the cluster: its loop divided among jobs, or as one."""
     if should_parallelize:
@@ -512,6 +528,7 @@ def _run_remotely(
                 kwargs,
                 job_config,
                 executor.config.max_parallel_jobs,
+                gpu_devices,
             )
         if not loop_plan.parallelizable:
             logger.info(
@@ -612,6 +629,61 @@ _SECONDS_PER_ITERATION: "weakref.WeakKeyDictionary[Any, float]" = (
 _ABANDONED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
 
 
+#: The GPUs an ssh account may use, by ``(host, port, username)``: asked
+#: once per process, not once per call.
+_REMOTE_GPU_DEVICES: Dict[tuple, List[str]] = {}
+
+
+def _gpu_devices_for(gpus: int, config, execution_mode: str) -> Optional[List[str]]:
+    """The devices a call that needs ``gpus`` may use, where clustrix must know.
+
+    ``None`` when no GPU was asked for, and on SLURM and HuggingFace, where
+    the scheduler or the flavor decides. Locally -- no cluster, or
+    ``cluster_type="local"`` -- and on an ``ssh`` host nothing else stands
+    between the request and the hardware, so the devices are counted here,
+    before anything runs, and a call that asks for more than there are is
+    refused: a function with no loop, ``cores=1``, ``parallel=False`` and
+    ``async_submit=True`` used to run without a GPU and say nothing.
+
+    On ``ssh`` this is one connection and one remote command, the first
+    time a host is asked in this process; the answer is kept
+    (``_REMOTE_GPU_DEVICES``). The devices are those
+    ``CUDA_VISIBLE_DEVICES`` allows where it is set
+    (:func:`clustrix.utils.usable_gpu_devices`).
+    """
+    if not gpus:
+        return None
+    if execution_mode == "local" or config.cluster_type == "local":
+        devices, where = local_gpu_devices(), "this machine"
+        visible = os.environ.get("CUDA_VISIBLE_DEVICES")
+    elif config.cluster_type == "ssh":
+        account = (config.cluster_host, config.cluster_port, config.username)
+        if account not in _REMOTE_GPU_DEVICES:
+            with ClusterExecutor(config) as executor:
+                executor.connect()
+                _REMOTE_GPU_DEVICES[account] = remote_gpu_devices(
+                    executor.connection_manager
+                )
+        devices, where, visible = (
+            _REMOTE_GPU_DEVICES[account],
+            config.cluster_host,
+            None,
+        )
+    else:
+        return None
+    if len(devices) < gpus:
+        allowed = (
+            ""
+            if visible is None
+            else f" (CUDA_VISIBLE_DEVICES={visible!r} is set in this process)"
+        )
+        raise ValueError(
+            f"gpus={gpus} was requested and {len(devices)} GPU(s) were found "
+            f"on {where}{allowed}"
+        )
+    return devices
+
+
 def _validated_gpus(gpus: Optional[int]) -> int:
     """``gpus`` as a count, refusing what no backend could act on."""
     if gpus is None:
@@ -668,6 +740,7 @@ def _run_split_remotely(
     kwargs: dict,
     job_config: dict,
     max_jobs: int,
+    gpu_devices: Optional[List[str]] = None,
 ) -> Any:
     """Run ``func`` on the cluster with its loop divided among jobs.
 
@@ -682,15 +755,10 @@ def _run_split_remotely(
     # so each piece is told which devices are its own, and there are no more
     # pieces than there are devices for.
     device_groups: Optional[List[str]] = None
-    if job_config.get("gpus") and executor.config.cluster_type == "ssh":
-        executor.connect()
-        found = detect_gpu_capabilities(executor.ssh_client, executor.config)
-        try:
-            device_groups = gpu_device_groups(
-                found.get("gpu_count") or 0, job_config["gpus"], max(1, max_jobs)
-            )
-        except ValueError as error:
-            raise ValueError(f"{error} on {executor.config.cluster_host}") from None
+    if gpu_devices is not None and executor.config.cluster_type == "ssh":
+        device_groups = gpu_device_groups(
+            gpu_devices, job_config["gpus"], max(1, max_jobs)
+        )
         max_jobs = len(device_groups)
 
     def invoke(function: Callable, *arguments: Any) -> Any:
@@ -954,6 +1022,7 @@ def _run_split_locally(
     kwargs: dict,
     job_config: dict,
     requested: Optional[_CoreRequest] = None,
+    gpu_devices: Optional[List[str]] = None,
 ) -> Any:
     """Run ``func`` here with its loop divided among worker processes.
 
@@ -999,12 +1068,9 @@ def _run_split_locally(
         _warn_cores_unused(requested, "only one CPU is available to this process")
         return func(*args, **kwargs)
 
-    if job_config.get("gpus"):
+    if gpu_devices is not None:
         # One worker per group of devices, each started seeing only its own.
-        try:
-            groups = gpu_device_groups(local_gpu_count(), job_config["gpus"], workers)
-        except ValueError as error:
-            raise ValueError(f"{error} on this machine") from None
+        groups = gpu_device_groups(gpu_devices, job_config["gpus"], workers)
         if len(groups) < 2:
             logger.info(
                 "%s runs unsplit: there are GPUs for one piece at a time.", name

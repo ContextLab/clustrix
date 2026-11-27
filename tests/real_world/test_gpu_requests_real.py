@@ -199,7 +199,13 @@ def test_an_ssh_job_sees_the_devices_it_was_assigned():
         assert executor.wait_for_result(job_id) == "2,3"
 
 
+def _host_has_no_gpu() -> None:
+    if _on_host("command -v nvidia-smi").strip():
+        pytest.skip(f"{HOST} has nvidia-smi; these tests are about a host without.")
+
+
 def test_dividing_a_loop_across_gpus_on_a_host_without_any_says_so():
+    _host_has_no_gpu()
     _configure("ssh", max_parallel_jobs=4)
 
     @cluster(gpus=1, **RESOURCES)
@@ -214,3 +220,50 @@ def test_dividing_a_loop_across_gpus_on_a_host_without_any_says_so():
 
     assert "gpus=1 was requested and 0 GPU(s) were found" in str(raised.value)
     assert HOST in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "options",
+    [dict(), dict(parallel=False), dict(async_submit=True)],
+    ids=["no loop", "parallel=False", "async_submit"],
+)
+def test_every_ssh_route_refuses_gpus_the_host_does_not_have(options):
+    """#176 G1. Only a divided loop was checked: these three submitted the
+    job, which ran without a GPU."""
+    _host_has_no_gpu()
+    _configure("ssh")
+    decorator_module._REMOTE_GPU_DEVICES.clear()
+    jobs_before = _on_host("ls ~/clustrix-realworld-tests 2>/dev/null | wc -l")
+
+    @cluster(gpus=1, **options, **RESOURCES)
+    def which_device(n):
+        import os
+
+        return os.environ.get("CUDA_VISIBLE_DEVICES", "ran without a GPU")
+
+    with pytest.raises(ValueError) as raised:
+        which_device(1)
+
+    assert f"gpus=1 was requested and 0 GPU(s) were found on {HOST}" in str(
+        raised.value
+    )
+    assert (
+        _on_host("ls ~/clustrix-realworld-tests 2>/dev/null | wc -l") == jobs_before
+    ), "nothing was submitted"
+
+
+def test_the_host_is_asked_for_its_gpus_once_per_process():
+    from clustrix.utils import remote_gpu_devices
+
+    _host_has_no_gpu()
+    _configure("ssh")
+    decorator_module._REMOTE_GPU_DEVICES.clear()
+    with ClusterExecutor(get_config()) as executor:
+        executor.connect()
+        assert remote_gpu_devices(executor.connection_manager) == []
+
+    for _ in range(2):
+        with pytest.raises(ValueError):
+            cluster(gpus=1, **RESOURCES)(len)("abc")
+
+    assert list(decorator_module._REMOTE_GPU_DEVICES.values()) == [[]]

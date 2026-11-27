@@ -20,7 +20,18 @@ import json
 import functools
 import subprocess
 from importlib import metadata as importlib_metadata
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    Union,
+)
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
@@ -4129,42 +4140,122 @@ def _create_ssh_script(
     return "\n".join(script_lines)
 
 
-def gpu_device_groups(available: int, per_job: int, at_most: int) -> List[str]:
-    """``CUDA_VISIBLE_DEVICES`` values for jobs that each get ``per_job``
-    devices of ``available``, for at most ``at_most`` jobs at a time.
+def gpu_device_groups(devices: Sequence[str], per_job: int, at_most: int) -> List[str]:
+    """``CUDA_VISIBLE_DEVICES`` values for jobs that each get ``per_job`` of
+    ``devices``, for at most ``at_most`` jobs at a time.
 
-    ``gpu_device_groups(4, 1, 8)`` is ``["0", "1", "2", "3"]``: four jobs can
-    run at once, however many were allowed. ``gpu_device_groups(4, 2, 8)``
-    is ``["0,1", "2,3"]``. Fewer devices than one job needs is an error, not
-    an empty list: the caller asked for something this machine cannot give.
+    ``devices`` are the ids the caller may use, as ``CUDA_VISIBLE_DEVICES``
+    spells them -- indices or GPU UUIDs -- and they are handed out as they
+    are: ``gpu_device_groups(["0", "1", "2", "3"], 1, 8)`` is ``["0", "1",
+    "2", "3"]``, four jobs at once however many were allowed;
+    ``gpu_device_groups(["4", "5", "6", "7"], 2, 8)`` is ``["4,5", "6,7"]``.
+    Fewer devices than one job needs is an error, not an empty list: the
+    caller asked for something this machine cannot give.
     """
     if per_job < 1 or at_most < 1:
         raise ValueError("per_job and at_most must be at least 1")
-    if available < per_job:
+    if len(devices) < per_job:
         raise ValueError(
-            f"gpus={per_job} was requested and {available} GPU(s) were found"
+            f"gpus={per_job} was requested and {len(devices)} GPU(s) were found"
         )
-    count = min(at_most, available // per_job)
+    count = min(at_most, len(devices) // per_job)
     return [
-        ",".join(str(index * per_job + offset) for offset in range(per_job))
+        ",".join(devices[index * per_job : (index + 1) * per_job])
         for index in range(count)
     ]
 
 
-def local_gpu_count() -> int:
-    """How many GPUs ``nvidia-smi`` lists on this machine; 0 without it."""
+#: Lists every GPU the driver shows as ``<index>, <uuid>``. Run here by
+#: :func:`local_gpu_devices` and on an ssh host by :func:`remote_gpu_devices`.
+GPU_LISTING_COMMAND = ("nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader")
+
+#: Printed before the listing by the remote probe, followed by the login
+#: environment's ``CUDA_VISIBLE_DEVICES`` when it has one.
+_VISIBLE_DEVICES_MARK = "CLUSTRIX-CUDA-VISIBLE-DEVICES"
+
+
+def usable_gpu_devices(listing: str, visible: Optional[str]) -> List[str]:
+    """The device ids a process may use, as it should name them.
+
+    ``listing`` is what ``GPU_LISTING_COMMAND`` printed (empty when there
+    is no ``nvidia-smi``) and ``visible`` the process's
+    ``CUDA_VISIBLE_DEVICES``, ``None`` when it is not set.
+
+    Not set: every listed device, by index. Set -- by a scheduler, a
+    container, or the user -- it is the whole answer to "which devices are
+    mine", so *that* list is returned, in its order and its spelling
+    (indices or ``GPU-...`` UUIDs), and never a device outside it. An entry
+    is kept only if the driver lists such a device, and reading stops at
+    the first that it does not, which is what CUDA does with the variable.
+    An empty value means no devices.
+    """
+    listed = []
+    for line in listing.splitlines():
+        index, _, uuid = (part.strip() for part in line.partition(","))
+        if index.isdigit():
+            listed.append((index, uuid))
+    if visible is None:
+        return [index for index, _ in listed]
+    usable: List[str] = []
+    for entry in (part.strip() for part in visible.split(",")):
+        known = bool(entry) and any(
+            entry == index or (not entry.isdigit() and uuid.startswith(entry))
+            for index, uuid in listed
+        )
+        if not known or entry in usable:
+            break
+        usable.append(entry)
+    return usable
+
+
+def local_gpu_devices() -> List[str]:
+    """The GPUs this process may use; none without ``nvidia-smi``.
+
+    See :func:`usable_gpu_devices` for how ``CUDA_VISIBLE_DEVICES`` counts.
+    """
     try:
         listing = subprocess.run(
-            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
-            capture_output=True,
-            text=True,
-            timeout=30,
+            list(GPU_LISTING_COMMAND), capture_output=True, text=True, timeout=30
         )
     except (OSError, subprocess.TimeoutExpired):
-        return 0
+        return []
     if listing.returncode != 0:
-        return 0
-    return sum(1 for line in listing.stdout.splitlines() if line.strip().isdigit())
+        return []
+    return usable_gpu_devices(listing.stdout, os.environ.get("CUDA_VISIBLE_DEVICES"))
+
+
+#: The listing, preceded by the shell's ``CUDA_VISIBLE_DEVICES`` if it has one.
+GPU_PROBE_COMMAND = (
+    f"echo {_VISIBLE_DEVICES_MARK} ${{CUDA_VISIBLE_DEVICES+set}} "
+    '"$CUDA_VISIBLE_DEVICES"; ' + " ".join(GPU_LISTING_COMMAND) + " 2>/dev/null; true"
+)
+
+
+def read_gpu_probe(output: str) -> Tuple[str, Optional[str]]:
+    """What ``GPU_PROBE_COMMAND`` printed, as ``(listing, visible)`` for
+    :func:`usable_gpu_devices`; ``visible`` is ``None`` when the variable
+    was not set there."""
+    visible: Optional[str] = None
+    listing = []
+    for line in output.splitlines():
+        words = line.split(None, 2)
+        if words and words[0] == _VISIBLE_DEVICES_MARK:
+            if len(words) > 1 and words[1] == "set":
+                visible = words[2] if len(words) > 2 else ""
+        else:
+            listing.append(line)
+    return "\n".join(listing), visible
+
+
+def remote_gpu_devices(connection) -> List[str]:
+    """The GPUs a job started on an ssh host may use; one remote command.
+
+    The command runs in the same kind of shell a job is started from, so a
+    ``CUDA_VISIBLE_DEVICES`` exported by the account's login environment is
+    the one the job would inherit, and it is honoured the same way.
+    """
+    output, _ = connection.execute_remote_command(GPU_PROBE_COMMAND)
+    return usable_gpu_devices(*read_gpu_probe(output))
 
 
 def detect_gpu_capabilities(
