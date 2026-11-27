@@ -5,21 +5,19 @@ including interactive setup, validation, and migration from existing systems.
 """
 
 import os
+import shlex
 import subprocess
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List, Optional
 import logging
 
-try:
-    import click
-
-    HAS_CLICK = True
-except ImportError:
-    HAS_CLICK = False
+import click
 
 from .credential_manager import (
     FlexibleCredentialManager,
+    format_env_assignment,
     get_credential_manager,
+    parse_env_file,
     write_text_securely,
 )
 from .credential_release import (
@@ -35,12 +33,6 @@ logger = logging.getLogger(__name__)
 
 def setup_credentials_interactive():
     """Interactive credential setup wizard that creates and populates .env file."""
-    if not HAS_CLICK:
-        print(
-            "❌ Interactive setup requires 'click' package. Install with: pip install click"
-        )
-        return False
-
     print("🔐 Clustrix Credential Setup Wizard")
     print("=" * 50)
 
@@ -49,8 +41,13 @@ def setup_credentials_interactive():
     print(f"📁 Configuration directory: {manager.config_dir}")
     print(f"📄 Credential file: {manager.env_file}")
 
-    if manager.env_file.exists():
-        print("📋 Existing .env file found")
+    # Asked only when the file already *holds* credentials. Constructing the
+    # manager above creates the commented-out template, so "does the file
+    # exist" was true on every first run -- and the question defaults to No,
+    # so pressing Enter through a first-time setup cancelled it.
+    configured = sorted(parse_env_file(manager.env_file))
+    if configured:
+        print(f"📋 Credentials already configured: {', '.join(configured)}")
         if not click.confirm("Do you want to update existing credentials?"):
             print("Setup cancelled.")
             return False
@@ -284,30 +281,52 @@ def _write_credentials_to_env_file(env_file: Path, credentials: Dict[str, str]) 
         return False
 
 
+def _assigned_name(line: str) -> Optional[str]:
+    """The variable an active ``.env`` line assigns, if it assigns one."""
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#") or "=" not in stripped:
+        return None
+    name = stripped.split("=", 1)[0].strip()
+    if name.startswith("export "):
+        name = name[len("export ") :].strip()
+    return name
+
+
 def _merge_env_content(existing_content: str, new_credentials: Dict[str, str]) -> str:
-    """Merge new credentials with existing .env content, preserving comments."""
+    """Set ``new_credentials`` in ``.env`` content, preserving everything else.
+
+    Each name ends up assigned exactly once, at the position of its first
+    existing assignment, else in place of its commented-out template line,
+    else at the end. Replacing matters: this used to write a name only when
+    it was commented out or absent, so ``clustrix credentials setup`` could
+    never change a password it had already saved -- the old value stayed and
+    the wizard reported success. Later duplicates of a name are removed,
+    because the parser lets the last assignment win and a stale one further
+    down would silently override the value just written.
+    """
     lines = existing_content.split("\n") if existing_content else []
+    while lines and not lines[-1].strip():
+        lines.pop()
 
-    # Create a map of existing variables
-    existing_vars = set()
-    for i, line in enumerate(lines):
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key = line.split("=", 1)[0].strip()
-            existing_vars.add(key)
-        elif line and line.startswith("#") and "=" in line[1:]:
-            # Commented variable - uncomment if we have a value
-            key = line[1:].split("=", 1)[0].strip()
-            if key in new_credentials:
-                lines[i] = f"{key}={new_credentials[key]}"
-                existing_vars.add(key)
+    assigned = {name for name in map(_assigned_name, lines) if name}
+    remaining = dict(new_credentials)
+    merged: List[str] = []
+    for line in lines:
+        name = _assigned_name(line)
+        if name is None and line.strip().startswith("#"):
+            # A commented-out template line stands in for a name that has no
+            # active assignment anywhere in the file.
+            candidate = _assigned_name(line.strip()[1:])
+            if candidate in remaining and candidate not in assigned:
+                name = candidate
+        if name not in new_credentials:
+            merged.append(line)
+        elif name in remaining:
+            merged.append(format_env_assignment(name, remaining.pop(name)))
+        # else: a later duplicate of a name already written -- dropped.
 
-    # Add new credentials that don't exist yet
-    for key, value in new_credentials.items():
-        if key not in existing_vars:
-            lines.append(f"{key}={value}")
-
-    return "\n".join(lines)
+    merged.extend(format_env_assignment(key, value) for key, value in remaining.items())
+    return "\n".join(merged) + "\n"
 
 
 # Main CLI command functions
@@ -440,25 +459,20 @@ def edit_credentials_command():
         print("📝 Creating new .env file...")
         manager._ensure_setup()
 
-    # Try to open in default editor
-    try:
-        editor = os.getenv("EDITOR", "nano")  # Default to nano
-        subprocess.run([editor, str(manager.env_file)])
-    except FileNotFoundError:
+    # ``$EDITOR`` is a command line, not a program name: ``code -w`` and
+    # ``emacsclient -t`` are ordinary values, and handing the whole string to
+    # exec as one word reported "editor not found" for an editor that exists.
+    candidates = [shlex.split(os.getenv("EDITOR", ""))]
+    candidates += [[fallback] for fallback in ("nano", "code", "vim", "emacs")]
+    for command in candidates:
+        if not command:
+            continue
         try:
-            # Try common editors
-            for editor in ["code", "vim", "nano", "emacs"]:
-                try:
-                    subprocess.run([editor, str(manager.env_file)])
-                    break
-                except FileNotFoundError:
-                    continue
-            else:
-                print(
-                    f"📝 Please edit the credential file manually: {manager.env_file}"
-                )
-        except Exception:
-            print(f"📝 Please edit the credential file manually: {manager.env_file}")
+            subprocess.run([*command, str(manager.env_file)])
+            return
+        except FileNotFoundError:
+            continue
+    print(f"📝 Please edit the credential file manually: {manager.env_file}")
 
 
 def reset_credentials_command():
@@ -466,9 +480,7 @@ def reset_credentials_command():
     manager = get_credential_manager()
 
     if manager.env_file.exists():
-        if HAS_CLICK and not click.confirm(
-            f"Reset credential file {manager.env_file}?"
-        ):
+        if not click.confirm(f"Reset credential file {manager.env_file}?"):
             print("Reset cancelled.")
             return
 

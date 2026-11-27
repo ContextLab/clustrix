@@ -571,7 +571,10 @@ def test_written_credentials_are_owner_only_and_leave_no_temp_file(
         f"credentials were left at {oct(_mode(env_file))}, readable by other "
         "local users"
     )
-    assert "CLUSTRIX_SSH_PASSWORD=<redacted>" in env_file.read_text(encoding="utf-8")
+    # Values are written single-quoted now, so that every password reads
+    # back exactly (tests/unit/test_credential_file_round_trip.py); the
+    # unquoted spelling this used to look for is what mangled them.
+    assert "CLUSTRIX_SSH_PASSWORD='<redacted>'" in env_file.read_text(encoding="utf-8")
 
     leftovers = [p.name for p in tmp_path.iterdir() if p.name != ".env"]
     assert leftovers == [], (

@@ -12,15 +12,12 @@ from typing import Dict, Mapping, Optional, List, Any
 from abc import ABC, abstractmethod
 from .config import get_config_dir, write_text_securely  # noqa: F401
 
-# Try to import python-dotenv. ``dotenv_values`` is used rather than
-# ``load_dotenv``: the latter copies the whole file into ``os.environ``,
-# which is the process-wide export this module deliberately does not do.
-try:
-    from dotenv import dotenv_values
-
-    HAS_DOTENV = True
-except ImportError:
-    HAS_DOTENV = False
+# ``dotenv_values`` rather than ``load_dotenv``: the latter copies the whole
+# file into ``os.environ``, which is the process-wide export this module
+# deliberately does not do. python-dotenv is a hard dependency, so there is
+# one parser for the credential file and :func:`format_env_assignment` is
+# written against it.
+from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +62,6 @@ def resolve_provider_credentials(
     Returns ``None`` when nothing for the provider is configured, so that
     "not configured" is distinguishable from "configured with defaults".
     """
-    if provider == "local":
-        return {"type": "local"}  # local execution needs no real credentials
-
     names = PROVIDER_ENV_NAMES.get(provider)
     if names is None:
         return None
@@ -96,22 +90,34 @@ def parse_env_file(path: Path) -> Dict[str, str]:
     happened to run afterwards, and made one test pass in CI (no ``.env``
     present) while failing on any developer machine that had one -- an
     asymmetry CI cannot see.
-    """
-    if HAS_DOTENV:
-        return {k: v for k, v in dotenv_values(path).items() if v is not None}
 
-    logger.debug("python-dotenv not available, parsing %s manually", path)
-    values: Dict[str, str] = {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    values[key.strip()] = value.strip().strip('"').strip("'")
-    except Exception as e:
-        logger.debug(f"Failed to read .env file: {e}")
-    return values
+    **Values are literal.** ``interpolate=False``: with interpolation on, a
+    password containing ``${HOME}`` came back as the home directory, and a
+    credential file is a list of secrets, not a shell script.
+    """
+    return {
+        k: v for k, v in dotenv_values(path, interpolate=False).items() if v is not None
+    }
+
+
+def format_env_assignment(key: str, value: str) -> str:
+    """One ``KEY='value'`` line that :func:`parse_env_file` reads back exactly.
+
+    An unquoted ``KEY=value`` is not a faithful way to write a secret: the
+    parser stops at `` #``, strips surrounding whitespace and removes a
+    matching pair of quotes, so ``pa ss #word`` was stored as ``pa ss``.
+    Single quotes keep everything literal; inside them the parser undoes
+    exactly two escapes, ``\\\\`` and ``\\'``, so those are the two applied.
+
+    A line break cannot be represented on one line and is refused rather
+    than written as something else.
+    """
+    if any(character in value for character in "\n\r\x00"):
+        raise ValueError(
+            f"{key} contains a line break or NUL, which a .env file cannot hold"
+        )
+    escaped = value.replace("\\", "\\\\").replace("'", "\\'")
+    return f"{key}='{escaped}'"
 
 
 class CredentialSource(ABC):
@@ -163,7 +169,6 @@ class DotEnvCredentialSource(CredentialSource):
         providers = [
             "ssh",
             "huggingface",
-            "local",
         ]
 
         for provider in providers:
@@ -190,7 +195,6 @@ class EnvironmentCredentialSource(CredentialSource):
         providers = [
             "ssh",
             "huggingface",
-            "local",
         ]
 
         for provider in providers:
@@ -331,7 +335,13 @@ class FlexibleCredentialManager:
 # Created automatically - uncomment and add your credentials below
 # File permissions: 600 (owner read/write only)
 #
-# Priority order: .env file → environment variables → GitHub Actions
+# Precedence: a variable set in your environment overrides the same name in
+# this file; this file supplies everything the environment does not set;
+# GitHub Actions secrets are consulted last.
+#
+# Values are read literally -- nothing is expanded, so ${HOME} stays ${HOME}.
+# Put a value in single quotes if it contains spaces, '#' or quotes, writing
+# \\' for a single quote and \\\\ for a backslash inside it.
 
 # ============================================================================
 # SSH Cluster Credentials (for ssh and slurm clusters)
@@ -536,7 +546,6 @@ class FlexibleCredentialManager:
         providers = [
             "ssh",
             "huggingface",
-            "local",
         ]
         for provider in providers:
             source_name, field_names = self._configured_fields(provider)

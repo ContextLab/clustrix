@@ -9,7 +9,7 @@ Flat layout: 34 modules, no subpackages. `__init__.py` re-exports 53 symbols —
 | Entry | `decorator.py`, `async_executor_simple.py` | `@cluster`; one shared async executor per process |
 | Execution | `executor_core.py`, `executor_connections.py`, `executor_schedulers.py`, `executor_scheduler_status.py`, `local_executor.py`, `hf_jobs.py` | `executor.py` is a 39-line compat shim — edit the split modules, not the shim |
 | Config | `config.py`, `profile_manager.py` | `SUPPORTED_CLUSTER_TYPES` is the single backend list; no ClusterType enum |
-| Auth/credentials | `auth_manager.py`, `auth_methods.py`, `auth_fallbacks.py`, `credential_manager.py`, `secure_credentials.py`, `cli_credentials.py` | Credential priority: `.env` file → environment → GitHub Actions |
+| Auth/credentials | `auth_manager.py`, `auth_methods.py`, `auth_fallbacks.py`, `credential_manager.py`, `secure_credentials.py`, `cli_credentials.py` | Credential priority: an environment variable overrides the same name in `.env`; `.env` supplies the rest; GitHub Actions last |
 | SSH | `ssh_security.py`, `ssh_utils.py` | Host-key policy lives ONLY in `ssh_security.configure_host_key_policy` |
 | Notebook | `notebook_magic.py`, `notebook_magic_core.py`, `notebook_magic_config.py`, `notebook_magic_widget.py`, `notebook_magic_fallback.py`, `modern_notebook_widget.py` | `notebook_magic.py` re-exports core; fallback provides no-IPython stubs |
 | Data/packaging | `staging.py`, `file_packaging.py`, `dependency_analysis.py`, `loop_analysis.py` | staging = declared `data_package` objects; packaging = function shipping |

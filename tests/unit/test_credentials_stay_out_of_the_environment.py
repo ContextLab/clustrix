@@ -227,5 +227,7 @@ class TestBothSourcesAgree:
         assert EnvironmentCredentialSource().get_credentials("aws") is None
         assert resolve_provider_credentials({}, "aws") is None
 
-    def test_local_needs_no_credentials(self):
-        assert resolve_provider_credentials({}, "local") == {"type": "local"}
+    def test_local_is_not_a_credential_provider(self):
+        """It was one: ``{"type": "local"}``, read by nothing, and always
+        "available" -- which hid the nothing-is-configured hint for good."""
+        assert resolve_provider_credentials({}, "local") is None

@@ -430,7 +430,12 @@ class TestFlexibleCredentialManager:
             # Only the backends that are actually supported: pbs/sge/
             # kubernetes and every cloud VM backend were removed as
             # never-verified, and their credentials went with them.
-            assert set(status["providers"]) == {"ssh", "huggingface", "local"}
+            #
+            # "local" used to be listed too, as a pseudo-provider that was
+            # always "available". Nothing read it, and its permanent tick
+            # meant `clustrix credentials list` could never say that nothing
+            # was configured -- so it is gone and this expects two.
+            assert set(status["providers"]) == {"ssh", "huggingface"}
 
 
 class TestGlobalCredentialManager:
