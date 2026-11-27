@@ -121,6 +121,12 @@ ALLOWED_ENV = frozenset(
         "CLUSTRIX_VALIDATION_SLURM_NAME",
         "CLUSTRIX_VALIDATION_SSH_HOST",
         "CLUSTRIX_VALIDATION_SSH_NAME",
+        # Which GPUs the calling process may use, as a scheduler, a container
+        # or the user set it. Read so that the devices handed to the pieces
+        # of a divided loop are taken from that list and not from every
+        # device on the machine (#176). User-facing; nothing in a test
+        # steers shipped code with it.
+        "CUDA_VISIBLE_DEVICES",
         "EDITOR",
         "GITHUB_ACTIONS",
         "HF_HOME",
