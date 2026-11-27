@@ -661,12 +661,20 @@ backend, and it stays.
 
 ### Known limitations
 
-- Functions defined in the REPL still lose the source-based features — loop
-  parallelization and complexity analysis — because those parse source with
-  `ast`. Serialization itself does not need source and works correctly.
-- Loop detection does not see tuple-unpacking targets
-  (`for i, x in enumerate(...)`), and its "any external name read" heuristic is
-  conservative enough to reject the canonical `results.append(f(x))` pattern.
+- **No computation has been run on a real GPU.** `@cluster(gpus=N)` was run
+  against a SLURM whose two `gpu` resources are placeholders; device
+  counting on an ssh host or locally was not run on a machine that has one.
+- Only a `for` loop at the top level of the decorated function is divided,
+  and only when it can be read from source. The run-time checks behind the
+  analysis do not see state outside the values the loop was handed; see
+  "What no check sees" in the parallel-loops guide.
+- On `ssh` and `slurm` each piece of a divided loop is its own job; there
+  are no SLURM job arrays.
+- Output files a job writes are not brought back, only the return value.
+  Automatic input staging does not apply to `async_submit` or to
+  HuggingFace Jobs, and cannot see a path computed at run time.
+- Nothing staged on a cluster is deleted automatically.
+- PBS, SGE, Kubernetes and the cloud VM providers are absent (#140–#146).
 
 ## [0.1.1] and earlier
 
