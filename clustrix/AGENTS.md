@@ -29,6 +29,6 @@ Flat layout, no subpackages. `__init__.__all__` is the public API; everything el
 Root ANTI-PATTERNS apply in full — the two most likely to bite here: host-key policy only via `ssh_security.configure_host_key_policy`, and dill/cloudpickle only (never stdlib `pickle`) for function/result payloads. Module-local additions:
 
 - No new module may read `cluster_type` as an enum — it is a plain `str`, validated against `SUPPORTED_CLUSTER_TYPES`.
-- No test-awareness in production code (`isinstance(x, Mock)`, env sniffing for pytest).
+- No test-awareness in production code (checking whether an object is a test double, env sniffing for pytest).
 - No UI side effects at import time — widget display is opt-in (`%%remote`, `display_modern_widget()`, or `CLUSTRIX_AUTO_WIDGET=1`).
 - No second loop analyser and no second widget.

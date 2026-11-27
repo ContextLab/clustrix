@@ -79,7 +79,7 @@ pytest --cov=clustrix    # Run tests with coverage
 
    **GPUs: `@cluster(gpus=N)`; `auto_gpu_parallel` does nothing.** `gpus` is per job. SLURM: `#SBATCH --gres=gpu:N`, and the scheduler assigns devices. `ssh` and local have no scheduler, so a *divided* loop gets one device group per piece via `CUDA_VISIBLE_DEVICES` (`utils.gpu_device_groups`; `loop_workers.gpu_pool` locally; `job_config["cuda_visible_devices"]` on ssh) and never more pieces than `GPUs // N`; too few GPUs raises rather than running without one. HuggingFace ignores it with a warning (`hf_flavor` is the hardware). `auto_gpu_parallel` is still accepted, warns, and does nothing. **What has been run:** the SLURM request path against a real scheduler whose two `gpu` resources are placeholders (`scripts/setup_local_slurm.sh`, `tests/real_world/test_gpu_requests_real.py`). **No computation has been run on a real GPU, and GPU counting on an ssh host or locally has not been run on a machine that has one.** Do not write otherwise until it has.
 
-2. **ClusterExecutor** (`clustrix/executor_core.py`): Central execution engine. Note that `clustrix/executor.py` is a 39-line backward-compatibility shim that re-exports it; the implementation is split across:
+2. **ClusterExecutor** (`clustrix/executor_core.py`): Central execution engine. Note that `clustrix/executor.py` is a backward-compatibility shim that re-exports it; the implementation is split across:
    - `executor_core.py` — the `ClusterExecutor` class, dispatch, result retrieval and verification
    - `executor_connections.py` — SSH/SFTP connection management via Paramiko
    - `executor_schedulers.py` — SLURM and SSH submission
