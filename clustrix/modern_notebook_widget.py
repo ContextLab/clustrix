@@ -527,6 +527,7 @@ class ModernClustrixWidget:
         action_row.add_class("cx-actions")
         actions = widgets.VBox([action_row, w["output"], w["trust_host_btn"]])
         w["trust_host_btn"].layout.margin = "10px 0 0 0"
+        w["trust_host_btn"].layout.align_self = "flex-start"
         actions.add_class("cx-section")
         w["output"].layout.margin = "10px 0 0 0"
 
