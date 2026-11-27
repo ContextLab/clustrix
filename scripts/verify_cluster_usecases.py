@@ -912,13 +912,25 @@ def check_target(key: str) -> Dict[str, Any]:
                 f"via CLUSTRIX_TEST_*_MODULES can supply it)"
             )
     except Exception as e:  # noqa: BLE001
-        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:300]}")
+        print(f"  FAIL  {type(e).__name__}: {_said(e)}")
         return {"target": key, "status": "failed", "passed": 0, "total": 1}
     print("  OK — reachable")
     return {"target": key, "status": "passed", "passed": 1, "total": 1}
 
 
 # ------------------------------------------------------------------- running
+
+
+def _said(error: BaseException, limit: int = 500) -> str:
+    """What an exception says, on one line.
+
+    Not its first line: a HuggingFace API error opens with a request id and
+    says what was refused -- "missing permissions: job.write" -- three lines
+    further down.
+    """
+    return " | ".join(line.strip() for line in str(error).splitlines() if line.strip())[
+        :limit
+    ]
 
 
 def _format_call(name: str, args, kwargs) -> str:
@@ -933,7 +945,7 @@ def _run_provenance(remote_callable, plain, args, kwargs) -> Dict[str, Any]:
     try:
         actual = remote_callable(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
-        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:160]}")
+        print(f"  FAIL  {type(e).__name__}: {_said(e)}")
         return {"case": "provenance", "ok": False, "detail": type(e).__name__}
 
     print(f"  caller: {local['host']} pid={local['pid']} {local['platform']}")
@@ -995,7 +1007,7 @@ def run_case(name: str, builder, decorate) -> Dict[str, Any]:
     try:
         actual = remote_callable(*args, **kwargs)
     except Exception as e:  # noqa: BLE001
-        print(f"  FAIL  {type(e).__name__}: {str(e).splitlines()[0][:300]}")
+        print(f"  FAIL  {type(e).__name__}: {_said(e)}")
         return {"case": name, "ok": False, "detail": type(e).__name__}
 
     print(f"  actual  : {_abbrev(actual, 400)}")
