@@ -1,589 +1,562 @@
-"""Comprehensive tests for authentication fallback methods."""
+"""The password fallback, asked the way a person meets it.
 
+``clustrix.auth_fallbacks`` decides where a password comes from by looking at
+what kind of process it is in -- a terminal, a script with piped input, a
+Jupyter kernel -- and then prompts accordingly. Every test of it used to
+patch ``detect_environment`` to announce the answer, patch ``getpass`` or
+``input`` to return a string, and assert that string came back.
+
+Nothing here is patched. Each environment is a real one:
+
+* **a terminal** is a real pseudo-terminal the child process is the session
+  leader of, so ``getpass`` really turns echo off, ``^C`` really raises
+  ``SIGINT`` and ``^D`` really is end-of-file;
+* **a script** is a real child process whose stdin is a real pipe;
+* **a notebook** is a real child process that has really imported
+  ``ipykernel``, which is the only thing ``detect_environment`` looks at.
+
+The SSH half of ``setup_auth_with_fallback`` runs against the real server in
+``tests/ssh_server.py`` with the real ``setup_ssh_keys``: a real key is
+generated, really deployed with the password the fallback found, and really
+used to log in.
+
+Not reachable from here, and so not tested here: Google Colab's
+``userdata`` store (``tests/real_world/test_auth_fallbacks_colab.py`` runs
+inside Colab and nowhere else) and the tkinter dialog, which needs a display
+and a person.
+"""
+
+import json
 import os
+import pty
+import select
+import signal
+import subprocess
 import sys
-from unittest.mock import Mock, patch, MagicMock
+import time
+from pathlib import Path
+
 import pytest
 
-try:  # The interpreter may be built without Tk; see TestGetPasswordGui.
-    import tkinter  # noqa: F401
-
-    TKINTER_AVAILABLE = True
-except ImportError:  # pragma: no cover - depends on the interpreter build
-    TKINTER_AVAILABLE = False
-
-from clustrix.config import (
-    CONFIG_SOURCE_WORKING_DIRECTORY,
-    ClusterConfig,
-    record_discovered_hostname,
-)
-from clustrix.credential_release import CredentialTarget
 from clustrix.auth_fallbacks import (
-    detect_environment,
-    get_password_gui,
-    get_password_widget,
-    get_cluster_password,
     requires_password_fallback,
     setup_auth_with_fallback,
 )
+from clustrix.config import ClusterConfig
+from clustrix.ssh_utils import setup_ssh_keys, setup_ssh_keys_with_fallback
+from tests.ssh_server import LocalSSHServer
 
-
-class TestDetectEnvironment:
-    """Test environment detection."""
-
-    @patch.dict(sys.modules, {"google.colab": Mock()})
-    def test_detect_colab(self):
-        """Test detection of Google Colab environment."""
-        assert detect_environment() == "colab"
-
-    @patch.dict(sys.modules, {"ipykernel": Mock()}, clear=False)
-    def test_detect_notebook(self):
-        """Test detection of Jupyter notebook environment."""
-        if "google.colab" in sys.modules:
-            del sys.modules["google.colab"]
-        assert detect_environment() == "notebook"
-
-    @patch("sys.stdin.isatty")
-    def test_detect_cli(self, mock_isatty):
-        """Test detection of CLI environment."""
-        mock_isatty.return_value = True
-        # Ensure colab and ipykernel are not present
-        with patch.dict(sys.modules, {}, clear=False):
-            if "google.colab" in sys.modules:
-                del sys.modules["google.colab"]
-            if "ipykernel" in sys.modules:
-                del sys.modules["ipykernel"]
-            assert detect_environment() == "cli"
-
-    @patch("sys.stdin.isatty")
-    def test_detect_script(self, mock_isatty):
-        """Test detection of script environment."""
-        mock_isatty.return_value = False
-        # Ensure colab and ipykernel are not present
-        with patch.dict(sys.modules, {}, clear=False):
-            if "google.colab" in sys.modules:
-                del sys.modules["google.colab"]
-            if "ipykernel" in sys.modules:
-                del sys.modules["ipykernel"]
-            assert detect_environment() == "script"
-
-
-#: ``@patch("tkinter.Tk")`` imports tkinter to resolve its target, so these
-#: tests need the module to exist -- not a display, the module. A CPython
-#: build without ``_tkinter`` (Homebrew's ``python@3.12`` without
-#: ``python-tk@3.12``, for instance) makes all three fail on the import rather
-#: than on anything they assert. Nothing about the assertions is relaxed: on
-#: an interpreter that has tkinter, including CI's, they run exactly as
-#: before.
-try:
-    import tkinter  # noqa: F401
-
-    HAS_TKINTER = True
-except Exception:  # pragma: no cover - depends on how CPython was built
-    HAS_TKINTER = False
-
-
-@pytest.mark.skipif(
-    not HAS_TKINTER,
-    reason="this interpreter has no _tkinter, so tkinter.Tk cannot be patched",
+pytestmark = pytest.mark.skipif(
+    os.name == "nt", reason="pseudo-terminals and POSIX signals are used throughout"
 )
-class TestGetPasswordGui:
-    """Test GUI password retrieval.
 
-    ``@patch("tkinter.Tk")`` has to *import* tkinter to patch it, so on a
-    Python built without Tk -- which is ordinary: the Homebrew and
-    python.org builds differ on it, and slim container images drop it --
-    these hard-failed with ``ModuleNotFoundError`` instead of skipping. The
-    code under test imports tkinter lazily inside the function and falls
-    back to the ipywidgets prompt on ``ImportError``, so it degrades
-    gracefully on exactly the interpreters where its tests did not. The
-    third test below covers that fallback and does not need Tk itself, but
-    it patches ``tkinter.Tk`` to *raise* ImportError, which still requires
-    the module to be importable.
+REPO_ROOT = Path(__file__).resolve().parent.parent
+HOST = "cluster.example.com"
+USER = "researcher"
+PROMPT = f"Password for {USER}@{HOST}: "
 
-    ``pytest.importorskip`` in the class body would skip the whole *module*
-    -- 31 unrelated tests -- because the Skipped it raises escapes during
-    collection of the file. A class-scoped ``pytestmark`` skips these three
-    and nothing else. The probe is a real import rather than
-    ``find_spec("tkinter")``: the package directory is present on an
-    interpreter built without Tk, and it is the ``_tkinter`` extension
-    underneath it that is missing, so only actually importing it answers the
-    question -- which is the same thing the code under test does.
+#: Run in a child process, so that the environment it reports is its own and
+#: not pytest's. The result goes to a file: on a terminal, stdout is the same
+#: device the prompt is written to.
+PROBE = """
+import json, sys
+out, preload, with_config = sys.argv[1:4]
+if preload:
+    __import__(preload)
+from clustrix.auth_fallbacks import detect_environment, get_cluster_password
+from clustrix.config import ClusterConfig
+from clustrix.credential_release import CredentialTarget
+
+environment = detect_environment()
+target = CredentialTarget(hostname={host!r}, username={user!r}, described_as="a test")
+config = (
+    ClusterConfig(cluster_host={host!r}, username={user!r}) if with_config else None
+)
+password = get_cluster_password(target, config=config)
+with open(out, "w") as handle:
+    json.dump({{"environment": environment, "password": password}}, handle)
+""".format(host=HOST, user=USER)
+
+
+def _probe_argv(result_path, preload="", with_config=False):
+    return [
+        sys.executable,
+        "-c",
+        PROBE,
+        str(result_path),
+        preload,
+        "1" if with_config else "",
+    ]
+
+
+def _child_env(**extra):
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if "PASSWORD" not in name.upper()
+    }
+    env.update(extra)
+    return env
+
+
+def _read_result(result_path):
+    assert Path(result_path).exists(), "the probe exited before reporting"
+    return json.loads(Path(result_path).read_text())
+
+
+def _run_on_a_terminal(argv, keys, env, wait_for=PROMPT.encode(), timeout=60):
+    """Run ``argv`` with a real pty as its controlling terminal.
+
+    ``keys`` are typed once ``wait_for`` has appeared. Returns everything the
+    terminal displayed and the exit status.
     """
+    pid, master = pty.fork()
+    if pid == 0:  # pragma: no cover - the child
+        try:
+            os.chdir(REPO_ROOT)
+            os.execve(argv[0], argv, env)
+        finally:
+            os._exit(127)
 
-    pytestmark = pytest.mark.skipif(
-        not TKINTER_AVAILABLE, reason="Python built without Tk (tkinter)"
+    displayed = b""
+    typed = False
+    deadline = time.monotonic() + timeout
+    try:
+        while time.monotonic() < deadline:
+            readable, _, _ = select.select([master], [], [], 0.5)
+            if not readable:
+                continue
+            try:
+                chunk = os.read(master, 4096)
+            except OSError:  # EIO: the child closed its side
+                break
+            if not chunk:
+                break
+            displayed += chunk
+            if not typed and wait_for in displayed:
+                os.write(master, keys)
+                typed = True
+        else:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            pytest.fail(f"the child never finished; terminal showed {displayed!r}")
+    finally:
+        os.close(master)
+    _, status = os.waitpid(pid, 0)
+    print("terminal showed:", displayed)
+    return displayed, os.waitstatus_to_exitcode(status)
+
+
+def _run_as_a_script(argv, stdin_text, env):
+    """Run ``argv`` with a real pipe for stdin, holding ``stdin_text``."""
+    completed = subprocess.run(
+        argv,
+        input=stdin_text,
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=REPO_ROOT,
+        timeout=120,
     )
+    print("stdout:", completed.stdout)
+    print("stderr:", completed.stderr)
+    return completed
 
-    @patch("tkinter.Tk")
-    @patch("tkinter.simpledialog.askstring")
-    def test_get_password_gui_success(self, mock_askstring, mock_tk):
-        """Test successful GUI password retrieval."""
-        mock_root = Mock()
-        mock_tk.return_value = mock_root
-        mock_askstring.return_value = "test_password"
 
-        result = get_password_gui("Enter password")
+class TestOnATerminal:
+    """stdin is a tty: the environment is "cli" and the prompt is getpass."""
 
-        assert result == "test_password"
-        mock_root.withdraw.assert_called_once()
-        mock_root.attributes.assert_called_once_with("-topmost", True)
-        mock_root.destroy.assert_called_once()
-        mock_askstring.assert_called_once_with(
-            "Cluster Authentication", "Enter password", show="*"
+    def test_the_typed_password_is_returned_and_never_echoed(self, tmp_path):
+        result_path = tmp_path / "result.json"
+
+        displayed, status = _run_on_a_terminal(
+            _probe_argv(result_path), b"s3cret-typed\n", _child_env()
         )
 
-    @patch("tkinter.Tk")
-    @patch("tkinter.simpledialog.askstring")
-    def test_get_password_gui_cancelled(self, mock_askstring, mock_tk):
-        """Test cancelled GUI password retrieval."""
-        mock_root = Mock()
-        mock_tk.return_value = mock_root
-        mock_askstring.return_value = None
+        assert status == 0
+        assert _read_result(result_path) == {
+            "environment": "cli",
+            "password": "s3cret-typed",
+        }
+        assert PROMPT.encode() in displayed
+        assert b"s3cret-typed" not in displayed, "getpass left echo on"
 
-        result = get_password_gui("Enter password")
+    def test_control_c_at_the_prompt_is_no_password_not_a_traceback(self, tmp_path):
+        result_path = tmp_path / "result.json"
 
-        assert result is None
-        mock_root.destroy.assert_called_once()
+        displayed, status = _run_on_a_terminal(
+            _probe_argv(result_path), b"\x03", _child_env()
+        )
 
-    @patch("clustrix.auth_fallbacks.get_password_widget")
-    def test_get_password_gui_import_error(self, mock_get_widget):
-        """Test GUI password retrieval with ImportError fallback."""
-        mock_get_widget.return_value = "widget_password"
+        assert status == 0, displayed
+        assert _read_result(result_path)["password"] is None
+        assert b"Traceback" not in displayed
 
-        with patch("tkinter.Tk", side_effect=ImportError()):
-            result = get_password_gui("Enter password")
+    def test_control_d_at_the_prompt_is_no_password_not_a_traceback(self, tmp_path):
+        result_path = tmp_path / "result.json"
 
-        assert result == "widget_password"
-        mock_get_widget.assert_called_once_with("Enter password")
+        displayed, status = _run_on_a_terminal(
+            _probe_argv(result_path), b"\x04", _child_env()
+        )
+
+        assert status == 0, displayed
+        assert _read_result(result_path)["password"] is None
+        assert b"Traceback" not in displayed
 
 
-class TestGetPasswordWidget:
-    """Test widget password retrieval."""
+class TestAsAScript:
+    """stdin is a pipe: the environment is "script" and the prompt is input()."""
 
-    @patch("ipywidgets.Password")
-    @patch("ipywidgets.Button")
-    @patch("ipywidgets.Output")
-    @patch("ipywidgets.HTML")
-    @patch("ipywidgets.VBox")
-    @patch("IPython.display.display")
-    @patch("IPython.display.clear_output")
-    def test_get_password_widget_success(
-        self,
-        mock_clear,
-        mock_display,
-        mock_vbox,
-        mock_html,
-        mock_output,
-        mock_button,
-        mock_password,
+    def test_a_line_on_stdin_is_the_password(self, tmp_path):
+        result_path = tmp_path / "result.json"
+
+        completed = _run_as_a_script(
+            _probe_argv(result_path), "s3cret-piped\n", _child_env()
+        )
+
+        assert completed.returncode == 0
+        assert _read_result(result_path) == {
+            "environment": "script",
+            "password": "s3cret-piped",
+        }
+        assert PROMPT in completed.stdout
+
+    def test_closed_stdin_is_no_password_not_a_traceback(self, tmp_path):
+        result_path = tmp_path / "result.json"
+
+        completed = _run_as_a_script(_probe_argv(result_path), "", _child_env())
+
+        assert completed.returncode == 0
+        assert _read_result(result_path)["password"] is None
+        assert "Traceback" not in completed.stderr
+
+    def test_an_interrupt_at_the_prompt_is_no_password_not_a_traceback(self, tmp_path):
+        result_path = tmp_path / "result.json"
+        child = subprocess.Popen(
+            _probe_argv(result_path),
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=_child_env(),
+            cwd=REPO_ROOT,
+        )
+        try:
+            shown = b""
+            while PROMPT.encode() not in shown:
+                byte = child.stdout.read(1)
+                assert byte, f"the prompt never appeared: {shown!r}"
+                shown += byte
+            child.send_signal(signal.SIGINT)
+            _, stderr = child.communicate(timeout=60)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.communicate()
+        print("stderr:", stderr)
+
+        assert child.returncode == 0
+        assert _read_result(result_path)["password"] is None
+        assert b"Traceback" not in stderr
+
+
+class TestInANotebookKernel:
+    """``ipykernel`` has been imported: the environment is "notebook"."""
+
+    def test_with_no_display_and_no_frontend_there_is_no_password(self, tmp_path):
+        """Neither notebook prompt can answer here, and neither one hangs.
+
+        With tkinter missing the dialog falls through to the ipywidgets
+        prompt, which builds its widgets and returns without waiting for
+        anyone to press Submit. So the honest outcome in a kernel that has
+        no display is ``None``, promptly -- not a blocked process.
+        """
+        pytest.importorskip("ipykernel")
+        result_path = tmp_path / "result.json"
+
+        completed = _run_as_a_script(
+            _probe_argv(result_path, preload="ipykernel"),
+            "this-must-not-be-read-as-a-password\n",
+            _child_env(),
+        )
+
+        assert completed.returncode == 0
+        assert _read_result(result_path) == {
+            "environment": "notebook",
+            "password": None,
+        }
+
+    def test_importing_clustrix_does_not_make_a_script_look_like_a_notebook(
+        self, tmp_path
     ):
-        """Test successful widget password retrieval."""
-        mock_password_widget = Mock()
-        mock_password_widget.value = "test_password"
-        mock_password.return_value = mock_password_widget
+        """The control for the test above: the preload is what changed it."""
+        result_path = tmp_path / "result.json"
 
-        mock_button_widget = Mock()
-        mock_button.return_value = mock_button_widget
+        _run_as_a_script(_probe_argv(result_path), "", _child_env())
 
-        mock_output_widget = Mock()
-        mock_output.return_value = mock_output_widget
-
-        result = get_password_widget("Enter password")
-
-        # The function returns None in its current implementation
-        # as it needs proper async handling
-        assert result is None
-
-    def test_get_password_widget_import_error(self):
-        """Test widget password retrieval with ImportError."""
-        with patch("ipywidgets.Password", side_effect=ImportError()):
-            result = get_password_widget("Enter password")
-
-        assert result is None
+        assert _read_result(result_path)["environment"] == "script"
 
 
-def _a_target(hostname="example.com", username="testuser"):
-    """The recipient every one of these calls now has to name."""
-    return CredentialTarget(
-        hostname=hostname,
-        username=username,
-        described_as=f"{hostname}, in a test",
+class TestThePasswordInTheEnvironment:
+    """The environment is asked before any person is."""
+
+    def test_a_variable_naming_the_host_is_used_without_prompting(self, tmp_path):
+        result_path = tmp_path / "result.json"
+
+        completed = _run_as_a_script(
+            _probe_argv(result_path),
+            "typed-at-the-prompt\n",
+            _child_env(CLUSTRIX_PASSWORD_CLUSTER_EXAMPLE_COM="from-the-environment"),
+        )
+
+        assert _read_result(result_path)["password"] == "from-the-environment"
+        assert PROMPT not in completed.stdout
+
+    @pytest.mark.parametrize(
+        "variable",
+        ["CLUSTER_PASSWORD_CLUSTER_EXAMPLE_COM", "CLUSTER_EXAMPLE_COM_PASSWORD"],
     )
+    def test_the_other_host_named_spellings_work_too(self, tmp_path, variable):
+        result_path = tmp_path / "result.json"
 
+        _run_as_a_script(
+            _probe_argv(result_path),
+            "",
+            _child_env(**{variable: "from-the-environment"}),
+        )
 
-class TestGetClusterPassword:
-    """Test cluster password retrieval."""
+        assert _read_result(result_path)["password"] == "from-the-environment"
 
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    def test_get_cluster_password_colab_success(self, mock_detect):
-        """Test successful password retrieval in Colab."""
-        mock_detect.return_value = "colab"
+    def test_a_variable_naming_another_host_is_not_used(self, tmp_path):
+        result_path = tmp_path / "result.json"
 
-        mock_userdata = Mock()
-        mock_userdata.get.side_effect = lambda key: {
-            "CLUSTER_PASSWORD_EXAMPLE_COM": "colab_password"
-        }.get(key)
+        _run_as_a_script(
+            _probe_argv(result_path),
+            "",
+            _child_env(CLUSTRIX_PASSWORD_OTHER_EXAMPLE_COM="someone-elses"),
+        )
 
-        # Create a mock colab module
-        mock_colab = Mock()
-        mock_colab.userdata = mock_userdata
+        assert _read_result(result_path)["password"] is None
 
-        # Create a mock google module with colab attribute
-        mock_google = Mock()
-        mock_google.colab = mock_colab
-
-        with patch.dict(
-            sys.modules, {"google": mock_google, "google.colab": mock_colab}
-        ):
-            result = get_cluster_password(_a_target())
-
-        assert result == "colab_password"
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    def test_get_cluster_password_colab_multiple_keys(self, mock_detect):
-        """Test password retrieval in Colab with multiple key attempts."""
-        mock_detect.return_value = "colab"
-
-        mock_userdata = Mock()
-        call_count = 0
-
-        def mock_get_side_effect(key):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                raise Exception("Not found")
-            elif call_count == 2:
-                return "found_password"
-            return None
-
-        mock_userdata.get.side_effect = mock_get_side_effect
-
-        # Create a mock colab module
-        mock_colab = Mock()
-        mock_colab.userdata = mock_userdata
-
-        # Create a mock google module with colab attribute
-        mock_google = Mock()
-        mock_google.colab = mock_colab
-
-        with patch.dict(
-            sys.modules, {"google": mock_google, "google.colab": mock_colab}
-        ):
-            result = get_cluster_password(_a_target())
-
-        assert result == "found_password"
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    def test_get_cluster_password_colab_import_error(self, mock_detect):
-        """Test password retrieval in Colab with import error."""
-        mock_detect.return_value = "colab"
-
-        # Mock the sys.modules to not contain google.colab
-        with patch.dict(sys.modules, {}, clear=False):
-            if "google.colab" in sys.modules:
-                del sys.modules["google.colab"]
-            result = get_cluster_password(_a_target())
-
-        assert result is None
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch.dict(os.environ, {"CLUSTRIX_PASSWORD_EXAMPLE_COM": "env_password"})
-    def test_get_cluster_password_env_vars(self, mock_detect):
-        """Test password retrieval from environment variables."""
-        mock_detect.return_value = "cli"
-
-        result = get_cluster_password(_a_target())
-
-        assert result == "env_password"
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("clustrix.auth_fallbacks.get_password_gui")
-    def test_get_cluster_password_notebook_gui(self, mock_gui, mock_detect):
-        """Test password retrieval in notebook with GUI."""
-        mock_detect.return_value = "notebook"
-        mock_gui.return_value = "gui_password"
-
-        result = get_cluster_password(_a_target())
-
-        assert result == "gui_password"
-        mock_gui.assert_called_once_with("Password for testuser@example.com")
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("clustrix.auth_fallbacks.get_password_gui")
-    @patch("clustrix.auth_fallbacks.get_password_widget")
-    def test_get_cluster_password_notebook_widget_fallback(
-        self, mock_widget, mock_gui, mock_detect
+    @pytest.mark.parametrize(
+        "variable", ["CLUSTRIX_DEFAULT_PASSWORD", "CLUSTER_PASSWORD"]
+    )
+    def test_a_hostless_variable_is_refused_when_nobody_chose_the_host(
+        self, tmp_path, variable
     ):
-        """Test password retrieval in notebook with widget fallback."""
-        mock_detect.return_value = "notebook"
-        mock_gui.return_value = None
-        mock_widget.return_value = "widget_password"
+        """It names no host, so it goes only to a host the user chose.
 
-        result = get_cluster_password(_a_target())
+        With nothing recording who chose ``cluster.example.com`` the variable
+        is withheld and the person is asked instead -- and told why, with the
+        name of the variable that *would* work.
+        """
+        result_path = tmp_path / "result.json"
 
-        assert result == "widget_password"
-        mock_widget.assert_called_once_with("Password for testuser@example.com")
+        completed = _run_as_a_script(
+            _probe_argv(result_path),
+            "typed-at-the-prompt\n",
+            _child_env(**{variable: "the-default-password"}),
+        )
 
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("getpass.getpass")
-    def test_get_cluster_password_cli_getpass(self, mock_getpass, mock_detect):
-        """Test password retrieval in CLI with getpass."""
-        mock_detect.return_value = "cli"
-        mock_getpass.return_value = "cli_password"
+        assert _read_result(result_path)["password"] == "typed-at-the-prompt"
+        assert f"${variable} was not offered" in completed.stderr
+        assert "CLUSTRIX_PASSWORD_CLUSTER_EXAMPLE_COM" in completed.stderr
+        assert "the-default-password" not in completed.stderr
 
-        result = get_cluster_password(_a_target())
+    def test_a_hostless_variable_is_used_for_a_host_the_user_configured(self, tmp_path):
+        result_path = tmp_path / "result.json"
 
-        assert result == "cli_password"
-        mock_getpass.assert_called_once_with("Password for testuser@example.com: ")
+        completed = _run_as_a_script(
+            _probe_argv(result_path, with_config=True),
+            "typed-at-the-prompt\n",
+            _child_env(CLUSTRIX_DEFAULT_PASSWORD="the-default-password"),
+        )
 
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("getpass.getpass")
-    def test_get_cluster_password_cli_keyboard_interrupt(
-        self, mock_getpass, mock_detect
-    ):
-        """Test password retrieval in CLI with KeyboardInterrupt."""
-        mock_detect.return_value = "cli"
-        mock_getpass.side_effect = KeyboardInterrupt()
-
-        result = get_cluster_password(_a_target())
-
-        assert result is None
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("getpass.getpass")
-    def test_get_cluster_password_cli_eof_error(self, mock_getpass, mock_detect):
-        """Test password retrieval in CLI with EOFError."""
-        mock_detect.return_value = "cli"
-        mock_getpass.side_effect = EOFError()
-
-        result = get_cluster_password(_a_target())
-
-        assert result is None
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("builtins.input")
-    def test_get_cluster_password_script_input(self, mock_input, mock_detect):
-        """Test password retrieval in script with input."""
-        mock_detect.return_value = "script"
-        mock_input.return_value = "script_password"
-
-        result = get_cluster_password(_a_target())
-
-        assert result == "script_password"
-        mock_input.assert_called_once_with("Password for testuser@example.com: ")
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    @patch("builtins.input")
-    def test_get_cluster_password_script_keyboard_interrupt(
-        self, mock_input, mock_detect
-    ):
-        """Test password retrieval in script with KeyboardInterrupt."""
-        mock_detect.return_value = "script"
-        mock_input.side_effect = KeyboardInterrupt()
-
-        result = get_cluster_password(_a_target())
-
-        assert result is None
-
-    @patch("clustrix.auth_fallbacks.detect_environment")
-    def test_get_cluster_password_unknown_environment(self, mock_detect):
-        """Test password retrieval in unknown environment."""
-        mock_detect.return_value = "unknown"
-
-        result = get_cluster_password(_a_target())
-
-        assert result is None
+        assert _read_result(result_path)["password"] == "the-default-password"
+        assert PROMPT not in completed.stdout
 
 
 class TestRequiresPasswordFallback:
-    """Test password fallback requirement detection."""
+    """``requires_password_fallback`` reads the dict ``setup_ssh_keys`` returns."""
 
-    def test_requires_password_fallback_success_false(self):
-        """Test when SSH key setup was successful."""
-        auth_result = {"success": True, "connection_tested": True, "error": ""}
+    @pytest.mark.parametrize(
+        "key_setup_result, expected",
+        [
+            ({"success": True, "connection_tested": True, "error": None}, False),
+            ({"success": True, "connection_tested": True}, False),
+            ({"success": True, "connection_tested": True, "error": "disk full"}, False),
+            ({"success": False, "connection_tested": True}, True),
+            ({"connection_tested": True}, True),
+            ({"success": True, "connection_tested": False}, True),
+            ({"success": True}, True),
+            (
+                {
+                    "success": True,
+                    "connection_tested": True,
+                    "error": "Permission denied (publickey)",
+                },
+                True,
+            ),
+            (
+                {"success": True, "connection_tested": True, "error": "Invalid KEY"},
+                True,
+            ),
+            (
+                {
+                    "success": True,
+                    "connection_tested": True,
+                    "error": "Authentication failed",
+                },
+                True,
+            ),
+            (
+                {"success": True, "connection_tested": True, "error": "GSSAPI error"},
+                True,
+            ),
+            (
+                {
+                    "success": True,
+                    "connection_tested": True,
+                    "error": "Kerberos ticket expired",
+                },
+                True,
+            ),
+        ],
+    )
+    def test_each_outcome_of_a_key_setup(self, key_setup_result, expected):
+        assert requires_password_fallback(key_setup_result) is expected
 
-        assert requires_password_fallback(auth_result) is False
+    def test_a_real_successful_key_setup_needs_no_fallback(self, ssh_server):
+        """The dict the real function returns, not one written for the test."""
+        result = setup_ssh_keys(_config(ssh_server), password=SSH_PASSWORD)
 
-    def test_requires_password_fallback_no_success(self):
-        """Test when SSH key setup was not successful."""
-        auth_result = {"success": False, "connection_tested": True, "error": ""}
+        print(result)
+        assert result["success"]
+        assert requires_password_fallback(result) is False
 
-        assert requires_password_fallback(auth_result) is True
+    def test_a_real_failed_key_setup_needs_the_fallback(self, ssh_server):
+        result = setup_ssh_keys(_config(ssh_server), password="not-the-password")
 
-    def test_requires_password_fallback_no_connection_test(self):
-        """Test when connection was not tested."""
-        auth_result = {"success": True, "connection_tested": False, "error": ""}
+        print(result)
+        assert not result["success"]
+        assert requires_password_fallback(result) is True
 
-        assert requires_password_fallback(auth_result) is True
 
-    def test_requires_password_fallback_publickey_error(self):
-        """Test when error indicates publickey authentication issue."""
-        auth_result = {
-            "success": True,
-            "connection_tested": True,
-            "error": "Permission denied (publickey)",
-        }
+SSH_PASSWORD = "clustrix-test-password"
 
-        assert requires_password_fallback(auth_result) is True
 
-    def test_requires_password_fallback_key_error(self):
-        """Test when error mentions key issues."""
-        auth_result = {
-            "success": True,
-            "connection_tested": True,
-            "error": "SSH key authentication failed",
-        }
+@pytest.fixture
+def ssh_server(tmp_path):
+    root = tmp_path / "remote"
+    root.mkdir()
+    with LocalSSHServer(root=root, password=SSH_PASSWORD) as server:
+        server.root_path = root
+        yield server
 
-        assert requires_password_fallback(auth_result) is True
 
-    def test_requires_password_fallback_authentication_error(self):
-        """Test when error mentions authentication issues."""
-        auth_result = {
-            "success": True,
-            "connection_tested": True,
-            "error": "Authentication failure detected",
-        }
+def _config(server):
+    return ClusterConfig(
+        cluster_host=server.host,
+        cluster_port=server.port,
+        username="testuser",
+        ssh_host_key_policy="auto_add",
+    )
 
-        assert requires_password_fallback(auth_result) is True
 
-    def test_requires_password_fallback_gssapi_error(self):
-        """Test when error mentions GSSAPI issues."""
-        auth_result = {
-            "success": True,
-            "connection_tested": True,
-            "error": "GSSAPI authentication failed",
-        }
-
-        assert requires_password_fallback(auth_result) is True
-
-    def test_requires_password_fallback_kerberos_error(self):
-        """Test when error mentions Kerberos issues."""
-        auth_result = {
-            "success": True,
-            "connection_tested": True,
-            "error": "Kerberos authentication failed",
-        }
-
-        assert requires_password_fallback(auth_result) is True
+def _host_variable(server):
+    return "CLUSTRIX_PASSWORD_" + server.host.upper().replace(".", "_")
 
 
 class TestSetupAuthWithFallback:
-    """Test authentication setup with fallback."""
+    """The real ``setup_ssh_keys``, given whatever password the fallback finds."""
 
-    def test_setup_auth_with_password_success(self):
-        """Test successful SSH key setup with provided password."""
-        mock_config = Mock()
-        mock_config.cluster_host = "example.com"
-        mock_config.username = "testuser"
-
-        mock_ssh_func = Mock()
-        mock_ssh_func.return_value = {
-            "success": True,
-            "connection_tested": True,
-            "error": "",
-        }
+    def test_a_working_password_is_used_as_given(self, ssh_server, monkeypatch):
+        monkeypatch.setenv(_host_variable(ssh_server), "would-fail-if-it-were-used")
 
         result = setup_auth_with_fallback(
-            mock_config, mock_ssh_func, password="test_password"
+            _config(ssh_server), setup_ssh_keys, password=SSH_PASSWORD
         )
 
-        assert result["success"] is True
-        mock_ssh_func.assert_called_once_with(mock_config, password="test_password")
+        print(result)
+        assert result["success"] and result["connection_tested"]
+        assert result["key_deployed"]
+        assert "used_password_fallback" not in result["details"]
+        assert ("testuser", "publickey") in ssh_server.authentications
+        deployed = (ssh_server.root_path / ".ssh" / "authorized_keys").read_text()
+        assert Path(f"{result['key_path']}.pub").read_text().split()[1] in deployed
 
-    @patch("clustrix.auth_fallbacks.get_cluster_password")
-    def test_setup_auth_with_fallback_success(self, mock_get_password):
-        """Test successful SSH key setup with fallback password."""
-        mock_config = Mock()
-        mock_config.cluster_host = "example.com"
-        mock_config.username = "testuser"
+    def test_with_no_password_given_the_environment_supplies_one(
+        self, ssh_server, monkeypatch
+    ):
+        monkeypatch.setenv(_host_variable(ssh_server), SSH_PASSWORD)
 
-        mock_ssh_func = Mock()
-        # Only one call with fallback password succeeds
-        mock_ssh_func.return_value = {
-            "success": True,
-            "connection_tested": True,
-            "error": "",
-        }
+        result = setup_ssh_keys_with_fallback(_config(ssh_server))
 
-        mock_get_password.return_value = "fallback_password"
-
-        result = setup_auth_with_fallback(mock_config, mock_ssh_func)
-
-        assert result["success"] is True
+        print(result)
+        assert result["success"] and result["connection_tested"]
         assert result["details"]["used_password_fallback"] is True
-        assert mock_ssh_func.call_count == 1
+        assert ("testuser", "password") in ssh_server.authentications
+        assert ("testuser", "publickey") in ssh_server.authentications
 
-        # Check that fallback password was used in the call
-        call_kwargs = mock_ssh_func.call_args[1]
-        assert call_kwargs["password"] == "fallback_password"
+    def test_a_wrong_password_is_retried_with_the_one_from_the_environment(
+        self, ssh_server, monkeypatch
+    ):
+        monkeypatch.setenv(_host_variable(ssh_server), SSH_PASSWORD)
 
-    @patch("clustrix.auth_fallbacks.get_cluster_password")
-    def test_setup_auth_with_fallback_no_password(self, mock_get_password):
-        """Test SSH key setup when no fallback password available."""
-        mock_config = Mock()
-        mock_config.cluster_host = "example.com"
-        mock_config.username = "testuser"
+        result = setup_auth_with_fallback(
+            _config(ssh_server), setup_ssh_keys, password="not-the-password"
+        )
 
-        mock_ssh_func = Mock()
-        mock_ssh_func.return_value = {
-            "success": False,
-            "connection_tested": False,
-            "error": "No password",
-        }
+        print(result)
+        assert result["success"] and result["connection_tested"]
+        assert result["details"]["used_password_fallback"] is True
 
-        mock_get_password.return_value = None
+    def test_a_wrong_fallback_password_is_reported_as_a_failure(
+        self, ssh_server, monkeypatch
+    ):
+        monkeypatch.setenv(_host_variable(ssh_server), "also-not-the-password")
 
-        result = setup_auth_with_fallback(mock_config, mock_ssh_func)
+        result = setup_ssh_keys_with_fallback(_config(ssh_server))
 
+        print(result)
+        assert not result["success"]
+        assert "Failed to deploy public key" in result["error"]
+        assert result["details"]["used_password_fallback"] is True
+        assert not (ssh_server.root_path / ".ssh" / "authorized_keys").exists()
+
+    def test_a_config_naming_no_host_has_nobody_to_ask_a_password_for(self):
+        result = setup_ssh_keys_with_fallback(ClusterConfig(username="someone"))
+
+        print(result)
         assert result["success"] is False
-        assert "no password fallback available" in result["error"]
-        assert result["details"]["fallback_attempted"] is True
-        assert result["details"]["fallback_available"] is False
-
-    @patch("clustrix.auth_fallbacks.get_cluster_password")
-    def test_setup_auth_with_fallback_cleanup(self, mock_get_password):
-        """Test that passwords are properly cleaned up after use."""
-        mock_config = Mock()
-        mock_config.cluster_host = "example.com"
-        mock_config.username = "testuser"
-
-        mock_ssh_func = Mock()
-        mock_ssh_func.return_value = {
-            "success": True,
-            "connection_tested": True,
-            "error": "",
+        assert "no credential target exists" in result["error"]
+        assert result["details"] == {
+            "fallback_attempted": True,
+            "fallback_available": False,
         }
 
-        mock_get_password.return_value = "fallback_password"
+    def test_with_no_password_anywhere_it_says_so_and_connects_to_nothing(
+        self, tmp_path
+    ):
+        """No argument, no variable, and stdin at end-of-file.
 
-        kwargs = {}
-        result = setup_auth_with_fallback(mock_config, mock_ssh_func, **kwargs)
-
-        # Verify password was cleaned up
-        assert kwargs.get("password") is None
-        assert result["success"] is True
-
-    @patch("clustrix.auth_fallbacks.get_cluster_password")
-    def test_setup_auth_with_provided_password_failure(self, mock_get_password):
-        """Test with provided password that fails, then fallback."""
-        mock_config = Mock()
-        mock_config.cluster_host = "example.com"
-        mock_config.username = "testuser"
-
-        mock_ssh_func = Mock()
-        # First call with provided password fails, second with fallback succeeds
-        mock_ssh_func.side_effect = [
-            {"success": False, "connection_tested": False, "error": "Wrong password"},
-            {"success": True, "connection_tested": True, "error": ""},
-        ]
-
-        mock_get_password.return_value = "fallback_password"
-
-        result = setup_auth_with_fallback(
-            mock_config, mock_ssh_func, password="wrong_password"
+        Run as a child process because the last resort is a prompt, and the
+        prompt has to meet a real closed stdin.
+        """
+        script = (
+            "import json\n"
+            "from clustrix.config import ClusterConfig\n"
+            "from clustrix.ssh_utils import setup_ssh_keys_with_fallback\n"
+            f"config = ClusterConfig(cluster_host={HOST!r}, username={USER!r})\n"
+            "print('RESULT ' + json.dumps(setup_ssh_keys_with_fallback(config)))\n"
         )
 
-        assert result["success"] is True
-        assert result["details"]["used_password_fallback"] is True
-        assert mock_ssh_func.call_count == 2
+        completed = _run_as_a_script([sys.executable, "-c", script], "", _child_env())
+
+        assert completed.returncode == 0
+        line = [x for x in completed.stdout.splitlines() if "RESULT " in x][-1]
+        assert json.loads(line.split("RESULT ", 1)[1]) == {
+            "success": False,
+            "error": "SSH key setup failed and no password fallback available",
+            "details": {"fallback_attempted": True, "fallback_available": False},
+        }
+        assert not list((Path(os.environ["HOME"]) / ".ssh").glob("id_*"))
