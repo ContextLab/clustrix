@@ -6,12 +6,11 @@ Every test here talks to real infrastructure: SSH hosts, a SLURM cluster, or the
 
 ```
 real_world/
-├── conftest.py            # auto-marks EVERY collected item real_world; registers
-│                          # the expensive/ssh_required markers locally
+├── conftest.py            # auto-marks EVERY collected item real_world
 ├── credential_manager.py  # credential lookup from ~/.clustrix/.env and the environment
-├── api_validation/        # standalone scripts (validate_*.py, debug_*.py); pytest does not collect them
 ├── test_local_sshd_slurm.py   # @cluster against a real sshd + single-node SLURM
-└── test_*_real.py         # same cluster: input staging, GPU requests, signals, job names, paths
+├── test_*_real.py         # same cluster: input staging, GPU requests, signals, job names, paths
+└── test_filesystem_real.py    # the filesystem helpers on this machine; needs no cluster
 ```
 
 ## CONVENTIONS
@@ -25,5 +24,5 @@ real_world/
 ## ANTI-PATTERNS
 
 - No `unittest.mock` here at all — this suite is the anti-mock boundary.
-- No new marker without an `addinivalue_line` in `conftest.py` (--strict-markers is on).
+- No new marker without registering it in `pyproject.toml` (--strict-markers is on).
 - Never relax a timeout to make a slow cluster pass; bump the specific test's budget with a comment instead.

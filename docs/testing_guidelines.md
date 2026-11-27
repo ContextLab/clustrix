@@ -243,15 +243,12 @@ is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
 @pytest.mark.real_world    # opens real SSH or API connections
 @pytest.mark.slow          # takes a long time
 @pytest.mark.unit          # a unit test
-@pytest.mark.expensive     # costs money or cluster time; opt in with --run-expensive
 @pytest.mark.performance   # a benchmark
 ```
 
-Three more are registered from conftest rather than `pyproject.toml`, because
-the suites that use them are routinely excluded from a run:
-`cluster_network` (from `tests/conftest.py`, for tests needing a private host
-named by `CLUSTRIX_TEST_*_HOST`), and `visual` and `ssh_required` (from
-`tests/real_world/conftest.py`).
+One more is registered from `tests/conftest.py` rather than `pyproject.toml`:
+`cluster_network`, for tests needing a private host named by
+`CLUSTRIX_TEST_*_HOST`.
 
 `real_world` is applied automatically to everything under `tests/real_world/`
 by that directory's `conftest.py`, so you do not need to add it by hand — and
@@ -319,17 +316,14 @@ python tests/infrastructure/setup_test_infrastructure.py teardown
 ### Running the real-world test runner
 
 ```bash
-# Everything
-python tests/run_real_world_tests.py
-
-# One or more categories: executor, decorator, config, credentials, ssh, notebook
-python tests/run_real_world_tests.py --category executor decorator
-
-# Bring the Docker services up first and take them down afterwards
-python tests/run_real_world_tests.py \
-    --setup-infrastructure \
-    --teardown-infrastructure
+python scripts/run_real_world_tests.py --filesystem   # filesystem helpers, this machine
+python scripts/run_real_world_tests.py --ssh          # @cluster against a real sshd and SLURM
+python scripts/run_real_world_tests.py --all          # everything under tests/real_world
 ```
+
+`--ssh` needs the cluster `scripts/setup_local_slurm.sh` creates, named by
+`CLUSTRIX_TEST_SSH_HOST`, `CLUSTRIX_TEST_SSH_PORT`, `CLUSTRIX_TEST_SSH_USER`
+and `CLUSTRIX_TEST_SSH_KEY`; without them its tests skip and say so.
 
 ## CI/CD Pipeline
 

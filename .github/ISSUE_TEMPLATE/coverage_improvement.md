@@ -85,11 +85,6 @@ assignees: ''
 - Run in CI/CD pipeline
 - No external dependencies
 
-**Integration Tests** (`tests/integration/`): Cross-module interaction tests
-- Component integration testing
-- Limited external dependencies
-- Run in CI/CD pipeline
-
 **Real-World Tests** (`tests/real_world/`): End-to-end testing with actual resources
 - Live cluster and API testing
 - Excluded from automated CI (credential requirements)
@@ -98,20 +93,20 @@ assignees: ''
 ### Phase 1: AWS Provider Tests
 1. Fix ClientError mocking issues in `tests/unit/`
 2. Add comprehensive VPC/subnet/security group tests
-3. Test EKS cluster lifecycle completely in `tests/integration/`
+3. Test EKS cluster lifecycle completely
 4. Add real AWS integration tests in `tests/real_world/`
 5. Add edge case and error handling tests
 
 ### Phase 2: Notebook Magic
 1. Mock Jupyter environment for testing in `tests/unit/`
 2. Test magic command parsing and execution
-3. Test widget configuration management in `tests/integration/`
+3. Test widget configuration management
 4. Test cloud provider integration through widgets
 
 ### Phase 3: Cost Providers
 1. Mock external pricing APIs in `tests/unit/`
 2. Test cost calculation accuracy
-3. Test error handling for API failures in `tests/integration/`
+3. Test error handling for API failures
 4. Test caching and rate limiting in `tests/real_world/`
 
 ### Phase 4: Core Modules

@@ -25,7 +25,7 @@ tests/
   No test module uses `unittest.mock` (issue #117); the one file the pattern below matches is
   `tests/unit/test_no_mocks_in_shipped_code.py`, which names what it scans for. Recount before quoting:
   `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`
-- `pytest --strict-markers` — every marker must be registered in pyproject.toml (5 are). `ssh_required` is registered locally by `tests/real_world/conftest.py` via `addinivalue_line`, NOT in pyproject; `cluster_network` by `tests/conftest.py`.
+- `pytest --strict-markers` — every marker must be registered in pyproject.toml (4 are); `cluster_network` is registered by `tests/conftest.py` instead, because it must exist in runs that exclude the suite that uses it.
 - `pyproject.toml [tool.pytest.ini_options]` is the ONLY pytest config — never add pytest.ini/tox.ini/setup.cfg (#130). Enforced by `tests/unit/test_pytest_config.py`.
 - Coverage floor `fail_under = 66` (measured 68%); raise it only as coverage actually rises (#115).
 - `tests/conftest.py` provides shared fixtures; `tests/ssh_server.py` is an in-process SSH server for tests that need a real protocol exchange.
@@ -34,5 +34,5 @@ tests/
 ## ANTI-PATTERNS
 
 - Never weaken or delete a failing test to go green — fix the code, or rewrite the assertion with a stated reason.
-- Never introduce a new marker without registering it (pyproject or the real_world conftest).
+- Never introduce a new marker without registering it in pyproject.
 - Never commit credentials, hosts, or usernames — tests read them from env (`CLUSTRIX_TEST_*`, `HF_TOKEN`).

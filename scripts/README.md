@@ -44,14 +44,14 @@ This directory contains essential utility scripts for development and maintenanc
 - Supports multiple badge types (tests, coverage, style, etc.)
 
 #### `run_real_world_tests.py` 
-**Purpose**: Comprehensive real-world test runner  
+**Purpose**: Runs the suites under `tests/real_world` by category and exits non-zero if one fails  
 **Usage**: `python scripts/run_real_world_tests.py [options]`  
-**Features**:
-- Runs external API validation tests
-- Manages SSH and cluster connectivity tests  
-- Credential management integration
-- Supports specific test categories (`--filesystem`, `--ssh`, `--api`, etc.)
-- **Note**: Requires actual credentials and external services
+**Categories**:
+- `--filesystem`: the filesystem helpers on this machine
+- `--ssh`: `@cluster` against a real sshd and SLURM; skips unless `CLUSTRIX_TEST_SSH_HOST`, `_USER` and `_KEY` name one (`scripts/setup_local_slurm.sh` creates it)
+- `--all`: everything under `tests/real_world`
+- `--unit`: everything outside it
+- `--check-creds`: report which credentials the suite can find
 
 ### Setup and Configuration
 
@@ -94,13 +94,12 @@ python scripts/generate_badges.py --run-coverage
 
 ### Real-World Testing Workflow
 ```bash
-# Setup credentials (one-time)
-python scripts/setup_validation_credentials.py
+# Stand up the cluster the --ssh tests run against (one-time, as root)
+sudo scripts/setup_local_slurm.sh
 
 # Run specific test categories
 python scripts/run_real_world_tests.py --filesystem
 python scripts/run_real_world_tests.py --ssh
-python scripts/run_real_world_tests.py --api
 
 # Run all tests
 python scripts/run_real_world_tests.py --all
@@ -114,10 +113,6 @@ All test files have been reorganized into the `tests/` directory:
 - **tests/real_world/**: tests that run against a real sshd and SLURM
   controller (`scripts/setup_local_slurm.sh` creates one); see
   `docs/REAL_WORLD_TESTING.md`
-
-- **tests/real_world/api_validation/**: standalone scripts, not collected by pytest
-  - `validate_*.py` - Service-specific validation scripts
-  - `debug_*.py` - API debugging utilities
 
 ### Scripts Removed
 The following categories of files were removed during cleanup:

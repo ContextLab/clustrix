@@ -85,42 +85,19 @@ GitHub Actions secrets.
 
 ## GitHub Actions
 
-### 1. Repository secrets
+`.github/workflows/real-world-tests.yml` has two jobs:
 
-Add these under `Settings → Secrets and variables → Actions`:
+- **Real sshd and SLURM.** Builds its own cluster with
+  `scripts/setup_local_slurm.sh` inside an Ubuntu 24.04 container and runs
+  `pytest tests/real_world/ -m real_world` against it. It needs no secret.
+  Manual (`workflow_dispatch`) only.
+- **HF Jobs smoke test.** Submits one `cpu-basic` job through `@cluster` and
+  checks the returned value. It needs the `HF_TOKEN` repository secret
+  (`Settings → Secrets and variables → Actions`), a token with `job.write` in
+  the target namespace, and is skipped when the secret is absent.
 
-- `CLUSTRIX_USERNAME` — username for the SSH and SLURM hosts
-- `CLUSTRIX_PASSWORD` — password for the SSH and SLURM hosts
-- `HF_TOKEN` — HuggingFace token with `job.write` in the target namespace
-- `HF_USERNAME` — HuggingFace username
-
-Those four are the only secrets `.github/workflows/real-world-tests.yml`
-references. Adding cloud-provider secrets has no effect, because no workflow
-reads them.
-
-### 2. What the workflow does
-
-`.github/workflows/real-world-tests.yml` creates a local SSH server to test
-against, injects the secrets above as environment variables, runs the
-real-world suites, and uploads the resulting artifacts. Jobs are individually
-gated on whether the secrets they need are present, so a fork without secrets
-skips rather than fails.
-
-### 3. Reproducing the workflow environment locally
-
-```bash
-export GITHUB_ACTIONS=true
-export CLUSTRIX_USERNAME="user"
-export CLUSTRIX_PASSWORD="your-password"
-export HF_USERNAME="your-hf-username"
-export HF_TOKEN="your-hf-token"
-
-python scripts/run_real_world_tests.py --check-creds
-```
-
-With `GITHUB_ACTIONS=true` set, the credential manager reads `CLUSTRIX_*` for
-the SSH and SLURM hosts in place of `TEST_SSH_*` and `TEST_SLURM_*`. The
-HuggingFace names are the same either way.
+`HF_TOKEN` is the only secret the workflow references. Adding cluster or
+cloud-provider secrets has no effect, because no workflow reads them.
 
 ## Running tests
 
@@ -132,31 +109,24 @@ python scripts/run_real_world_tests.py --check-creds
 
 # Run one category at a time
 python scripts/run_real_world_tests.py --filesystem
-python scripts/run_real_world_tests.py --ssh
-python scripts/run_real_world_tests.py --api
+python scripts/run_real_world_tests.py --ssh     # needs CLUSTRIX_TEST_SSH_HOST/_USER/_KEY
 
 # Everything
 python scripts/run_real_world_tests.py --all
-
-# Include the tests marked expensive
-python scripts/run_real_world_tests.py --all --expensive
 ```
 
 ### In GitHub Actions
 
 Real-world tests do **not** run on push or pull request. The `Real-World
 Tests` workflow deliberately has no `push:` or `pull_request:` trigger,
-because these jobs use real credentials and some of them provision billable
-resources — a pull request from a fork must never be able to start them. It
-runs on a weekly `schedule` (default branch only) or when you start it by
-hand:
+because the HuggingFace job uses a real token — a pull request from a fork
+must never be able to start it. That job also runs on a weekly `schedule`
+(default branch only); the cluster job runs only when you start the workflow
+by hand:
 
 1. Open the `Actions` tab
 2. Select `Real-World Tests`
-3. Click `Run workflow`
-4. Tick `Run expensive tests` only if you want the jobs that provision
-   billable resources
-5. Click `Run workflow` again to confirm
+3. Click `Run workflow`, and again to confirm
 
 ## Security practices
 

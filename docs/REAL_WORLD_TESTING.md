@@ -37,36 +37,17 @@ cloud calls. Location in the directory is now sufficient.
 ```
 tests/
 ├── real_world/
-│   ├── __init__.py                  # test_manager, TempResourceManager
-│   ├── conftest.py                  # markers, options, automatic real_world marking
+│   ├── __init__.py                  # TempResourceManager
+│   ├── conftest.py                  # automatic real_world marking, private-cluster skips
 │   ├── credential_manager.py        # credential lookup
-│   ├── api_validation/              # standalone scripts, not collected by pytest
 │   ├── test_local_sshd_slurm.py     # @cluster against a real sshd and SLURM
 │   ├── test_*_real.py               # the same cluster: staging, GPUs, signals, paths, ...
-│   ├── test_filesystem_real.py      # real filesystem tests
-│   └── test_ssh_real.py             # SSH key handling; needs no cluster
+│   └── test_filesystem_real.py      # the filesystem helpers on this machine
 ├── unit/
 └── test_*.py
 ```
 
 ## Test infrastructure
-
-### RealWorldTestManager
-
-Tracks API call count and estimated spend so a run cannot quietly cost money:
-
-```python
-from tests.real_world import test_manager
-
-if test_manager.can_make_api_call(estimated_cost=0.01):
-    result = api_call()
-    test_manager.record_api_call(cost=0.01)
-```
-
-`can_make_api_call` returns `False` once the session has made `daily_limit`
-calls (100 by default) or once the next call would push `current_cost` past
-`cost_limit_usd` ($5.00 by default). Both are set from the command line — see
-below.
 
 ### TempResourceManager
 
@@ -140,57 +121,25 @@ pytest tests/ -m "not real_world" --ignore=tests/real_world
 pytest tests/real_world/ -m real_world
 ```
 
-The options below are registered by `tests/real_world/conftest.py`, so they
-are available when that directory is part of the run:
-
-```bash
-# Include tests marked expensive
-pytest tests/real_world/ --run-expensive
-
-# Raise or lower the cost ceiling for the session
-pytest tests/real_world/ --api-cost-limit=10.0 --api-call-limit=200
-```
-
-Markers registered for this suite are `real_world`, `expensive` and
-`ssh_required`; no test is marked `expensive` at present. Selecting specific
-files works as usual:
+Selecting specific files works as usual:
 
 ```bash
 pytest tests/real_world/test_filesystem_real.py
 pytest tests/real_world/test_local_sshd_slurm.py -m real_world
 ```
 
-## Cost management
+## Cost
 
-Defaults are 100 API calls and $5.00 per session, both adjustable with the
-options above. The suite prefers operations that cost nothing:
-
-1. **HuggingFace Jobs** — CPU flavors only unless a paid GPU flavor is
-   explicitly allowed; GPU flavors bill by the second.
-2. **AWS STS GetCallerIdentity** — free, and used only to check the
-   credentials the `scripts/aws/` cleanup tooling needs. It is not an
-   execution backend.
-3. **Public APIs** — GitHub, PyPI, HuggingFace, all free at these volumes.
-
-Clustrix has no cloud pricing clients and no cloud VM backend; nothing in the
-suite queries a provider's price list.
-
-To see where a session stands:
-
-```python
-from tests.real_world import test_manager
-
-print(f"API calls this session: {test_manager.api_calls_today}")
-print(f"Current cost: ${test_manager.current_cost:.2f}")
-print(f"Cost limit: ${test_manager.cost_limit_usd:.2f}")
-```
+Nothing under `tests/real_world/` costs money: the cluster is one you run
+yourself. The one paid operation in the project's testing is the HuggingFace
+Jobs round trip in the workflow, pinned to the `cpu-basic` flavor.
 
 ## What gets tested where
 
 ### Filesystem operations
 
-Real tests create actual files and directories, exercise permissions, and
-handle large files.
+`test_filesystem_real.py` runs `ClusterFilesystem` and the `cluster_*` helpers
+over real files and directories on this machine.
 
 ### SSH and SLURM
 
@@ -198,7 +147,6 @@ handle large files.
 controller: key authentication, SFTP, virtualenv builds, `sbatch`, `squeue`,
 `sacct`, `scancel`. The other `test_*_real.py` files use the same host for
 input staging, GPU requests, signals, job names and `~` in paths.
-`test_ssh_real.py` covers key discovery and generation and needs no host.
 
 ### HuggingFace Jobs
 
@@ -211,8 +159,7 @@ the project has.
 
 ## Writing a real-world test
 
-Group tests into a class, mark what needs marking, and clean up after
-yourself:
+Group tests into a class and clean up after yourself:
 
 ```python
 class TestComponentReal:
@@ -222,10 +169,6 @@ class TestComponentReal:
         with TempResourceManager() as temp_mgr:
             temp_file = temp_mgr.create_temp_file("content")
             ...
-
-    @pytest.mark.expensive
-    def test_expensive_operation_real(self):
-        ...
 ```
 
 Skip when a resource is genuinely unavailable, and say which one:
@@ -243,41 +186,22 @@ turns a real failure into a pass, which is exactly what this suite exists to
 prevent. Skip on a missing prerequisite you checked for, not on any exception
 that happens to come out.
 
-A starting point for a new file:
-
-```python
-"""
-Real-world tests for [component].
-
-These tests use actual [external resource] to verify functionality.
-"""
-
-import pytest
-from tests.real_world import test_manager, TempResourceManager
-
-
-class TestComponentReal:
-    def test_basic_functionality_real(self):
-        if not test_manager.can_make_api_call(0.01):
-            pytest.skip("API limit reached")
-
-        with TempResourceManager() as temp_mgr:
-            ...
-
-        test_manager.record_api_call(0.01)
-```
-
 ## Continuous integration
 
 `.github/workflows/real-world-tests.yml` runs this suite. It has no `push:` or
-`pull_request:` trigger, on purpose: these jobs use real credentials and some
-provision billable resources, so a pull request from a fork must never be able
-to start them. It runs on a weekly schedule against the default branch, or
-manually through `workflow_dispatch`.
+`pull_request:` trigger, on purpose: its HuggingFace job uses a real token, so
+a pull request from a fork must never be able to start it.
 
-Each job is gated on whether the secrets it needs are present, resolved in a
-separate `check-secrets` job — the `secrets` context is not available in `if:`
-conditions, so the presence check has to become a job output first.
+- `local-cluster` (manual only) runs `scripts/setup_local_slurm.sh` in an
+  Ubuntu 24.04 container and then `pytest tests/real_world/ -m real_world`
+  with the four `CLUSTRIX_TEST_SSH_*` variables. It needs no secret. **It has
+  not yet been run on GitHub**: the script and the suite were run in such a
+  container elsewhere, and that the hosted runner behaves the same is
+  inferred.
+- `hf-jobs-integration` (manual, and weekly on the default branch) is gated
+  on `HF_TOKEN` being present, resolved in a separate `check-secrets` job —
+  the `secrets` context is not available in `if:` conditions, so the presence
+  check has to become a job output first.
 
 ## Troubleshooting
 
@@ -290,9 +214,6 @@ process never sourced.
 are `600`; `ssh -vvv` will tell you which. A `HostKeyVerificationError` inside
 a test means the test connected without naming a host-key policy — see "Host
 keys" above.
-
-**Cost or call limits reached.** Raise them with `--api-cost-limit` and
-`--api-call-limit`, or work out why a test is making more calls than it needs.
 
 **File permission errors.** Check the temp directory is writable and that a
 previous run's `TempResourceManager` cleanup actually ran.
