@@ -1,17 +1,32 @@
 Data packages
 =============
 
-Clustrix ships your function and its arguments. It does not ship your dataset.
-A function that opens ``"data/subjects.h5"`` finds that file on your laptop and
-does not find it on the worker, and no amount of decorating changes that. A
-data package is how a dataset travels: you name the files, clustrix moves them,
-and the function reads them back through the package on whichever machine it
-happens to be running on.
+A data package is an explicit handle on a set of files or bytes. You build it,
+pass it to a ``@cluster`` function as an ordinary argument, and read the files
+back through it on whichever machine the function runs on.
 
-Nothing is inferred. A file moves because you named it, never because a string
-in your source code looked like a path. That restraint is deliberate: an upload
-triggered by the literal ``"s3://bucket/notes.log"`` is the worst failure mode
-available here, so declaration is the only route.
+It is one of two ways data reaches a job:
+
+* On ``ssh`` and ``slurm``, local files a call names are staged automatically;
+  see :doc:`input_files`. Most code on those backends needs nothing else.
+* A data package is declared by you. It is the way to send data to
+  **HuggingFace Jobs**, where nothing is staged automatically, and it gives
+  you a handle that can be listed and deleted.
+
+A package contains exactly what you named. Nothing is added to it by reading
+your source code.
+
+.. warning::
+
+   **Large packages and** ``ssh`` **/** ``slurm``. A package too big to travel
+   inline (``stage_inline_max_bytes``, 1 MB) is stored in a private
+   HuggingFace dataset repository. An ``ssh`` or ``slurm`` worker has no
+   Clustrix installation to fetch it with, and dereferencing the package
+   there raises :class:`clustrix.StagingError`. On those backends use
+   automatic staging for large files, or build the package with
+   ``force_local=True`` so that its contents travel with the job. Inline
+   packages work on every backend; an inline package was run over a real SSH
+   connection for this page.
 
 The shape of it
 ---------------
@@ -135,9 +150,9 @@ all of them before it happens rather than after:
    ``<namespace>/clustrix-data``. The namespace is ``hf_namespace`` if you set
    one, otherwise ``hf_username``, otherwise whatever the token's ``whoami()``
    reports. Set ``hf_data_repo`` to name a different repo outright.
-3. **This applies on every backend.** A ``slurm`` job with a package too big to
-   inline still stages that package through HuggingFace, because that is the
-   only remote store clustrix has.
+3. **Only a worker that has Clustrix and a token can read it.** That is a
+   HuggingFace Jobs container. An ``ssh`` or ``slurm`` worker cannot; see the
+   warning at the top of this page.
 
 Each package gets its own folder in that repo, keyed by a fresh identifier, so
 two packages never share a stored blob and deleting one cannot pull data out
@@ -319,12 +334,11 @@ changed.
 When not to use this
 --------------------
 
-If the data is already reachable from the worker, staging it is pure waste. On
-an HPC cluster with a shared filesystem your ``/scratch`` directory is visible
-from every compute node, so the file your function opens is already there and
-moving a copy of it through HuggingFace buys nothing but a transfer and a
-storage bill. The same goes for data in object storage the worker can
-authenticate to.
+If the data is already reachable from the worker, do not package it. On an HPC
+cluster with a shared filesystem your ``/scratch`` directory is visible from
+every compute node; pass the path. On ``ssh`` and ``slurm`` a local file the
+call names is staged automatically (:doc:`input_files`), which keeps the bytes
+on the cluster's own filesystem and is the better choice for anything large.
 
 Use the read-only :doc:`filesystem utilities <api/filesystem>` to check.
 ``cluster_exists`` answers the question directly:

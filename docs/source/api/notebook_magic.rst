@@ -1,229 +1,237 @@
-Notebook Magic Commands
-=======================
+Notebook magics and the widget
+==============================
 
-.. currentmodule:: clustrix.notebook_magic
+Install the widget's dependencies with ``pip install "clustrix[widget]"``.
 
-Clustrix integrates with Jupyter notebooks through an IPython magic command and
-an interactive widget.
+Magics
+------
 
-Magic Commands
---------------
+.. code-block:: ipython
 
-%%remote
+   %load_ext clustrix
+
+``%load_ext clustrix`` registers the magics below and puts ``cluster``,
+``configure`` and ``get_config`` in the notebook's namespace if those names
+are free. ``import clustrix`` also registers the magics. Neither displays
+anything.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 34 66
+
+   * - Magic
+     - Effect
+   * - ``%%remote``
+     - Shows the configuration widget, then runs the rest of the cell as
+       ordinary code.
+   * - ``%clustrix status``
+     - Prints the backend, host, user, default resources and work directory
+       that ``@cluster`` would use now. ``%clustrix`` alone does the same.
+   * - ``%clustrix config``
+     - The same as ``status``.
+   * - ``%clustrix config <profile>``
+     - Makes a saved profile the live configuration. The profile replaces
+       the configuration; it is not merged into it.
+   * - ``%clustrix load <file>``
+     - Loads a YAML or JSON configuration file.
+   * - ``%%clusterfy``
+     - Deprecated alias for ``%%remote``. It works and emits a
+       ``DeprecationWarning``.
+
+Each ``%clustrix`` form returns the resulting ``ClusterConfig`` (IPython
+shows it as the result of the line), or ``None`` when the command was
+refused. From a real IPython session, with the returned values left out:
+
+.. code-block:: text
+
+   In [1]: %load_ext clustrix
+
+   In [2]: %clustrix status
+   cluster_type : slurm
+   resources    : 4 cores, 8GB, 01:00:00
+   work dir     : ~/.clustrix/jobs
+
+   In [3]: %clustrix config nope
+   ❌ No profile named 'nope'. Available: HuggingFace Jobs (CPU), HuggingFace Jobs (GPU), Local all cores, Local single-core, SLURM cluster, SSH remote machine
+
+   In [4]: c = %clustrix config Local all cores
+   ✅ Applied profile 'Local all cores'
+
+   In [5]: print(c.cluster_type, c.default_cores, c.cluster_host)
+   local -1 None
+
+   In [6]: %clustrix frobnicate
+   ❌ Unknown command 'frobnicate'. Try: status | config | config <profile> | load <file>
+
+``%clustrix load`` with a file that does not exist raises
+``FileNotFoundError``.
+
+Setting the environment variable ``CLUSTRIX_AUTO_WIDGET=1`` before importing
+Clustrix makes the widget appear on import. By default it does not.
+
+The widget
+----------
+
+There is one widget, :class:`clustrix.ModernClustrixWidget`.
+
+.. image:: ../_static/widget/widget-slurm.png
+   :alt: The configuration widget in JupyterLab's dark theme, SLURM selected
+   :width: 640px
+
+Three things are kept apart
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* **The live configuration**: what ``@cluster`` uses now. The header names
+  it ("@cluster currently runs on ...").
+* **Saved profiles**: named configurations on disk.
+* **The form**: a *draft* of the selected profile. Editing a field changes
+  neither the profile nor the live configuration.
+
+**Apply** saves the draft to the profile and makes it the live configuration
+in one step. **Revert** discards the draft. A draft survives switching to
+another profile and back for as long as the widget exists.
+
+Two indicators
+~~~~~~~~~~~~~~
+
+* The pill in the header says only whether the form is what ``@cluster`` is
+  using: *applied* or *not applied*.
+* The pill beside the **Result** console reports the outcome of the last
+  action (for example *connected*, *unknown host*, *export failed*).
+
+Controls
 ~~~~~~~~
 
-``%%remote`` displays the configuration widget. Any code in the rest of the
-cell is executed afterwards.
+.. list-table::
+   :header-rows: 1
+   :widths: 28 72
 
-**Usage:**
+   * - Control
+     - What it does
+   * - Saved profile, Rename to, Duplicate, Delete
+     - Choose, rename, copy and remove profiles. Six are provided at first:
+       Local single-core, Local all cores, SLURM cluster, SSH remote machine,
+       HuggingFace Jobs (CPU) and HuggingFace Jobs (GPU).
+   * - Where to run
+     - One tile per supported backend: Local, SSH, SLURM, Hugging Face. The
+       tiles are built from ``clustrix.config.SUPPORTED_CLUSTER_TYPES``.
+   * - CPUs per job, Memory per job, Time limit per job
+     - ``default_cores``, ``default_memory``, ``default_time``.
+   * - Partition
+     - ``default_partition`` (SLURM only).
+   * - Host, Port, Username
+     - ``cluster_host``, ``cluster_port``, ``username`` (SSH and SLURM).
+   * - Password
+     - Used for this session only. Never written to a profile.
+   * - ...or the environment variable that holds the password
+     - ``password_env_var``.
+   * - SSH key file
+     - ``key_file``. Blank means the SSH agent and the default keys.
+   * - Set up SSH key
+     - Generates a key and installs it on the host, using the password above
+       once. "Replace a key that already works" forces a new key.
+   * - Directory on the host for job files
+     - ``remote_work_dir``.
+   * - Namespace, Hardware, Time limit per job, Token
+     - HuggingFace Jobs: ``hf_namespace``, ``hf_flavor``,
+       ``hf_job_timeout``, and a token used for this session only.
+   * - Allow GPU hardware, which is billed per second
+     - ``hf_allow_gpu_flavors``.
+   * - Test connection
+     - Connects and authenticates through the same code a job uses, without
+       running a job.
+   * - Run test job
+     - Runs one small job end to end and shows where it ran.
+   * - Trust this host
+     - Appears when a connection is refused because the host is unknown; see
+       below.
 
-.. code-block:: ipython3
+**Advanced settings** adds: Package manager, Python executable, Existing
+conda environment (``conda_env_name``), "Install my local packages on the
+worker" (``replicate_local_environment``), "Delete job files on the host
+after success" (``cleanup_on_success``), Modules to load, Environment
+variables (this session only), Shell commands to run before the job, and
+the profiles file with **Export** and **Import**.
 
-   %%remote
+.. image:: ../_static/widget/widget-advanced.png
+   :alt: The widget with the advanced settings shown
+   :width: 640px
 
-Importing ``clustrix`` registers the magic but does **not** display the widget.
-A library should not inject UI as a side effect of being imported, and an
-import that displayed the widget would also put a second copy of it next to
-any explicit ``%%remote`` or ``display()`` call. Set
-``CLUSTRIX_AUTO_WIDGET=1`` if you want display-on-import anyway.
+**Export** writes every saved profile to the named file, without
+credentials and without edits that have not been applied. **Import**
+replaces every profile with the ones in the file. A bare file name is
+resolved inside the Clustrix configuration directory.
 
-%%clusterfy (deprecated)
-~~~~~~~~~~~~~~~~~~~~~~~~
+A host seen for the first time
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-``%%clusterfy`` is an alias for ``%%remote``. It works, and it emits a
-``DeprecationWarning``.
+Host keys are verified (:ref:`host-key-verification`). When the host is not
+in ``known_hosts``, the widget shows the fingerprint of the key the host
+offered and a **Trust this host** button. Pressing it records exactly that
+key in ``~/.ssh/known_hosts`` and tries again. Check the fingerprint against
+the one your cluster's administrators publish before pressing it.
 
-Widget Interface
-----------------
+.. image:: ../_static/widget/widget-unknown-host.png
+   :alt: The widget showing an unknown host's fingerprint and the Trust this host button
+   :width: 640px
 
-``%%remote`` shows :class:`clustrix.modern_notebook_widget.ModernClustrixWidget`.
+``ssh_host_key_policy`` and ``hf_image`` are never applied from a profile.
 
-.. autoclass:: clustrix.modern_notebook_widget.ModernClustrixWidget
-   :members: display, get_widget, set_status
-   :show-inheritance:
+.. _security-note:
 
-**Sections:**
+Security note
+~~~~~~~~~~~~~
 
-- **Profile**: the active profile, and the configuration file that Save and
-  Load use. New profiles are added with ``+`` and removed with ``-``.
-- **Resources**: cluster type, CPUs, memory, walltime.
-- **Connection** (``ssh``, ``slurm`` only): host, port,
-  username, SSH key file, password, remote work directory, an environment
-  variable to read the password from, and an "Auto setup SSH keys" button.
-- **HuggingFace Jobs** (``huggingface`` only): namespace, flavor, token, and an
-  "Allow paid GPU flavors" checkbox. GPU flavors bill by the second, so that
-  box has to be ticked before one is accepted.
-- **Actions**: "Test connection", "Test job submission", "Apply".
-- **Advanced**: package manager, Python executable, whether to replicate the
-  local environment, environment variables, module loads, pre-execution
-  commands.
-- **Output**: where the test buttons and errors report.
+The widget itself never writes a password or token to a profile or to an
+exported file. The notebook file is a different matter. If JupyterLab's
+**Settings → Save Widget State Automatically** is on, the state of every
+widget, including the text typed into the Password and Token fields, is
+stored in the ``.ipynb`` file when the notebook is saved. Anyone who can
+read that file, or a repository it is committed to, can read the secret.
 
-The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
-``huggingface`` -- the contents of
-:data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`, and nothing else. There are
-no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries, and no
-``k8s_*`` settings, because Clustrix does not support those backends. Each is
-planned for a future release under its own tracking issue -- see
-:ref:`removed-backends`.
+Turn that setting off before typing a secret into the widget, or do not type
+one: use an SSH key, the environment-variable field, ``HF_TOKEN`` or
+``hf auth login``. If a notebook was saved with a secret in it, clear its
+outputs and widget state and change the secret.
 
-"Apply" calls :func:`clustrix.configure` with the widget's values, so
-subsequent ``@cluster`` functions use them.
-
-Where the widget saves
-~~~~~~~~~~~~~~~~~~~~~~
-
-Save and Load use the filename in the Profile row, resolved against the
-clustrix configuration directory -- ``~/.clustrix`` unless
-``CLUSTRIX_CONFIG_DIR`` says otherwise. Set that variable in tests and in CI,
-or the Save button writes into your real configuration.
-
-ClusterfyMagics
-~~~~~~~~~~~~~~~
-
-.. autoclass:: ClusterfyMagics
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-A second widget class
-~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: EnhancedClusterConfigWidget
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-   A separate widget implementation, kept importable, along with
-   :data:`DEFAULT_CONFIGS`. ``%%remote`` displays
-   :class:`~clustrix.modern_notebook_widget.ModernClustrixWidget` instead.
-   Any template this one offers that names a cluster type outside
-   :data:`clustrix.config.SUPPORTED_CLUSTER_TYPES` cannot be dispatched by the
-   executor; see :ref:`removed-backends`.
-
-   **Renaming onto a name that is taken is refused.** Typing a name another
-   configuration in the dropdown already has leaves both of them exactly as
-   they were and reports which one holds the name, in the Status & Output
-   area. It used to overwrite that configuration in silence, which was
-   unrecoverable: ``password`` and ``hf_token`` are omitted from every saved
-   file, so a configuration holding either exists only in the session. To
-   reuse a name, delete the configuration that has it first. The name box
-   keeps what you typed and the selection does not move, so carrying on
-   typing to a free name renames the configuration you were editing.
-
-.. Documented from the module that defines it, not from the one that
-   re-exports it: autodoc only picks up the ``#:`` comment at the definition
-   site, so pointing at ``clustrix.notebook_magic`` made it fall back to
-   ``dict.__doc__`` -- whose own ``**kwargs`` and indented body are not valid
-   RST and produced four build warnings.
-
-.. autodata:: clustrix.notebook_magic_config.DEFAULT_CONFIGS
-   :no-value:
-
-   Configuration templates for the widget above, keyed by display name
-   (``'Local Single-core'``, ``'University SLURM Cluster'``, ...). Entries hold
-   plain :class:`~clustrix.config.ClusterConfig` field names; there is no
-   ``name`` or ``description`` key.
-
-Extension Loading
------------------
-
-.. autofunction:: load_ipython_extension
-
-   Registers the magic commands with an IPython instance. Called automatically
-   when clustrix is imported in a Jupyter environment.
-
-   **Parameters:**
-
-   - ``ipython``: The IPython instance to register the magic command with
-
-Requirements
-------------
-
-The notebook magic functionality requires:
-
-- ``IPython`` - For magic command support
-- ``ipywidgets`` - For the interactive widget interface
-- ``PyYAML`` - For YAML configuration file support
-
-**Installation:**
-
-.. code-block:: bash
-
-   pip install clustrix[widget]
-   # or
-   pip install ipywidgets pyyaml
-
-Usage Examples
---------------
-
-Displaying the widget
-~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: ipython3
-
-   %%remote
-
-Programmatic Access
-~~~~~~~~~~~~~~~~~~~
+In code
+-------
 
 .. code-block:: python
 
-   from clustrix.modern_notebook_widget import ModernClustrixWidget
+   from clustrix import ModernClustrixWidget
 
    widget = ModernClustrixWidget()
-   widget.display()
+   print(sorted(widget.widgets)[:5])
+   print(widget.widgets["cluster_type"].value)
+   container = widget.get_widget()   # the ipywidgets container; display it yourself
 
-Or, equivalently:
+.. code-block:: text
 
-.. code-block:: python
+   ['add_profile_btn', 'advanced_section', 'advanced_toggle', 'applied_pill', 'apply_btn']
+   local
 
-   from clustrix.notebook_magic import display_config_widget
+``display_modern_widget()`` and its alias ``show_widget()`` display a new
+widget and return ``None``. ``create_modern_cluster_widget()`` returns the
+container without displaying it.
 
-   display_config_widget()
+.. autoclass:: clustrix.ModernClustrixWidget
+   :members: get_widget, display, set_status
+   :no-undoc-members:
+   :no-special-members:
 
-Save and Load Configurations
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: clustrix.display_modern_widget
 
-1. **Save**: writes the current profile to the named configuration file
-2. **Load**: reads profiles back from it
-3. **File Formats**: YAML and JSON, detected from the file extension
+.. autofunction:: clustrix.create_modern_cluster_widget
 
-.. autofunction:: clustrix.notebook_magic_config.load_config_from_file
+.. autofunction:: clustrix.load_ipython_extension
 
-   Who chose the path decides what a failure means, and the two answers are
-   deliberately different:
+Removed
+-------
 
-   * A file you **name** is a file you chose, so a path that does not exist,
-     one you cannot read, or one that does not parse **raises** --
-     :class:`FileNotFoundError`, :class:`PermissionError`,
-     ``yaml.YAMLError`` or :class:`json.JSONDecodeError`, the same errors
-     :func:`clustrix.config.load_config` raises for the same file.
-   * A file clustrix **discovered** by searching the standard locations
-     (``discovered=True``, which is what the widget's own scan passes) is
-     best effort: an unreadable one is skipped so that it cannot take the
-     widget's other profiles down with it, and the reason is written to the
-     ``clustrix.notebook_magic_config`` logger at ``WARNING``.
-
-   .. note::
-
-      **Behaviour change.** The named case used to return an empty mapping
-      for *every* failure.
-      That made a typo, a permissions problem and malformed YAML all report
-      identically to a file that genuinely holds no configurations, and the
-      widget offered the result as a valid, blank profile. If you were
-      relying on the old behaviour, pass ``discovered=True`` -- but read the
-      log, because an empty result now no longer means the file was empty.
-
-Notes
------
-
-- The magic command is registered when importing clustrix in a Jupyter
-  environment; the widget is not displayed until you ask for it
-- Widget state is preserved during the notebook session
-- Configurations can be shared between team members via saved files
-- The widget works in both JupyterLab and Jupyter Notebook. Its colours resolve
-  through JupyterLab's ``--jp-*`` theme variables, so it follows the notebook
-  theme rather than carrying a separate dark stylesheet
-- The widget does not validate that a cluster type is one that works. Consult
-  the supported cluster types table before relying on a backend
+``EnhancedClusterConfigWidget``, ``DEFAULT_CONFIGS``,
+``detect_config_files``, ``load_config_from_file``, ``validate_ip_address``,
+``validate_hostname`` and the modules ``clustrix.notebook_magic_widget`` and
+``clustrix.notebook_magic_config`` no longer exist. Use
+``ModernClustrixWidget`` for the form and :func:`clustrix.config.load_config`
+to read a file.

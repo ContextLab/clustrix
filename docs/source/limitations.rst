@@ -12,62 +12,95 @@ and, where an error message is quoted, produced by running it.
    :depth: 2
 
 
+.. _limitation-loops:
+
+Loop parallelisation
+--------------------
+
+:doc:`parallel_loops` is the full account. In short:
+
+* Only a ``for`` loop, or a statement that is a single-``for`` comprehension,
+  at the top level of the decorated function is considered. Not a ``while``
+  loop, not a loop in a helper function, not a loop under ``if``, ``with`` or
+  ``try``. At most one loop per function is divided.
+* A loop is not divided when an iteration uses a value from the previous
+  one, contains ``break`` or ``return``, assigns a name that is used after
+  the loop, writes a global, or draws from the unseeded global ``random`` or
+  NumPy generator. :func:`clustrix.explain` names the line and the reason.
+* Run-time checks catch a shared value being modified and the global random
+  state moving, and fall back to the sequential loop.
+* **No check sees state outside the values the loop was handed**: a
+  module-level cache, a file, a database, a GPU's random state. Side effects
+  of that kind happen once per iteration, in an unspecified order, and
+  locally in a worker process rather than in the caller.
+* There are no SLURM job arrays. Each piece of a divided loop is a separate
+  ``sbatch`` submission, at most ``max_parallel_jobs`` at once.
+* No GPU path has been verified on real hardware in this release, and
+  ``auto_gpu_parallel`` does nothing.
+* Locally, a function with no loop that can be divided runs once in the
+  calling process whatever ``cores`` says, and a warning says so.
+
+.. _limitation-input-files:
+
+Input files
+-----------
+
+:doc:`input_files` is the full account. In short:
+
+* Automatic staging applies to ``ssh`` and ``slurm`` only, and not to
+  ``async_submit=True``.
+* A path computed at run time is not found. Pass it as an argument or list
+  it in ``@cluster(data=[...])``.
+* A path that appears in code is staged only if it is inside the project.
+  Credential files are refused. A call naming more than
+  ``auto_stage_max_bytes`` stops.
+* **Files a job writes are not brought back.** Only the return value is.
+* Staged copies are never deleted automatically.
+* A :doc:`data package <data_packages>` too large to travel inline cannot be
+  read by an ``ssh`` or ``slurm`` worker.
+
 .. _limitation-sourceless:
 
 Functions whose source cannot be read
 -------------------------------------
 
-**What is true:** a function defined in the REPL, in a notebook cell, or by
-``exec()`` **serializes and runs correctly**. Dill and cloudpickle serialize by
-value -- they embed the code object -- so the worker never needs the source
-text.
+A function defined in the REPL, in a notebook cell, or by ``exec()``
+serializes and runs correctly. Dill and cloudpickle serialize by value, so
+the worker never needs the source text.
 
-The function you wrote is the function that gets serialized. Nothing is
-substituted for it, ever, and no code path rewrites it.
-
-**What is actually lost** is everything that reads source text:
-
-* loop parallelization (``detect_loops``, ``find_parallelizable_loops`` -- both
-  start with ``inspect.getsource``),
-* the source-text fallback the worker would use if binary deserialization
-  failed.
+What needs the source is loop division. When the source is not available the
+function runs as one unit, and :func:`clustrix.explain` says so:
 
 .. code-block:: python
 
-   from clustrix.utils import serialize_function, deserialize_function
-   from clustrix.loop_analysis import find_parallelizable_loops
+   import clustrix
+   from clustrix.utils import deserialize_function, serialize_function
 
    namespace = {}
    exec(
        "def sourceless(n):\n"
-       "    out = 0\n"
+       "    out = []\n"
        "    for i in range(n):\n"
-       "        out = i\n"
+       "        out.append(i)\n"
        "    return out\n",
        namespace,
    )
    sourceless = namespace["sourceless"]
 
-   data = serialize_function(sourceless, (10,), {})
-   print("function_source:", data["function_source"])
-   print("parallelizable loops:", find_parallelizable_loops(sourceless, (10,), {}))
+   print(clustrix.explain(sourceless))
 
+   data = serialize_function(sourceless, (3,), {})
    func, args, kwargs = deserialize_function(data)
    print("still runs:", func(*args, **kwargs))
 
-Output:
-
 .. code-block:: text
 
-   function_source: None
-   parallelizable loops: []
-   still runs: 9
+   sourceless:
+     not analysed: its source is not available (could not get source code)
+   still runs: [0, 1, 2]
 
-(The round trip above happens in one process for brevity; the same payload was
-also loaded in a *fresh* interpreter, where it returned ``9`` as well.)
-
-**Workaround:** none needed for correctness. If you want loop parallelization,
-move the function into a ``.py`` file.
+A function defined in a Jupyter cell or an IPython prompt does have source
+available, and its loop is divided.
 
 
 Editable installs, git checkouts and local source trees
@@ -124,345 +157,6 @@ outside site-packages is classified project-local and gets shipped by value
 instead -- which usually works. The refusal fires for the cases where the code
 really is in site-packages but the metadata is unreproducible, notably VCS
 installs.
-
-
-.. _limitation-local-cores:
-
-Local cores require splittable work
------------------------------------
-
-With no cluster configured, ``@cluster(cores=8)`` runs an ordinary function in
-the process that called it, on one core, and logs that the request has no
-effect. One call is one unit of work, so there is nothing to give seven other
-workers. Nothing forks, and the call returns when the function returns.
-
-.. code-block:: python
-
-   import os
-   import clustrix
-
-   clustrix.configure(cluster_type="local")
-
-   @clustrix.cluster(cores=8)
-   def where_did_it_run(n):
-       return os.getpid(), sum(i * i for i in range(n))
-
-   pid, _ = where_did_it_run(200_000)
-   print("this interpreter:", os.getpid())
-   print("the job ran in:  ", pid)
-   print("same process?    ", pid == os.getpid())
-
-.. code-block:: text
-
-   this interpreter: 44824
-   the job ran in:   44824
-   same process?     True
-
-There is exactly one local path where ``cores`` does size a pool: the
-parallelizing path (on by default through ``auto_parallel``, and forced with
-``parallel=True``) must find a supported loop, split it into chunks, and pass
-each chunk through a ``_parallel_<variable>`` keyword the function accepts.
-Most Python loops do not meet those rules. Even when they do, the pool size is
-an upper bound, not a promise that many workers will be busy. On that path the
-work is cut into roughly two chunks per worker, so that a worker which draws a
-slow chunk can be relieved by an idle sibling taking the next one; the count
-follows the pool you asked for, not the machine's CPU count.
-
-Three details of the "has no effect" message itself:
-
-* It is logged **once per decorated function per distinct request**, not on
-  every call, because the local path is exactly where a decorated function
-  gets called in a tight loop. Change the request -- a different
-  ``default_cores``, a different reason for declining -- and it speaks again.
-  That single message is spent only when clustrix can establish that some
-  handler would emit it. A logging filter is the case it cannot establish:
-  a filter is your code, and running it here to find out would run it twice
-  for every message that is logged, so clustrix assumes the worst and repeats
-  the message rather than risk losing it -- up to three times, and then it
-  stops.
-* A request of one worker is not reported. Every one of these routes already
-  provides one.
-* ``configure(default_cores=4)`` -- the shipped default -- is not reported
-  either, deliberately. Clustrix cannot distinguish an explicit request that
-  happens to equal the default from no request at all, and warning on the
-  shipped value would fire on every local call anyone ever makes. Any *other*
-  ``default_cores`` you set is treated as an instruction and is reported.
-
-The parallel machinery underneath is real.
-:class:`clustrix.local_executor.LocalExecutor` builds a
-``ProcessPoolExecutor`` or a ``ThreadPoolExecutor`` and gives the speedups you
-would expect.
-:func:`clustrix.local_executor.choose_executor_type` decides which pool you
-get, in two steps. First it calls ``pickle.dumps`` on your function and on
-every argument, and any failure selects threads, because a process pool has no
-way to send an unpicklable object to a worker. Then it reads
-``inspect.getsource`` and scans the text for ``open(``, ``requests.``,
-``urllib.``, ``http.``, ``ftp.``, ``sql``, ``database``, ``time.sleep`` and
-``threading.``; a hit selects threads on the theory that the work releases the
-GIL. Otherwise you get processes. That second step is a substring scan over
-source text, so it is fooled by a variable called ``sqlite_path`` and blind to
-I/O reached through a helper. Pass ``use_threads=True`` or ``use_threads=False``
-to say what you meant.
-
-For general local parallelism, drive
-:class:`~clustrix.local_executor.LocalExecutor` yourself, or use ``joblib`` or
-``concurrent.futures``. The
-:doc:`local-parallelism notebook <notebooks/local_parallel_comparison>`
-measures both the gap and what the pools are worth.
-
-
-Loop detection is much narrower than it looks
----------------------------------------------
-
-``auto_parallel`` defaults to ``True``, which suggests loops are routinely
-parallelized. In practice ``find_parallelizable_loops`` rejects most real
-loops. Three rules do the rejecting.
-
-**1. The loop target must be a bare name.** ``_analyze_for_loop`` returns
-``None`` unless ``node.target`` is an ``ast.Name``. So
-``for i, x in enumerate(items)`` and ``for k, v in d.items()`` are not merely
-non-parallelizable -- they are not detected as loops at all.
-
-**2. Reading any external name in the body disqualifies the loop.**
-``final_dependencies = dep_analyzer.reads - {variable}``, and
-``find_parallelizable_loops`` requires ``not loop.dependencies``. Every
-``ast.Name`` in ``Load`` context counts, including the receiver of a method
-call. So the single most common loop shape in Python --
-``results.append(f(x))`` -- is rejected, because ``results`` is read.
-
-**3. An augmented assignment counts as a read.** ``total += i`` adds ``total``
-to ``reads`` even though the AST target's context is ``Store``. This one is
-correct and deliberate: without it, an accumulator loop looked dependency-free
-and was falsely classified as safe to parallelize (issues #106, #131).
-
-Demonstrated:
-
-.. code-block:: python
-
-   from clustrix.loop_analysis import detect_loops_in_function, find_parallelizable_loops
-
-   def tuple_target(items):
-       total = 0
-       for i, x in enumerate(items):
-           total += i * x
-       return total
-
-   def appending(items):
-       results = []
-       for x in items:
-           results.append(x * 2)
-       return results
-
-   def independent():
-       out = 0
-       for i in range(1000):
-           out = i
-       return out
-
-   for fn, argv in [(tuple_target, ([1, 2, 3],)), (appending, ([1, 2, 3],)),
-                    (independent, ())]:
-       loops = detect_loops_in_function(fn, argv, {})
-       print(
-           fn.__name__,
-           "| detected:",
-           [(lp.variable, sorted(lp.dependencies), lp.is_parallelizable) for lp in loops],
-           "| parallelizable:",
-           [lp.variable for lp in find_parallelizable_loops(fn, argv, {})],
-       )
-
-Real output:
-
-.. code-block:: text
-
-   tuple_target | detected: [] | parallelizable: []
-   appending | detected: [('x', ['results'], False)] | parallelizable: []
-   independent | detected: [('i', [], True)] | parallelizable: ['i']
-
-**Workarounds:**
-
-* Do not rely on automatic parallelization. Split the work yourself and submit
-  one ``@cluster`` call per chunk; that is explicit, backend-independent, and
-  produces a shape you chose.
-* Rewrite ``for i, x in enumerate(items)`` as ``for i in range(len(items))``
-  if you want the loop to be *seen* at all.
-* Set ``auto_parallel=False`` to remove the guesswork entirely.
-
-
-Auto-parallelization needs chunk parameters, and they differ local vs remote
-----------------------------------------------------------------------------
-
-The two paths use **different keyword names**, which is easy to trip over:
-
-.. list-table::
-   :header-rows: 1
-   :widths: 20 80
-
-   * - Path
-     - Keywords your function must accept
-   * - Local (``_create_local_work_chunks``)
-     - ``_parallel_<loop variable>``
-   * - Remote (``_create_work_chunks``)
-     - ``_chunk_range_<loop variable>`` **and** ``_chunk_index``
-
-Either path declines, and logs at ``INFO``, when the function cannot accept
-its chunk. Neither injects the keyword regardless; a function that declares
-neither the parameter nor ``**kwargs`` simply runs whole.
-
-Both paths also require the loop's bound to be something the analysis can work
-out *before* the function runs -- which is not the same as requiring a
-literal. ``SafeRangeEvaluator`` resolves a bare name against the call's bound
-arguments, so ``range(n)`` is accepted whenever ``n`` is an integer argument of
-the decorated function, and so is arithmetic over one, ``range(n + 1)``. What
-is declined is a bound that cannot be reduced to an integer without running
-something:
-
-* a call -- ``range(len(data))`` is the common one;
-* a name computed in the body rather than passed in -- ``m = n * 2`` followed
-  by ``range(m)``, because only the arguments are in scope for the evaluator;
-* a bound that is not an ``int`` at all, such as ``n=8.0``.
-
-When ``_create_local_work_chunks`` splits a loop, it hands each chunk to your
-function as a keyword argument named ``_parallel_<loop variable>``. A function
-that cannot receive it is run sequentially, and clustrix says so:
-
-.. code-block:: text
-
-   INFO clustrix.decorator: Not parallelizing no_chunk_param locally:
-   it takes no '_parallel_i' parameter.
-
-That is an ``INFO`` on the ``clustrix.decorator`` logger, so you will not see
-it unless logging is configured at that level.
-
-
-Parallel and sequential runs can return different shapes
---------------------------------------------------------
-
-This is the trap most likely to produce a wrong answer rather than an error.
-
-``_combine_local_results`` does this:
-
-* no results -> ``None``
-* exactly one chunk -> that chunk's result, unwrapped
-* all chunks returned lists -> the lists concatenated
-* otherwise -> **the list of per-chunk results**
-
-So a function that returns a scalar returns a *list of scalars* when it is
-parallelized, and the length of that list is the number of chunks the work was
-cut into -- roughly two per worker, the worker count being the ``cores`` you
-asked for. Exactly two per worker only when ``2 * cores`` divides the loop's
-length: ``chunk_size`` is a floor, so any remainder becomes a further chunk. A
-100-iteration loop across three workers is cut into seven pieces rather than
-six, and a 10-iteration loop across four workers into ten rather than eight.
-
-The "exactly one chunk" line is the helper's contract rather than something
-you can provoke today: work is only split when the loop runs at least three
-times, and ``chunk_size = max(1, len(loop_range) // (workers * 2))`` cuts any
-such loop into at least two pieces. Nothing on the decorator's path currently
-reaches that branch.
-
-Two consequences catch people out, and neither is a difference between a
-parallel run and a sequential one -- they are differences *between parallel
-runs*.
-
-**Changing the** ``cores`` **count alone changes the answer.** The chunk count follows the
-pool size, so the same call cut a different number of ways returns a different
-list:
-
-.. code-block:: python
-
-   import clustrix
-
-   clustrix.configure(cluster_type="local", cluster_host=None)
-
-   def partial_sum(n, _parallel_i=None):
-       indices = list(range(n)) if _parallel_i is None else list(_parallel_i)
-       marker = 0
-       for i in range(n):
-           marker = i * i
-       del marker
-       return sum(indices)
-
-.. code-block:: text
-
-   partial_sum(8)                                     -> 28
-   @cluster(parallel=True, cores=1) partial_sum(8)    -> [6, 22]
-   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
-   @cluster(parallel=True, cores=4) partial_sum(8)    -> [0, 1, 2, 3, 4, 5, 6, 7]
-
-Three pool sizes, three answers, none of them 28. For a callee that returns a
-**list** the concatenation makes the parallel answer match the sequential one,
-so this only bites scalar-returning callees -- but there it bites hard, because
-nothing raises.
-
-**A short loop changes the return type.** A loop of fewer than three
-iterations is not considered worth splitting, so the same decorated function
-returns the scalar its body returns:
-
-.. code-block:: text
-
-   @cluster(parallel=True, cores=2) partial_sum(2)    -> 1     (an int)
-   @cluster(parallel=True, cores=2) partial_sum(8)    -> [1, 5, 9, 13]
-
-A caller who tested with a short input and shipped with a long one gets a list
-where they tested an int. Whether any of this is the right behaviour is an open
-design question -- see `issue #170
-<https://github.com/ContextLab/clustrix/issues/170>`_ -- but it is the current
-behaviour, and it is pinned by
-``tests/unit/test_local_cores.py::test_the_answers_shape_depends_on_cores_and_on_how_long_the_loop_is``.
-
-.. code-block:: python
-
-   # shape_demo.py
-   import clustrix
-
-   clustrix.configure(cluster_type="local", auto_parallel=True)
-
-   def body(_parallel_i=None):
-       total = 0
-       for i in range(1000):
-           total = i
-       return total
-
-   @clustrix.cluster(cores=4)
-   def counted(_parallel_i=None):
-       total = 0
-       for i in range(1000):
-           total = i
-       return total
-
-Called from another module, so that ``inspect.getsource`` can see it:
-
-.. code-block:: python
-
-   import shape_demo
-
-   parallel = shape_demo.counted()
-   sequential = shape_demo.body()
-   print("parallel   ->", type(parallel).__name__, repr(parallel)[:60])
-   print("sequential ->", type(sequential).__name__, repr(sequential))
-   assert isinstance(sequential, int)
-
-With ``cores=4`` that prints a list of eight -- two chunks per worker -- and
-the scalar:
-
-.. code-block:: text
-
-   parallel   -> list [999, 999, 999, 999, 999, 999, 999, 999]
-   sequential -> int 999
-
-Note also that the function above *accepts* ``_parallel_i`` and then ignores
-it, which is why every chunk computed the same thing. Accepting the parameter
-is what makes clustrix willing to parallelize; **using** it is your
-responsibility.
-
-The remote path has the same shape problem: ``_combine_results`` in
-``decorator.py`` sorts by chunk index and returns
-``[result[1] for result in results]`` unconditionally.
-
-**Workaround:** either set ``parallel=False`` on the decorator (or
-``auto_parallel=False`` globally) so a function always returns what its body
-returns, or write the function to take ``_parallel_<var>`` and return a list,
-so both shapes agree.
 
 
 Python version skew is refused, not worked around
@@ -720,13 +414,10 @@ Smaller sharp edges
 * ``pre_execution_commands`` **is not validated or quoted.** It is a raw shell
   injection point by design. ``module_loads`` and ``environment_variables``
   keys *are* validated and will refuse metacharacters.
-* ``cores`` **must be a positive integer.** ``@cluster(cores=0)`` and
-  ``@cluster(cores=-2)`` raise ``ValueError`` at decoration time rather than
-  falling through the ``cores or config.default_cores`` merge. Booleans are
-  refused as well, at the decorator and at
-  :class:`~clustrix.local_executor.LocalExecutor`: ``bool`` subclasses
-  ``int``, so ``cores=True`` would otherwise pass the type check and be read
-  as a request for one worker.
+* ``cores`` **must be a positive integer, or -1.** ``@cluster(cores=0)``,
+  ``@cluster(cores=-2)`` and ``@cluster(cores=True)`` raise ``ValueError``
+  when the decorator is applied. ``-1`` means every CPU available to the
+  calling process and is refused for a SLURM job.
 * **Unknown** ``@cluster`` **keywords are warned about, not rejected.** The
   warning goes to the ``clustrix.decorator`` logger on every call, so a typo in
   a keyword name is easy to miss if nothing is watching that logger. This is
@@ -735,10 +426,15 @@ Smaller sharp edges
   ignores it. Use ``configure(cluster_type="local")``.
 * **Some recognised** ``@cluster`` **keywords are still ignored by their
   backend.**
-  ``hf_namespace``, ``hf_token`` and ``hf_username`` are accepted and placed in
-  ``job_config``, but ``HFJobsManager`` resolves them from configuration
-  instead. This produces no warning, because the keywords *are* on the
-  recognised list. Set them through ``clustrix.configure()``.
+  ``hf_namespace``, ``hf_token``, ``hf_username`` and ``key_file`` are
+  accepted, but no backend reads them from the decorator. This produces no
+  warning, because the keywords are on the recognised list. Set them through
+  ``clustrix.configure()``.
+* **The first job on a new host is slow.** It builds a Python environment
+  there. In a run against a local test host the first job took 27 seconds and
+  the next one 3.
+* **Printed output of a remote job is not shown.** It is in the job's log
+  files on the cluster.
 
 
 See also

@@ -1,203 +1,106 @@
-Decorator API
-=============
+The ``@cluster`` decorator
+==========================
 
-``@cluster`` is the whole interface. Put it on a function, call the function,
-and Clustrix either submits the call to the backend you configured or runs it
-in the calling process.
+.. autofunction:: clustrix.cluster
 
-One thing to fix in your expectations before reading further: ``cores`` is a
-resource request, not an instruction to split an ordinary function. On the
-local path, ``@cluster(cores=8)`` runs that function once in this process, and
-Clustrix warns that the eight was discarded. The value sizes a pool only on the
-narrow local-parallelization path described below, which needs no
-``parallel=True`` -- ``config.auto_parallel`` is already ``True`` -- but does
-need the loop analysis to flag a loop and the function to accept the matching
-``_parallel_<var>`` keyword. See :ref:`limitation-local-cores`.
+Parameters
+----------
 
-.. automodule:: clustrix.decorator
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. list-table::
+   :header-rows: 1
+   :widths: 22 78
 
-Examples
---------
+   * - Parameter
+     - Meaning
+   * - ``cores``
+     - CPUs per job. Locally, the number of worker processes a loop is
+       divided among; ``-1`` means every CPU available to the process.
+       ``-1`` is refused for a SLURM job. Default: ``default_cores``.
+   * - ``memory``
+     - Memory per job, for example ``"8GB"``. Recorded but not enforced by
+       the local backend. Default: ``default_memory``.
+   * - ``time``
+     - Wall-time limit per job, for example ``"01:00:00"``. Default:
+       ``default_time``.
+   * - ``partition``
+     - SLURM partition. Default: ``default_partition``.
+   * - ``parallel``
+     - ``False`` runs the function as one unit; ``True`` or unset divides a
+       loop when one qualifies. Default: ``auto_parallel`` (on). See
+       :doc:`../parallel_loops`.
+   * - ``environment``
+     - Name of a conda environment that already exists on the cluster; the
+       function runs in it. Default: ``conda_env_name``.
+   * - ``async_submit``
+     - ``True`` returns an ``AsyncJobResult`` at once; call ``.get_result()``
+       on it. Loop division and automatic input staging do not apply to an
+       asynchronous call.
+   * - ``data``
+     - A list of local paths to stage for calls of this function, in addition
+       to the ones found automatically. See :doc:`../input_files`.
+   * - ``no_data``
+     - A list of local paths that must not be staged.
+   * - ``hf_flavor``, ``hf_timeout``
+     - Per-function hardware flavor and time limit for HuggingFace Jobs.
+   * - ``hf_namespace``, ``hf_token``, ``hf_username``, ``key_file``
+     - Accepted without a warning, but **no backend reads them from the
+       decorator**. Set them with :func:`clustrix.configure`.
+   * - ``auto_gpu_parallel``
+     - No effect. Accepted so that old call sites keep working; passing it
+       logs a warning.
 
-Basic Usage
-~~~~~~~~~~~
+Any other keyword is ignored, with a warning that names it. In particular
+``cluster_type`` is **not** a decorator keyword: the backend is chosen with
+:func:`clustrix.configure`.
 
 .. code-block:: python
+
+   import logging
 
    from clustrix import cluster, configure
 
-   # Explicit and self-contained: with no cluster configured (or, as here,
-   # cluster_type="local" and no host), @cluster runs locally -- see "How
-   # Execution Mode Is Chosen" below.
-   configure(cluster_type="local", cluster_host=None)
+   logging.basicConfig(format="%(levelname)s %(name)s: %(message)s")
+   configure(cluster_type="local")
 
-   @cluster(cores=4, memory='8GB')
-   def my_function(x, y):
-       return x + y
 
-   result = my_function(10, 20)
+   @cluster(cores=2, cluster_type="local")
+   def double(x):
+       return 2 * x
 
-Resource Specification
-~~~~~~~~~~~~~~~~~~~~~~
 
-.. code-block:: python
+   print(double(21))
 
-   @cluster(
-       cores=16,
-       memory='32GB', 
-       time='04:00:00',
-       partition='gpu'
-   )
-   def gpu_computation():
-       # Your GPU code here
-       pass
+.. code-block:: text
 
-Parallel Loop Execution (Remote)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   WARNING clustrix.decorator: @cluster received unrecognised option(s) cluster_type; they have no effect. Recognised extras: data, hf_flavor, hf_namespace, hf_timeout, hf_token, hf_username, key_file, no_data
+   WARNING clustrix.decorator: @cluster(cores=2) has no effect here: double has no loop that can be split. Locally, cores is the number of worker processes a loop in the function is divided among; with no loop that can be divided, the function runs once, in this process. clustrix.explain(function) says why a loop was not divided.
+   42
 
-When ``parallel=True`` submits to a *remote* backend, loop detection uses
-``clustrix.utils.detect_loops`` -- a much simpler AST scan than the local
-path below. Two conditions must BOTH hold, and most functions fail at least
-one of them.
+Where a call runs
+-----------------
 
-**First, the loop's range must be a literal.** ``detect_loops`` only
-recognises a ``for`` loop written as ``range(<int literal>)``. A bound known
-only at run time is declined outright and the answer is ``None``, because
-there is no honest way to split a range whose length the analysis cannot read.
-Verified directly:
+Decided on every call from the live configuration:
 
-``detect_loops`` reads the function's source with ``inspect.getsource``, so
-these have to live in a real file to be analysed at all:
+.. list-table::
+   :header-rows: 1
+   :widths: 45 55
 
-.. code-block:: python
+   * - Configuration
+     - The call runs
+   * - ``cluster_type="huggingface"``
+     - As a HuggingFace job.
+   * - No ``cluster_host`` (whatever ``cluster_type`` says)
+     - On this machine. A loop that qualifies is divided among ``cores``
+       worker processes.
+   * - ``cluster_host`` set, ``prefer_local_parallel=True``
+     - On this machine, as above.
+   * - ``cluster_host`` set, ``cluster_type="ssh"`` or ``"slurm"``
+     - On the cluster.
+   * - ``cluster_host`` set, ``cluster_type="local"``
+     - On this machine through the same submit-and-collect path a remote
+       job takes, as one unit of work.
 
-   # loopdemo.py
-   def a(data):
-       for item in data:
-           pass
-
-   def b(data):
-       for i in range(len(data)):
-           pass
-
-   def c():
-       for i in range(100):
-           pass
-
-.. code-block:: python
-
-   from clustrix.utils import detect_loops
-   import loopdemo
-
-   print(detect_loops(loopdemo.a, ([1, 2, 3],), {}))   # None -- a value, not a range
-   print(detect_loops(loopdemo.b, ([1, 2, 3],), {}))   # None -- len(data) is not a literal
-   print(detect_loops(loopdemo.c, (), {})["range"])    # range(0, 100)
-
-**Second, the function must be able to receive a chunk.** Clustrix splits the
-range and passes each piece as the keyword arguments ``_chunk_range_<var>``
-and ``_chunk_index``. A function that does not declare them (or ``**kwargs``)
-cannot be handed one, so ``_create_work_chunks`` produces no chunks, the call
-runs whole, and the decision is logged at ``INFO`` on the
-``clustrix.decorator`` logger.
-
-.. code-block:: python
-
-   from clustrix.decorator import _accepts_chunk_kwargs
-
-   def no_chunk_params():
-       results = []
-       for i in range(100):
-           results.append(i)
-       return results
-
-   def chunk_aware(_chunk_range_i=None, _chunk_index=None):
-       total = 0
-       for i in range(100):
-           total += i
-       return total
-
-   names = ["_chunk_range_i", "_chunk_index"]
-   print(_accepts_chunk_kwargs(no_chunk_params, names))   # False -- runs whole
-   print(_accepts_chunk_kwargs(chunk_aware, names))       # True  -- can be chunked
-
-So a remote-parallelizable function needs a literal range *and* the chunk
-parameters:
-
-.. code-block:: python
-
-   # cluster-required: needs a remote backend to actually distribute the work
-   from clustrix import cluster
-
-   @cluster(cores=8, parallel=True)
-   def parallel_processing(_chunk_range_i=None, _chunk_index=None):
-       # When chunked, _chunk_range_i is this worker's slice of range(100).
-       # When not chunked, it is None and the whole range runs here.
-       span = _chunk_range_i if _chunk_range_i is not None else range(100)
-       return [i * i for i in span]
-
-.. note::
-
-   Results come back as a list of per-chunk results, so a parallelized run
-   and an unparallelized run of the same function can return different
-   shapes. See :doc:`../limitations` before relying on this.
-
-How Execution Mode Is Chosen
------------------------------
-
-``clustrix.decorator._choose_execution_mode`` decides, on every call,
-whether to run locally or submit to a remote backend. It falls back to
-*local* execution whenever ``config.cluster_host`` is unset (SLURM, SSH) and
-the cluster type is not one of the HTTP-API backends (currently HuggingFace
-Jobs). Concretely: if
-you never call ``configure()`` with a real host, ``@cluster``-decorated
-functions still run -- in the calling process, with no cluster involved --
-and the exact same code starts submitting real remote jobs the moment
-``configure()`` points at one. See :doc:`../tutorials/usage_patterns` for
-worked examples of both modes side by side.
-
-Local Parallelization
-~~~~~~~~~~~~~~~~~~~~~
-
-When ``parallel=True`` (or ``config.auto_parallel``) triggers *local*
-execution, ``@cluster`` first asks ``clustrix.loop_analysis.find_parallelizable_loops``
-whether the function has a chunkable loop, using a stricter analysis than
-the remote path above: a ``for <var> in range(...)`` loop only qualifies if
-its body reads no name other than ``<var>`` itself -- no accumulator
-variable, no function call, nothing from an outer scope. In practice this
-means the common ``results = []; for x in data: results.append(f(x))``
-shape is **never** flagged parallelizable (``results`` counts as a
-dependency), verified directly:
-
-.. code-block:: python
-
-   from clustrix.loop_analysis import find_parallelizable_loops
-
-   def accumulator_style(data):
-       results = []
-       for item in data:
-           results.append(item * 2)
-       return results
-
-   def trivial_range_loop(n):
-       for i in range(n):
-           x = i * 2  # reads only the loop variable -- no dependencies
-
-   find_parallelizable_loops(accumulator_style, ([1, 2, 3],), {})  # [] -- not flagged
-   find_parallelizable_loops(trivial_range_loop, (20,), {})        # one parallelizable loop
-
-When a loop *is* flagged, clustrix hands each chunk to the function as a
-keyword argument named ``_parallel_<var>`` (for a loop variable ``i``, that
-is ``_parallel_i``) and calls the function once per chunk -- the function's
-own loop body is not rewritten or re-executed; only the keyword is added to
-whatever ``args``/``kwargs`` the call already had. A function that wants to
-actually make use of chunked local parallelization therefore has to be
-written with two parts: a trivial, dependency-free loop for
-``find_parallelizable_loops`` to detect, and a branch on ``_parallel_<var>``
-that does the real work. Verified end-to-end (real ``@cluster`` call,
-``cluster_type="local"``, no cluster involved):
+Both spellings of the decorator work:
 
 .. code-block:: python
 
@@ -205,29 +108,22 @@ that does the real work. Verified end-to-end (real ``@cluster`` call,
 
    configure(cluster_type="local")
 
-   @cluster(cores=4, parallel=True)
-   def chunked_doubler(n, _parallel_i=None, **kwargs):
-       # Trivial loop purely so find_parallelizable_loops flags this
-       # function -- its body is never actually used for the result.
-       for i in range(n):
-           pass
-       if _parallel_i is not None:
-           return [x * 2 for x in _parallel_i]  # this chunk's share of work
-       return [x * 2 for x in range(n)]          # no chunk: do it all here
 
-   result = chunked_doubler(20)  # -> [0, 2, 4, ..., 38], computed across chunks
+   @cluster
+   def bare(x):
+       return x + 1
 
-If the callee's signature doesn't accept ``_parallel_<var>`` (and doesn't
-accept ``**kwargs``), clustrix does not silently run it sequentially
-without telling you: it logs ``"Not parallelizing <name> locally: it takes
-no '_parallel_<var>' parameter."`` at ``INFO`` level (see
-``clustrix/decorator.py``'s ``_create_local_work_chunks``) and then falls
-back to calling the function once, normally -- still a correct result, just
-without local parallelization.
 
-Expect to land on that decline path, or on "no loop detected at all". The
-detection criterion is narrow enough that most real functions hit one or the
-other, which is the practical reason ``@cluster`` is not a way to use your
-machine's cores. For that, drive :doc:`local_executor` directly:
-``LocalExecutor.execute_loop_parallel`` takes an arbitrary loop and gives you
-a real pool.
+   @cluster(memory="2GB")
+   def with_options(x):
+       return x + 2
+
+
+   print(bare(1), with_options(1))
+
+``clustrix.explain``
+--------------------
+
+.. autofunction:: clustrix.explain
+
+See :doc:`../parallel_loops` for how to read its output.

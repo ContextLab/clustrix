@@ -1,159 +1,154 @@
-Public API reference
-====================
+Public API
+==========
 
-Every name in ``clustrix.__all__`` is public by declaration: it is what a
-user is invited to import. Most are documented on their own pages (see the
-table below); this page exists so that none of them is documented nowhere.
+``clustrix.__all__`` is the public API. Every name in it is listed here with
+the page that documents it. The list on this page was compared with
+``sorted(clustrix.__all__)`` when it was written.
 
-+-------------------------------------+-----------------------------------+
-| Export group                        | Documented on                     |
-+=====================================+===================================+
-| ``cluster``, ``configure``,         | :doc:`decorator`,                 |
-| ``get_config``, ``ClusterConfig``   | :doc:`config`                     |
-+-------------------------------------+-----------------------------------+
-| ``LocalExecutor``,                  | :doc:`local_executor`             |
-| ``create_local_executor``           |                                   |
-+-------------------------------------+-----------------------------------+
-| ``cluster_ls`` …                    | :doc:`filesystem`                 |
-| ``cluster_count_files``,            |                                   |
-| ``ClusterFilesystem``, ``FileInfo``,|                                   |
-| ``DiskUsage``                       |                                   |
-+-------------------------------------+-----------------------------------+
-| ``DependencyAnalyzer`` …            | :doc:`dependency_analysis`        |
-| ``analyze_function_loops``          |                                   |
-+-------------------------------------+-----------------------------------+
-| ``data_package``,                   | :doc:`../data_packages`           |
-| ``list_data_packages``,             |                                   |
-| ``delete_data_package``,            |                                   |
-| ``materialize_packages``,           |                                   |
-| ``DataPackage``, ``StagingError``   |                                   |
-+-------------------------------------+-----------------------------------+
-| ``%%remote``, ``%clustrix``         | :doc:`notebook_magic`             |
-+-------------------------------------+-----------------------------------+
+.. list-table::
+   :header-rows: 1
+   :widths: 46 54
 
-The names below had no page before 0.2.0 (#162). Each is documented here;
-all docstrings are authoritative for signatures.
+   * - Names
+     - Documented in
+   * - ``cluster``, ``explain``
+     - :doc:`decorator`, :doc:`../parallel_loops`
+   * - ``configure``, ``get_config``, ``ClusterConfig``
+     - :doc:`config`, :doc:`../configuration`
+   * - ``data_package``, ``DataPackage``, ``materialize_packages``,
+       ``list_data_packages``, ``delete_data_package``, ``StagingError``
+     - :doc:`../data_packages`
+   * - ``cluster_ls``, ``cluster_find``, ``cluster_glob``, ``cluster_stat``,
+       ``cluster_exists``, ``cluster_isdir``, ``cluster_isfile``,
+       ``cluster_du``, ``cluster_count_files``, ``ClusterFilesystem``,
+       ``FileInfo``, ``DiskUsage``
+     - :doc:`filesystem`
+   * - ``ModernClustrixWidget``, ``create_modern_cluster_widget``,
+       ``display_modern_widget``, ``show_widget``,
+       ``load_ipython_extension``
+     - :doc:`notebook_magic`
+   * - ``setup_ssh_keys``, ``setup_ssh_keys_with_fallback``,
+       ``add_host_key``, ``find_ssh_keys``, ``list_ssh_keys``
+     - :doc:`../ssh_setup` and below
+   * - ``ClusterExecutor``, ``setup_environment``, ``ProfileManager``,
+       ``adopt_profile_store``
+     - Below
+   * - ``DependencyAnalyzer``, ``DependencyGraph``, ``ImportInfo``,
+       ``LocalFunctionCall``, ``FilesystemCall``, ``FileReference``,
+       ``analyze_function_dependencies``, ``FilePackager``, ``PackageInfo``,
+       ``PackagedFile``, ``ExecutionContext``, ``create_execution_context``,
+       ``package_function_for_execution``
+     - :ref:`Below <not-on-the-execution-path>`; not used when a job runs
 
-SSH key automation -- ``setup_ssh_keys``, ``setup_ssh_keys_with_fallback``,
-``add_host_key``
---------------------------------------------------------------------------------
+There is no separate module to import for loop division or input staging.
+``clustrix.parallelize``, ``clustrix.loop_workers`` and
+``clustrix.auto_stage`` are used by ``@cluster``; the user-facing parts are
+``clustrix.explain``, the ``cores`` and ``parallel`` parameters, and the
+``data`` / ``no_data`` keywords and ``auto_stage`` settings.
 
-The one-call setup described in :doc:`../ssh_setup`
-generates an Ed25519 key, deploys it, and writes the matching
-``~/.ssh/config`` entry:
+SSH helpers
+-----------
+
+.. py:function:: clustrix.setup_ssh_keys(config, password, cluster_alias=None, key_type="ed25519", force_refresh=False, auto_refresh_days=None)
+   :no-index:
+
+   Generate a key, install it on ``config.cluster_host`` using ``password``
+   once, test it, and optionally write a ``~/.ssh/config`` entry. Returns a
+   dict with ``success``, ``key_path``, ``key_already_existed``,
+   ``key_deployed``, ``connection_tested``, ``error`` and ``details``.
+   ``auto_refresh_days`` is accepted and not implemented. See
+   :doc:`../ssh_setup`.
+
+.. autofunction:: clustrix.setup_ssh_keys_with_fallback
+
+.. autofunction:: clustrix.find_ssh_keys
+
+.. autofunction:: clustrix.list_ssh_keys
+
+.. autofunction:: clustrix.add_host_key
+
+``add_host_key`` trusts whatever key the host presents at that moment. To
+record the key a refused connection was actually offered, after you have
+compared its fingerprint, use
+:func:`clustrix.ssh_security.trust_offered_host_key`; see
+:ref:`host-key-verification`.
+
+.. autofunction:: clustrix.ssh_security.trust_offered_host_key
+
+.. autoexception:: clustrix.ssh_security.HostKeyVerificationError
+   :no-members:
+
+``ClusterExecutor``
+-------------------
+
+The object ``@cluster`` uses to connect, submit, poll and fetch. Use it
+directly to test a connection or to manage a job yourself.
+
+.. code-block:: python
+
+   # cluster-required: needs an SSH host
+   from clustrix import ClusterExecutor, get_config
+
+   executor = ClusterExecutor(get_config())
+   try:
+       executor.connect()
+       print("connected")
+   finally:
+       executor.disconnect()
+
+While waiting for a result the executor checks after one second and backs
+off from there; ``job_poll_interval`` is the longest it waits between checks,
+not the interval. ``job_wait_timeout`` bounds the whole wait.
+
+``setup_environment``
+---------------------
+
+.. autofunction:: clustrix.setup_environment
+
+Every remote job calls this itself. Call it directly only to build an
+environment ahead of time.
+
+Profiles
+--------
+
+``ProfileManager`` is the store of named configurations behind the notebook
+widget and ``%clustrix config <profile>``. It lives in
+``<config dir>/profiles/profiles.yml``; the constructor takes a different
+directory.
 
 .. code-block:: python
 
-   from clustrix import ClusterConfig, setup_ssh_keys_with_fallback
-
-   config = ClusterConfig(
-       cluster_type="slurm",
-       cluster_host="cluster.example.edu",
-       username="myuser",
-   )
-   result = setup_ssh_keys_with_fallback(config)  # -> {"success": True, ...}
-
-``setup_ssh_keys(config)`` is the non-fallback core (key generation and
-deployment only); ``setup_ssh_keys_with_fallback(config)`` adds password
-discovery (Colab secrets, host-named environment variables, then a prompt)
-so it works unattended where credentials are available. Both return a dict
-with ``success`` and, on failure, ``error``.
-
-``add_host_key(hostname, port=22)`` appends one host's key to your
-``~/.ssh/known_hosts`` — the manual equivalent of answering "yes" to
-OpenSSH's fingerprint prompt. Prefer connecting once through clustrix's
-default ``reject`` policy, which prints exactly this call's ``ssh-keyscan``
-equivalent when it refuses; use ``add_host_key`` when you have verified the
-fingerprint out of band.
-
-Environment replication -- ``setup_environment``
-------------------------------------------------
-
-.. code-block:: python
-
-   # cluster-required: builds a virtualenv on the configured cluster
-   from clustrix import setup_environment
-
-   message = setup_environment(
-       work_dir="/scratch/myuser/env",
-       requirements={"numpy": "2.0.1"},
-       config=config,
-   )
-   print(message)
-
-Builds (or reuses) the remote virtualenv for ``config`` from the
-``requirements`` mapping and returns a human-readable report line. It is
-the same routine every backend runs inside a job; calling it yourself is
-for pre-warming a cluster or checking what *would* be installed. Not needed
-for ``huggingface``, which replicates the environment inside its container.
-
-Profiles -- ``ProfileManager``
-------------------------------
-
-.. code-block:: python
+   import tempfile
 
    from clustrix import ClusterConfig, ProfileManager
 
-   manager = ProfileManager()
-   manager.get_profile_names()   # -> ["University SLURM Cluster", ...]
-   manager.create_profile(
-       "mine",
-       ClusterConfig(cluster_type="local", default_cores=2),
-   )
-   config = manager.load_profile("mine")
+   manager = ProfileManager(tempfile.mkdtemp())
+   manager.create_profile("mine", ClusterConfig(cluster_type="local", default_cores=2))
+   print("mine" in manager.get_profile_names())
+   print(manager.load_profile("mine").default_cores)
    manager.remove_profile("mine")
+   print("mine" in manager.get_profile_names())
 
-Named clusters stored under ``~/.clustrix/profiles/``. The notebook widget
-and ``%clustrix config <name>`` are front-ends to the same store. A store
-written before clustrix recorded provenance loads with a warning naming the
-affected profiles, and releasing a stored credential to a host such a
-profile named is refused until you run ``clustrix.adopt_profile_store()``
-after recognising every entry.
+.. code-block:: text
 
-Widget constructors -- ``ModernClustrixWidget``,
-``create_modern_cluster_widget``, ``display_modern_widget``, ``show_widget``
------------------------------------------------------------------------------
+   True
+   2
+   False
 
-Four spellings of the notebook panel shown by ``%%remote``
-(:doc:`notebook_magic`), for callers who want the object rather than the
-magic:
+.. autofunction:: clustrix.adopt_profile_store
 
-.. code-block:: python
+.. _not-on-the-execution-path:
 
-   from clustrix import (
-       ModernClustrixWidget,          # the widget class itself
-       create_modern_cluster_widget,  # -> widget instance
-       display_modern_widget,         # construct + display, returns widget
-       show_widget,                   # alias for display_modern_widget
-   )
+Exported, but not used when a job runs
+--------------------------------------
 
-Importing clustrix never displays it; see ``CLUSTRIX_AUTO_WIDGET`` in
-:doc:`config`.
-
-Packaging internals -- ``PackageInfo``, ``ExecutionContext``,
-``create_execution_context``, ``package_function_for_execution``,
-``PackagedFile``
----------------------------------------------------------------------------
-
-The packaging pipeline (:doc:`file_packaging`) exposes these for tooling
-that wants to inspect what would travel with a function before submitting
-it:
-
-.. code-block:: python
-
-   from clustrix import ClusterConfig, package_function_for_execution
-
-   def train(matrix):
-       return sum(matrix)
-
-   packaged = package_function_for_execution(
-       train,
-       ClusterConfig(cluster_type="local"),
-       ([1, 2, 3],),
-   )
-   packaged.package_id        # the staged package's id
-   packaged.dependencies      # DependencyGraph: what would travel with it
-   packaged.size_bytes
-
-Nothing in the execution path requires you to touch these; they exist so
-dependency analysis is inspectable rather than opaque.
+``clustrix.dependency_analysis`` (``DependencyAnalyzer``,
+``DependencyGraph``, ``ImportInfo``, ``LocalFunctionCall``,
+``FilesystemCall``, ``FileReference``, ``analyze_function_dependencies``)
+and ``clustrix.file_packaging`` (``FilePackager``, ``PackageInfo``,
+``PackagedFile``, ``ExecutionContext``, ``create_execution_context``,
+``package_function_for_execution``) are importable from ``clustrix``.
+**Nothing that** ``@cluster`` **does calls them.** A job's code, its
+dependencies and its input files are found by other means (cloudpickle, the
+payload's imports, :doc:`../input_files`). They are kept for existing callers
+and have no guide in this documentation.

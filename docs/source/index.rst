@@ -22,125 +22,81 @@ polling loop, no result-unpickling glue.
 
 .. code-block:: python
 
+   import clustrix
    from clustrix import cluster, configure
 
    configure(cluster_type="local")  # no cluster needed to try this
 
-   @cluster(cores=8, memory="16GB", time="02:00:00")
-   def expensive_computation(iterations=1000):
+
+   @cluster(cores=4)
+   def roots(numbers):
        import math
 
-       return sum(math.sqrt(i) for i in range(iterations))
+       found = []
+       for number in numbers:
+           found.append(math.sqrt(number))
+       return sum(found)
 
-   print(expensive_computation(iterations=10_000))
 
-Change ``cluster_type="local"`` to a SLURM login node and those same lines
-submit a batch job. That substitutability is the point of the library.
+   print(clustrix.explain(roots))
+   print(roots(range(10_000)))
+
+Configure a SLURM login node or an SSH host in place of ``"local"`` and the
+same function runs there.
 
 Start here
 ----------
 
-- :doc:`introduction` -- what Clustrix is, what it is not, and how it compares
-  to hand-written sbatch scripts, Dask, Ray, joblib and plain SSH.
-- :doc:`installation` -- install it, with the optional extras.
-- :doc:`quickstart` -- a real result in five minutes, beginning with a backend
-  that needs no cluster at all.
-- :ref:`supported-cluster-types` -- the four backends Clustrix supports, and
-  the evidence that each one runs a real job.
-- :ref:`removed-backends` -- if you are looking for PBS, SGE, Kubernetes or a
-  cloud VM provider, start here.
+- :doc:`introduction` -- what Clustrix is and is not.
+- :doc:`installation`
+- :doc:`quickstart`
+- :ref:`supported-cluster-types` -- the four backends, and the ones that are
+  not supported.
 
 What it does
 ------------
 
-- **One decorator.** ``@cluster`` on a function is the whole interface.
-- **Function packaging.** Your function is serialized by value with dill and
-  cloudpickle, so closures, nested functions and project-local modules travel
-  with it. Source code is not required.
-- **Four backends**: SLURM, SSH, HuggingFace Jobs and local execution. Each has
-  been run end to end -- see :ref:`supported-cluster-types`.
-- **Environment replication.** The remote environment is rebuilt from your
-  local ``pip freeze``.
-- **Read-only filesystem utilities.** ``cluster_ls``, ``cluster_glob``,
-  ``cluster_stat`` and their siblings work against a local path or a remote one
-  through the same call. They inspect; they do not transfer.
-- **Shared-storage detection.** A worker that already shares your filesystem
-  is detected, so the payload is not copied across a network that does not
-  need it.
-- **Loop parallelization.** A loop whose body carries no dependency between
-  iterations can be distributed across nodes. The analysis is deliberately
-  conservative and declines most real loops -- see :doc:`limitations`.
-- **A Jupyter widget.** ``%%remote`` opens a configuration panel in the
-  notebook.
-- **Errors that reach you.** A remote traceback is re-raised in your own
-  process rather than left in a log file on the cluster.
+- **Runs a function elsewhere.** The function is serialized by value, so
+  functions defined in a script, a notebook or the REPL work, and modules
+  from your own project travel with it.
+- **Divides a loop automatically.** A top-level ``for`` loop whose iterations
+  are independent is run in parallel: among ``cores`` worker processes
+  locally, as one job per piece on ``ssh`` and ``slurm``. The function
+  returns what it would have returned. :func:`clustrix.explain` prints the
+  decision. See :doc:`parallel_loops`, including what it cannot check.
+- **Stages input files automatically** on ``ssh`` and ``slurm``. A local file
+  the call names is uploaded once and made available at the path the code
+  uses. See :doc:`input_files`, including its limits. Files a job writes are
+  not brought back.
+- **Installs the dependencies.** The packages a function imports are detected
+  and installed in a cached environment on the remote host. Local and remote
+  Python must be the same minor version.
+- **Four backends**: ``slurm``, ``ssh``, ``huggingface`` (HuggingFace Jobs)
+  and ``local``.
+- **Verifies what it connects to and what it receives.** Unknown SSH hosts
+  are refused by default, and a result is authenticated before it is
+  deserialized.
+- **A notebook widget and a command line.** See :doc:`api/notebook_magic`
+  and :doc:`cli`.
+- **Read-only filesystem helpers.** ``cluster_ls``, ``cluster_glob``,
+  ``cluster_stat`` and others answer the same question about a local or a
+  remote path.
 
-Two things that sound like features and are not. ``@cluster(cores=N)`` does not
-split an ordinary local function across N workers: it runs once in your own
-process, and Clustrix warns that the number was discarded whenever you asked
-for more than one core. Loop parallelization is on by default, so nothing has
-to be switched on: ``cores`` sizes a local pool only when the loop analysis
-finds a supported loop *and* the function accepts the matching chunk argument.
-Clustrix also does not move your data -- see :doc:`introduction`.
+What it does not do
+-------------------
 
-Jupyter Notebook Integration
-----------------------------
+- It does not divide a loop that is inside a helper function, nested under
+  ``if``/``with``/``try``, or whose iterations depend on each other.
+- It cannot see side effects outside the values a loop was given (module
+  state, files, databases, GPU random state).
+- It does not use SLURM job arrays, and no GPU path has been verified on real
+  hardware in this release. ``auto_gpu_parallel`` does nothing.
+- It does not find a path that is computed at run time, does not stage files
+  for HuggingFace Jobs or asynchronous calls, and does not delete staged
+  data.
+- It does not support PBS, SGE, Kubernetes or cloud VM providers.
 
-Clustrix registers an IPython magic that opens a configuration widget:
-
-.. code-block:: ipython3
-
-   %%remote
-
-Importing ``clustrix`` registers the magic but does **not** display the widget.
-A library should not inject UI as a side effect of being imported, so the
-widget appears on demand: run ``%%remote`` in a cell, or call
-``clustrix.notebook_magic.display_config_widget()``. Setting
-``CLUSTRIX_AUTO_WIDGET=1`` makes it display on import instead.
-
-``%%clusterfy`` is an alias for ``%%remote``. It works, and it emits a
-``DeprecationWarning``.
-
-Interactive Configuration Widget
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-The widget edits the same settings as ``clustrix.configure()`` and applies them
-to the current session.
-
-.. image:: _static/widget/02-after-light.jpg
-   :alt: Clustrix widget in JupyterLab, light theme
-   :width: 700px
-
-Its colours resolve through JupyterLab's own theme variables, so it follows the
-notebook theme rather than carrying a second hand-maintained dark stylesheet:
-
-.. image:: _static/widget/03-after-dark.jpg
-   :alt: The same widget in JupyterLab's dark theme
-   :width: 700px
-
-"Show advanced" reveals the package manager, Python executable, environment
-variables, module loads and pre-execution commands:
-
-.. image:: _static/widget/04-advanced-light.jpg
-   :alt: Widget with the Advanced panel expanded
-   :width: 700px
-
-**What the widget covers**
-
-The cluster type dropdown offers ``local``, ``ssh``, ``slurm`` and
-``huggingface`` -- the same four values as
-:data:`clustrix.config.SUPPORTED_CLUSTER_TYPES`.
-
-- ``ssh`` and ``slurm`` show the connection section: host, port, username, SSH
-  key file, password, remote work directory, an environment variable to read
-  the password from, and an "Auto setup SSH keys" button.
-- ``huggingface`` shows namespace, flavor, token and an "Allow paid GPU
-  flavors" checkbox. GPU flavors bill by the second, so that box has to be
-  ticked before one is accepted.
-- ``local`` needs no connection settings at all.
-
-There are no PBS, SGE, Kubernetes, AWS, GCP, Azure or Lambda Cloud entries,
-because Clustrix does not support those backends; see :ref:`removed-backends`.
+:doc:`limitations` has the full list.
 
 Table of Contents
 -----------------
@@ -157,44 +113,38 @@ Table of Contents
    :maxdepth: 2
    :caption: User Guide
 
-   execution_model
-   configuration
+   parallel_loops
+   input_files
    data_packages
+   configuration
+   cli
    ssh_setup
+   execution_model
    limitations
    troubleshooting
 
 .. toctree::
    :maxdepth: 2
    :caption: Tutorials
+   :glob:
 
-   tutorials/usage_patterns
-   tutorials/filesystem_tutorial
-   tutorials/slurm_tutorial
+   tutorials/*
 
 .. toctree::
    :maxdepth: 2
    :caption: Interactive Notebooks
+   :glob:
 
-   notebooks/local_parallel_comparison
-   notebooks/filesystem_tutorial
-   notebooks/cluster_config_example
-   notebooks/complete_api_demo
-   notebooks/slurm_tutorial
-   notebooks/ssh_tutorial
-   notebooks/basic_usage
+   notebooks/*
 
 .. toctree::
    :maxdepth: 2
    :caption: API Reference
 
    api/decorator
-   api/filesystem
-   api/dependency_analysis
-   api/file_packaging
    api/config
    api/notebook_magic
-   api/local_executor
+   api/filesystem
    api/public_api
 
 .. _supported-cluster-types:
@@ -211,16 +161,16 @@ the notebook widget offer. There are no others.
 +--------------------+-------------------+--------------------------------------------------+
 | ``cluster_type``   | Status            | Notes                                            |
 +====================+===================+==================================================+
-| ``slurm``          | Verified          | A real job ran on ``hpc.example.edu``            |
-|                    |                   | and returned its result.                         |
+| ``slurm``          | Verified          | Verified end to end against a real scheduler.    |
+|                    |                   |                                                  |
 +--------------------+-------------------+--------------------------------------------------+
 | ``ssh``            | Verified          | Direct execution, no scheduler. A real job ran   |
 |                    |                   | on an 8-GPU host.                                |
 +--------------------+-------------------+--------------------------------------------------+
 | ``huggingface``    | Verified          | HuggingFace Jobs. A real job ran in a container. |
 +--------------------+-------------------+--------------------------------------------------+
-| ``local``          | Works             | Runs in the calling process. Used for            |
-|                    |                   | development and the fast tests.                  |
+| ``local``          | Works             | Runs on the calling machine. A divided loop uses |
+|                    |                   | worker processes.                                |
 +--------------------+-------------------+--------------------------------------------------+
 
 ``cluster_type='huggingface'`` means HuggingFace *Jobs*. There is no

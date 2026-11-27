@@ -25,8 +25,9 @@ call. In other words, you write the code once and choose the machine later.
 
 These utilities are **read-only**. There is no ``cluster_put``, no
 ``cluster_get``, and no copy or delete. They tell you what is on a filesystem.
-To send data to a worker, declare it with :func:`clustrix.data_package` and
-pass the result to your function as an argument.
+Input files reach a job by other means: automatically on ``ssh`` and
+``slurm`` (:doc:`../input_files`), or through a declared
+:func:`clustrix.data_package` (:doc:`../data_packages`).
 
 Behind the Scenes
 ------------------
@@ -226,7 +227,9 @@ Data-Driven Workflows
         data_files = cluster_glob("*.csv", "input/", config)
         
         results = []
-        # Sequential -- see the auto-parallelization contract in limitations.
+        # This loop is divided among workers or jobs: filename and file_info
+        # are private to an iteration, config is only read, and results is
+        # only appended to. clustrix.explain(process_datasets) prints that.
         for filename in data_files:
             # Check file size before processing
             file_info = cluster_stat(filename, config)

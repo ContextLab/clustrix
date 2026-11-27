@@ -1,102 +1,18 @@
-SSH Key Setup for Remote Clusters
-====================================
+SSH setup and host keys
+=======================
 
-Clustrix generates an SSH key, deploys it to the cluster, and writes the
-matching ``~/.ssh/config`` entry, in one call. Those are the same three steps
-you would otherwise run by hand, in the same order.
+The ``ssh`` and ``slurm`` backends reach the cluster over SSH. Two things
+have to be in place: this machine must recognise the host, and the host must
+accept you.
 
-.. note::
-   A runnable walkthrough is available as a notebook:
-   `SSH Key Automation Tutorial <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
+.. contents:: On this page
+   :local:
+   :depth: 1
 
-Quick Start: Automated Setup
------------------------------
+.. _host-key-verification:
 
-The easiest way to set up SSH access is using Clustrix's automated system:
-
-Method 1: Interactive Widget (Recommended)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Open the widget with the ``%%remote`` magic, in a cell of its own. Importing
-``clustrix`` registers the magic but does not display the widget.
-
-.. code-block:: ipython3
-
-   %%remote
-
-Then:
-
-1. Choose a remote cluster type (``ssh`` or ``slurm``) so the connection
-   section appears
-2. Enter your cluster hostname (e.g. ``cluster.example.edu``)
-3. Enter your username
-4. Enter your password
-5. Click "Auto setup SSH keys"
-
-Method 2: Command Line Interface
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   # Basic automated setup
-   clustrix ssh-setup --host cluster.example.edu --user your_username
-   
-   # With custom alias for easy access
-   clustrix ssh-setup --host cluster.example.edu --user your_username --alias my_hpc
-   
-   # Now you can connect with: ssh my_hpc
-
-Method 3: Python API
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   # cluster-required: connects to and deploys a key on a live host
-   from clustrix import setup_ssh_keys_with_fallback
-   from clustrix.config import ClusterConfig
-
-   config = ClusterConfig(
-       cluster_type="slurm",
-       cluster_host="cluster.example.edu", 
-       username="your_username"
-   )
-   
-   result = setup_ssh_keys_with_fallback(config)
-   if result["success"]:
-       print("✅ SSH keys setup successfully!")
-
-What the Automation Does
-------------------------
-
-The automated SSH setup handles everything for you:
-
-🔑 **Key Generation**
-  - Creates Ed25519 keys (modern elliptic-curve signatures; fast,
-    compact, and widely supported)
-  - Proper file permissions (600 for private, 644 for public)
-  - Informative comments with timestamps
-
-🚀 **Key Deployment** 
-  - Securely copies public key to remote cluster
-  - Automatically cleans up conflicting old keys
-  - Tests connection to verify success
-
-⚙️ **SSH Configuration**
-  - Updates ~/.ssh/config with cluster alias
-  - Configures optimal connection settings
-  - Enables easy future connections
-
-🔒 **Security Features**
-  - No plain-text credential storage
-  - Automatic password clearing from memory
-  - Cross-platform compatibility (Windows, macOS, Linux)
-
-Host Key Verification (Read This Before Connecting to a New Cluster)
-----------------------------------------------------------------------
-
-This is the first thing you will hit the first time you point clustrix at a
-cluster it hasn't talked to before, so it's worth understanding before it
-happens to you.
+Host key verification
+---------------------
 
 Every SSH connection clustrix makes -- for key setup, for job submission, for
 file transfer -- checks the remote host's SSH key against your local
@@ -109,30 +25,58 @@ message:
 
 .. code-block:: text
 
-   HostKeyVerificationError: Host key verification failed for 'cluster.example.edu':
-   this host is not in your known_hosts file(s), so clustrix refused the
-   connection rather than risk a machine-in-the-middle attack.
-     Offered key: ssh-ed25519 SHA256:AbCdEf...
+   HostKeyVerificationError: Host key verification failed for '[127.0.0.1]:2222': this host is not in your known_hosts file(s), so clustrix refused the connection rather than risk a machine-in-the-middle attack.
+     Offered key: ssh-ed25519 SHA256:t71ZfprzQXrLFRY47Bhv+RehzAB+NGmKLeKfi1cK//c
 
    To fix this:
      1. If you recognize and trust this host, add its key with:
-          ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
+          ssh-keyscan -p 2222 127.0.0.1 >> ~/.ssh/known_hosts
         then retry.
-     2. If you understand the risk and want clustrix to trust unknown host
-        keys automatically (NOT recommended -- this is exactly the behavior
-        that enables MITM attacks), set on ClusterConfig:
+     2. If you understand the risk and want clustrix to trust unknown host keys automatically (NOT recommended -- this is exactly the behavior that enables MITM attacks), set on ClusterConfig:
           ssh_host_key_policy="auto_add"
 
-A secure default means the first connection to any cluster needs one of:
+(Produced by connecting to a test ``sshd`` with an empty ``known_hosts``.)
 
-1. Run the ``ssh-keyscan`` command the error message gives you (this is the
-   same thing ``ssh`` itself would ask you to confirm interactively the
-   first time you connect by hand), or
-2. Already have a plain ``ssh`` connection to that host under your belt --
-   if you can already ``ssh cluster.example.edu`` from this machine, its
-   key is already in ``known_hosts`` and clustrix will never hit this error
-   for that host, or
-3. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
+The first connection to a host therefore needs one of the following.
+
+1. **Connect once with** ``ssh``, compare the fingerprint it shows with the
+   one your cluster's administrators publish, and accept it. The key is then
+   in ``known_hosts`` and Clustrix accepts the host. Running the
+   ``ssh-keyscan`` command from the error message records the key without
+   asking you anything; compare the "Offered key" line yourself first.
+2. **In the notebook widget, press "Trust this host".** The widget shows the
+   fingerprint of the key the host offered, and the button records exactly
+   that key. See :doc:`api/notebook_magic`.
+3. **In code, call** :func:`clustrix.ssh_security.trust_offered_host_key` with
+   the error you caught. It records exactly the key that was offered, where
+   scanning the host again would trust whatever answers the second time:
+
+   .. code-block:: python
+
+      # cluster-required: needs an SSH host that is not yet in known_hosts
+      from clustrix import ClusterExecutor, get_config
+      from clustrix.ssh_security import (
+          HostKeyVerificationError,
+          trust_offered_host_key,
+      )
+
+      executor = ClusterExecutor(get_config())
+      try:
+          executor.connect()
+      except HostKeyVerificationError as error:
+          print("Offered:", error.fingerprint)
+          # Compare with the fingerprint your administrators publish.
+          if input("Trust this host? [yes/no] ") == "yes":
+              print("Recorded in", trust_offered_host_key(error))
+              executor.connect()
+      finally:
+          executor.disconnect()
+
+   Run against a test ``sshd`` with the question answered "yes", this printed
+   ``Offered: ssh-ed25519 SHA256:t71ZfprzQXrLFRY47Bhv+RehzAB+NGmKLeKfi1cK//c``,
+   appended one line to ``~/.ssh/known_hosts`` (created with mode ``0600`` in
+   a ``0700`` directory), and connected.
+4. Explicitly opt out with ``ssh_host_key_policy="auto_add"`` in your
    ``ClusterConfig`` or ``configure(...)`` call -- but understand that this
    accepts whatever key a host offers, which is genuinely insecure. Only do
    this for a host you already trust through some other channel (e.g. you set
@@ -170,7 +114,7 @@ raises ``BadHostKeyException`` without consulting the policy at all.
 The ``reject`` policy never writes to your filesystem, since verifying is not
 a reason to create anything.
 
-The automated key setup described above obeys the same policy, and the
+The automated key setup described below obeys the same policy, and the
 ``ssh-copy-id`` it shells out to obeys it too: the subprocess is handed
 ``-o StrictHostKeyChecking=yes`` under ``reject`` and ``accept-new`` under
 ``auto_add``, so the one place clustrix reaches for OpenSSH cannot be more
@@ -194,332 +138,126 @@ repository, say -- ``ssh-copy-id`` is additionally given
 default identities nor anything in your ssh-agent. For a host you chose,
 nothing changes.
 
+Authentication
+--------------
+
+Clustrix authenticates with the key named by ``key_file``, with the SSH
+agent and your default keys, or with a password. A password is taken from
+``password`` (for the current process only; it is never saved), from the
+environment variable named by ``password_env_var``, or from the credential
+file managed by ``clustrix credentials`` (:doc:`cli`).
+
+A stored credential is offered only to the host it names, or to a host that
+came from a configuration source you chose. See
+:ref:`untrusted-security-settings`.
+
 .. code-block:: python
 
+   # cluster-required: needs an SSH host
    from clustrix import configure
 
-   # Secure default: unknown keys are rejected.
-   configure(cluster_type="slurm", cluster_host="cluster.example.edu")
-
-   # Explicit opt-out -- only for hosts you already trust out-of-band.
    configure(
        cluster_type="slurm",
-       cluster_host="cluster.example.edu",
-       ssh_host_key_policy="auto_add",
+       cluster_host="login.cluster.example.edu",
+       username="researcher",
+       key_file="~/.ssh/id_ed25519",
    )
 
-Advanced Features
------------------
+The port is ``cluster_port`` (default 22). ``ssh_port`` is accepted only as
+a deprecated alias for it and emits a ``DeprecationWarning``.
 
-Password Fallback System
-~~~~~~~~~~~~~~~~~~~~~~~~
+Setting up a key
+----------------
 
-Clustrix automatically retrieves passwords from secure sources:
+If you already have a key that the cluster accepts, there is nothing to do.
+Otherwise Clustrix can generate one and install it, using your password
+once. Three front ends do the same thing:
 
-**Google Colab Integration**
-
-.. code-block:: python
-
-   # Store password in Colab secrets (key icon 🔑 in sidebar)
-   # Use key: CLUSTER_PASSWORD_HOSTNAME or CLUSTER_PASSWORD
-   # Clustrix automatically retrieves it!
-
-**Environment Variables**
-
-.. code-block:: bash
-
-   # Set cluster-specific password
-   export CLUSTRIX_PASSWORD_CLUSTER_UNIVERSITY_EDU="your_password"
-   
-   # Or generic fallback
-   export CLUSTER_PASSWORD="your_password"
-
-**Interactive Prompts**
-  - **Jupyter Notebooks**: GUI popup dialogs
-  - **Command Line**: Secure terminal prompts
-  - **Python Scripts**: Standard input prompts
-
-Key Rotation and Management
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+* the **Set up SSH key** button in the notebook widget
+  (:doc:`api/notebook_magic`);
+* ``clustrix ssh-setup --host HOST --user USER [--port N] [--alias NAME]``
+  (:doc:`cli`), which prompts for the password;
+* :func:`clustrix.setup_ssh_keys_with_fallback` in Python.
 
 .. code-block:: python
 
-   # cluster-required: connects to a live host (also assumes `config` from
-   # the Method 3 example above)
-   # Force generation of new keys (for security rotation)
-   result = setup_ssh_keys_with_fallback(
-       config, 
-       force_refresh=True  # Removes old keys, generates fresh ones
-   )
-   
-   # Check existing SSH keys
-   from clustrix import find_ssh_keys, list_ssh_keys
-   
-   keys = find_ssh_keys()
-   print(f"Found {len(keys)} SSH keys")
-   
-   # Get detailed key information
-   key_info = list_ssh_keys()
-   for info in key_info:
-       if info["exists"]:
-           print(f"Key: {info['type']} {info['bit_size']} bits")
+   # cluster-required: connects to a host and installs a key on it
+   from clustrix import ClusterConfig, setup_ssh_keys_with_fallback
 
-Enterprise Cluster Support
---------------------------
-
-University and Enterprise Clusters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Many university clusters use **Kerberos authentication**. Clustrix handles this gracefully:
-
-.. code-block:: bash
-
-   # Clustrix deploys SSH keys successfully, then use Kerberos for auth
-   kinit your_netid@EXAMPLE.EDU
-   ssh your_netid@cluster.example.edu
-
-The SSH key deployment still succeeds and helps with file transfers and other operations.
-
-Multi-Factor Authentication
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-For clusters requiring MFA:
-  - SSH keys handle the cryptographic authentication
-  - MFA only needed for initial login or sensitive operations
-  - Reduces overall authentication friction
-
-Configuration Integration
--------------------------
-
-After SSH setup, configure Clustrix normally:
-
-Python Configuration
-~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: python
-
-   from clustrix import configure
-   
-   # After automated SSH setup, just configure normally
-   configure(
-       cluster_type="slurm",
-       cluster_host="cluster.example.edu",
-       username="your_username"
-       # No need to specify key_file - automatically detected!
-   )
-
-Configuration File
-~~~~~~~~~~~~~~~~~~
-
-.. code-block:: yaml
-
-   # ~/.clustrix/config.yml
-   cluster_type: "slurm"
-   cluster_host: "cluster.example.edu"
-   username: "your_username"
-   # key_file automatically set by SSH automation
-   
-   default_cores: 4
-   default_memory: "8GB"
-   default_time: "02:00:00"
-   
-   module_loads:
-     - "python/3.11"
-     - "gcc/11.2"
-
-Complete Workflow Example
--------------------------
-
-Here's a complete end-to-end example:
-
-.. code-block:: python
-
-   # cluster-required: connects to a live host and submits a real job
-   import clustrix
-   from clustrix import setup_ssh_keys_with_fallback, cluster
-   from clustrix.config import ClusterConfig
-
-   # Step 1: Automated SSH setup
    config = ClusterConfig(
        cluster_type="slurm",
-       cluster_host="hpc.example.edu",
-       username="researcher"
+       cluster_host="login.cluster.example.edu",
+       username="researcher",
    )
-   
-   ssh_result = setup_ssh_keys_with_fallback(config)
-   if not ssh_result["success"]:
-       raise Exception(f"SSH setup failed: {ssh_result['error']}")
-   
-   print("✅ SSH keys configured automatically!")
-   
-   # Step 2: Configure Clustrix
-   clustrix.configure(
-       cluster_type=config.cluster_type,
-       cluster_host=config.cluster_host,
-       username=config.username,
-       default_cores=4,
-       default_memory="8GB"
-   )
-   
-   # Step 3: Use cluster computing
-   @cluster(cores=8, memory="16GB", time="01:00:00")
-   def scientific_computation(n_samples=1000):
-       import numpy as np
-       data = np.random.randn(n_samples, n_samples)
-       eigenvalues = np.linalg.eigvals(data)
-       return float(np.mean(eigenvalues.real))
-   
-   # This executes on the cluster automatically
-   result = scientific_computation(n_samples=500)
-   print(f"Computation result: {result}")
+   result = setup_ssh_keys_with_fallback(config, cluster_alias="mycluster")
+   print(result["success"], result["key_path"], result["error"])
 
-Manual Setup
-------------
+What it does:
+
+1. Looks for a key in ``~/.ssh`` that the host already accepts and stops if
+   it finds one (unless ``force_refresh=True``).
+2. Generates an Ed25519 key (or RSA with ``key_type="rsa"``).
+3. Installs the public key in ``~/.ssh/authorized_keys`` on the host. An
+   earlier copy of the same key is removed first. **Other keys, including
+   keys Clustrix installed earlier, are left in place.**
+4. Tests a connection with the new key.
+5. With an alias, writes a ``Host <alias>`` block to ``~/.ssh/config``. A
+   block Clustrix wrote earlier for the same alias is replaced in place. A
+   ``Host <alias>`` block that you wrote is left unchanged, with a warning.
+
+The host key rules above apply to every step: under the default policy, key
+setup does not add an unknown host to ``known_hosts``.
+
+The password comes from the ``password`` argument, then (in Google Colab) a
+Colab secret, then the environment, then an interactive prompt.
 
 .. note::
-   Prefer the automated setup above. Do the steps by hand when your site needs
-   something the automation does not cover -- a non-default key type, a jump
-   host, a key held on a smartcard.
 
-The manual equivalent, step by step:
+   Key installation needs the password of a real account, which this
+   documentation build did not have. The steps above were read from
+   ``clustrix/ssh_utils.py``; they were not re-run for this page.
 
-1. Generate SSH Key Pair
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: bash
-
-   # Generate Ed25519 key (recommended)
-   ssh-keygen -t ed25519 -f ~/.ssh/clustrix_key
-   
-   # Or RSA key for older systems
-   ssh-keygen -t rsa -b 4096 -f ~/.ssh/clustrix_key
-
-2. Deploy Public Key
-~~~~~~~~~~~~~~~~~~~~
+Doing it by hand
+----------------
 
 .. code-block:: bash
 
-   # Copy public key to cluster
-   ssh-copy-id -i ~/.ssh/clustrix_key.pub username@cluster.example.edu
-
-3. Configure SSH Client
-~~~~~~~~~~~~~~~~~~~~~~~
-
-.. code-block:: text
-
-   # ~/.ssh/config
-   Host my-cluster
-       HostName cluster.example.edu
-       User username
-       IdentityFile ~/.ssh/clustrix_key
-       IdentitiesOnly yes
-
-4. Configure Clustrix
-~~~~~~~~~~~~~~~~~~~~~
+   ssh-keygen -t ed25519 -f ~/.ssh/cluster_key
+   ssh-copy-id -i ~/.ssh/cluster_key.pub researcher@login.cluster.example.edu
 
 .. code-block:: python
+
+   # cluster-required: needs an SSH host
+   from clustrix import configure
 
    configure(
        cluster_type="slurm",
-       cluster_host="my-cluster",
-       key_file="~/.ssh/clustrix_key"
+       cluster_host="login.cluster.example.edu",
+       username="researcher",
+       key_file="~/.ssh/cluster_key",
    )
 
-Troubleshooting
----------------
-
-Common Issues and Solutions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-**SSH Key Setup Failed**
+Looking at local keys
+---------------------
 
 .. code-block:: python
 
-   # cluster-required: connects to a live host (also assumes `config` from
-   # the Method 3 example above)
-   # Enable debug logging
-   import logging
-   logging.basicConfig(level=logging.DEBUG)
+   from clustrix import find_ssh_keys, list_ssh_keys
 
-   # Try setup with detailed output
-   result = setup_ssh_keys_with_fallback(config)
-   print(f"Detailed result: {result}")
+   print(len(find_ssh_keys()), "private key(s) in ~/.ssh")
+   for info in list_ssh_keys():
+       if info["exists"]:
+           print(info["path"], info["type"], info["fingerprint"])
 
-**Kerberos Authentication Required**
+Sites with Kerberos or multi-factor login
+-----------------------------------------
 
-.. code-block:: bash
+Clustrix does not perform Kerberos or interactive multi-factor
+authentication. If your site requires one of them for every connection, a
+key alone will not let Clustrix in.
 
-   # This is expected for university clusters
-   kinit your_netid@EXAMPLE.EDU
-   ssh your_netid@cluster.example.edu
+See also
+--------
 
-**Connection Test Failed**
-
-.. code-block:: python
-
-   # cluster-required: connects to a live host (also assumes `config` from
-   # the Method 3 example above)
-   # Try force refresh to clean up old keys
-   result = setup_ssh_keys_with_fallback(
-       config, 
-       force_refresh=True
-   )
-
-**Permission Denied**
-
-.. code-block:: bash
-
-   # Check key permissions
-   ls -la ~/.ssh/
-   
-   # Should be:
-   # drwx------  ~/.ssh/
-   # -rw-------  ~/.ssh/id_ed25519*
-   # -rw-r--r--  ~/.ssh/id_ed25519*.pub
-
-Security Best Practices
------------------------
-
-Key Management
-~~~~~~~~~~~~~~
-
-1. **Use Ed25519 Keys**: Default in automated setup; modern
-   elliptic-curve signatures, preferred over RSA
-2. **Regular Rotation**: Use ``force_refresh=True`` periodically  
-3. **Unique Keys**: Different keys for different clusters
-4. **Secure Storage**: Keys stored with proper permissions automatically
-
-Network Security
-~~~~~~~~~~~~~~~~
-
-1. **SSH Config Aliases**: Hide hostnames, centralize settings
-2. **Connection Timeouts**: Prevent hanging connections
-3. **Agent Forwarding**: Only when necessary
-4. **Jump Hosts**: Supported through SSH config
-
-Monitoring
-~~~~~~~~~~
-
-.. code-block:: python
-
-   # Monitor SSH key usage
-   from clustrix import list_ssh_keys
-   
-   keys = list_ssh_keys()
-   for key_info in keys:
-       if key_info["exists"]:
-           print(f"Key: {key_info['path']}")
-           print(f"Type: {key_info['type']}")
-           print(f"Fingerprint: {key_info['fingerprint']}")
-
-Getting Help
-------------
-
-- **Interactive Tutorial**: `SSH Automation Notebook <https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb>`_
-- **GitHub Issues**: `Report problems <https://github.com/ContextLab/clustrix/issues>`_
-- **Documentation**: `Read the Docs <https://clustrix.readthedocs.io>`_
-- **SSH Key Automation**: `Issue #57 <https://github.com/ContextLab/clustrix/issues/57>`_
-
-.. note::
-   **Remember**: one call replaces generating, deploying and configuring a
-   key by hand.
+* :doc:`cli` for ``clustrix ssh-setup`` and ``clustrix status``.
+* :doc:`troubleshooting`.
