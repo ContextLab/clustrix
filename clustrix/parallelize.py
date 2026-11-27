@@ -1153,23 +1153,38 @@ def _bind_from_env(names: Sequence[str]) -> List[ast.stmt]:
 #: module as ``pre``/``body``/``post`` rather than imported, so a worker
 #: without clustrix can still run them.
 _HELPERS_SOURCE = f"""
-def {_P}fingerprint({_P}env, {_P}names):
+def {_P}fingerprint({_P}env, {_P}names, {_P}known=None):
+    # A digest of each value's pickle. With ``known``, also records every
+    # object those pickles contain -- {{id: (number, object)}} -- which is
+    # the pickler's own bookkeeping, so it costs nothing extra.
     import hashlib
     import pickle
     try:
-        import cloudpickle as serializer
+        from cloudpickle import Pickler
     except ImportError:
-        serializer = pickle
+        Pickler = pickle.Pickler
+
+    class Digest:
+        def __init__(self):
+            self.sha1 = hashlib.sha1()
+
+        def write(self, data):
+            self.sha1.update(data)
+
     prints = {{}}
     for name in {_P}names:
         if name not in {_P}env:
             continue
+        digest = Digest()
         try:
-            data = serializer.dumps({_P}env[name], protocol=4)
+            pickler = Pickler(digest, protocol=4)
+            pickler.dump({_P}env[name])
+            if {_P}known is not None:
+                {_P}known.update(pickler.memo.copy())
         except Exception:
             prints[name] = None
         else:
-            prints[name] = hashlib.sha1(data).hexdigest()
+            prints[name] = digest.sha1.hexdigest()
     return prints
 
 
@@ -1189,26 +1204,47 @@ def {_P}rng_state():
     return digest.hexdigest()
 
 
-def {_P}reach({_P}roots, {_P}through_code, {_P}seen):
-    # Every object reachable from the roots, once. Numbers, strings and
-    # modules are neither yielded nor entered. Raises OverflowError rather
-    # than stop silently: an unfinished search has proved nothing.
+def {_P}walk({_P}roots, {_P}through_code, {_P}seen, {_P}stop):
+    # Visit everything reachable from the roots, recording it in ``seen``
+    # ({{id: object}}). Returns the id of the first object met that is in
+    # ``stop``, or None. Numbers, strings and modules are not entered.
+    # Raises OverflowError rather than stop silently: an unfinished search
+    # has proved nothing.
     import gc
     import sys
     import types
-    atomic = (int, float, complex, str, bytes, bool, type(None), range,
-              types.ModuleType)
+    atomic = frozenset((int, float, complex, str, bytes, bool, type(None), range))
+    sequences = (list, tuple, set, frozenset)
+    methods = (types.MethodType, types.BuiltinFunctionType, types.MethodWrapperType)
     numpy = sys.modules.get("numpy")
+    ndarray = numpy.ndarray if numpy is not None else ()
     stack = list({_P}roots)
     while stack:
         obj = stack.pop()
-        if type(obj) in atomic or id(obj) in {_P}seen:
+        kind = type(obj)
+        if kind in atomic:
             continue
-        {_P}seen.add(id(obj))
+        key = id(obj)
+        if key in {_P}seen:
+            continue
+        {_P}seen[key] = obj
+        if {_P}stop is not None and key in {_P}stop:
+            return key
         if len({_P}seen) > {_WALK_LIMIT}:
             raise OverflowError
-        yield obj
-        if isinstance(obj, type):
+        # A container of nothing but numbers and strings is passed over in
+        # one step; a million floats must not cost a million of these.
+        if kind in sequences:
+            if not atomic.issuperset(map(type, obj)):
+                stack.extend(obj)
+        elif kind is dict:
+            if not atomic.issuperset(map(type, obj.values())):
+                stack.extend(obj.values())
+            if not atomic.issuperset(map(type, obj)):
+                stack.extend(obj)
+        elif isinstance(obj, types.ModuleType):
+            pass
+        elif isinstance(obj, type):
             # A class written in Python: its attributes are values too.
             if {_P}through_code and obj.__flags__ & 512:
                 stack.extend(vars(obj).values())
@@ -1223,13 +1259,12 @@ def {_P}reach({_P}roots, {_P}through_code, {_P}seen):
                         pass
                 stack.extend(obj.__defaults__ or ())
                 stack.extend((obj.__kwdefaults__ or {{}}).values())
-        elif isinstance(obj, (types.MethodType, types.BuiltinFunctionType,
-                              types.MethodWrapperType)):
+        elif isinstance(obj, methods):
             # ``out.__len__`` holds ``out``.
             stack.append(obj.__self__)
             if isinstance(obj, types.MethodType):
                 stack.append(obj.__func__)
-        elif numpy is not None and isinstance(obj, numpy.ndarray):
+        elif isinstance(obj, ndarray):
             # The garbage collector does not look inside an array.
             if obj.dtype.hasobject:
                 stack.extend(obj.flat)
@@ -1237,6 +1272,7 @@ def {_P}reach({_P}roots, {_P}through_code, {_P}seen):
                 stack.append(obj.base)
         else:
             stack.extend(gc.get_referents(obj))
+    return None
 
 
 def {_P}aliases({_P}env, {_P}written, {_P}read, {_P}items=None):
@@ -1252,73 +1288,80 @@ def {_P}aliases({_P}env, {_P}written, {_P}read, {_P}items=None):
     try:
         for name in {_P}written:
             if name in {_P}env:
-                for obj in {_P}reach([{_P}env[name]], False, set()):
+                reached = {{}}
+                {_P}walk([{_P}env[name]], False, reached, None)
+                for key, obj in reached.items():
                     if not isinstance(obj, never_written):
-                        targets.setdefault(id(obj), name)
+                        targets.setdefault(key, name)
         if not targets:
             return []
         readers = [(name, {_P}env[name]) for name in {_P}read if name in {_P}env]
         if {_P}items is not None:
             readers.append(({_ITEMS!r}, {_P}items))
         found = []
-        seen = set()
+        seen = {{}}
         for name, value in readers:
-            for obj in {_P}reach([value], True, seen):
-                if id(obj) in targets:
-                    found.append((name, targets[id(obj)]))
-                    break
+            hit = {_P}walk([value], True, seen, targets)
+            if hit is not None:
+                found.append((name, targets[hit]))
         return found
     except OverflowError:
         return [(None, sorted({_P}written)[0])]
 
 
 def {_P}index({_P}env, {_P}items):
-    # Where each object the chunk was handed lives: {{id: (path, object)}}.
-    # A path names a variable or an item, then steps into lists, tuples,
-    # dict values and attributes. It is how an object that existed before
-    # the loop is named in the log instead of being copied into it.
+    # Where each object the chunk was handed lives: {{id: (parent, step,
+    # object)}}. Following parents gives a path -- a variable or an item,
+    # then steps into lists, tuples, dict values and attributes -- which is
+    # how an object that existed before the loop is named in the log
+    # instead of being copied into it.
     import types
-    atomic = (int, float, complex, str, bytes, bool, type(None), range)
+    atomic = frozenset((int, float, complex, str, bytes, bool, type(None), range))
     opaque = (type, types.ModuleType, types.FunctionType)
     table = {{}}
     stack = []
     if type({_P}items) is not range:
         stack.extend(
-            ((("i", position),), item)
+            (None, ("i", position), item)
             for position, item in enumerate({_P}items)
+            if type(item) not in atomic
         )
-    stack.extend(((("e", name),), {_P}env[name]) for name in sorted({_P}env))
+    stack.extend((None, ("e", name), {_P}env[name]) for name in sorted({_P}env))
     while stack and len(table) < {_WALK_LIMIT}:
-        path, obj = stack.pop()
+        entry = stack.pop()
+        obj = entry[2]
         if type(obj) in atomic or id(obj) in table:
             continue
-        table[id(obj)] = (path, obj)
+        table[id(obj)] = entry
         if isinstance(obj, list):
-            stack.extend(
-                (path + (("s", k),), e) for k, e in enumerate(list.__iter__(obj))
-            )
+            if not atomic.issuperset(map(type, list.__iter__(obj))):
+                for k, e in enumerate(list.__iter__(obj)):
+                    if type(e) not in atomic:
+                        stack.append((entry, ("s", k), e))
         elif isinstance(obj, tuple):
-            stack.extend(
-                (path + (("s", k),), e) for k, e in enumerate(tuple.__iter__(obj))
-            )
+            if not atomic.issuperset(map(type, tuple.__iter__(obj))):
+                for k, e in enumerate(tuple.__iter__(obj)):
+                    if type(e) not in atomic:
+                        stack.append((entry, ("s", k), e))
         elif isinstance(obj, dict):
-            stack.extend(
-                (path + (("v", k),), e) for k, e in enumerate(dict.values(obj))
-            )
+            if not atomic.issuperset(map(type, dict.values(obj))):
+                for k, e in enumerate(dict.values(obj)):
+                    if type(e) not in atomic:
+                        stack.append((entry, ("v", k), e))
         if not isinstance(obj, opaque):
             attributes = getattr(obj, "__dict__", None)
             if type(attributes) is dict:
-                stack.extend(
-                    (path + (("a", name),), e)
-                    for name, e in attributes.items()
-                    if type(name) is str
-                )
+                for name, e in attributes.items():
+                    if type(name) is str and type(e) not in atomic:
+                        stack.append((entry, ("a", name), e))
     return table
 
 
-def {_P}dump({_P}log, {_P}table):
+def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items):
     # The log as bytes, a pre-existing object written as its path. Returns
     # (bytes, the variables those paths start from, what went wrong).
+    # ``known`` holds every object the chunk was handed; where each one
+    # lives is only worked out if the log turns out to contain one.
     import io
     import pickle
     import types
@@ -1326,20 +1369,34 @@ def {_P}dump({_P}log, {_P}table):
         from cloudpickle import Pickler as base
     except ImportError:
         base = pickle.Pickler
+    atomic = frozenset((int, float, complex, str, bytes, bool, type(None), range))
+    function = types.FunctionType
     here = {_P}dump.__code__.co_filename
-    table = {_P}table  # a name starting __ is rewritten inside a class
+    # Names starting __ are rewritten inside a class body; use plain ones.
+    known, env, items, index = {_P}known, {_P}env, {_P}items, {_P}index
     used = set()
     escaped = []
+    tables = []
 
     class Tokens(base):
         def persistent_id(self, obj):
-            entry = table.get(id(obj))
-            if entry is not None and entry[1] is obj:
-                path = entry[0]
-                used.add(path[0][1] if path[0][0] == "e" else {_ITEMS!r})
-                return path
-            if (
-                type(obj) is types.FunctionType
+            kind = type(obj)
+            if kind in atomic:
+                return None
+            if id(obj) in known:
+                if not tables:
+                    tables.append(index(env, items))
+                entry = tables[0].get(id(obj))
+                if entry is not None and entry[2] is obj:
+                    steps = []
+                    while entry is not None:
+                        steps.append(entry[1])
+                        entry = entry[0]
+                    steps.reverse()
+                    used.add(steps[0][1] if steps[0][0] == "e" else {_ITEMS!r})
+                    return tuple(steps)
+            elif (
+                kind is function
                 and obj.__closure__
                 and obj.__code__.co_filename == here
             ):
@@ -1453,9 +1510,9 @@ def _generate(
             if not isinstance({_P}items, range):
                 {_P}watched[{_ITEMS!r}] = {_P}items
             {_P}names = ({_ITEMS!r},) + {body_names!r}
-            {_P}before = {_P}fingerprint({_P}watched, {_P}names)
+            {_P}known = {{}}
+            {_P}before = {_P}fingerprint({_P}watched, {_P}names, {_P}known)
             {_P}rng_before = {_P}rng_state()
-            {_P}table = {_P}index({_P}env, {_P}items)
             {_P}log = []
             """))
     body_statements.append(
@@ -1475,7 +1532,9 @@ def _generate(
             )
             if {_P}rng_state() != {_P}rng_before:
                 {_P}changed.append({_RNG!r})
-            {_P}blob, {_P}used, {_P}problem = {_P}dump({_P}log, {_P}table)
+            {_P}blob, {_P}used, {_P}problem = {_P}dump(
+                {_P}log, {_P}known, {_P}env, {_P}items
+            )
             if {_P}problem is not None:
                 {_P}changed.append({_P}problem)
             return ({_P}blob, {_P}changed, {_P}used)
