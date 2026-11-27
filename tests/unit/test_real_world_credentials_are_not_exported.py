@@ -158,9 +158,9 @@ class TestUnconfiguredMeansUnconfigured:
     """``get_ssh_credentials`` used to invent a localhost/$USER target.
 
     Nothing was configured, yet the answer was a truthy dictionary, so the
-    ``if not ssh_creds: pytest.skip(...)`` gates in conftest.py,
-    test_ssh_real.py and test_ssh_job_execution_real.py never fired and their
-    tests pointed clustrix at the developer's own machine over SSH.
+    ``if not ssh_creds: pytest.skip(...)`` gates that then guarded the
+    real-world SSH tests never fired and their tests pointed clustrix at the
+    developer's own machine over SSH.
     """
 
     def test_nothing_configured_yields_no_ssh_credentials(self, tmp_path):

@@ -19,9 +19,9 @@ import logging
 from typing import Dict, Optional
 from pathlib import Path
 
-# Only used by the require_* helpers below, which skip rather than fail when a
-# target is unconfigured. This module lives under tests/, so pytest is always
-# installed alongside it.
+# Only used by require_test_remote_work_dir, which skips rather than fails
+# when a target is unconfigured. This module lives under tests/, so pytest is
+# always installed alongside it.
 import pytest
 
 # The supported credential path. Guarded so that this module still imports
@@ -120,25 +120,6 @@ def configured_test_hosts():
         if host and host not in seen:
             seen.append(host)
     return tuple(seen)
-
-
-def require_test_host(role: str) -> str:
-    """Hostname for `role`, or skip the test saying which variable to set."""
-    host = get_test_host(role)
-    if not host:
-        pytest.skip(
-            f"No {role} test cluster configured: set "
-            f"{HOST_ENV_VARS[role][0]} to a host you have access to"
-        )
-    return host
-
-
-def require_test_username() -> str:
-    """Username for the test clusters, or skip saying which variable to set."""
-    username = get_test_username()
-    if not username:
-        pytest.skip(f"No test cluster account configured: set {USERNAME_ENV_VARS[0]}")
-    return username
 
 
 def require_test_remote_work_dir() -> str:
@@ -351,25 +332,14 @@ def get_cluster_credentials(role: str) -> Optional[Dict[str, str]]:
     credentials = {
         "host": host,
         "username": username,
-        # Present even when unset: existing callers, including several under
-        # tests/integration, index this key directly, and a KeyError on a
-        # key-only setup would be a worse signal than the None they used to
-        # get from the old credential shape.
+        # Present even when unset: existing callers index this key directly,
+        # and a KeyError on a key-only setup would be a worse signal than the
+        # None they used to get from the old credential shape.
         "password": password,
         "port": str(ssh.get("port") or "22"),
     }
     if private_key_path:
         credentials["private_key_path"] = private_key_path
-    return credentials
-
-
-def require_cluster_credentials(role: str) -> Dict[str, str]:
-    """Credentials for `role`, or skip the test saying exactly what is missing."""
-    credentials = get_cluster_credentials(role)
-    if not credentials:
-        pytest.skip(
-            f"No credentials for the {role} test cluster. {credential_setup_hint()}"
-        )
     return credentials
 
 
@@ -425,14 +395,6 @@ class RealWorldCredentialManager:
             "private_key_path": private_key_path,
             "port": os.getenv("TEST_SSH_PORT", "22"),
         }
-
-    def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get plain-SSH ("ssh" role, the GPU box here) cluster credentials."""
-        return get_cluster_credentials("ssh")
-
-    def get_slurm_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SLURM head-node ("slurm" role) cluster credentials."""
-        return get_cluster_credentials("slurm")
 
     def get_slurm_credentials(self) -> Optional[Dict[str, str]]:
         """Get SLURM credentials from available sources."""

@@ -1,21 +1,14 @@
 """
 Real-world testing infrastructure for Clustrix.
 
-This module contains tests that use actual external resources:
-- File system operations
-- SSH connections
-- API calls to cloud providers
-- Database operations
-- Visual verification of widgets
-
-These tests are designed to validate that our code works correctly
-with real external dependencies, not just mocked versions.
+This package contains tests that use actual external resources: the
+filesystem, a real sshd, a real SLURM controller and the HuggingFace API.
+Nothing here is mocked.
 """
 
 import os
 import logging
 from pathlib import Path
-from typing import Optional, Dict, Any
 import tempfile
 import uuid
 
@@ -58,44 +51,6 @@ class RealWorldTestManager:
         logger.info(
             f"API call recorded: {self.api_calls_today}/{self.daily_limit}, cost: ${self.current_cost:.2f}"
         )
-
-
-class TestCredentials:
-    """Manage test credentials from ~/.clustrix/.env and the environment."""
-
-    def __init__(self):
-        """Initialize with credential manager."""
-        from .credential_manager import get_credential_manager
-
-        self._manager = get_credential_manager()
-
-    def get_ssh_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH credentials from available sources."""
-        return self._manager.get_ssh_credentials()
-
-    def get_slurm_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SLURM credentials from available sources."""
-        return self._manager.get_slurm_credentials()
-
-    def get_huggingface_credentials(self) -> Optional[Dict[str, str]]:
-        """Get HuggingFace credentials from available sources."""
-        return self._manager.get_huggingface_credentials()
-
-    def get_gpu_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH-GPU cluster credentials from available sources."""
-        return self._manager.get_gpu_cluster_credentials()
-
-    def get_slurm_cluster_credentials(self) -> Optional[Dict[str, str]]:
-        """Get SSH-SLURM cluster credentials from available sources."""
-        return self._manager.get_slurm_cluster_credentials()
-
-    def get_credential_status(self) -> Dict[str, bool]:
-        """Get status of all credential types."""
-        return self._manager.get_credential_status()
-
-    def print_credential_status(self) -> None:
-        """Print credential status for debugging."""
-        return self._manager.print_credential_status()
 
 
 class TempResourceManager:
@@ -159,4 +114,3 @@ class TempResourceManager:
 
 # Global test manager instance
 test_manager = RealWorldTestManager()
-credentials = TestCredentials()

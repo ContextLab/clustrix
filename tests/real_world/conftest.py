@@ -11,11 +11,10 @@ import socket
 import threading
 import time
 
-from tests.real_world import RealWorldTestManager, TestCredentials, TempResourceManager
+from tests.real_world import RealWorldTestManager, TempResourceManager
 from tests.real_world.credential_manager import (
     HOST_ENV_VARS,
     configured_test_hosts,
-    credential_setup_hint,
 )
 
 # Create global test manager instance
@@ -105,81 +104,11 @@ def real_world_test_manager():
     return test_manager
 
 
-@pytest.fixture(scope="session")
-def test_credentials():
-    """Test credentials manager."""
-    return TestCredentials()
-
-
 @pytest.fixture
 def temp_resource_manager():
     """Create temporary resource manager for test."""
     with TempResourceManager() as manager:
         yield manager
-
-
-@pytest.fixture
-def ssh_credentials(test_credentials):
-    """SSH credentials for testing."""
-    creds = test_credentials.get_ssh_credentials()
-    if not creds:
-        # This gate could not fire until the localhost/$USER default was
-        # removed from get_ssh_credentials(): the tests below used to run
-        # against the developer's own machine instead of skipping.
-        pytest.skip(f"No SSH credentials configured. {credential_setup_hint()}")
-    return creds
-
-
-@pytest.fixture
-def require_cluster_network():
-    """
-    Fixture that skips the test unless a configured cluster is reachable.
-
-    Usage:
-        def test_something(require_cluster_network):
-            # Skipped unless CLUSTRIX_TEST_*_HOST names a reachable machine
-            pass
-    """
-    if not can_reach_configured_cluster():
-        pytest.skip(
-            "No reachable private test cluster: set one of "
-            f"{CLUSTER_HOST_ENV_VARS} and connect to its network (VPN or "
-            "on-site)"
-        )
-
-
-@pytest.fixture
-def gpu_cluster_credentials(test_credentials, require_cluster_network):
-    """SSH-GPU cluster credentials (requires the cluster network)."""
-    creds = test_credentials.get_gpu_cluster_credentials()
-    if not creds:
-        pytest.skip(f"No SSH-GPU cluster credentials. {credential_setup_hint()}")
-    return creds
-
-
-@pytest.fixture
-def slurm_cluster_credentials(test_credentials, require_cluster_network):
-    """SSH-SLURM cluster credentials (requires the cluster network)."""
-    creds = test_credentials.get_slurm_cluster_credentials()
-    if not creds:
-        pytest.skip(f"No SSH-SLURM cluster credentials. {credential_setup_hint()}")
-    return creds
-
-
-@pytest.fixture
-def screenshots_dir(tmp_path_factory):
-    """Directory for screenshot outputs.
-
-    A tmp directory, not `tests/real_world/screenshots`. Writing generated
-    artefacts back into the source tree meant every test run left the working
-    copy dirty, so a `git status` after running the suite could not be read at
-    a glance -- and the checked-in copies drifted with whoever ran it last.
-    Set CLUSTRIX_SCREENSHOT_DIR to keep them somewhere durable for inspection.
-    """
-    override = os.environ.get("CLUSTRIX_SCREENSHOT_DIR")
-    directory = Path(override) if override else tmp_path_factory.mktemp("screenshots")
-    directory.mkdir(parents=True, exist_ok=True)
-    return directory
 
 
 @pytest.fixture
@@ -212,9 +141,6 @@ def pytest_configure(config):
     )
     config.addinivalue_line(
         "markers", "expensive: mark test as potentially expensive (API costs)"
-    )
-    config.addinivalue_line(
-        "markers", "visual: mark test as requiring visual verification"
     )
     config.addinivalue_line(
         "markers", "ssh_required: mark test as requiring SSH access"
@@ -259,13 +185,6 @@ def pytest_collection_modifyitems(config, items):
             if "expensive" in item.keywords:
                 item.add_marker(skip_expensive)
 
-    # Skip visual tests unless requested
-    if not config.getoption("--run-visual"):
-        skip_visual = pytest.mark.skip(reason="Visual tests skipped (use --run-visual)")
-        for item in items:
-            if "visual" in item.keywords:
-                item.add_marker(skip_visual)
-
     # Skip private-cluster tests unless a configured cluster is reachable
     if not can_reach_configured_cluster():
         skip_cluster_network = pytest.mark.skip(
@@ -293,12 +212,6 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Run expensive tests that may incur API costs",
-    )
-    parser.addoption(
-        "--run-visual",
-        action="store_true",
-        default=False,
-        help="Run visual tests that require manual verification",
     )
     parser.addoption(
         "--api-cost-limit",
@@ -329,8 +242,8 @@ def configure_test_limits(request):
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
     """Set up test environment."""
-    # Screenshots and scratch files go to a temp directory; see screenshots_dir
-    # for why the source tree is not a good place for generated artefacts.
+    # Scratch files go to a temp directory: generated artefacts written into
+    # the source tree leave the working copy dirty after every run.
     temp_dir = Path(tempfile.gettempdir()) / "clustrix-real-world"
     temp_dir.mkdir(parents=True, exist_ok=True)
 

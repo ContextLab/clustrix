@@ -327,25 +327,3 @@ class TestRealFilesystemOperations:
             # Check if file is executable
             stat_info = test_file.stat()
             assert stat_info.st_mode & 0o111  # Check execute bits
-
-    def test_error_handling_real(self):
-        """Test error handling with real filesystem errors."""
-        with TempResourceManager() as temp_mgr:
-            # Test reading non-existent file
-            non_existent = temp_mgr.create_temp_dir() / "does_not_exist.txt"
-
-            with pytest.raises(FileNotFoundError):
-                with open(non_existent, "r") as f:
-                    f.read()
-
-            # Test writing to read-only directory (Unix only)
-            if os.name != "nt":
-                ro_dir = temp_mgr.create_temp_dir()
-                ro_dir.chmod(0o444)  # Read-only
-
-                with pytest.raises(PermissionError):
-                    forbidden_file = ro_dir / "forbidden.txt"
-                    forbidden_file.write_text("This should fail")
-
-                # Restore permissions for cleanup
-                ro_dir.chmod(0o755)

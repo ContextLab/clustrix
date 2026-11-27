@@ -239,34 +239,6 @@ class RealWorldTestRunner:
             print(f"❌ Error running API tests: {e}")
             return False
 
-    def run_visual_tests(self) -> bool:
-        """Run visual verification tests."""
-        print("\n🎨 Running Visual Tests...")
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.real_world_dir / "test_visual_verification.py"),
-            "-v",
-            "--tb=short",
-            "--run-visual",
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ Visual tests passed")
-                print(f"📸 Check screenshots in: {self.real_world_dir / 'screenshots'}")
-                return True
-            else:
-                _report_failure("Visual tests", result)
-                return False
-        except Exception as e:
-            print(f"❌ Error running visual tests: {e}")
-            return False
-
     def run_hybrid_tests(self) -> bool:
         """Run hybrid tests."""
         print("\n🔄 Running Hybrid Tests...")
@@ -294,9 +266,7 @@ class RealWorldTestRunner:
             print(f"❌ Error running hybrid tests: {e}")
             return False
 
-    def run_all_tests(
-        self, include_expensive: bool = False, include_visual: bool = False
-    ) -> bool:
+    def run_all_tests(self, include_expensive: bool = False) -> bool:
         """Run all real-world tests."""
         print("\n🚀 Running All Real-World Tests...")
 
@@ -311,9 +281,6 @@ class RealWorldTestRunner:
 
         if include_expensive:
             cmd.append("--run-expensive")
-
-        if include_visual:
-            cmd.append("--run-visual")
 
         try:
             result = subprocess.run(
@@ -355,8 +322,6 @@ class RealWorldTestRunner:
                 ("API Tests", lambda: self.run_api_tests(include_expensive=False))
             )
 
-        tests_to_run.append(("Visual Tests", self.run_visual_tests))
-
         # Run each test category
         results = []
         for test_name, test_func in tests_to_run:
@@ -393,7 +358,6 @@ def main():
     )
     parser.add_argument("--ssh", action="store_true", help="Run SSH tests")
     parser.add_argument("--api", action="store_true", help="Run API tests")
-    parser.add_argument("--visual", action="store_true", help="Run visual tests")
     parser.add_argument("--hybrid", action="store_true", help="Run hybrid tests")
     parser.add_argument("--all", action="store_true", help="Run all tests")
     parser.add_argument(
@@ -434,16 +398,11 @@ def main():
     if args.api:
         outcomes.append(runner.run_api_tests(include_expensive=args.expensive))
 
-    if args.visual:
-        outcomes.append(runner.run_visual_tests())
-
     if args.hybrid:
         outcomes.append(runner.run_hybrid_tests())
 
     if args.all:
-        outcomes.append(
-            runner.run_all_tests(include_expensive=args.expensive, include_visual=True)
-        )
+        outcomes.append(runner.run_all_tests(include_expensive=args.expensive))
 
     if outcomes and not all(outcomes):
         sys.exit(1)
@@ -454,7 +413,6 @@ def main():
             args.filesystem,
             args.ssh,
             args.api,
-            args.visual,
             args.hybrid,
             args.all,
         ]

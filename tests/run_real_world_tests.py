@@ -192,7 +192,7 @@ class RealWorldTestRunner:
                 "test_secure_credentials_real.py",
                 "test_auth_fallbacks.py",
             ],
-            "ssh": ["real_world/test_ssh_job_execution_real.py"],
+            "ssh": ["real_world/test_local_sshd_slurm.py"],
             "notebook": ["test_notebook_magic_real.py"],
         }
 

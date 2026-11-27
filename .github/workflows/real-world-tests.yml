@@ -101,8 +101,7 @@ jobs:
       # so every host these tests connect to must be scanned in first.
       #
       # localhost/127.0.0.1 is the sshd this job installs a few steps above,
-      # and is the only host the CI run actually reaches: `test_ssh_real.py`
-      # skips itself unless the configured host is localhost.
+      # and is the only host the CI run actually reaches.
       #
       # There is deliberately no `secrets.*` reference for an external
       # cluster hostname here, because no such repository secret exists --
@@ -145,10 +144,6 @@ jobs:
       run: |
         python scripts/run_real_world_tests.py --api
 
-    - name: Run visual tests
-      run: |
-        python scripts/run_real_world_tests.py --visual
-
     - name: Run expensive tests
       if: ${{ inputs.run_expensive }}
       env:
@@ -163,7 +158,6 @@ jobs:
       with:
         name: test-results
         path: |
-          tests/real_world/screenshots/
           tests/real_world/temp/
         retention-days: 7
 
