@@ -1,8 +1,11 @@
+import os
+import socket
+
+import paramiko
 import pytest
-from unittest.mock import Mock, patch, MagicMock
+
 from clustrix.decorator import cluster
 from clustrix.config import configure
-from clustrix.async_executor_simple import AsyncJobResult
 
 
 class TestClusterDecorator:
@@ -70,44 +73,29 @@ class TestClusterDecorator:
         assert config["auto_gpu_parallel"] is True
         assert config["environment"] == "test_env"
 
-    @patch("clustrix.executor.ClusterExecutor")
-    def test_local_execution_with_cluster_none(self, mock_executor):
-        """Test that function executes locally when cluster_host is None."""
+    def test_with_no_cluster_the_function_runs_here_on_the_callers_own_objects(self):
+        """No host configured means a plain call: same process, same objects.
+
+        The mocked version patched ``clustrix.executor.ClusterExecutor`` --
+        not the name the decorator uses -- and asserted the patch was never
+        called, which was true whatever the decorator did. What local
+        execution means is observable without it: the function sees this
+        process, and the very list it was handed, not a copy that crossed a
+        serializer on the way to somewhere else.
+        """
         configure(cluster_host=None)
+        handed_in = [1, 2]
 
         @cluster(cores=4)
-        def test_func(x, y):
-            return x + y
+        def remembers(values, extra):
+            values.append(extra)
+            return os.getpid(), values
 
-        result = test_func(2, 3)
-        assert result == 5
-        mock_executor.assert_not_called()
+        pid, returned = remembers(handed_in, 3)
 
-    @patch("clustrix.decorator.ClusterExecutor")
-    @patch("clustrix.decorator._execute_single")
-    def test_remote_execution(self, mock_execute_single, mock_executor_class):
-        """Test remote execution with cluster configured."""
-        configure(cluster_host="test.cluster.com", username="testuser")
-
-        # Setup mock return value
-        mock_execute_single.return_value = 42
-
-        @cluster(cores=8)
-        def test_func(x, y):
-            return x * y
-
-        result = test_func(6, 7)
-
-        assert result == 42
-        mock_execute_single.assert_called_once()
-
-        # Verify arguments passed to _execute_single
-        call_args = mock_execute_single.call_args[0]
-        executor, func, args, kwargs, job_config = call_args
-        assert func.__name__ == "test_func"
-        assert args == (6, 7)
-        assert kwargs == {}
-        assert job_config["cores"] == 8
+        assert pid == os.getpid()
+        assert returned is handed_in
+        assert handed_in == [1, 2, 3]
 
     def test_function_metadata_preserved(self):
         """Test that function metadata is preserved."""
@@ -120,21 +108,39 @@ class TestClusterDecorator:
         assert documented_function.__name__ == "documented_function"
         assert documented_function.__doc__ == "This function adds two numbers."
 
-    @patch("clustrix.decorator.ClusterExecutor")
-    def test_exception_handling(self, mock_executor_class):
-        """Test exception handling in remote execution."""
-        configure(cluster_host="test.cluster.com")
+    def test_a_cluster_that_cannot_be_reached_raises_and_does_not_run_locally(
+        self, tmp_path
+    ):
+        """A failed submission is the caller's error, never a quiet local run.
 
-        mock_executor = Mock()
-        mock_executor_class.return_value = mock_executor
-        mock_executor.submit_job.side_effect = RuntimeError("Cluster error")
+        The mocked version told a ``Mock`` executor to raise ``RuntimeError``
+        from ``submit_job`` and asserted a ``RuntimeError`` came out. This one
+        has a real failure to propagate: the configured port is one nothing
+        is listening on, so the SSH connection is really refused.
+        """
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            closed_port = probe.getsockname()[1]
+        configure(
+            cluster_type="ssh",
+            cluster_host="127.0.0.1",
+            cluster_port=closed_port,
+            username="tester",
+            password="wrong_password",
+            remote_work_dir=str(tmp_path),
+        )
+        ran_here = []
 
-        @cluster
-        def test_func():
-            return "test"
+        @cluster(cores=1)
+        def job():
+            ran_here.append(os.getpid())
+            return "an answer nobody computed remotely"
 
-        with pytest.raises(RuntimeError, match="Cluster error"):
-            test_func()
+        with pytest.raises(paramiko.ssh_exception.NoValidConnectionsError) as raised:
+            job()
+
+        assert str(closed_port) in str(raised.value)
+        assert ran_here == [], "the function ran on this machine instead"
 
     def test_parallel_flag(self):
         """Test parallel execution flag."""
@@ -299,57 +305,6 @@ class TestClusterDecorator:
         )
         mode = _choose_execution_mode(config_prefer_local, lambda: None, (), {})
         assert mode == "local"
-
-
-class TestAsyncExecution:
-    """Test async execution functionality."""
-
-    @patch("clustrix.decorator.AsyncClusterExecutor")
-    def test_async_local_execution(self, mock_async_executor):
-        """Test async local execution path."""
-        # Setup mock
-        mock_instance = Mock()
-        mock_async_executor.return_value = mock_instance
-        mock_future = Mock()
-        mock_instance.submit_job_async.return_value = AsyncJobResult(
-            mock_future, "job123", mock_instance
-        )
-
-        @cluster(async_submit=True)
-        def test_func(x):
-            return x * 2
-
-        # Configure for local execution
-        configure(cluster_type="local")
-
-        result = test_func(5)
-
-        assert isinstance(result, AsyncJobResult)
-        mock_instance.submit_job_async.assert_called_once()
-
-    @patch("clustrix.decorator.ClusterExecutor")
-    @patch("clustrix.decorator.AsyncClusterExecutor")
-    def test_async_remote_execution(self, mock_async_executor, mock_executor):
-        """Test async remote execution path."""
-        # Setup mocks
-        mock_async_instance = Mock()
-        mock_async_executor.return_value = mock_async_instance
-        mock_future = Mock()
-        mock_async_instance.submit_job_async.return_value = AsyncJobResult(
-            mock_future, "job456", mock_async_instance
-        )
-
-        @cluster(async_submit=True)
-        def test_func(x):
-            return x * 3
-
-        # Configure for remote execution
-        configure(cluster_type="slurm", cluster_host="test.cluster")
-
-        result = test_func(10)
-
-        assert isinstance(result, AsyncJobResult)
-        mock_async_instance.submit_job_async.assert_called_once()
 
 
 class TestExecutionModeSelection:

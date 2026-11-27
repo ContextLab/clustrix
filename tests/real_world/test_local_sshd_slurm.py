@@ -467,6 +467,26 @@ def test_running_past_the_time_limit_is_reported_as_a_timeout(host_facts, backen
         job()
 
 
+def test_the_cores_the_decorator_names_are_the_cpus_slurm_grants(backend):
+    """``@cluster(cores=N)`` has to arrive at the scheduler as N.
+
+    Asked of the job itself: SLURM exports what it granted. This was once
+    "checked" by replacing the submission with a ``Mock`` and reading the
+    number back out of the arguments it was called with, which shows the
+    decorator held the number and nothing about where it went.
+    """
+    if backend != "slurm":
+        pytest.skip("Only a scheduler grants CPUs; plain ssh runs with what is there.")
+
+    def granted():
+        import os
+
+        return os.environ.get("SLURM_CPUS_PER_TASK")
+
+    assert cluster(cores=2, memory="200MB", time="00:05:00")(granted)() == "2"
+    assert cluster(cores=1, memory="200MB", time="00:05:00")(granted)() == "1"
+
+
 def test_a_request_the_scheduler_refuses_is_reported_with_its_reason(backend):
     if backend != "slurm":
         pytest.skip("Only a scheduler can refuse a submission.")
