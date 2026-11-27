@@ -310,6 +310,31 @@ was not is marked.
   requirements (the sdist had contained `notes/`, `.claude/` and all of
   `tests/`), `[tool.flake8]` from `pyproject.toml` (flake8 never read it),
   and a tracked personal `clustrix.yml`.
+- **Tests that could not run.** 95 files: `tests/integration/` (26 modules,
+  24 of which loaded a `gpu_cluster_config.yml` or `slurm_cluster_config.yml`
+  the repository never contained) with its `CLUSTRIX_ALLOW_BILLABLE` guard;
+  twelve `tests/real_world/` modules that loaded the same files; the
+  `validation/`, `cluster_validation/` and `api_validation/` scripts; and the
+  modules that could not reach a job on any cluster — they passed parameters
+  `ClusterConfig` does not have, or connected with the default host-key
+  policy from the empty `$HOME` every test is given. Tests of the standard
+  library that sat beside them are gone as well. Nothing was ported: each
+  behaviour that still exists was already tested against a real sshd and
+  SLURM. `pytest tests/real_world -m real_world` against
+  `scripts/setup_local_slurm.sh` ends 147 passed, 6 skipped, where it ended
+  22 failed, 6 errors, 88 skipped.
+- **With them:** the `integration`, `expensive`, `visual` and `ssh_required`
+  markers; `--run-expensive`, `--run-visual`, `--api-cost-limit` and
+  `--api-call-limit`; `tests/run_real_world_tests.py`; and the `--api`,
+  `--hybrid`, `--visual`, `--expensive` and `--demo` options of
+  `scripts/run_real_world_tests.py`, none of which had a test to run. Its
+  `--ssh` now runs the tests that connect to a cluster. *Migration:* drop
+  `--ignore=tests/integration` from any command that has it.
+- **The `real-world-tests` workflow no longer builds a password sshd** for
+  tests that did not exist. Its manual job runs `scripts/setup_local_slurm.sh`
+  in an Ubuntu 24.04 container and then the real-world suite. Not yet run on
+  GitHub: that the hosted runner behaves like the container the suite was
+  developed in is inferred.
 
 ### Security
 
