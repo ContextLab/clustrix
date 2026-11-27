@@ -4,7 +4,7 @@
 
 ```
 docs/
-├── source/          # Sphinx source: conf.py + *.rst + api/ + notebooks/ + tutorials/
+├── source/          # Sphinx source: conf.py + *.rst + api/ + tutorials/ (the notebooks)
 ├── evidence/        # COMMITTED proof: execution-evidence.txt, local-sshd-slurm-evidence.txt, usecase-matrix.txt — regenerated, then checked in
 ├── aws/             # IAM/permissions guides for scripts/aws/ operator tooling (NOT an execution backend)
 ├── build/           # GENERATED html/doctrees — never edit, never grep as source

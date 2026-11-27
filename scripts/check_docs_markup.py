@@ -23,7 +23,7 @@ output has all of them in one place:
 - ``docs/source/**/*.rst`` -- written as RST directly.
 - ``clustrix/**/*.py`` docstrings -- published through ``automodule`` in
   ``docs/source/api/*.rst``.
-- ``docs/source/notebooks/*.ipynb`` markdown cells -- nbsphinx converts
+- ``docs/source/tutorials/*.ipynb`` markdown cells -- nbsphinx converts
   markdown to RST before Sphinx sees it, so a markdown code span inside a
   markdown bold span (``**works with `@cluster`**``) becomes exactly the
   same unparsable RST.

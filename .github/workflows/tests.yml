@@ -221,11 +221,13 @@ jobs:
     - name: Check documentation for nested inline markup
       run: python scripts/check_docs_markup.py docs/build/html
 
-    - name: Test notebook execution
-      run: |
-        pip install jupyter nbconvert
-        jupyter nbconvert --to script docs/source/notebooks/basic_usage.ipynb
-        # Note: Full notebook execution would require cluster setup
+    # The notebooks are the tutorials under docs/source/tutorials/. Their code
+    # cells are executed (or, for the ones that need a cluster, statically
+    # checked) by scripts/check_docs_examples.py in the `test` job, and their
+    # rendering is covered by the build above. A step here used to run
+    # nbconvert on docs/source/notebooks/basic_usage.ipynb, a file that no
+    # longer exists.
+
   # A single stable name for branch protection to require. Without it,
   # protection has to list all seven `test (os, version)` jobs individually
   # and silently stops covering any combination added later -- and `master`
