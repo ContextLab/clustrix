@@ -119,7 +119,7 @@ def test_a_session_only_password_is_kept_through_a_merge(two_sessions):
     """Secrets are never written, so a merge must not swap the object out."""
     first, second = two_sessions
     config = ssh_profile("box.example.edu")
-    config.password = "session-only"
+    config.password = "<redacted>"
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         first.create_profile("with-password", config)
@@ -130,8 +130,8 @@ def test_a_session_only_password_is_kept_through_a_merge(two_sessions):
         first.set_active_profile("with-password")
 
     assert "elsewhere" in first.get_profile_names()
-    assert first.load_profile("with-password").password == "session-only"
-    assert "session-only" not in first.store_path.read_text()
+    assert first.load_profile("with-password").password == "<redacted>"
+    assert "<redacted>" not in first.store_path.read_text()
 
 
 def test_one_session_alone_writes_exactly_what_it_holds(tmp_path):
