@@ -47,9 +47,9 @@ RUNNER = REPO_ROOT / "scripts" / "run_real_world_tests.py"
 #: write; in the repo it is the real filesystem suite, which we never touch.
 TARGET = pathlib.Path("tests") / "real_world" / "test_filesystem_real.py"
 
-#: The file ``--api`` runs. Used only to give one category something that
-#: passes while another fails.
-API_TARGET = pathlib.Path("tests") / "real_world" / "test_cloud_apis_real.py"
+#: The file ``--ssh`` runs. Used only to give one category something that
+#: passes while another fails; in the throwaway tree it is ours to write.
+SSH_TARGET = pathlib.Path("tests") / "real_world" / "test_local_sshd_slurm.py"
 
 FAILING_TEST = (
     "def test_that_really_fails():\n"
@@ -64,7 +64,7 @@ PASSING_TEST = "def test_that_really_passes():\n    assert 2 + 2 == 4\n"
 UNCOLLECTABLE_TEST = "import a_module_that_does_not_exist  # noqa: F401\n"
 
 
-def _throwaway_tree(tmp_path, filesystem_source, api_source=None):
+def _throwaway_tree(tmp_path, filesystem_source, ssh_source=None):
     """A miniature project the runner will treat as its own.
 
     Returns the path of the copied script. ``shutil.copy`` rather than a
@@ -79,9 +79,9 @@ def _throwaway_tree(tmp_path, filesystem_source, api_source=None):
     target.parent.mkdir(parents=True)
     target.write_text(filesystem_source, encoding="utf-8")
 
-    if api_source is not None:
-        api_target = tmp_path / API_TARGET
-        api_target.write_text(api_source, encoding="utf-8")
+    if ssh_source is not None:
+        ssh_target = tmp_path / SSH_TARGET
+        ssh_target.write_text(ssh_source, encoding="utf-8")
 
     return script
 
@@ -165,11 +165,11 @@ def test_one_failing_category_fails_the_run_beside_a_passing_one(tmp_path):
     real failure through whenever anything else in the same invocation
     happened to pass.
     """
-    script = _throwaway_tree(tmp_path, FAILING_TEST, api_source=PASSING_TEST)
+    script = _throwaway_tree(tmp_path, FAILING_TEST, ssh_source=PASSING_TEST)
 
-    result = _run(script, "--api", "--filesystem")
+    result = _run(script, "--ssh", "--filesystem")
 
-    assert "API tests passed" in result.stdout, (
+    assert "SSH tests passed" in result.stdout, (
         f"the passing half did not run.\nstdout:\n{result.stdout}\n"
         f"stderr:\n{result.stderr}"
     )

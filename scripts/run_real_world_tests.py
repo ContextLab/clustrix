@@ -2,15 +2,28 @@
 """
 Real-world test runner for Clustrix.
 
-This script demonstrates how to run real-world tests with different configurations.
+Runs the suites under ``tests/real_world`` one category at a time and exits
+non-zero when any category fails. Every category names files that exist:
+
+``--filesystem``
+    ``test_filesystem_real.py`` -- the filesystem helpers on this machine.
+``--ssh``
+    ``test_local_sshd_slurm.py`` -- ``@cluster`` against a real sshd and a
+    real SLURM controller. Skipped by pytest, with the reason, unless
+    ``CLUSTRIX_TEST_SSH_HOST``, ``CLUSTRIX_TEST_SSH_USER`` and
+    ``CLUSTRIX_TEST_SSH_KEY`` name one (``scripts/setup_local_slurm.sh``
+    creates it).
+``--all``
+    everything under ``tests/real_world``.
+``--unit``
+    everything outside ``tests/real_world``; what CI runs.
 """
 
-import os
 import sys
 import argparse
 import subprocess
 from pathlib import Path
-from typing import Dict
+from typing import Dict, List
 
 
 def _report_failure(label: str, result: subprocess.CompletedProcess) -> None:
@@ -21,7 +34,7 @@ def _report_failure(label: str, result: subprocess.CompletedProcess) -> None:
     goes to ``stderr``. An operator was told something failed and not what
     (issue #147).
     """
-    print(f"\u274c {label} failed (exit {result.returncode})")
+    print(f"❌ {label} failed (exit {result.returncode})")
     if result.stdout:
         print(result.stdout)
     if result.stderr:
@@ -39,314 +52,80 @@ class RealWorldTestRunner:
         self.tests_dir = self.project_root / "tests"
         self.real_world_dir = self.tests_dir / "real_world"
 
-    def check_dependencies(self) -> bool:
-        """Check if required dependencies are installed."""
-        try:
-
-            print("✅ Required dependencies available")
-            return True
-        except ImportError as e:
-            print(f"❌ Missing dependencies: {e}")
-            print("Run: pip install -e '.[test]'")
-            return False
-
     def check_credentials(self) -> Dict[str, bool]:
-        """Check availability of credentials for different services."""
-        try:
-            # Add project root to path to ensure imports work
-            import sys
+        """Report which credentials the real-world suite can find."""
+        sys.path.insert(0, str(self.project_root))
+        from tests.real_world.credential_manager import get_credential_manager
 
-            sys.path.insert(0, str(self.project_root))
-            from tests.real_world.credential_manager import get_credential_manager
+        manager = get_credential_manager()
+        credentials = manager.get_credential_status()
 
-            manager = get_credential_manager()
-            credentials = manager.get_credential_status()
+        print("\n🔑 Credential Status:")
+        print(
+            f"  Environment: {'GitHub Actions' if manager.is_github_actions else 'Local Development'}"
+        )
 
-            print("\n🔑 Credential Status:")
-            print(
-                f"  Environment: {'GitHub Actions' if manager.is_github_actions else 'Local Development'}"
-            )
+        service_names = {
+            "ssh": "SSH",
+            "slurm": "SLURM",
+            "huggingface": "HuggingFace",
+        }
 
-            service_names = {
-                "ssh": "SSH",
-                "slurm": "SLURM",
-                "huggingface": "HuggingFace",
-            }
+        for service, available in credentials.items():
+            display_name = service_names.get(service, service.upper())
+            status = "✅" if available else "❌"
+            print(f"  {status} {display_name}")
 
-            for service, available in credentials.items():
-                display_name = service_names.get(service, service.upper())
-                status = "✅" if available else "❌"
-                print(f"  {status} {display_name}")
+        return credentials
 
-            return credentials
-
-        except ImportError:
-            # Fall back to environment variables
-            credentials = {
-                "aws": all(
-                    [os.getenv("TEST_AWS_ACCESS_KEY"), os.getenv("TEST_AWS_SECRET_KEY")]
-                ),
-                "azure": bool(os.getenv("TEST_AZURE_SUBSCRIPTION_ID")),
-                "gcp": bool(os.getenv("TEST_GCP_PROJECT_ID")),
-                "ssh": bool(os.getenv("TEST_SSH_HOST", "localhost")),
-            }
-
-            print("\n🔑 Credential Status:")
-            for service, available in credentials.items():
-                status = "✅" if available else "❌"
-                print(f"  {status} {service.upper()}")
-
-            return credentials
-
-    def run_unit_tests(self) -> bool:
-        """Run traditional unit tests."""
-        print("\n🧪 Running Unit Tests...")
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.tests_dir),
-            "-m",
-            "not real_world and not expensive and not visual",
-            "-v",
-            "--tb=short",
-            "--maxfail=5",
-        ]
-
+    def _run_pytest(self, label: str, pytest_args: List[str]) -> bool:
+        """Run pytest with `pytest_args`; report and return whether it passed."""
+        cmd = [sys.executable, "-m", "pytest", *pytest_args, "-v", "--tb=short"]
         try:
             result = subprocess.run(
                 cmd, cwd=self.project_root, capture_output=True, text=True
             )
-            if result.returncode == 0:
-                print("✅ Unit tests passed")
-                return True
-            else:
-                _report_failure("Unit tests", result)
-                return False
         except Exception as e:
-            print(f"❌ Error running unit tests: {e}")
+            print(f"❌ Error running {label}: {e}")
             return False
+        if result.returncode == 0:
+            print(f"✅ {label} passed")
+            return True
+        _report_failure(label, result)
+        return False
+
+    def run_unit_tests(self) -> bool:
+        """Run everything outside tests/real_world."""
+        print("\n🧪 Running Unit Tests...")
+        return self._run_pytest(
+            "Unit tests",
+            [
+                str(self.tests_dir),
+                "-m",
+                "not real_world",
+                f"--ignore={self.real_world_dir}",
+                "--maxfail=5",
+            ],
+        )
 
     def run_filesystem_tests(self) -> bool:
         """Run real-world filesystem tests."""
         print("\n📁 Running Filesystem Tests...")
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.real_world_dir / "test_filesystem_real.py"),
-            "-v",
-            "--tb=short",
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ Filesystem tests passed")
-                return True
-            else:
-                _report_failure("Filesystem tests", result)
-                return False
-        except Exception as e:
-            print(f"❌ Error running filesystem tests: {e}")
-            return False
+        return self._run_pytest(
+            "Filesystem tests", [str(self.real_world_dir / "test_filesystem_real.py")]
+        )
 
     def run_ssh_tests(self) -> bool:
-        """Run real-world SSH tests."""
+        """Run @cluster against the real sshd and SLURM the environment names."""
         print("\n🔐 Running SSH Tests...")
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.real_world_dir / "test_ssh_real.py"),
-            "-v",
-            "--tb=short",
-        ]
+        return self._run_pytest(
+            "SSH tests", [str(self.real_world_dir / "test_local_sshd_slurm.py")]
+        )
 
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ SSH tests passed")
-                return True
-            else:
-                _report_failure("SSH tests", result)
-                return False
-        except Exception as e:
-            print(f"❌ Error running SSH tests: {e}")
-            return False
-
-    def run_api_tests(self, include_expensive: bool = False) -> bool:
-        """Run real-world API tests."""
-        print("\n🌐 Running API Tests...")
-
-        # The cloud-API suite died with the removed cloud backends (#140-#146
-        # removed them from the package). A category whose target file does
-        # not exist cannot fail, and pretending otherwise blocked every push.
-        # If an API suite returns, this skip disappears on its own.
-        api_target = self.real_world_dir / "test_cloud_apis_real.py"
-        if not api_target.exists():
-            print(
-                "⏭️  API tests SKIPPED: the cloud-API suite "
-                f"({api_target.name}) was removed along with the unverified "
-                "cloud backends it tested. Nothing remains to run in this "
-                "category."
-            )
-            return True
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.real_world_dir / "test_cloud_apis_real.py"),
-            "-v",
-            "--tb=short",
-        ]
-
-        if include_expensive:
-            cmd.append("--run-expensive")
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ API tests passed")
-                return True
-            # A quota-exhausted provider is an external billing condition,
-            # not a code defect: the same tree passed these tests when the
-            # account had credits (see docs/evidence/). Report it as the
-            # skip it semantically is -- loudly -- rather than failing the
-            # push gate for something no commit can fix. Mirrors the
-            # credential-absence behaviour of --check-creds.
-            combined = (result.stdout or "") + (result.stderr or "")
-            if "402" in combined and "Payment Required" in combined:
-                print(
-                    "⏭️  API tests SKIPPED: the HuggingFace account's Jobs "
-                    "quota is exhausted (HTTP 402 Payment Required). This is "
-                    "an external billing condition, not a code failure; the "
-                    "same tree passed these tests with credits available "
-                    "(docs/evidence/execution-evidence.txt). Re-run when the "
-                    "quota resets."
-                )
-                return True
-            _report_failure("API tests", result)
-            return False
-        except Exception as e:
-            print(f"❌ Error running API tests: {e}")
-            return False
-
-    def run_hybrid_tests(self) -> bool:
-        """Run hybrid tests."""
-        print("\n🔄 Running Hybrid Tests...")
-        # Find hybrid test files
-        hybrid_files = list(self.tests_dir.glob("test_*_hybrid.py"))
-        if not hybrid_files:
-            print("❌ No hybrid test files found")
-            return False
-
-        cmd = [sys.executable, "-m", "pytest", "-v", "--tb=short"] + [
-            str(f) for f in hybrid_files
-        ]
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ Hybrid tests passed")
-                return True
-            else:
-                _report_failure("Hybrid tests", result)
-                return False
-        except Exception as e:
-            print(f"❌ Error running hybrid tests: {e}")
-            return False
-
-    def run_all_tests(self, include_expensive: bool = False) -> bool:
+    def run_all_tests(self) -> bool:
         """Run all real-world tests."""
         print("\n🚀 Running All Real-World Tests...")
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "pytest",
-            str(self.real_world_dir),
-            "-v",
-            "--tb=short",
-        ]
-
-        if include_expensive:
-            cmd.append("--run-expensive")
-
-        try:
-            result = subprocess.run(
-                cmd, cwd=self.project_root, capture_output=True, text=True
-            )
-            if result.returncode == 0:
-                print("✅ All tests passed")
-                return True
-            else:
-                _report_failure("Tests", result)
-                return False
-        except Exception as e:
-            print(f"❌ Error running tests: {e}")
-            return False
-
-    def run_demo(self) -> None:
-        """Run a demo of real-world testing capabilities."""
-        print("🎭 Real-World Testing Demo")
-        print("=" * 50)
-
-        # Check system
-        if not self.check_dependencies():
-            return
-
-        credentials = self.check_credentials()
-
-        # Run tests progressively
-        tests_to_run = [
-            ("Unit Tests", self.run_unit_tests),
-            ("Filesystem Tests", self.run_filesystem_tests),
-            ("Hybrid Tests", self.run_hybrid_tests),
-        ]
-
-        if credentials.get("ssh", False):
-            tests_to_run.append(("SSH Tests", self.run_ssh_tests))
-
-        if any(credentials.values()):
-            tests_to_run.append(
-                ("API Tests", lambda: self.run_api_tests(include_expensive=False))
-            )
-
-        # Run each test category
-        results = []
-        for test_name, test_func in tests_to_run:
-            try:
-                success = test_func()
-                results.append((test_name, success))
-            except Exception as e:
-                print(f"❌ {test_name} failed with error: {e}")
-                results.append((test_name, False))
-
-        # Print summary
-        print("\n📊 Test Results Summary:")
-        print("=" * 50)
-        for test_name, success in results:
-            status = "✅ PASS" if success else "❌ FAIL"
-            print(f"  {status} {test_name}")
-
-        passed = sum(1 for _, success in results if success)
-        total = len(results)
-        print(f"\nTotal: {passed}/{total} test categories passed")
-
-        if passed == total:
-            print("🎉 All real-world tests completed successfully!")
-        else:
-            print("⚠️  Some tests failed. Check logs for details.")
+        return self._run_pytest("All tests", [str(self.real_world_dir)])
 
 
 def main():
@@ -356,14 +135,8 @@ def main():
     parser.add_argument(
         "--filesystem", action="store_true", help="Run filesystem tests"
     )
-    parser.add_argument("--ssh", action="store_true", help="Run SSH tests")
-    parser.add_argument("--api", action="store_true", help="Run API tests")
-    parser.add_argument("--hybrid", action="store_true", help="Run hybrid tests")
+    parser.add_argument("--ssh", action="store_true", help="Run SSH and SLURM tests")
     parser.add_argument("--all", action="store_true", help="Run all tests")
-    parser.add_argument(
-        "--expensive", action="store_true", help="Include expensive tests"
-    )
-    parser.add_argument("--demo", action="store_true", help="Run demo")
     parser.add_argument(
         "--check-creds", action="store_true", help="Check credentials only"
     )
@@ -374,10 +147,6 @@ def main():
 
     if args.check_creds:
         runner.check_credentials()
-        return
-
-    if args.demo:
-        runner.run_demo()
         return
 
     # Every return value below is collected. Dropping them is what made the
@@ -395,30 +164,14 @@ def main():
     if args.ssh:
         outcomes.append(runner.run_ssh_tests())
 
-    if args.api:
-        outcomes.append(runner.run_api_tests(include_expensive=args.expensive))
-
-    if args.hybrid:
-        outcomes.append(runner.run_hybrid_tests())
-
     if args.all:
-        outcomes.append(runner.run_all_tests(include_expensive=args.expensive))
+        outcomes.append(runner.run_all_tests())
 
     if outcomes and not all(outcomes):
         sys.exit(1)
 
-    if not any(
-        [
-            args.unit,
-            args.filesystem,
-            args.ssh,
-            args.api,
-            args.hybrid,
-            args.all,
-        ]
-    ):
-        print("No specific test category selected. Running demo...")
-        runner.run_demo()
+    if not outcomes:
+        parser.print_help()
 
 
 if __name__ == "__main__":
