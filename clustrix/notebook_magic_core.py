@@ -65,6 +65,44 @@ def auto_display_on_import():
         display_config_widget()
 
 
+def _status_summary(config) -> str:
+    """A few lines saying where ``@cluster`` runs a function right now.
+
+    The first line is the backend *in effect*, which is not always
+    ``cluster_type``: with no ``cluster_host`` an ``ssh`` or ``slurm``
+    configuration runs the function in this process, and reporting
+    ``slurm`` for it described a cluster nothing would be sent to. The
+    decision is the decorator's own, asked for rather than restated.
+    """
+    from .decorator import _choose_execution_mode
+
+    if config.cluster_type == "local":
+        backend = "local"
+    elif _choose_execution_mode(config, None, (), {}) == "remote":
+        backend = config.cluster_type
+    else:
+        why = (
+            "prefer_local_parallel is set"
+            if config.cluster_host
+            else "no cluster host set"
+        )
+        backend = f"local ({why}; cluster_type is {config.cluster_type!r})"
+
+    lines = [f"backend      : {backend}"]
+    remote = backend == config.cluster_type and backend != "local"
+    if remote and config.cluster_host:
+        lines.append(f"host         : {config.cluster_host}")
+    if remote and config.username:
+        lines.append(f"username     : {config.username}")
+    lines.append(
+        f"resources    : {config.default_cores} cores, "
+        f"{config.default_memory}, {config.default_time}"
+    )
+    if remote and config.cluster_host:
+        lines.append(f"work dir     : {config.remote_work_dir}")
+    return "\n".join(lines)
+
+
 @magics_class
 class ClusterfyMagics(Magics):
     """IPython magic commands for Clustrix."""
@@ -77,12 +115,13 @@ class ClusterfyMagics(Magics):
         the things that do not need one::
 
             %clustrix status            what @cluster will do right now
-            %clustrix config            the same, in full
+            %clustrix config            the same, and the configuration itself
             %clustrix config <profile>  make a saved profile active
             %clustrix load <file>       load configuration from a YAML/JSON file
 
-        Each form returns the resulting ``ClusterConfig``, or ``None`` when
-        the command was refused.
+        ``status`` prints and returns nothing. Every other form returns the
+        resulting ``ClusterConfig``, or ``None`` when the command was
+        refused.
         """
         from .config import configure, get_config, load_config
 
@@ -92,17 +131,12 @@ class ClusterfyMagics(Magics):
 
         if command in ("status", "config") and not argument:
             config = get_config()
-            print(f"cluster_type : {config.cluster_type}")
-            if config.cluster_host:
-                print(f"host         : {config.cluster_host}")
-            if config.username:
-                print(f"username     : {config.username}")
-            print(
-                f"resources    : {config.default_cores} cores, "
-                f"{config.default_memory}, {config.default_time}"
-            )
-            print(f"work dir     : {config.remote_work_dir}")
-            return config
+            print(_status_summary(config))
+            # ``status`` answers by printing. Returning the configuration as
+            # well made a notebook show it as the cell's ``Out[]``: every
+            # field of the dataclass on one line, directly under the five
+            # lines that had just said what mattered.
+            return None if command == "status" else config
 
         if command == "load":
             if not argument:

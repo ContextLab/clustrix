@@ -145,7 +145,8 @@ class TestLoadingTheExtension:
 
         assert "Traceback" not in captured.stdout
         assert "clustrix" in loaded.magics_manager.magics["line"]
-        result, _ = _run(loaded, "%clustrix status")
+        # ``config``, not ``status``: status returns nothing by design.
+        result, _ = _run(loaded, "%clustrix config")
         assert result.result is get_config()
 
     def test_the_extension_hook_is_importable_from_every_documented_place(self):
@@ -166,8 +167,7 @@ class TestLoadingTheExtension:
 
 
 class TestStatus:
-    @pytest.mark.parametrize("line", ["status", "config", ""])
-    def test_it_prints_and_returns_the_live_configuration(self, loaded, line):
+    def _configure_a_cluster(self):
         configure(
             cluster_type="slurm",
             cluster_host="hpc.example.edu",
@@ -178,17 +178,92 @@ class TestStatus:
             remote_work_dir="/scratch/researcher",
         )
 
+    SUMMARY = [
+        "backend      : slurm",
+        "host         : hpc.example.edu",
+        "username     : researcher",
+        "resources    : 12 cores, 48GB, 03:00:00",
+        "work dir     : /scratch/researcher",
+    ]
+
+    @pytest.mark.parametrize("line", ["status", ""])
+    def test_status_prints_a_summary_and_returns_nothing(self, loaded, line):
+        """This used to assert ``returned is get_config()``. Returning it is
+        what made a notebook print the whole dataclass under the summary."""
+        self._configure_a_cluster()
+
         with capture_output() as captured:
             returned = loaded.run_line_magic("clustrix", line)
 
+        assert returned is None
+        assert captured.stdout.splitlines() == self.SUMMARY
+
+    def test_status_as_a_cell_shows_the_summary_and_no_dataclass(self, loaded):
+        """The cell a user actually runs: its whole visible output."""
+        self._configure_a_cluster()
+
+        result, captured = _run(loaded, "%clustrix status")
+        print(captured.stdout)
+
+        assert result.result is None
+        assert captured.stdout.splitlines() == self.SUMMARY
+        assert "ClusterConfig(" not in captured.stdout
+
+    def test_config_prints_the_summary_and_returns_the_configuration(self, loaded):
+        self._configure_a_cluster()
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", "config")
+
         assert returned is get_config()
+        assert captured.stdout.splitlines() == self.SUMMARY
+
+    def test_the_default_configuration_is_reported_as_local(self, loaded):
+        """``cluster_type`` defaults to ``slurm`` and ``cluster_host`` to
+        nothing, and with no host ``@cluster`` runs the function here. The
+        status said ``cluster_type : slurm`` for that."""
+        fresh = ClusterConfig()
+        assert (fresh.cluster_type, fresh.cluster_host) == ("slurm", None)
+        configure(**_fields(fresh))
+
+        with capture_output() as captured:
+            loaded.run_line_magic("clustrix", "status")
+        print(captured.stdout)
+
+        @clustrix.cluster
+        def where():
+            return os.getpid()
+
+        assert where() == os.getpid(), "the premise: this configuration runs here"
         assert captured.stdout.splitlines() == [
-            "cluster_type : slurm",
-            "host         : hpc.example.edu",
-            "username     : researcher",
-            "resources    : 12 cores, 48GB, 03:00:00",
-            "work dir     : /scratch/researcher",
+            "backend      : local (no cluster host set; cluster_type is 'slurm')",
+            f"resources    : {fresh.default_cores} cores, "
+            f"{fresh.default_memory}, {fresh.default_time}",
         ]
+
+    def test_a_host_that_is_set_but_not_used_is_reported_as_local(self, loaded):
+        configure(
+            cluster_type="ssh",
+            cluster_host="box.example.edu",
+            prefer_local_parallel=True,
+        )
+
+        with capture_output() as captured:
+            loaded.run_line_magic("clustrix", "status")
+
+        assert captured.stdout.splitlines()[0] == (
+            "backend      : local (prefer_local_parallel is set; "
+            "cluster_type is 'ssh')"
+        )
+        assert "box.example.edu" not in captured.stdout
+
+    def test_a_backend_that_needs_no_host_is_not_called_local(self, loaded):
+        configure(cluster_type="huggingface", cluster_host=None, username=None)
+
+        with capture_output() as captured:
+            loaded.run_line_magic("clustrix", "status")
+
+        assert captured.stdout.splitlines()[0] == "backend      : huggingface"
 
     def test_no_host_line_is_printed_when_there_is_no_host(self, loaded):
         configure(cluster_type="local", cluster_host=None, username=None)
@@ -196,7 +271,7 @@ class TestStatus:
         with capture_output() as captured:
             loaded.run_line_magic("clustrix", "status")
 
-        assert "cluster_type : local" in captured.stdout
+        assert "backend      : local\n" in captured.stdout
         assert "host" not in captured.stdout
         assert "username" not in captured.stdout
 
@@ -224,7 +299,7 @@ class TestStatus:
             hf_token=typed_token,
         )
 
-        _, captured = _run(loaded, "%clustrix status")
+        _, captured = _run(loaded, "%clustrix config")
 
         assert "ClusterConfig(" in captured.stdout, "the result was not shown at all"
         assert typed_password not in captured.stdout

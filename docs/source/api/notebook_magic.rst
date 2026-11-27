@@ -25,10 +25,15 @@ anything.
      - Shows the configuration widget, then runs the rest of the cell as
        ordinary code.
    * - ``%clustrix status``
-     - Prints the backend, host, user, default resources and work directory
-       that ``@cluster`` would use now. ``%clustrix`` alone does the same.
+     - Prints the backend ``@cluster`` would use now and its default
+       resources; for ``ssh`` and ``slurm`` also the host, user and work
+       directory. The backend is the one in effect, not the ``cluster_type``
+       field: with no ``cluster_host`` an ``ssh`` or ``slurm`` configuration
+       runs the function in this process, and is reported as ``local (no
+       cluster host set; cluster_type is 'slurm')``. Returns nothing.
+       ``%clustrix`` alone does the same.
    * - ``%clustrix config``
-     - The same as ``status``.
+     - Prints the same summary and returns the ``ClusterConfig``.
    * - ``%clustrix config <profile>``
      - Makes a saved profile the live configuration. The profile replaces
        the configuration; it is not merged into it.
@@ -38,7 +43,7 @@ anything.
      - Deprecated alias for ``%%remote``. It works and emits a
        ``DeprecationWarning``.
 
-Each ``%clustrix`` form returns the resulting ``ClusterConfig`` (IPython
+Every form except ``status`` returns the resulting ``ClusterConfig`` (IPython
 shows it as the result of the line), or ``None`` when the command was
 refused. From a real IPython session, with the returned values left out:
 
@@ -47,9 +52,8 @@ refused. From a real IPython session, with the returned values left out:
    In [1]: %load_ext clustrix
 
    In [2]: %clustrix status
-   cluster_type : slurm
+   backend      : local (no cluster host set; cluster_type is 'slurm')
    resources    : 4 cores, 8GB, 01:00:00
-   work dir     : ~/.clustrix/jobs
 
    In [3]: %clustrix config nope
    ❌ No profile named 'nope'. Available: HuggingFace Jobs (CPU), HuggingFace Jobs (GPU), Local all cores, Local single-core, SLURM cluster, SSH remote machine
