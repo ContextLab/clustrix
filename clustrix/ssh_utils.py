@@ -294,7 +294,18 @@ def generate_ssh_key(
     key_dir.mkdir(mode=0o700, exist_ok=True)
 
     try:
-        subprocess.run(cmd, capture_output=True, text=True, check=True)
+        # stdin is closed on purpose. When key_path already exists
+        # ssh-keygen asks "Overwrite (y/n)?" and waits; its output is
+        # captured here, so on a terminal that was a silent hang on a
+        # question nobody could see. With no stdin it declines and exits
+        # non-zero, and the key that was there is left alone.
+        subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            stdin=subprocess.DEVNULL,
+        )
         logger.info(f"Generated SSH key pair: {key_path}")
 
         # Belt and braces, not a fix for a window: ssh-keygen creates
@@ -310,7 +321,9 @@ def generate_ssh_key(
         return key_path, f"{key_path}.pub"
 
     except subprocess.CalledProcessError as e:
-        raise SSHKeyGenerationError(f"Failed to generate SSH key: {e.stderr}")
+        # The refusal to overwrite goes to stdout, everything else to stderr.
+        reason = (e.stderr or e.stdout or "").strip()
+        raise SSHKeyGenerationError(f"Failed to generate SSH key: {reason}")
 
 
 def add_host_key(hostname: str, port: int = 22) -> bool:

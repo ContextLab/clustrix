@@ -28,12 +28,9 @@ and a person.
 
 import json
 import os
-import pty
-import select
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -45,6 +42,7 @@ from clustrix.auth_fallbacks import (
 from clustrix.config import ClusterConfig
 from clustrix.ssh_utils import setup_ssh_keys, setup_ssh_keys_with_fallback
 from tests.ssh_server import LocalSSHServer
+from tests.terminal import run_on_a_terminal
 
 pytestmark = pytest.mark.skipif(
     os.name == "nt", reason="pseudo-terminals and POSIX signals are used throughout"
@@ -104,49 +102,6 @@ def _read_result(result_path):
     return json.loads(Path(result_path).read_text())
 
 
-def _run_on_a_terminal(argv, keys, env, wait_for=PROMPT.encode(), timeout=60):
-    """Run ``argv`` with a real pty as its controlling terminal.
-
-    ``keys`` are typed once ``wait_for`` has appeared. Returns everything the
-    terminal displayed and the exit status.
-    """
-    pid, master = pty.fork()
-    if pid == 0:  # pragma: no cover - the child
-        try:
-            os.chdir(REPO_ROOT)
-            os.execve(argv[0], argv, env)
-        finally:
-            os._exit(127)
-
-    displayed = b""
-    typed = False
-    deadline = time.monotonic() + timeout
-    try:
-        while time.monotonic() < deadline:
-            readable, _, _ = select.select([master], [], [], 0.5)
-            if not readable:
-                continue
-            try:
-                chunk = os.read(master, 4096)
-            except OSError:  # EIO: the child closed its side
-                break
-            if not chunk:
-                break
-            displayed += chunk
-            if not typed and wait_for in displayed:
-                os.write(master, keys)
-                typed = True
-        else:
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-            pytest.fail(f"the child never finished; terminal showed {displayed!r}")
-    finally:
-        os.close(master)
-    _, status = os.waitpid(pid, 0)
-    print("terminal showed:", displayed)
-    return displayed, os.waitstatus_to_exitcode(status)
-
-
 def _run_as_a_script(argv, stdin_text, env):
     """Run ``argv`` with a real pipe for stdin, holding ``stdin_text``."""
     completed = subprocess.run(
@@ -169,8 +124,8 @@ class TestOnATerminal:
     def test_the_typed_password_is_returned_and_never_echoed(self, tmp_path):
         result_path = tmp_path / "result.json"
 
-        displayed, status = _run_on_a_terminal(
-            _probe_argv(result_path), b"s3cret-typed\n", _child_env()
+        displayed, status = run_on_a_terminal(
+            _probe_argv(result_path), [(PROMPT, "s3cret-typed\n")], _child_env()
         )
 
         assert status == 0
@@ -178,30 +133,30 @@ class TestOnATerminal:
             "environment": "cli",
             "password": "s3cret-typed",
         }
-        assert PROMPT.encode() in displayed
-        assert b"s3cret-typed" not in displayed, "getpass left echo on"
+        assert PROMPT in displayed
+        assert "s3cret-typed" not in displayed, "getpass left echo on"
 
     def test_control_c_at_the_prompt_is_no_password_not_a_traceback(self, tmp_path):
         result_path = tmp_path / "result.json"
 
-        displayed, status = _run_on_a_terminal(
-            _probe_argv(result_path), b"\x03", _child_env()
+        displayed, status = run_on_a_terminal(
+            _probe_argv(result_path), [(PROMPT, "\x03")], _child_env()
         )
 
         assert status == 0, displayed
         assert _read_result(result_path)["password"] is None
-        assert b"Traceback" not in displayed
+        assert "Traceback" not in displayed
 
     def test_control_d_at_the_prompt_is_no_password_not_a_traceback(self, tmp_path):
         result_path = tmp_path / "result.json"
 
-        displayed, status = _run_on_a_terminal(
-            _probe_argv(result_path), b"\x04", _child_env()
+        displayed, status = run_on_a_terminal(
+            _probe_argv(result_path), [(PROMPT, "\x04")], _child_env()
         )
 
         assert status == 0, displayed
         assert _read_result(result_path)["password"] is None
-        assert b"Traceback" not in displayed
+        assert "Traceback" not in displayed
 
 
 class TestAsAScript:

@@ -1,504 +1,271 @@
-"""
-Tests for SSH key automation utilities.
+"""The parts of ``clustrix.ssh_utils`` that ``test_ssh_automation.py`` leaves out.
+
+This module used to patch ``Path.home``, ``subprocess.run``, ``os.chmod`` and
+``paramiko.SSHClient`` and then assert the patches had been called. Seventeen
+of its twenty tests had a real counterpart in ``tests/test_ssh_automation.py``
+already (key discovery, generation, deployment by ``ssh-copy-id`` and by
+paramiko, ``~/.ssh/config`` entries, the full ``setup_ssh_keys`` workflow)
+and are gone. What is here is what nothing real covered:
+
+* discovery when there is nothing to discover;
+* ``ssh-keygen`` really missing from ``PATH``, and really refusing a path;
+* a public key file that is not there;
+* a first ``~/.ssh/config`` entry, with a non-default port;
+* ``get_ssh_key_info`` / ``list_ssh_keys`` reading real keys with the real
+  ``ssh-keygen -l``.
+
+``$HOME`` is a real temporary directory for every test (the autouse
+``isolate_home`` fixture), so ``Path.home()`` is never patched.
 """
 
 import os
-import tempfile
-import pytest
-import platform
-from pathlib import Path
-from unittest.mock import patch, MagicMock, mock_open
+import shutil
+import stat
 import subprocess
+import sys
+from pathlib import Path
 
+import pytest
+
+from clustrix.config import ClusterConfig
 from clustrix.ssh_utils import (
-    find_ssh_keys,
-    detect_existing_ssh_key,
-    generate_ssh_key,
+    SSHKeyDeploymentError,
+    SSHKeyGenerationError,
     deploy_public_key,
-    update_ssh_config,
-    setup_ssh_keys,
+    detect_existing_ssh_key,
+    find_ssh_keys,
+    generate_ssh_key,
     get_ssh_key_info,
     list_ssh_keys,
-    SSHKeySetupError,
-    SSHKeyGenerationError,
-    SSHKeyDeploymentError,
+    update_ssh_config,
 )
-from clustrix.config import ClusterConfig
+from tests.ssh_server import LocalSSHServer, generate_keypair
+from tests.terminal import run_on_a_terminal
+
+
+@pytest.fixture
+def ssh_dir():
+    return Path(os.environ["HOME"]) / ".ssh"
 
 
 class TestFindSSHKeys:
-    """Test SSH key discovery functionality."""
+    def test_an_empty_ssh_directory_holds_no_keys(self, ssh_dir):
+        assert list(ssh_dir.iterdir()) == []
+        assert find_ssh_keys() == []
 
-    def test_find_ssh_keys_empty_directory(self):
-        """Test finding SSH keys in empty directory."""
-        with patch("clustrix.ssh_utils.Path.home") as mock_home:
-            mock_ssh_dir = MagicMock()
-            mock_ssh_dir.exists.return_value = False
-            mock_home.return_value = MagicMock()
-            mock_home.return_value.__truediv__.return_value = mock_ssh_dir
+    def test_a_home_with_no_ssh_directory_holds_no_keys(self, ssh_dir):
+        ssh_dir.rmdir()
 
-            result = find_ssh_keys()
-            assert result == []
-
-    def test_find_ssh_keys_with_keys(self):
-        """Test finding existing SSH keys."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ssh_dir = Path(temp_dir) / ".ssh"
-            ssh_dir.mkdir(mode=0o700)
-
-            # Create mock SSH keys
-            key_files = ["id_rsa", "id_ed25519", "id_ecdsa"]
-            created_keys = []
-
-            for key_name in key_files:
-                key_path = ssh_dir / key_name
-                with open(key_path, "w") as f:
-                    f.write(
-                        "-----BEGIN OPENSSH PRIVATE KEY-----\ntest key content\n-----END OPENSSH PRIVATE KEY-----\n"
-                    )
-                # Set proper permissions only on Unix-like systems
-                if platform.system() != "Windows":
-                    os.chmod(key_path, 0o600)
-                created_keys.append(str(key_path))
-
-            with patch("clustrix.ssh_utils.Path.home") as mock_home:
-                mock_home.return_value = Path(temp_dir)
-                result = find_ssh_keys()
-
-                # Should find all created keys
-                assert len(result) == 3
-                for key_path in created_keys:
-                    assert key_path in result
-
-    @pytest.mark.skipif(
-        platform.system() == "Windows",
-        reason="File permissions not applicable on Windows",
-    )
-    def test_find_ssh_keys_wrong_permissions(self):
-        """Test that keys with wrong permissions are ignored."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ssh_dir = Path(temp_dir) / ".ssh"
-            ssh_dir.mkdir(mode=0o700)
-
-            # Create key with wrong permissions
-            key_path = ssh_dir / "id_rsa"
-            with open(key_path, "w") as f:
-                f.write(
-                    "-----BEGIN OPENSSH PRIVATE KEY-----\ntest\n-----END OPENSSH PRIVATE KEY-----\n"
-                )
-            os.chmod(key_path, 0o644)  # Wrong permissions
-
-            with patch("clustrix.ssh_utils.Path.home") as mock_home:
-                mock_home.return_value = Path(temp_dir)
-                result = find_ssh_keys()
-
-                # Should not find the key due to wrong permissions
-                assert len(result) == 0
+        assert find_ssh_keys() == []
+        assert not ssh_dir.exists(), "looking for keys must not create ~/.ssh"
 
 
 class TestDetectExistingSSHKey:
-    """Test SSH key detection functionality."""
+    def test_a_key_the_server_was_never_given_is_not_reported_as_working(
+        self, ssh_dir, tmp_path
+    ):
+        """A real, well-formed key that a real server really refuses."""
+        generate_keypair(ssh_dir, "id_ed25519")
+        root = tmp_path / "remote"
+        root.mkdir()
+        with LocalSSHServer(root=root, password="unused") as server:
+            config = ClusterConfig(
+                cluster_host=server.host,
+                cluster_port=server.port,
+                username="testuser",
+                ssh_host_key_policy="auto_add",
+            )
 
-    @patch("clustrix.ssh_utils.find_ssh_keys")
-    @patch("paramiko.SSHClient")
-    def test_detect_existing_ssh_key_success(self, mock_ssh_client, mock_find_keys):
-        """Test successful SSH key detection."""
-        mock_find_keys.return_value = [
-            "/home/user/.ssh/id_rsa",
-            "/home/user/.ssh/id_ed25519",
-        ]
+            found = detect_existing_ssh_key(
+                server.host, "testuser", server.port, config=config
+            )
 
-        # Mock successful connection for first key
-        mock_client = MagicMock()
-        mock_ssh_client.return_value = mock_client
-        mock_client.connect.side_effect = [None, Exception("Connection failed")]
-
-        result = detect_existing_ssh_key("test.host.com", "testuser")
-
-        assert result == "/home/user/.ssh/id_rsa"
-        mock_client.connect.assert_called()
-        mock_client.close.assert_called()
-
-    @patch("clustrix.ssh_utils.find_ssh_keys")
-    @patch("paramiko.SSHClient")
-    def test_detect_existing_ssh_key_none_work(self, mock_ssh_client, mock_find_keys):
-        """Test when no SSH keys work."""
-        mock_find_keys.return_value = ["/home/user/.ssh/id_rsa"]
-
-        # Mock failed connection
-        mock_client = MagicMock()
-        mock_ssh_client.return_value = mock_client
-        mock_client.connect.side_effect = Exception("Connection failed")
-
-        result = detect_existing_ssh_key("test.host.com", "testuser")
-
-        assert result is None
+            print("authentications:", server.authentications)
+            assert found is None
+            assert server.authentications == []
 
 
 class TestGenerateSSHKey:
-    """Test SSH key generation functionality."""
+    def test_an_rsa_key_with_a_comment_and_a_passphrase(self, tmp_path):
+        """The options ``generate_ssh_key_pair`` never passes."""
+        key_path = str(tmp_path / "keys" / "id_rsa_test")
 
-    @patch("subprocess.run")
-    @patch("os.chmod")
-    def test_generate_ssh_key_success(self, mock_chmod, mock_run):
-        """Test successful SSH key generation."""
-        # Mock successful ssh-keygen commands
-        mock_run.side_effect = [
-            MagicMock(returncode=0),  # ssh-keygen --help
-            MagicMock(returncode=0, stdout="", stderr=""),  # actual key generation
-        ]
+        private, public = generate_ssh_key(
+            key_path, key_type="rsa", passphrase="correct horse", comment="me@laptop"
+        )
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            key_path = str(Path(temp_dir) / "test_key")
+        assert (private, public) == (key_path, f"{key_path}.pub")
+        assert stat.S_IMODE(os.stat(private).st_mode) == 0o600
+        assert stat.S_IMODE(os.stat(public).st_mode) == 0o644
+        assert stat.S_IMODE(os.stat(tmp_path / "keys").st_mode) == 0o700
+        kind, _, comment = Path(public).read_text().split()
+        assert (kind, comment) == ("ssh-rsa", "me@laptop")
+        # The passphrase is real: the wrong one cannot unlock the key, and
+        # the right one can.
+        wrong = subprocess.run(
+            ["ssh-keygen", "-y", "-P", "wrong", "-f", private], capture_output=True
+        )
+        right = subprocess.run(
+            ["ssh-keygen", "-y", "-P", "correct horse", "-f", private],
+            capture_output=True,
+            text=True,
+        )
+        assert wrong.returncode != 0
+        assert right.stdout.split()[:2] == Path(public).read_text().split()[:2]
 
-            private_key, public_key = generate_ssh_key(key_path, "ed25519")
-
-            assert private_key == key_path
-            assert public_key == f"{key_path}.pub"
-
-            # Verify ssh-keygen was called correctly
-            expected_cmd = ["ssh-keygen", "-t", "ed25519", "-f", key_path, "-N", ""]
-            mock_run.assert_any_call(
-                expected_cmd, capture_output=True, text=True, check=True
-            )
-
-            # Verify permissions were set
-            mock_chmod.assert_any_call(key_path, 0o600)
-            mock_chmod.assert_any_call(f"{key_path}.pub", 0o644)
-
-    @patch("subprocess.run")
-    def test_generate_ssh_key_no_ssh_keygen(self, mock_run):
-        """Test error when ssh-keygen is not available."""
-        mock_run.side_effect = FileNotFoundError()
+    def test_without_ssh_keygen_on_the_path_it_says_what_to_install(
+        self, tmp_path, monkeypatch
+    ):
+        empty_bin = tmp_path / "bin"
+        empty_bin.mkdir()
+        monkeypatch.setenv("PATH", str(empty_bin))
+        assert shutil.which("ssh-keygen") is None
 
         with pytest.raises(SSHKeyGenerationError, match="ssh-keygen not found"):
-            generate_ssh_key("/tmp/test_key")
+            generate_ssh_key(str(tmp_path / "id_ed25519"))
 
-    @patch("subprocess.run")
-    def test_generate_ssh_key_generation_fails(self, mock_run):
-        """Test error when key generation fails."""
-        mock_run.side_effect = [
-            MagicMock(returncode=0),  # ssh-keygen --help succeeds
-            subprocess.CalledProcessError(1, "ssh-keygen", stderr="Generation failed"),
-        ]
+        assert not (tmp_path / "id_ed25519").exists()
 
+    def test_a_key_type_ssh_keygen_does_not_know_is_reported_with_its_reason(
+        self, tmp_path
+    ):
         with pytest.raises(SSHKeyGenerationError, match="Failed to generate SSH key"):
-            generate_ssh_key("/tmp/test_key")
+            generate_ssh_key(str(tmp_path / "id_bogus"), key_type="no-such-type")
+
+        assert not (tmp_path / "id_bogus").exists()
+
+    def test_on_a_terminal_an_existing_key_is_refused_rather_than_asked_about(
+        self, tmp_path
+    ):
+        """``ssh-keygen`` asks "Overwrite (y/n)?" -- into a captured pipe.
+
+        With a person's terminal as stdin it then waited for an answer to a
+        question it had never shown them. Run on a real pty, because that
+        is the only place the hang exists: under pytest's own stdin
+        ``ssh-keygen`` reads end-of-file and gives up by itself.
+        """
+        existing = generate_keypair(tmp_path, "id_ed25519")
+        before = existing.read_bytes()
+        script = (
+            "from clustrix.ssh_utils import generate_ssh_key, SSHKeyGenerationError\n"
+            "try:\n"
+            f"    generate_ssh_key({str(existing)!r})\n"
+            "except SSHKeyGenerationError as exc:\n"
+            "    print('REFUSED', exc)\n"
+        )
+
+        displayed, status = run_on_a_terminal(
+            [sys.executable, "-c", script], [], dict(os.environ), timeout=30
+        )
+
+        assert status == 0
+        assert "REFUSED Failed to generate SSH key" in displayed
+        assert "already exists" in displayed, "the reason must reach the caller"
+        assert existing.read_bytes() == before
 
 
 class TestDeployPublicKey:
-    """Test SSH public key deployment functionality."""
-
-    def test_deploy_public_key_file_not_found(self):
-        """Test error when public key file doesn't exist."""
+    def test_a_public_key_file_that_does_not_exist_is_an_error_before_any_connection(
+        self, tmp_path
+    ):
         with pytest.raises(SSHKeyDeploymentError, match="Cannot read public key file"):
-            deploy_public_key("test.host.com", "testuser", "/nonexistent/key.pub")
-
-    @patch("subprocess.run")
-    def test_deploy_public_key_ssh_copy_id_success(self, mock_run):
-        """Test successful deployment using ssh-copy-id."""
-        mock_run.return_value = MagicMock(returncode=0)
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
-            f.write("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAATEST test@example.com\n")
-            pub_key_path = f.name
-
-        try:
-            result = deploy_public_key("test.host.com", "testuser", pub_key_path)
-            assert result is True
-
-            # ssh-copy-id must be told which known_hosts to use. OpenSSH
-            # resolves "~" from the passwd database rather than $HOME, so
-            # without -o UserKnownHostsFile it appends to a different file
-            # from the one this module reads -- which is how the test suite
-            # came to leave 1,191 loopback entries in a developer's real
-            # known_hosts.
-            from clustrix.ssh_utils import _user_known_hosts_path
-
-            # This assertion used to expect ``StrictHostKeyChecking=accept-new``
-            # and nothing about identities, and it was asserting a defect
-            # rather than a decision, so it is rewritten rather than relaxed.
-            # With no ``config`` the host key policy is the ``ClusterConfig``
-            # default, ``reject`` -- OpenSSH's ``yes`` -- and nothing says who
-            # chose ``test.host.com``, so the gate does not license the local
-            # identities and OpenSSH is given the key being deployed and
-            # nothing else.
-            #
-            # ``-F /dev/null`` belongs to the same decision and was added
-            # after ``IdentitiesOnly=yes`` was measured *not* to be enough:
-            # an ``IdentityFile`` out of the user's own ``~/.ssh/config``
-            # counts as explicitly configured, so it survives the option
-            # meant to exclude everything ambient. See
-            # ``clustrix.ssh_utils.ssh_copy_id_command``.
-            expected_cmd = [
-                "ssh-copy-id",
-                "-i",
-                pub_key_path,
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-o",
-                f"UserKnownHostsFile={_user_known_hosts_path()}",
-                "-F",
-                "/dev/null",
-                "-o",
-                "IdentitiesOnly=yes",
-                "-o",
-                f"IdentityFile={pub_key_path[: -len('.pub')]}",
-                "-o",
-                "IdentityAgent=none",
-                "testuser@test.host.com",
-            ]
-            mock_run.assert_called_with(
-                expected_cmd, capture_output=True, text=True, input=None, timeout=30
+            deploy_public_key(
+                "nowhere.clustrix.invalid", "testuser", str(tmp_path / "missing.pub")
             )
-            # The path has to follow $HOME, or the isolation is nominal.
-            assert str(_user_known_hosts_path()).startswith(os.path.expanduser("~"))
-        finally:
-            os.unlink(pub_key_path)
-
-    @patch("subprocess.run")
-    @patch("paramiko.SSHClient")
-    def test_deploy_public_key_manual_fallback(self, mock_ssh_client, mock_run):
-        """Test manual deployment fallback when ssh-copy-id fails."""
-        # ssh-copy-id fails
-        mock_run.side_effect = subprocess.CalledProcessError(1, "ssh-copy-id")
-
-        # Manual deployment succeeds
-        mock_client = MagicMock()
-        mock_ssh_client.return_value = mock_client
-
-        # Mock exec_command returns
-        mock_stdout = MagicMock()
-        mock_stdout.channel.recv_exit_status.return_value = 0
-        mock_client.exec_command.return_value = (None, mock_stdout, None)
-
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".pub", delete=False) as f:
-            f.write("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAATEST test@example.com\n")
-            pub_key_path = f.name
-
-        try:
-            result = deploy_public_key(
-                "test.host.com", "testuser", pub_key_path, password="testpass"
-            )
-            assert result is True
-
-            # Verify SSH connection was attempted
-            mock_client.connect.assert_called()
-            mock_client.exec_command.assert_called()
-            mock_client.close.assert_called()
-        finally:
-            os.unlink(pub_key_path)
 
 
 class TestUpdateSSHConfig:
-    """Test SSH config file management."""
+    def test_the_first_entry_creates_a_private_config_file(self, ssh_dir):
+        config_path = ssh_dir / "config"
+        assert not config_path.exists()
 
-    def test_update_ssh_config_new_entry(self):
-        """Test adding new SSH config entry."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ssh_dir = Path(temp_dir) / ".ssh"
-            ssh_config_path = ssh_dir / "config"
-
-            with patch("clustrix.ssh_utils.Path.home") as mock_home:
-                mock_home.return_value = Path(temp_dir)
-
-                update_ssh_config(
-                    "test.host.com", "testuser", "/path/to/key", "testalias"
-                )
-
-                # Verify config file was created
-                assert ssh_config_path.exists()
-
-                # Verify content
-                with open(ssh_config_path, "r") as f:
-                    content = f.read()
-
-                assert "Host testalias" in content
-                assert "HostName test.host.com" in content
-                assert "User testuser" in content
-                assert "IdentityFile /path/to/key" in content
-
-    def test_update_ssh_config_existing_entry(self):
-        """Test skipping existing SSH config entry."""
-        with tempfile.TemporaryDirectory() as temp_dir:
-            ssh_dir = Path(temp_dir) / ".ssh"
-            ssh_dir.mkdir(mode=0o700)
-            ssh_config_path = ssh_dir / "config"
-
-            # Create existing config
-            with open(ssh_config_path, "w") as f:
-                f.write("Host testalias\n    HostName existing.host.com\n")
-
-            with patch("clustrix.ssh_utils.Path.home") as mock_home:
-                mock_home.return_value = Path(temp_dir)
-
-                update_ssh_config(
-                    "test.host.com", "testuser", "/path/to/key", "testalias"
-                )
-
-                # Verify original content is preserved
-                with open(ssh_config_path, "r") as f:
-                    content = f.read()
-
-                assert "existing.host.com" in content
-                assert "test.host.com" not in content
-
-
-class TestSetupSSHKeys:
-    """Test end-to-end SSH key setup."""
-
-    def test_setup_ssh_keys_missing_host(self):
-        """Test error when host is missing."""
-        config = ClusterConfig(cluster_type="slurm", username="testuser")
-
-        result = setup_ssh_keys(config, "testpass")
-        assert not result["success"]
-        assert "cluster_host must be specified" in result["error"]
-
-    def test_setup_ssh_keys_missing_username(self):
-        """Test error when username is missing."""
-        config = ClusterConfig(cluster_type="slurm", cluster_host="test.host.com")
-
-        result = setup_ssh_keys(config, "testpass")
-        assert not result["success"]
-        assert "username must be specified" in result["error"]
-
-    @patch("clustrix.ssh_utils.detect_existing_ssh_key")
-    def test_setup_ssh_keys_existing_key_found(self, mock_detect):
-        """Test when existing SSH key is found."""
-        mock_detect.return_value = "/home/user/.ssh/id_rsa"
-
-        config = ClusterConfig(
-            cluster_type="slurm", cluster_host="test.host.com", username="testuser"
+        update_ssh_config(
+            "cluster.example.edu", "researcher", "/keys/id_ed25519", "hpc", port=2222
         )
 
-        result = setup_ssh_keys(config, "testpass")
+        assert config_path.read_text() == (
+            "\n# Clustrix auto-generated entry for hpc\n"
+            "Host hpc\n"
+            "    HostName cluster.example.edu\n"
+            "    User researcher\n"
+            "    IdentityFile /keys/id_ed25519\n"
+            "    IdentitiesOnly yes\n"
+            "    Port 2222\n"
+        )
+        assert stat.S_IMODE(config_path.stat().st_mode) == 0o600
 
-        assert result["success"]
-        assert result["key_path"] == "/home/user/.ssh/id_rsa"
-        assert result["key_already_existed"]
-        assert config.key_file == "/home/user/.ssh/id_rsa"
-        mock_detect.assert_called_once_with(
-            "test.host.com", "testuser", 22, config=config
+    def test_openssh_reads_the_entry_the_way_it_was_meant(self, ssh_dir):
+        """``ssh -G`` is OpenSSH's own account of what an alias resolves to."""
+        update_ssh_config(
+            "cluster.example.edu", "researcher", "/keys/id_ed25519", "hpc", port=2222
         )
 
-    @patch("clustrix.ssh_utils.detect_existing_ssh_key")
-    @patch("clustrix.ssh_utils.generate_ssh_key")
-    @patch("clustrix.ssh_utils.deploy_public_key")
-    @patch("clustrix.ssh_utils.update_ssh_config")
-    @patch("pathlib.Path.exists")
-    @patch("pathlib.Path.home")
-    def test_setup_ssh_keys_full_workflow(
-        self,
-        mock_home,
-        mock_path_exists,
-        mock_update_config,
-        mock_deploy,
-        mock_generate,
-        mock_detect,
-    ):
-        """Test complete SSH key setup workflow."""
-        # Set up mock home directory that works in any environment
-        from pathlib import Path
+        resolved = subprocess.run(
+            ["ssh", "-F", str(ssh_dir / "config"), "-G", "hpc"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.splitlines()
 
-        mock_home_path = Path("/home/testuser")  # Generic path for testing
-        mock_home.return_value = mock_home_path
-        expected_key_path = str(
-            mock_home_path / ".ssh" / "id_ed25519_clustrix_testuser_testcluster"
-        )
+        print("\n".join(resolved[:12]))
+        assert "hostname cluster.example.edu" in resolved
+        assert "user researcher" in resolved
+        assert "port 2222" in resolved
+        assert "identityfile /keys/id_ed25519" in resolved
+        assert "identitiesonly yes" in resolved
 
-        # Set up detect_existing_ssh_key to return None initially, then the key path
-        mock_detect.side_effect = [
-            None,  # First call: no existing key
-            expected_key_path,  # Second call: key works
-            expected_key_path,  # Third call: key works (retry)
-            expected_key_path,  # Fourth call: key works (retry)
-        ]
+    def test_writing_the_same_entry_twice_leaves_one_entry(self, ssh_dir):
+        for _ in range(2):
+            update_ssh_config("cluster.example.edu", "researcher", "/keys/k", "hpc")
 
-        # Key file doesn't exist initially
-        mock_path_exists.return_value = False
-
-        # Key generation succeeds
-        mock_generate.return_value = (
-            expected_key_path,
-            f"{expected_key_path}.pub",
-        )
-
-        # Deployment succeeds
-        mock_deploy.return_value = True
-
-        config = ClusterConfig(
-            cluster_type="slurm", cluster_host="test.host.com", username="testuser"
-        )
-
-        result = setup_ssh_keys(
-            config, password="testpass", cluster_alias="testcluster"
-        )
-
-        assert result["success"]
-        assert result["key_deployed"]
-        assert result["connection_tested"]
-        assert config.key_file == expected_key_path
-        mock_generate.assert_called_once()
-        mock_deploy.assert_called_once()
-        mock_update_config.assert_called_once()
+        assert (ssh_dir / "config").read_text().count("Host hpc\n") == 1
 
 
-class TestGetSSHKeyInfo:
-    """Test SSH key information retrieval."""
+class TestSSHKeyInfo:
+    def test_a_real_key_is_described_by_ssh_keygen(self, ssh_dir):
+        private = generate_keypair(ssh_dir, "id_ed25519")
+        fingerprint = subprocess.run(
+            ["ssh-keygen", "-l", "-f", str(private)],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.split()[1]
 
-    @patch("subprocess.run")
-    def test_get_ssh_key_info_success(self, mock_run):
-        """Test successful SSH key info retrieval."""
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="256 SHA256:AAAA test@example.com (ED25519)\n"
-        )
+        info = get_ssh_key_info(str(private))
 
-        result = get_ssh_key_info("/path/to/key")
-
-        expected = {
-            "path": "/path/to/key",
+        print(info)
+        assert info == {
+            "path": str(private),
             "type": "ED25519",
             "bit_size": "256",
-            "fingerprint": "SHA256:AAAA",
-            "comment": "test@example.com",
+            "fingerprint": fingerprint,
+            "comment": "clustrix-test",
             "exists": True,
         }
+        assert fingerprint.startswith("SHA256:")
 
-        assert result == expected
+    def test_a_missing_key_is_reported_as_not_existing(self, tmp_path):
+        missing = str(tmp_path / "id_missing")
 
-    @patch("subprocess.run")
-    def test_get_ssh_key_info_failure(self, mock_run):
-        """Test SSH key info retrieval failure."""
-        mock_run.side_effect = subprocess.CalledProcessError(1, "ssh-keygen")
+        assert get_ssh_key_info(missing) == {"path": missing, "exists": False}
 
-        result = get_ssh_key_info("/path/to/key")
+    def test_a_file_that_is_not_a_key_is_reported_as_not_existing(self, tmp_path):
+        not_a_key = tmp_path / "id_rsa"
+        not_a_key.write_text("this is not a key\n")
 
-        expected = {"path": "/path/to/key", "exists": False}
+        assert get_ssh_key_info(str(not_a_key)) == {
+            "path": str(not_a_key),
+            "exists": False,
+        }
 
-        assert result == expected
+    def test_listing_describes_exactly_the_keys_discovery_finds(self, ssh_dir):
+        first = generate_keypair(ssh_dir, "id_ed25519")
+        second = generate_keypair(ssh_dir, "id_ed25519_clustrix_me_hpc")
+        generate_keypair(ssh_dir, "some_other_name")
 
+        listed = list_ssh_keys()
 
-class TestListSSHKeys:
-    """Test SSH key listing functionality."""
-
-    @patch("clustrix.ssh_utils.find_ssh_keys")
-    @patch("clustrix.ssh_utils.get_ssh_key_info")
-    def test_list_ssh_keys(self, mock_get_info, mock_find_keys):
-        """Test SSH key listing."""
-        mock_find_keys.return_value = ["/path/to/key1", "/path/to/key2"]
-        mock_get_info.side_effect = [
-            {"path": "/path/to/key1", "type": "RSA", "exists": True},
-            {"path": "/path/to/key2", "type": "ED25519", "exists": True},
-        ]
-
-        result = list_ssh_keys()
-
-        assert len(result) == 2
-        assert result[0]["path"] == "/path/to/key1"
-        assert result[1]["path"] == "/path/to/key2"
-        assert mock_get_info.call_count == 2
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+        print(listed)
+        assert [entry["path"] for entry in listed] == [str(first), str(second)]
+        assert all(entry["exists"] and entry["type"] == "ED25519" for entry in listed)
+        assert listed[0]["fingerprint"] != listed[1]["fingerprint"]
