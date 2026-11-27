@@ -1,12 +1,10 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-08-21 16:23 UTC
-**Commit:** 7d28428
-**Branch:** work/priorities-and-docs
+**Updated:** 2026-11-27 (branch `ccr-d2f64557-m5wit9`)
 
 ## OVERVIEW
 
-Clustrix is a Python distributed computing framework: `@cluster` on a function serializes it (dill/cloudpickle, by value) and runs it on a configured backend — `local`, `ssh`, `slurm`, `huggingface` (HF Jobs). Those four are the whole list (`clustrix.config.SUPPORTED_CLUSTER_TYPES`); pbs/sge/kubernetes/AWS/GCP/Azure/Lambda raise `ValueError` (issues #140–#146). Python >=3.10, version 0.2.0, beta.
+Clustrix is a Python distributed computing framework: `@cluster` on a function serializes it (dill/cloudpickle, by value) and runs it on a configured backend — `local`, `ssh`, `slurm`, `huggingface` (HF Jobs). Those four are the whole list (`clustrix.config.SUPPORTED_CLUSTER_TYPES`); pbs/sge/kubernetes/AWS/GCP/Azure/Lambda raise `ValueError` (issues #140–#146). Python >=3.10 (tested to 3.13), beta. A top-level loop in a decorated function is divided automatically (`parallelize.py`); local input files are staged automatically on ssh/slurm (`auto_stage.py`).
 
 **CLAUDE.md is the deep curated knowledge base** (architecture, security invariants, mocking policy, two-venv execution). This file is the map; read CLAUDE.md before non-trivial work.
 
@@ -14,7 +12,7 @@ Clustrix is a Python distributed computing framework: `@cluster` on a function s
 
 ```
 clustrix/
-├── clustrix/            # the package — flat, 34 modules (see clustrix/AGENTS.md)
+├── clustrix/            # the package — flat, no subpackages (see clustrix/AGENTS.md)
 ├── tests/               # unit/ + real_world/ + integration/ + comprehensive/ (see tests/AGENTS.md)
 ├── scripts/             # dev/ops tooling; aws/ is operator cleanup, NOT a backend
 ├── docs/                # source/ (Sphinx) + evidence/ (committed proof) + build/ (generated)
@@ -23,7 +21,7 @@ clustrix/
 ├── .github/workflows/   # tests.yml, fast_ci.yml, real-world-tests.yml
 ├── build/               # STALE setuptools output — see NOTES
 ├── htmlcov/, performance_test_results/, docs/build/   # generated; ignore
-└── pyproject.toml       # the ONLY pytest/coverage config; black/mypy/flake8 too
+└── pyproject.toml       # the ONLY package metadata and pytest/coverage config; black/mypy too (flake8 reads .flake8; setup.py is a shim)
 ```
 
 ## WHERE TO LOOK
@@ -31,39 +29,42 @@ clustrix/
 | Task | Location | Notes |
 |-|-|-|
 | Add a backend | `config.SUPPORTED_CLUSTER_TYPES` + `executor_core.py` dispatch + `executor_schedulers.py` | Gate: real job on real hardware, evidence committed |
-| Change execution flow | `executor_core.py` (ClusterExecutor), split across `executor_connections/_schedulers/_scheduler_status` | `executor.py` is a 39-line shim |
+| Change execution flow | `executor_core.py` (ClusterExecutor), split across `executor_connections/_schedulers/_scheduler_status` | `executor.py` is a shim. Result polling starts at 1 s and backs off to `job_poll_interval` |
+| Loop division | `parallelize.py` (`plan`, `explain`, `run`), `loop_workers.py` (local worker subprocesses), `decorator._run_split_locally/_run_split_remotely` | The only analyser. Static rule + three run-time checks; cannot see state outside the loop's values. No SLURM arrays, no verified GPU path |
+| Input staging | `auto_stage.py` (`prepare`), `@cluster(data=, no_data=)`, `ClusterConfig.auto_stage`, `auto_stage_max_bytes` | ssh/slurm only; not async, not HF; outputs are not brought back; nothing auto-deleted |
 | Touch serialization | `utils.py` `serialize_function`/`deserialize_function`, `generate_two_venv_execution_commands` | Keep each serialize/deserialize pair symmetric; never stdlib `pickle` |
-| Config change | `config.py` (ClusterConfig, configure, load_config) | No env-var overlay exists; only `CLUSTRIX_CONFIG_DIR` + `password_env_var` |
-| SSH/auth | `ssh_security.py` (host keys), `ssh_utils.py`, `auth_manager.py`, `credential_manager.py` | Never `AutoAddPolicy` directly |
-| Notebook UI | `notebook_magic_core.py` (%%remote, %clustrix), `modern_notebook_widget.py` | Widget never auto-displays on import unless `CLUSTRIX_AUTO_WIDGET=1` |
-| Data staging | `staging.py` (`data_package`, `materialize_packages`) | Declaration only; nothing inferred; nothing auto-deleted |
+| Config change | `config.py` (ClusterConfig, configure, load_config) | No env-var overlay exists; only `CLUSTRIX_CONFIG_DIR` + `password_env_var`. `configure()` validates types and ranges. `ssh_port` is only a deprecated alias for `cluster_port`. `clustrix config`/`clustrix load` persist to `<config dir>/config.yml` |
+| SSH/auth | `ssh_security.py` (host keys, `trust_offered_host_key`), `ssh_utils.py`, `auth_manager.py`, `credential_manager.py`, `credential_release.py` | Never `AutoAddPolicy` directly; every stored secret is released through `release_credential` |
+| Notebook UI | `notebook_magic_core.py` (%%remote, %clustrix), `modern_notebook_widget.py`, `widget_style.py` | One widget. Form is a draft; Apply saves and makes live. Never auto-displays on import unless `CLUSTRIX_AUTO_WIDGET=1` |
+| Declared data | `staging.py` (`data_package`, `materialize_packages`) | Explicit packages; a large one lives in a private HF repo that an ssh/slurm worker cannot read; nothing auto-deleted |
+| Docs | `docs/source/`, `scripts/check_docs_examples.py`, `scripts/check_docs_markup.py` | Every Python block is executed or, if marked `# cluster-required`, statically checked |
 | Quality gates | `scripts/pre_push_check.py` (retries 5x), `scripts/check_quality.py` | Run repeatedly until ALL pass before commit |
 | Regenerate backend evidence | `scripts/verify_cluster_usecases.py`, `scripts/collect_execution_evidence.py` | Output committed under `docs/evidence/` |
 | CI changes | `.github/workflows/` | `real-world-tests.yml` has NO push/PR trigger deliberately (credentialed jobs); secrets gate via `check-secrets` job outputs — `secrets` context is illegal in `if:` |
 
 ## CODE MAP
 
-Centrality from codegraph (Python LSP not installed; ruff is lint-only).
-
-| Symbol | Type | Location | Refs | Role |
-|-|-|-|-|-|
-| `configure` | function | `clustrix/config.py:559` | 288 | Singleton config entry point; validates all keys before applying any |
-| `ClusterExecutor` | class | `clustrix/executor_core.py:27` | 81 | Dispatch, submission, HMAC-verified result retrieval |
-| `cluster` | decorator | `clustrix/decorator.py:58` | public API | `@cluster`; extras limited to `hf_*` + `key_file` — `cluster_type=` is NOT accepted |
-| `ClusterConfig` | dataclass | `clustrix/config.py` | high | Plain-`str` `cluster_type`; no ClusterType enum |
-| `ClusterfyMagics` | class | `clustrix/notebook_magic_core.py:69` | 6 | `%%remote`, `%clustrix`, deprecated `%%clusterfy` alias |
-| `LocalExecutor` | class | `clustrix/local_executor.py` | — | Real local parallelism; `choose_executor_type` at :339 |
-| `HFJobsManager` | class | `clustrix/hf_jobs.py` | — | HuggingFace Jobs backend; 256 KB payload cap |
-| `data_package` | function | `clustrix/staging.py` | — | Declared data staging; large packages go to a private HF dataset repo |
+| Symbol | Type | Location | Role |
+|-|-|-|-|
+| `cluster` | decorator | `clustrix/decorator.py` | `@cluster`; extras limited to `hf_*`, `key_file`, `data`, `no_data` — `cluster_type=` is NOT accepted |
+| `explain` | function | `clustrix/parallelize.py` | Says whether a function's loop would be divided, and why not |
+| `configure` | function | `clustrix/config.py` | Singleton config entry point; validates all keys and values before applying any |
+| `ClusterConfig` | dataclass | `clustrix/config.py` | Plain-`str` `cluster_type`; no ClusterType enum |
+| `ClusterExecutor` | class | `clustrix/executor_core.py` | Dispatch, submission, HMAC-verified result retrieval |
+| `LocalJobManager` | class | `clustrix/local_executor.py` | The `cluster_type="local"` backend (no pool; `LocalExecutor` is gone) |
+| `HFJobsManager` | class | `clustrix/hf_jobs.py` | HuggingFace Jobs backend; 256 KB payload cap |
+| `ModernClustrixWidget` | class | `clustrix/modern_notebook_widget.py` | The notebook widget |
+| `ClusterfyMagics` | class | `clustrix/notebook_magic_core.py` | `%%remote`, `%clustrix`, deprecated `%%clusterfy` alias |
+| `data_package` | function | `clustrix/staging.py` | Declared data packages |
 
 ## CONVENTIONS
 
-- black line-length 88, target py310, **pinned `black==26.3.1`** (unbounded `>=` broke CI, #110); flake8 max-line 88, extend-ignore E203/W503; mypy python_version 3.10, `files=["clustrix/"]`, tests ignored, `follow_imports="skip"`.
+- black line-length 88, target py310, **pinned `black==26.3.1`** (unbounded `>=` broke CI, #110); flake8 is configured in `.flake8` only; mypy python_version 3.10, `files=["clustrix/"]`, tests ignored, `follow_imports="skip"`.
 - **pyproject.toml is the only pytest config.** No pytest.ini/tox.ini/setup.cfg — the first found shadows this block (#130); `tests/unit/test_pytest_config.py` enforces it.
 - pytest `--strict-markers`; all 6 markers registered in pyproject. `testpaths` must never list `tests/integration` (billable, #109).
 - Coverage `fail_under = 66` — a floor 2 points under measured 68%, not a target (#115).
 - Pre-commit runs on python3.12 explicitly (system python3 may be 3.9, which the project does not support).
-- Version string lives in 4 places and must stay identical: `pyproject.toml`, `setup.py`, `clustrix/__init__.py`, `docs/source/conf.py`.
+- Version string lives in 3 places and must stay identical: `pyproject.toml`, `clustrix/__init__.py`, `docs/source/conf.py` (`setup.py` is a shim).
 - Comments explain *why*, often with issue refs (#109–#159). Match that style; do not strip them.
 
 ## ANTI-PATTERNS (THIS PROJECT)
@@ -75,6 +76,8 @@ Centrality from codegraph (Python LSP not installed; ruff is lint-only).
 - Never document unsupported backends (pbs/sge/k8s/cloud VMs), cost monitoring, or HF Spaces as working.
 - Never add `@cluster(cluster_type=...)` to examples — it is ignored with a warning; backend is set via `configure()`.
 - `auto_gpu_parallel` does nothing (deleted; it fabricated results). Don't document it as a feature.
+- Never document the removed chunk-keyword protocol (`_chunk_range_*`, `_parallel_*`), `clustrix.loop_analysis`, `LocalExecutor`, `clustrix.validation`, or the legacy widget (`EnhancedClusterConfigWidget`, `notebook_magic_widget`, `notebook_magic_config`).
+- Never describe loop division as a proof of safety: say what no check can see (module caches, files, databases, GPU RNG).
 - No `cluster_put`/`cluster_get` — the `cluster_*` fs helpers are read-only by design.
 
 ## UNIQUE STYLES
@@ -100,4 +103,4 @@ cd docs && make html                    # docs build
 - `htmlcov/`, `performance_test_results/`, `docs/build/` are generated output, not source.
 - `tests/integration/` provisions real billable AWS resources; refuses without `CLUSTRIX_ALLOW_BILLABLE=1` (guard reads `config.args`, deliberately).
 - `remote_work_dir` must be on a filesystem compute nodes see — `/tmp` dies with exit 127 on SLURM.
-- Fresh count: 21 of 166 test modules use `unittest.mock` (issue #117 migrates them; new tests must not add to it).
+- Some test modules still use `unittest.mock` (issue #117 migrates them; new tests must not add to it). Recount before quoting a figure: `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`.

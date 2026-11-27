@@ -8,6 +8,173 @@ been exercised against the real thing. Anything implemented but unproven is
 labelled as such and stays labelled until someone runs it for real — and as of
 0.2.0, anything that stayed unproven was removed rather than shipped.
 
+## [Unreleased]
+
+Changes since commit `8d0f1c4`. Everything listed under "Added" was run
+against a real `sshd` and a single-node SLURM installation, or locally; what
+was not is marked.
+
+### Breaking changes, and what to change
+
+- **A divided loop returns the function's own return value.** The old
+  protocol is gone: `@cluster` no longer passes `_chunk_range_<var>`,
+  `_chunk_index` or `_parallel_<var>` keywords, and never returns a list of
+  per-chunk results. *Migration:* delete those parameters and the code that
+  merged chunk results; write the loop plainly. Check the decision with
+  `print(clustrix.explain(function))`.
+- **`clustrix.loop_analysis` is deleted**, with `detect_loops`,
+  `detect_loops_in_function`, `find_parallelizable_loops`, `LoopAnalyzer` and
+  `analyze_function_loops`. *Migration:* `clustrix.explain(function)`.
+- **`LocalExecutor`, `create_local_executor` and `choose_executor_type` are
+  deleted.** *Migration:* `@cluster(cores=N)` with no `cluster_host` divides
+  a qualifying loop among `N` worker processes; for anything else use
+  `concurrent.futures` or joblib directly.
+- **The legacy notebook widget is deleted**: `EnhancedClusterConfigWidget`,
+  `DEFAULT_CONFIGS`, `detect_config_files`, `load_config_from_file`,
+  `validate_ip_address`, `validate_hostname`, and the modules
+  `clustrix.notebook_magic_widget` and `clustrix.notebook_magic_config`.
+  *Migration:* `ModernClustrixWidget` (or `%%remote`) for the form,
+  `clustrix.config.load_config(path)` to read a file.
+- **`display_modern_widget()` and `show_widget()` return `None`.** They used
+  to return the container, which showed the widget twice when the call ended
+  a cell. *Migration:* construct `ModernClustrixWidget()` to keep a handle.
+- **`clustrix.validation` is deleted.** *Migration:* `clustrix status`, or
+  `ClusterExecutor(config).connect()`.
+- **`ssh_port` is no longer a field.** It is accepted as a deprecated alias
+  for `cluster_port` and warns. *Migration:* rename it to `cluster_port`.
+- **`configure()` validates types and ranges** and applies nothing when a
+  value is refused. `configure(default_cores=0)`, `cluster_port="abc"` and
+  `ssh_host_key_policy="yolo"` now raise `ValueError`.
+- **`clustrix status` exits 1 when the connection fails.** It used to exit 0.
+- **`clustrix config --api-key` is removed.** It set a field nothing reads
+  and put a secret on a command line.
+- **`clustrix config --cores 0` is an error** rather than "not given".
+- **`clustrix credentials list` no longer shows a `LOCAL` provider.**
+- **Values in the credential file (`.env`) are read literally.** `${VAR}` is
+  no longer expanded, and values are written single-quoted. *Migration:* if a
+  stored value relied on expansion, write the expanded value.
+- **A failed or timed-out remote environment build raises.** It used to fall
+  back silently to an environment containing only the serializers.
+- **`replicate_local_environment=False` installs the packages the job was
+  detected to need.** It used to install nothing.
+- **Local and remote Python must be the same minor version**; a mismatch is
+  refused at submission instead of failing inside the job.
+- **`setup.py` is a shim.** The version lives in `pyproject.toml`,
+  `clustrix/__init__.py` and `docs/source/conf.py`.
+
+### Added
+
+- **Automatic loop parallelisation** (`clustrix.parallelize`). A top-level
+  `for` loop, or a single-`for` comprehension statement, whose iterations are
+  independent is divided: among `cores` worker processes locally (`cores=-1`
+  uses every CPU available to the process), or into one job per piece, at
+  most `max_parallel_jobs`, on `ssh` and `slurm`. Writes to collected values
+  are replayed in iteration order, so the result is the sequential one.
+  Limits: only a top-level loop of the decorated function; no split when a
+  value is carried between iterations, on `break`, on `return` in the loop,
+  when a value assigned in the loop is used after it, on a write to a global,
+  or on the unseeded global random generator. Run-time checks catch a
+  modified shared value and moved global random state and fall back to the
+  sequential loop. No check sees module caches, files, databases or GPU
+  random state. There are no SLURM job arrays, and no GPU path was verified
+  on real hardware. One job per piece on HuggingFace Jobs follows from the
+  same code path and was **not run**.
+- **`clustrix.explain(function)`** returns the decision and, for a loop that
+  is not divided, the line and the reason.
+- **Local timing.** A function's first local call divides its loop and
+  measures it; later calls divide only when the loop is long enough to be
+  worth it (about 0.2 s of work).
+- **Automatic staging of input files** on `ssh` and `slurm`
+  (`clustrix.auto_stage`; `ClusterConfig.auto_stage`, default on;
+  `auto_stage_max_bytes`, default 1 GB; `@cluster(data=[...], no_data=[...])`).
+  A file already on the cluster at the same path and size is used in place;
+  otherwise it is uploaded once over SSH and linked at the path the code
+  uses. Limits: a path found in code must be inside the project; credential
+  files are refused; a path computed at run time is not found; it does not
+  apply to `async_submit=True` or HuggingFace Jobs; files a job writes are
+  not brought back; staged data is never deleted automatically.
+- **Project modules travel with the job**, including a module imported
+  inside a function body.
+- **Dependency detection** from the serialized job (`required_packages`).
+- **Declared data packages work on `ssh` and `slurm` workers** when they
+  travel inline. A package stored in a HuggingFace repository still cannot be
+  read there, and now says so.
+- **Notebook widget**: edits are a draft until **Apply**; **Revert**; separate
+  "applied" and "last result" indicators; **Test connection** and **Run test
+  job** through the real executor; **Trust this host**; **Set up SSH key**;
+  **Export** / **Import** of profiles; fields for partition, an existing
+  conda environment and the HuggingFace time limit.
+- **`clustrix.ssh_security.trust_offered_host_key(error)`** records exactly
+  the key a refused connection was offered.
+- **`%clustrix status | config | config <profile> | load <file>`**, and
+  `%load_ext clustrix` puts `cluster`, `configure` and `get_config` in the
+  notebook namespace.
+- **Python 3.13** classifier and CI job.
+- Documentation pages: loop parallelisation, input files, command line.
+
+### Changed
+
+- **Waiting for a result** starts polling one second apart and backs off to
+  `job_poll_interval`, which is now the ceiling. Four one-second SLURM jobs
+  went from 67 s to 9.5 s in the commit's own measurement.
+- **Remote environments are keyed by content** under
+  `<remote_work_dir>/envs/` and reused; a set of requirements is resolved once
+  per executor.
+- **`clustrix config ...` and `clustrix load` persist** to
+  `<config dir>/config.yml` (mode 0600, secrets omitted). They used to print
+  success and save nothing.
+- **`%%clusterfy`** is a deprecated alias for `%%remote`.
+- **Remote tracebacks reach the caller**, and a job that died without an
+  error report says how it ended.
+- **A class sent to a worker by value comes back as the caller's class**, so
+  `isinstance` and `except MyError` work on results and remote errors.
+- **`cancel_job` on the `ssh` backend kills the process tree.**
+- **An SSH connection attempt gives up after `ssh_connect_timeout`** (30 s).
+
+### Fixed
+
+- NumPy and other third-party objects as arguments or return values failed
+  on `ssh` and `slurm` with `ModuleNotFoundError`.
+- An `ssh` job that was killed or called `sys.exit` appeared to be running
+  for a day; job ids could collide.
+- `module_loads` did nothing in a non-login shell.
+- `sbatch` refusing a job produced an `IndexError`.
+- Two notebook sessions sharing a profile store erased each other's profiles;
+  an unreadable store was overwritten with the built-in profiles.
+- `clustrix credentials setup` could not change an existing value and
+  cancelled itself on first run; the `.env` template stated the opposite
+  precedence from the code.
+- `%load_ext clustrix` failed when Clustrix was imported before a shell
+  existed; `%clustrix config <profile>` raised `AttributeError`.
+- `package_manager="auto"` on the single-venv path passed `uv` a flag it
+  rejects.
+- A local worker pool could exceed its size, and a decorated function called
+  from inside a divided loop divided again in every worker.
+
+### Removed
+
+- See "Breaking changes". Also removed: `setuptools-scm` from the build
+  requirements (the sdist had contained `notes/`, `.claude/` and all of
+  `tests/`), `[tool.flake8]` from `pyproject.toml` (flake8 never read it),
+  and a tracked personal `clustrix.yml`.
+
+### Security
+
+- **An unknown SSH host is refused by default**, with the offered fingerprint
+  in the message. The notebook widget no longer suggests a shell command; it
+  shows the fingerprint and records exactly that key on request.
+- **Installing a key no longer removes other Clustrix keys** from the
+  cluster's `authorized_keys`. Setting up a second computer used to lock out
+  the first.
+- **`update_ssh_config` only replaces a block Clustrix wrote**; a `Host`
+  block of yours with the same alias is left unchanged.
+- **Passwords in the credential file round-trip exactly**; a value containing
+  spaces or `#` used to be truncated.
+- **Note for notebook users:** with JupyterLab's "Save Widget State
+  Automatically" on, text typed into the widget's Password or Token field is
+  stored in the `.ipynb` file. Turn the setting off or do not type secrets
+  into the widget.
+
 ## [0.2.0] — unreleased
 
 The first release in which `@cluster` demonstrably runs a function on remote

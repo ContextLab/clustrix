@@ -152,8 +152,8 @@ def process_dataset(config):
     print(f"Dataset size: {usage.total_gb:.2f} GB")
     
     results = []
-    # Sequential: auto-parallelization needs a literal range() and a
-    # function that accepts the chunk keywords.
+    # This loop is divided among workers or jobs when its iterations are
+    # independent; print(clustrix.explain(process_dataset)) says whether.
     for filename in data_files:
         # 3. Check file size before processing
         file_info = cluster_stat(filename, config)
@@ -180,7 +180,7 @@ config = ClusterConfig(
     remote_work_dir="/scratch/datasets"
 )
 
-# This will run on the cluster with automatic loop parallelization
+# This runs on the cluster
 results = process_dataset(config)
 '''
 
@@ -294,7 +294,6 @@ def main():
     print("• Configure your cluster credentials")
     print("• Try the remote operations examples")
     print("• Integrate with your existing @cluster functions")
-    print("• Explore the technical design document for Phase 2 features")
 
 
 if __name__ == "__main__":

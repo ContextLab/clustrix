@@ -79,9 +79,9 @@ python scripts/run_real_world_tests.py --check-creds
 ```
 
 This prints one line per service (SSH, SLURM, HuggingFace) saying whether
-usable credentials were found, plus whether a 1Password CLI session is
-available. When 1Password is reachable, the credential manager prefers it and
-falls back to the environment variables only if a lookup fails.
+usable credentials were found. 1Password support was removed from clustrix;
+credentials come from the environment, from `<config dir>/.env`, or from
+GitHub Actions secrets.
 
 ## GitHub Actions
 

@@ -65,11 +65,10 @@ def test_remote_execution_real():
 Two things about that example. `cluster_type` is not a `@cluster` keyword —
 passing it there logs "@cluster received unrecognised option(s)" and is
 ignored, so the backend has to come from `configure`. And on the `local`
-backend `cores=4` has no effect: the function runs in the caller's own
-process, sequentially. That is issue
-[#152](https://github.com/ContextLab/clustrix/issues/152). Real in-process
-parallelism lives in `clustrix.local_executor.LocalExecutor`, which is a
-separate entry point.
+backend `cores=4` is the number of worker processes a top-level loop of the
+function is divided among; a function with no such loop runs once, in the
+caller's process, and a warning says so (`clustrix.explain(function)` gives
+the reason).
 
 ## Strategy
 

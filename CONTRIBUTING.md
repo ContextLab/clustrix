@@ -56,8 +56,8 @@ Before submitting any code, please ensure it meets our quality standards:
 
 ### Testing
 
-No trustworthy coverage figure has been measured for this project (see
-`README.md`'s Testing Philosophy section). When contributing:
+No trustworthy coverage figure has been measured for this project. When
+contributing:
 
 - **Write tests** for all new functionality
 - **Update existing tests** when modifying behavior
@@ -158,20 +158,42 @@ The template helps you describe:
 
 ```
 clustrix/
-├── clustrix/              # Main package
-│   ├── __init__.py       # Package exports
-│   ├── config.py         # Configuration management
-│   ├── decorator.py      # @cluster decorator
-│   ├── executor.py       # Remote cluster execution
-│   ├── local_executor.py # Local parallel execution
-│   ├── loop_analysis.py  # Loop detection and analysis
-│   ├── cli.py           # Command-line interface
-│   └── utils.py         # Utility functions
-├── tests/               # Test suite
-├── docs/               # Documentation
-├── examples/           # Example scripts
-└── setup.py           # Package configuration
+├── clustrix/                  # the package
+│   ├── __init__.py           # public API (__all__)
+│   ├── decorator.py          # @cluster
+│   ├── parallelize.py        # loop division: plan, explain, run
+│   ├── loop_workers.py       # local worker processes for a divided loop
+│   ├── auto_stage.py         # automatic staging of input files (ssh, slurm)
+│   ├── staging.py            # declared data packages
+│   ├── config.py             # ClusterConfig, configure, load/save
+│   ├── executor_core.py      # ClusterExecutor (executor.py is a shim)
+│   ├── executor_*.py         # connections, schedulers, status
+│   ├── hf_jobs.py            # HuggingFace Jobs backend
+│   ├── local_executor.py     # the cluster_type="local" backend
+│   ├── ssh_security.py       # host key policy
+│   ├── modern_notebook_widget.py, widget_style.py   # the notebook widget
+│   ├── notebook_magic_core.py                       # %%remote, %clustrix
+│   ├── cli.py, cli_credentials.py                   # the clustrix command
+│   └── utils.py              # serialization, environments, job scripts
+├── tests/                     # unit/, real_world/, integration/ (billable)
+├── docs/                      # source/ (Sphinx), evidence/
+├── examples/
+├── scripts/                   # quality checks, docs checkers, evidence
+└── pyproject.toml             # the only package metadata; setup.py is a shim
 ```
+
+The version string lives in `pyproject.toml`, `clustrix/__init__.py` and
+`docs/source/conf.py`, and the three must agree.
+
+## Documentation
+
+Every Python block in `README.md` and under `docs/source/` is checked by
+`python scripts/check_docs_examples.py`: a block is executed unless its first
+line is `# cluster-required: <reason>`, in which case it is compiled and its
+imports and `clustrix` keyword arguments are checked against the installed
+package. Output shown in the documentation must come from a real run. Build
+with `sphinx-build -b html docs/source docs/build/html -W --keep-going` and
+then run `python scripts/check_docs_markup.py docs/build/html`.
 
 ## Areas for Contribution
 

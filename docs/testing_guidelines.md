@@ -66,10 +66,9 @@ def test_local_execution():
 
 The backend is chosen by `configure`, not by the decorator: `cluster_type` is
 not a `@cluster` keyword and passing it there is ignored with a warning. On
-the `local` backend `cores=2` is also inert — the function runs in the
-caller's own process, sequentially (issue
-[#152](https://github.com/ContextLab/clustrix/issues/152)). For actual
-in-process parallelism, use `clustrix.local_executor.LocalExecutor` directly.
+the `local` backend `cores=2` is the number of worker processes a top-level
+loop of the function is divided among; a function with no such loop runs
+once, in the caller's process, and a warning says so.
 
 ### 2. Integration Tests
 Tests that validate interactions between components using real infrastructure.

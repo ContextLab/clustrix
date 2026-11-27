@@ -1,5 +1,12 @@
 # SSH Key Automation Technical Design Document
 
+> **Superseded in part.** This is the design record for issue #57. Since it
+> was written, `clustrix/notebook_magic_widget.py` was deleted (the only
+> widget is `modern_notebook_widget.py`), deploying a key no longer removes
+> other clustrix keys from `authorized_keys`, `update_ssh_config` replaces
+> only blocks clustrix wrote, and unknown hosts are refused by default. The
+> current behaviour is documented in `docs/source/ssh_setup.rst`.
+
 ## Issue #57: Automate SSH key setup for cluster authentication
 
 **Status: implemented.** The architecture described here is in the codebase;
