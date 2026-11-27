@@ -105,7 +105,10 @@ was not is marked.
   reads that can reach what it collects into, a modified shared value, moved
   global random state, a collected value that cannot be copied, and a
   function created in the loop that outlives its iteration; each falls back
-  to the sequential loop. No check sees module caches, files, databases, GPU
+  to the sequential loop. A loop over a generator, `map`, a file or another
+  one-shot iterator runs in order (wrap it in `list(...)` to have it
+  divided), and a write the loop's own `try`/`with` depends on
+  (`counts[k] += 1` under `except KeyError`) is refused. No check sees module caches, files, databases, GPU
   random state, process-wide settings such as the `decimal` context, or an
   object whose pickle omits its state. The checks cost time proportional to
   the data the loop reads (about 2 s per million small objects). There are

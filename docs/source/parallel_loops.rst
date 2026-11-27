@@ -167,6 +167,16 @@ trigger it.
        the code after it, assigns
      - ``a function defined before the loop reads total, which is assigned
        again in or after the loop; it would go on seeing the old value``
+   * - A write the loop's own ``try`` or ``with`` depends on:
+       ``counts[k] += 1`` under ``except KeyError``, ``seen.remove(x)`` under
+       ``contextlib.suppress``. (``out.append(x)`` and ``out[k] = v`` inside
+       ``try`` or ``with`` are fine.)
+     - ``counts is changed inside try or with by something that can raise,
+       and whether it raises decides what the loop does next; a split would
+       make the change after the loop``
+   * - Assigning to an attribute of a function, class or module
+       (``f.count = ...``)
+     - ``f is not created in this function and the loop changes it; ...``
    * - ``for box.last in xs`` -- a loop target that is not a plain variable
      - ``the loop assigns each item to box.last, which is not a plain
        variable, so every iteration writes to the same place``
@@ -298,10 +308,26 @@ Aliasing
    five million objects; beyond that the loop runs in order, because an
    unfinished search has shown nothing.
 
+Items produced as the loop goes
+   A list, a dict, an array, a ``range`` and iterators that only walk those
+   (``zip``, ``enumerate``, ``reversed``, ``itertools.product``, ...) are
+   listed before the loop is divided. A generator, ``map``, ``filter``, an
+   open file or any other iterator is **not**: it may read what the loop
+   changes, raise half way, print, or never end, and listing it first would
+   move all of that to before the first iteration. Such a loop runs in order
+   and the message says ``it runs over a generator, which produces its items
+   as the loop goes; wrap it in list(...) if they can all be produced before
+   the first iteration``. So ``for row in df.iterrows()`` and ``for p in
+   Path(d).glob("*.csv")`` are divided only as ``list(df.iterrows())`` and
+   ``sorted(Path(d).glob("*.csv"))``. The same happens when the body can
+   reach the iterator it runs over (``next(it)`` inside ``for x in it``).
+
 Mutation
    Each piece fingerprints the values it reads and the items it was given,
    before and after it runs. A difference means an iteration changed something
-   the others share.
+   the others share. Module-level data and enclosing-function variables that
+   the loop body *names* are included; what a called function reads from its
+   own module is not.
 
 Hidden randomness
    The state of the global ``random`` and NumPy generators is compared around
@@ -312,7 +338,9 @@ Identity
    collects: ``out.append(row)`` collects ``row`` itself, so a later
    ``row.append(1)`` shows in ``out`` exactly as in a sequential run. This
    holds for objects found through lists, tuples, dict values and attributes;
-   it does not hold for the elements of a set or the keys of a dict. A value
+   it does not hold for the elements of a set or the keys of a dict.
+   Module-level objects the body names (a ``MISSING = object()`` sentinel)
+   are kept as themselves too. A value
    that cannot be copied between processes (a generator, a lock), and a
    function created in the loop that reads the loop's variables and is kept
    afterwards, both abandon the split.
@@ -365,6 +393,12 @@ lives anywhere else:
   in the file. Pass such values as arguments. Local workers are kept between
   calls, so they also keep the version of an imported module they first
   loaded; a module edited and reloaded in the notebook is not reloaded there,
+* the iteration order of a set of strings (or of anything else hashed by
+  content or address): it depends on the process, as it does between two
+  runs of Python. ``list(vocabulary)`` inside the loop and after it can
+  disagree. Sort such a set, or set ``PYTHONHASHSEED``, which the workers
+  inherit,
+* ``sys.argv`` and other state of the interpreter that started the program,
 * an object whose pickle leaves its state out (a custom ``__getstate__``):
   pickling is how a change is noticed.
 
@@ -380,11 +414,20 @@ When an iteration raises
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 The exception that reaches you is the one from the earliest failing
-iteration, as in a sequential run. Locally, if the loop collects into
-something the caller passed in, the loop is run again in order in the calling
-process, so that object holds what was collected before the error, as it
-would after a direct call. On a cluster the caller's objects are never
-touched, with or without a split.
+iteration, as in a sequential run. Locally, the loop is then run again in
+order in the calling process in two cases: when it collects into something
+the caller passed in, so that object holds what was collected before the
+error, as it would after a direct call; and when a write the split postpones
+could itself have raised (``remaining.remove(x)``), so that whichever error
+comes first in order is the one raised. On a cluster the caller's objects
+are never touched, with or without a split.
+
+Two things differ from a direct call and are not corrected. Iterations after
+the failing one may already have run, so what they printed or wrote appears
+although a direct call would have stopped. And an iteration that can only
+succeed after an earlier one changed some hidden state raises in a worker
+where a direct call would have returned; the exception carries a note saying
+the loop was divided, and ``parallel=False`` is the fix.
 
 GPUs
 ----

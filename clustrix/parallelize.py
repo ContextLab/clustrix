@@ -264,6 +264,10 @@ class ParallelPlan:
     #: were code when the plan was made. Checked again on every run: the
     #: plan may be reused for another closure of the same source.
     assumed_code: Tuple[str, ...] = ()
+    #: True when a write the split postpones could itself raise
+    #: (``xs.remove(v)``, ``counts[k] += 1``). If an iteration then fails,
+    #: only running in order can say which error comes first.
+    postpones_what_may_raise: bool = False
 
     @property
     def parallelizable(self) -> bool:
@@ -848,6 +852,58 @@ def _nested_scopes(nodes: Sequence[ast.AST]) -> List[ast.AST]:
     return found
 
 
+#: Method names that add to a builtin container and do not raise for a value
+#: the container can hold. Inside ``try`` or ``with`` only these, and plain
+#: item or attribute assignment, are recorded for later: ``counts[k] += 1``
+#: under ``except KeyError`` and ``seen.remove(x)`` under
+#: ``contextlib.suppress`` rely on raising *there*.
+_ADDING_METHODS = frozenset(
+    {"append", "appendleft", "extend", "extendleft", "add", "update", "insert"}
+)
+
+
+def _guarded_statements(body: Sequence[ast.stmt]) -> Dict[int, str]:
+    """Statements of ``body`` nested in ``try`` ("try") or only ``with``
+    ("with"), by ``id``."""
+    found: Dict[int, str] = {}
+
+    def visit(stmts: Sequence[ast.stmt], guard: Optional[str]) -> None:
+        for stmt in stmts:
+            if guard is not None:
+                found[id(stmt)] = guard
+            if isinstance(stmt, _NESTED_SCOPES):
+                continue
+            inner = guard
+            if isinstance(stmt, _TRY_STATEMENTS):
+                inner = "try"
+            elif isinstance(stmt, (ast.With, ast.AsyncWith)) and guard is None:
+                inner = "with"
+            for name in ("body", "orelse", "finalbody"):
+                visit(getattr(stmt, name, []) or [], inner)
+            for handler in getattr(stmt, "handlers", []) or []:
+                visit(handler.body, inner)
+            for case in getattr(stmt, "cases", []) or []:
+                visit(case.body, inner)
+
+    visit(body, None)
+    return found
+
+
+def _may_be_deferred(stmt: ast.stmt, guard: Optional[str]) -> bool:
+    """Whether a write to a collector may be made after the loop instead."""
+    if guard is None:
+        return True
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call):
+        function = stmt.value.func
+        return isinstance(function, ast.Attribute) and function.attr in _ADDING_METHODS
+    if isinstance(stmt, ast.Assign):
+        # ``acc[k] = v`` yes; ``acc.attr = v`` no -- a property or a frozen
+        # object refuses it by raising.
+        return all(isinstance(target, ast.Subscript) for target in stmt.targets)
+    # ``acc[k] += v`` reads acc[k] first, and that can raise KeyError.
+    return isinstance(stmt, ast.AugAssign) and isinstance(stmt.target, ast.Name)
+
+
 def _resolve(func: Callable, identifier: str) -> Tuple[bool, Any]:
     """What a free name in ``func`` refers to right now, if anything."""
     code = func.__code__
@@ -979,13 +1035,20 @@ def _analyse_loop(
         ]
     )
 
+    deferred_refused: Dict[str, int] = {}
     sites: List[_Site] = []
     candidates: Dict[str, List[_Site]] = {}
     mutated: Dict[str, int] = {}
+    #: Roots something is *assigned* through (``f.count = 1``), as opposed
+    #: to having a method called on them (``np.save(...)``).
+    assigned_through: Dict[str, int] = {}
+    guarded = _guarded_statements(body)
     for stmt in _statements(body):
         root = _mutation_root(stmt)
         if root is None and not isinstance(stmt, (ast.Assign, ast.AugAssign)):
             continue
+        if root is not None and isinstance(stmt, (ast.Assign, ast.AugAssign)):
+            assigned_through.setdefault(root, stmt.lineno)
         try:
             site = _site_for(stmt)
         except _NotASite:
@@ -994,13 +1057,38 @@ def _analyse_loop(
             continue
         if site.root in code_names:
             continue
+        if not _may_be_deferred(stmt, guarded.get(id(stmt))):
+            # Not recordable here: the name is then judged as modified.
+            deferred_refused.setdefault(site.root, stmt.lineno)
+            mutated.setdefault(site.root, stmt.lineno)
+            continue
         candidates.setdefault(site.root, []).append(site)
         mutated.setdefault(site.root, stmt.lineno)
 
     assumed_code: Set[str] = set()
     accumulators: Set[str] = set()
+    for name, line in sorted(deferred_refused.items()):
+        block.append(
+            Blocker(
+                line,
+                f"{name} is changed inside try or with by something that can "
+                "raise, and whether it raises decides what the loop does "
+                "next; a split would make the change after the loop",
+            )
+        )
+    for name in sorted(set(assigned_through) & code_names):
+        block.append(
+            Blocker(
+                assigned_through[name],
+                f"the loop assigns to an attribute or item of {name}, which is "
+                "code shared by every iteration; a change made in a worker "
+                "would be lost",
+            )
+        )
     for name, name_sites in candidates.items():
         if name not in defined_before or name in target_names:
+            continue
+        if name in deferred_refused:
             continue
         mentions = sum(
             (
@@ -1031,7 +1119,7 @@ def _analyse_loop(
                 )
             )
         elif name not in assigned_in_body:
-            if is_code(name):
+            if is_code(name) and name not in assigned_through:
                 assumed_code.add(name)
             else:
                 block.append(
@@ -1309,7 +1397,72 @@ def {_P}aliases({_P}env, {_P}written, {_P}read, {_P}items=None):
         return [(None, sorted({_P}written)[0])]
 
 
-def {_P}index({_P}env, {_P}items):
+def {_P}outside({_P}names, {_P}env):
+    # The data the loop body reads from outside the function: module-level
+    # values and the variables of an enclosing function. Code is left out.
+    import types
+    code = (types.ModuleType, types.FunctionType, types.BuiltinFunctionType, type)
+    scope = globals()
+    return {{
+        name: scope[name]
+        for name in {_P}names
+        if name in scope and name not in {_P}env
+        and not isinstance(scope[name], code)
+    }}
+
+
+def {_P}lazy({_P}items, {_P}env, {_P}read):
+    # Why the items cannot be listed before the loop starts, or None.
+    # A list, a dict, an array can be: looping over one twice gives the same
+    # items. A generator cannot in general: it may read what the loop
+    # changes, raise half way, print, or never end, and listing it first
+    # would move all of that to before the first iteration. Iterators that
+    # only walk containers (zip, enumerate, reversed, ...) are safe to list.
+    import gc
+    import itertools
+    # Asked of the type, not by calling iter(): that would run the object's
+    # own code a second time.
+    if not hasattr(type({_P}items), "__next__"):
+        return None
+    walkers = {{
+        type(iter([])), type(iter(())), type(iter({{}})), type(iter(set())),
+        type(iter(range(0))), type(iter("")), type(iter(b"")),
+        type(iter({{}}.values())), type(iter({{}}.items())),
+        type(reversed([])), type(reversed(())), type(reversed(range(0))),
+        type(reversed({{}})), enumerate, zip, itertools.chain, itertools.islice,
+        itertools.product, itertools.permutations, itertools.combinations,
+        itertools.zip_longest,
+    }}
+    reason = (
+        "it runs over a %s, which produces its items as the loop goes; "
+        "wrap it in list(...) if they can all be produced before the first "
+        "iteration"
+    )
+    stack = [{_P}items]
+    seen = set()
+    while stack:
+        obj = stack.pop()
+        if id(obj) in seen:
+            continue
+        seen.add(id(obj))
+        if type(obj) is tuple:
+            stack.extend(obj)
+        elif hasattr(obj, "__next__"):
+            if type(obj) not in walkers:
+                return reason % type(obj).__name__
+            stack.extend(gc.get_referents(obj))
+    # Listable -- unless the body can reach the iterator and advance it.
+    for name in {_P}read:
+        if name in {_P}env:
+            if {_P}walk([{_P}env[name]], True, {{}}, {{id({_P}items): None}}) is not None:
+                return (
+                    "the loop body can reach the iterator it runs over (%s), "
+                    "so it could take items out of turn" % name
+                )
+    return None
+
+
+def {_P}index({_P}env, {_P}items, {_P}outer=None):
     # Where each object the chunk was handed lives: {{id: (parent, step,
     # object)}}. Following parents gives a path -- a variable or an item,
     # then steps into lists, tuples, dict values and attributes -- which is
@@ -1326,6 +1479,10 @@ def {_P}index({_P}env, {_P}items):
             for position, item in enumerate({_P}items)
             if type(item) not in atomic
         )
+    stack.extend(
+        (None, ("g", name), ({_P}outer or {{}})[name])
+        for name in sorted({_P}outer or ())
+    )
     stack.extend((None, ("e", name), {_P}env[name]) for name in sorted({_P}env))
     while stack and len(table) < {_WALK_LIMIT}:
         entry = stack.pop()
@@ -1357,7 +1514,7 @@ def {_P}index({_P}env, {_P}items):
     return table
 
 
-def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items):
+def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items, {_P}outer):
     # The log as bytes, a pre-existing object written as its path. Returns
     # (bytes, the variables those paths start from, what went wrong).
     # ``known`` holds every object the chunk was handed; where each one
@@ -1374,6 +1531,7 @@ def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items):
     here = {_P}dump.__code__.co_filename
     # Names starting __ are rewritten inside a class body; use plain ones.
     known, env, items, index = {_P}known, {_P}env, {_P}items, {_P}index
+    outer = {_P}outer
     used = set()
     escaped = []
     tables = []
@@ -1385,7 +1543,7 @@ def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items):
                 return None
             if id(obj) in known:
                 if not tables:
-                    tables.append(index(env, items))
+                    tables.append(index(env, items, outer))
                 entry = tables[0].get(id(obj))
                 if entry is not None and entry[2] is obj:
                     steps = []
@@ -1393,7 +1551,10 @@ def {_P}dump({_P}log, {_P}known, {_P}env, {_P}items):
                         steps.append(entry[1])
                         entry = entry[0]
                     steps.reverse()
-                    used.add(steps[0][1] if steps[0][0] == "e" else {_ITEMS!r})
+                    if steps[0][0] == "e":
+                        used.add(steps[0][1])
+                    elif steps[0][0] == "i":
+                        used.add({_ITEMS!r})
                     return tuple(steps)
             elif (
                 kind is function
@@ -1429,6 +1590,8 @@ def {_P}load({_P}blobs, {_P}env, {_P}items):
     def resolve(path, start):
         if path[0][0] == "e":
             obj = {_P}env[path[0][1]]
+        elif path[0][0] == "g":
+            obj = globals()[path[0][1]]
         else:
             obj = {_P}items[start + path[0][1]]
         for kind, key in path[1:]:
@@ -1471,6 +1634,17 @@ def _generate(
     body_names = tuple(sorted((_loaded(loop.body) & defined_before) - accumulators))
     post_names = tuple(sorted(((_loaded(after) & defined_before) | accumulators)))
     env_names = tuple(sorted(set(body_names) | set(post_names)))
+    # Names the body reads that are not the function's own: globals, the
+    # variables of an enclosing function, builtins. Which of them are data
+    # is only known when there are values to look at.
+    outer_names = tuple(
+        sorted(
+            _loaded(loop.body)
+            - defined_before
+            - _stored(loop.body)
+            - _stored([loop.target])
+        )
+    )
 
     # -- pre ------------------------------------------------------------------
     pre_body: List[ast.stmt] = []
@@ -1483,12 +1657,18 @@ def _generate(
             {_P}items = {ast.unparse(loop.iter)}
             {_P}scope = locals()
             {_P}found = {{{_P}n: {_P}scope[{_P}n] for {_P}n in {env_names!r} if {_P}n in {_P}scope}}
-            # Searched before the items are listed: a generator may be
-            # reading what the loop collects, and listing it would use it up.
-            {_P}shared = {_P}aliases({_P}found, {written!r}, {body_names!r}, {_P}items)
+            {_P}outer = {_P}outside({outer_names!r}, {_P}found)
+            {_P}readable = dict({_P}outer)
+            {_P}readable.update({_P}found)
+            {_P}reads = {body_names!r} + tuple(sorted({_P}outer))
+            # Decided before the items are listed: listing a generator uses
+            # it up, and may run code that belongs between iterations.
+            {_P}shared = {_P}lazy({_P}items, {_P}readable, {_P}reads)
+            if not {_P}shared:
+                {_P}shared = {_P}aliases({_P}readable, {written!r}, {_P}reads, {_P}items)
             if not {_P}shared and not isinstance({_P}items, range):
                 {_P}items = list({_P}items)
-                {_P}shared = {_P}aliases({_P}found, {written!r}, (), {_P}items)
+                {_P}shared = {_P}aliases({_P}readable, {written!r}, (), {_P}items)
             if {_P}shared and {_P}inline:
                 return ("fallback", {_P}shared, {_P}rest({_P}found, {_P}items))
             return ("env", {_P}found, {_P}items, {_P}shared)
@@ -1506,10 +1686,12 @@ def _generate(
     logged_body = [_LogWrites(numbers).visit(stmt) for stmt in body_copy]
     body_statements: List[ast.stmt] = _bind_from_env(body_names)
     body_statements.extend(_parse_statements(f"""
-            {_P}watched = dict({_P}env)
+            {_P}outer = {_P}outside({outer_names!r}, {_P}env)
+            {_P}watched = dict({_P}outer)
+            {_P}watched.update({_P}env)
             if not isinstance({_P}items, range):
                 {_P}watched[{_ITEMS!r}] = {_P}items
-            {_P}names = ({_ITEMS!r},) + {body_names!r}
+            {_P}names = ({_ITEMS!r},) + {body_names!r} + tuple(sorted({_P}outer))
             {_P}known = {{}}
             {_P}before = {_P}fingerprint({_P}watched, {_P}names, {_P}known)
             {_P}rng_before = {_P}rng_state()
@@ -1533,7 +1715,7 @@ def _generate(
             if {_P}rng_state() != {_P}rng_before:
                 {_P}changed.append({_RNG!r})
             {_P}blob, {_P}used, {_P}problem = {_P}dump(
-                {_P}log, {_P}known, {_P}env, {_P}items
+                {_P}log, {_P}known, {_P}env, {_P}items, {_P}outer
             )
             if {_P}problem is not None:
                 {_P}changed.append({_P}problem)
@@ -2022,6 +2204,9 @@ def plan(func: Callable) -> ParallelPlan:
         result.body_names = body_names
         result.post_names = post_names
         result.assumed_code = tuple(sorted(assumed_code))
+        result.postpones_what_may_raise = any(
+            not _may_be_deferred(site.stmt, "guarded") for site in sites
+        )
         own = set(parameters) - imported
         result.pre_is_cheap = _is_cheap_block(before, own) and _is_cheap_expression(
             stmt.iter, (own | _stored(before)) - imported
@@ -2216,7 +2401,9 @@ def run(
     if outcome[0] == "return":
         return outcome[1]
 
-    def shared(aliases: List[tuple]) -> str:
+    def shared(aliases: Any) -> str:
+        if isinstance(aliases, str):
+            return aliases
         reader, collected = aliases[0]
         if reader is None:
             return (
@@ -2261,19 +2448,30 @@ def run(
         results = map_chunks(split.body, body_env, chunks)
     except CannotShip as error:
         return unsplit(str(error))
-    except Exception:
+    except Exception as error:
         collected = tuple(parallel_plan.chosen.accumulators)  # type: ignore[union-attr]
         handed_in = {f"argument {key}": value for key, value in arguments.items()}
-        if invoke is _here and split.aliases(
-            {**handed_in, **{key: env[key] for key in collected if key in env}},
-            collected,
-            tuple(handed_in),
+        if invoke is _here and (
+            parallel_plan.postpones_what_may_raise
+            or split.aliases(
+                {**handed_in, **{key: env[key] for key in collected if key in env}},
+                collected,
+                tuple(handed_in),
+            )
         ):
-            # The caller can see what the loop collects into. A direct call
-            # would have left there everything collected before the error;
-            # running the loop in order here does the same and then raises
-            # the same error. Not a failed check, so nobody is told.
+            # Either the caller can see what the loop collects into, and a
+            # direct call would have left there everything collected before
+            # the error; or a postponed write might have raised before this
+            # error did. Running the loop in order here settles both, and
+            # raises what a direct call raises. Not a failed check, so
+            # nobody is told.
             return split.rest(env, items)
+        if hasattr(error, "add_note"):
+            error.add_note(
+                f"Raised in an iteration of the loop in {name}, which clustrix "
+                "had divided among processes. If an iteration can only "
+                "succeed after an earlier one has run, pass parallel=False."
+            )
         raise
 
     blobs: List[tuple] = []

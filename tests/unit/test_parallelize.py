@@ -1592,3 +1592,322 @@ def test_a_fallback_found_before_any_chunk_does_not_claim_side_effects_happened(
 
     assert "happened in that attempt" not in early[0]
     assert "happened in that attempt" in late[0]
+
+
+# -- second adversarial review ---------------------------------------------------
+
+
+def takes_items_out_of_turn(n):
+    it = iter(range(n))
+    out = []
+    for i in it:
+        out.append((i, next(it, None)))
+    return out
+
+
+def bump(state):
+    state["k"] += 1
+
+
+def runs_over_a_generator_that_reads_what_the_loop_changes(n):
+    state = {"k": 0}
+
+    def produce():
+        for i in range(n):
+            yield i + state["k"]
+
+    out = []
+    for x in produce():
+        bump(state)
+        out.append(x)
+    return out
+
+
+def runs_over_a_map(xs):
+    out = []
+    for x in map(abs, xs):
+        out.append(x)
+    return out
+
+
+@pytest.mark.parametrize(
+    "func,args,because",
+    [
+        (takes_items_out_of_turn, (10,), "can reach the iterator it runs over"),
+        (
+            runs_over_a_generator_that_reads_what_the_loop_changes,
+            (10,),
+            "runs over a generator, which produces its items as the loop goes",
+        ),
+        (runs_over_a_map, ([-1, 2, -3, 4],), "runs over a map"),
+    ],
+    ids=lambda value: getattr(value, "__name__", None),
+)
+def test_items_that_are_produced_as_the_loop_goes_are_not_listed_first(
+    func, args, because
+):
+    """Listing them up front would run the producer before the first
+    iteration: with different values, in a different order, or for ever."""
+    expected = func(*args)
+    plan = parallelize.plan(func)
+    assert plan.parallelizable, plan.explain()
+    reasons = []
+
+    result = parallelize.run(
+        plan, func, args, {}, in_process, 3, on_fallback=reasons.append
+    )
+
+    assert result == expected
+    assert because in reasons[0]
+
+
+def stops_half_way(n, out):
+    def produce():
+        for i in range(n):
+            if i == 5:
+                raise RuntimeError("no sixth item")
+            yield i
+
+    for x in produce():
+        out.append(x)
+    return out
+
+
+def test_a_producer_that_fails_half_way_leaves_what_came_before_it():
+    seen_directly, seen = [], []
+    with pytest.raises(RuntimeError):
+        stops_half_way(10, seen_directly)
+
+    with pytest.raises(RuntimeError, match="no sixth item"):
+        parallelize.run(
+            parallelize.plan(stops_half_way),
+            stops_half_way,
+            (10, seen),
+            {},
+            in_process,
+            3,
+        )
+
+    assert seen == seen_directly == [0, 1, 2, 3, 4]
+
+
+class CountsItsLoops:
+    def __init__(self, n):
+        self.n, self.loops = n, 0
+
+    def __iter__(self):
+        self.loops += 1
+        return iter(range(self.n))
+
+
+def loops_once_over(source):
+    out = []
+    for i in source:
+        out.append(i)
+    return out, source.loops
+
+
+def test_an_iterable_is_asked_for_its_items_once_as_the_loop_would():
+    how, result = outcome_of(loops_once_over, CountsItsLoops(5))
+
+    assert result == ([0, 1, 2, 3, 4], 1)
+    assert how == "split"
+
+
+def walks_plain_containers(xs, ys):
+    out = []
+    for position, (x, y) in enumerate(zip(xs, reversed(ys))):
+        out.append((position, x, y))
+    return out
+
+
+def test_iterators_that_only_walk_containers_are_still_divided():
+    how, result = outcome_of(walks_plain_containers, [1, 2, 3, 4], "abcd")
+
+    assert how == "split"
+    assert result == walks_plain_containers([1, 2, 3, 4], "abcd")
+
+
+def counts_with_a_handler(n):
+    counts = {}
+    for i in range(n):
+        k = i % 3
+        try:
+            counts[k] += 1
+        except KeyError:
+            counts[k] = 1
+    return counts
+
+
+def removes_what_may_be_absent(n):
+    seen = {0, 1, 2}
+    missing = []
+    for i in range(n):
+        try:
+            seen.remove(i)
+        except KeyError:
+            missing.append(i)
+    return seen, missing
+
+
+def removes_under_suppress(n):
+    import contextlib
+
+    seen = {0, 1, 2}
+    for i in range(n):
+        with contextlib.suppress(KeyError):
+            seen.remove(i)
+    return seen
+
+
+def assigns_a_frozen_attribute(n):
+    import dataclasses
+
+    @dataclasses.dataclass(frozen=True)
+    class Frozen:
+        x: int = 0
+
+    frozen = Frozen()
+    refused = []
+    for i in range(n):
+        try:
+            frozen.x = i
+        except Exception:
+            refused.append(i)
+    return refused
+
+
+@pytest.mark.parametrize(
+    "func",
+    [
+        counts_with_a_handler,
+        removes_what_may_be_absent,
+        removes_under_suppress,
+        assigns_a_frozen_attribute,
+    ],
+    ids=lambda value: value.__name__,
+)
+def test_a_write_whose_failure_the_loop_handles_is_not_postponed(func):
+    """Postponed, it would raise after the loop, outside the handler."""
+    how, explanation = outcome_of(func, 6)
+
+    assert how == "refused"
+    assert "inside try or with by something that can raise" in explanation
+
+
+def reads_and_collects_inside_with(paths):
+    out = []
+    for path in paths:
+        with open(path) as handle:
+            out.append(handle.read())
+    return out
+
+
+def test_collecting_inside_with_is_still_divided(tmp_path):
+    paths = []
+    for number in range(4):
+        path = tmp_path / f"{number}.txt"
+        path.write_text(f"file {number}")
+        paths.append(str(path))
+
+    how, result = outcome_of(reads_and_collects_inside_with, paths)
+
+    assert how == "split"
+    assert result == [f"file {number}" for number in range(4)]
+
+
+MISSING = object()
+SETTINGS = {"calls": 0}
+
+
+def marks_gaps_with_a_module_level_object(n):
+    out = []
+    for i in range(n):
+        out.append(MISSING if i % 2 else i)
+    return [value is MISSING for value in out]
+
+
+def test_a_module_level_object_is_collected_as_itself():
+    expected = marks_gaps_with_a_module_level_object(6)
+
+    how, result = outcome_of(marks_gaps_with_a_module_level_object, 6)
+
+    assert how == "split"
+    assert result == expected == [False, True, False, True, False, True]
+
+
+def changes_module_level_data_through_a_helper(n):
+    out = []
+    for i in range(n):
+        bump_settings()
+        out.append(SETTINGS["calls"])
+    return out
+
+
+def bump_settings():
+    SETTINGS["calls"] += 1
+
+
+def reads_module_level_data(n):
+    out = []
+    for i in range(n):
+        out.append(SETTINGS["calls"] + i)
+    return out
+
+
+def test_module_level_data_the_body_names_is_watched_for_changes():
+    """Only what the body names: a helper's own globals are out of sight."""
+    SETTINGS["calls"] = 0
+    how, result = outcome_of(reads_module_level_data, 4)
+    assert (how, result) == ("split", [0, 1, 2, 3])
+
+    plan = parallelize.plan(changes_module_level_data_through_a_helper)
+    assert plan.parallelizable, plan.explain()
+    reasons = []
+    parallelize.run(
+        plan,
+        changes_module_level_data_through_a_helper,
+        (4,),
+        {},
+        in_process,
+        2,
+        on_fallback=reasons.append,
+    )
+    assert "the loop changed SETTINGS" in reasons[0]
+
+
+def counts_on_itself(n):
+    out = []
+    for i in range(n):
+        counts_on_itself.count = getattr(counts_on_itself, "count", 0) + 1
+        out.append(counts_on_itself.count)
+    return out
+
+
+def test_assigning_to_an_attribute_of_a_function_is_refused():
+    how, explanation = outcome_of(counts_on_itself, 4)
+
+    assert how == "refused"
+    assert "counts_on_itself is not created in this function" in explanation
+
+
+def removes_then_fails_later(n):
+    remaining = [1, 2, 3]
+    for i in range(n):
+        remaining.remove(i + 1)
+        if i == 8:
+            raise KeyError("eight")
+    return remaining
+
+
+def test_the_error_a_postponed_write_would_have_raised_first_is_the_one_raised():
+    """``remaining.remove(4)`` fails at the fourth iteration; the ninth
+    raising something else in a worker must not get there first."""
+    with pytest.raises(ValueError):
+        removes_then_fails_later(12)
+
+    plan = parallelize.plan(removes_then_fails_later)
+    assert plan.parallelizable and plan.postpones_what_may_raise
+
+    with pytest.raises(ValueError):
+        parallelize.run(plan, removes_then_fails_later, (12,), {}, in_process, 3)
