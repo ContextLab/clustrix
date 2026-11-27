@@ -629,3 +629,96 @@ def test_an_interrupt_does_not_wait_for_the_tasks_or_leave_workers(tmp_path):
         text=True,
     ).stdout.split()
     assert left == [], f"worker processes left behind: {left}"
+
+
+@pytest.mark.parametrize("how", [signal.SIGKILL, signal.SIGTERM])
+def test_workers_do_not_outlive_a_parent_that_was_killed(tmp_path, how):
+    """#176 W1. A real ``@cluster`` loop in a real process that is then
+    killed. Its workers used to finish their chunks -- every remaining
+    iteration ran, for nobody. Each iteration leaves a marker file when it
+    starts, so "kept computing" is something that can be counted."""
+    markers = tmp_path / "markers"
+    markers.mkdir()
+    script = tmp_path / "driver.py"
+    script.write_text(textwrap.dedent("""
+            import os, sys, time
+            from clustrix import cluster, configure
+
+            configure(cluster_type="local", cluster_host=None)
+            MARKERS = sys.argv[1]
+
+            @cluster(cores=3)
+            def work(n):
+                out = []
+                for i in range(n):
+                    open(f"{MARKERS}/iter_{i}_{os.getpid()}", "w").close()
+                    time.sleep(2)
+                    out.append(i)
+                return out
+
+            work(12)
+            print("FINISHED", flush=True)
+            """))
+    driver = subprocess.Popen(
+        [sys.executable, str(script), str(markers)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+        env={**os.environ, "PYTHONPATH": PACKAGE_ROOT, "HOME": str(tmp_path)},
+    )
+
+    def workers():
+        return subprocess.run(
+            ["pgrep", "-g", str(driver.pid), "-f", "clustrix.loop_workers"],
+            capture_output=True,
+            text=True,
+        ).stdout.split()
+
+    try:
+        deadline = time.monotonic() + 60
+        while len(os.listdir(markers)) < 3 and time.monotonic() < deadline:
+            time.sleep(0.1)
+        assert len(os.listdir(markers)) >= 3, "the loop never started in 3 workers"
+        assert len(workers()) == 3
+        os.kill(driver.pid, how)
+        driver.wait(timeout=30)
+        killed = time.monotonic()
+        while workers() and time.monotonic() - killed < 5:
+            time.sleep(0.1)
+        gone_after = time.monotonic() - killed
+        left = workers()
+        started = sorted(os.listdir(markers))
+        time.sleep(5)  # two more iterations' worth, had anything survived
+        later = sorted(os.listdir(markers))
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(driver.pid, signal.SIGKILL)
+
+    print(
+        f"{how.name}: workers gone {gone_after:.2f}s after the parent; "
+        f"{len(started)} iteration(s) had started, {len(later)} five seconds on"
+    )
+    assert left == [], f"workers outlived their parent: {left}"
+    assert gone_after < 3
+    assert later == started, "iterations kept starting after the parent died"
+    assert len(later) < 12 and "FINISHED" not in driver.stdout.read()
+
+
+def pid_after_a_pause(seconds):
+    time.sleep(seconds)
+    return os.getpid()
+
+
+def test_a_worker_whose_parent_is_alive_is_left_alone_between_calls():
+    """The watch must not fire on its own: the thread that started a worker
+    ends with the call that needed it, and the worker is kept."""
+    with WorkerPool(2) as pool:
+        starter = threading.Thread(target=pool.prestart)
+        starter.start()
+        starter.join()
+        first = set(pool.map(pid_after_a_pause, [(0.5,), (0.5,)]))
+        time.sleep(2.5)  # more than two of the watch's checks
+        second = set(pool.map(pid_after_a_pause, [(0.5,), (0.5,)]))
+
+    assert first == second and len(first) == 2

@@ -61,6 +61,7 @@ import contextlib
 import io
 import os
 import pickle
+import select
 import struct
 import subprocess
 import sys
@@ -233,9 +234,61 @@ def _output(
     return TaskOutput(out.getvalue(), err.getvalue(), list(recorded))
 
 
+#: How often a worker that cannot be told of a hang-up looks for itself.
+_PARENT_CHECK_SECONDS = 1.0
+
+
+def _exit_when_parent_is_gone(request_fd: int) -> None:
+    """Start a thread that ends this worker as soon as its parent is gone.
+
+    A worker only reads the pipe between tasks. One in the middle of a
+    chunk when its parent was killed -- SIGTERM, SIGKILL, a restarted
+    notebook kernel -- used to finish the chunk first: minutes of work
+    for nobody, on CPUs or GPUs the user thinks are free.
+
+    The parent holds the only write end of the request pipe, and the kernel
+    closes it however the parent ends, so a hang-up on the read end is the
+    signal. It is waited for with ``poll`` and no requested events, which
+    reports a hang-up without reading anything the main thread is owed. A
+    change of parent process id is checked as well, for a platform where the
+    hang-up is not reported.
+
+    ``prctl(PR_SET_PDEATHSIG)`` is deliberately not used: it fires when the
+    *thread* that started the process ends, and workers are started from
+    short-lived pool threads, so every worker would be killed at the end of
+    the call that started it.
+
+    The exit is ``os._exit``: the task is in the middle of user code that
+    cannot be interrupted from here. Nothing it was writing is finished or
+    removed, and processes it started itself are not stopped.
+    """
+    parent = os.getppid()
+
+    def watch() -> None:
+        hung_up = None
+        if hasattr(select, "poll"):
+            hung_up = select.poll()
+            hung_up.register(request_fd, 0)
+        while True:
+            if hung_up is not None:
+                gone = bool(hung_up.poll(_PARENT_CHECK_SECONDS * 1000))
+            else:
+                time.sleep(_PARENT_CHECK_SECONDS)
+                gone = False
+            if gone or os.getppid() != parent:
+                os._exit(1)
+
+    threading.Thread(target=watch, name="clustrix-parent-watch", daemon=True).start()
+
+
 def worker_main() -> None:
-    """Serve tasks from the parent until its end of the pipe closes."""
+    """Serve tasks from the parent until its end of the pipe closes.
+
+    Between tasks that is noticed by the read below, which returns. During
+    one it is noticed by :func:`_exit_when_parent_is_gone`.
+    """
     requests = os.fdopen(os.dup(sys.stdin.fileno()), "rb")
+    _exit_when_parent_is_gone(requests.fileno())
     replies = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
     # The protocol owns the real stdin and stdout from here on. Anything
     # that writes to file descriptor 1 directly -- a C library, a child

@@ -1061,3 +1061,100 @@ def test_ctrl_c_during_a_divided_loop_returns_at_once_and_leaves_no_workers(tmp_
         text=True,
     ).stdout.split()
     assert left == [], f"worker processes left behind: {left}"
+
+
+# -- #176 W2: SIGTERM while waiting for jobs --------------------------------
+
+
+class TestSigtermStopsTheCall:
+    """The handler itself, with real signals. That it cancels real jobs is
+    ``tests/real_world/test_sigterm_cancels_jobs_real.py``."""
+
+    def test_a_real_sigterm_unwinds_the_block_and_the_process_dies_by_it(
+        self, tmp_path
+    ):
+        import signal
+        import subprocess
+        import sys
+        import textwrap
+
+        script = tmp_path / "driver.py"
+        script.write_text(textwrap.dedent("""
+                import signal, time
+                from clustrix.decorator import _sigterm_stops_the_call
+
+                try:
+                    with _sigterm_stops_the_call():
+                        try:
+                            print("WAITING", flush=True)
+                            time.sleep(60)
+                        except BaseException as error:
+                            print("UNWOUND", type(error).__name__, flush=True)
+                            raise
+                finally:
+                    print("NOT REACHED", flush=True)
+                """))
+        driver = subprocess.Popen(
+            [sys.executable, str(script)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={
+                **os.environ,
+                "PYTHONPATH": os.path.dirname(os.path.dirname(clustrix.__file__)),
+            },
+        )
+        assert driver.stdout.readline().strip() == "WAITING"
+        driver.send_signal(signal.SIGTERM)
+        out, err = driver.communicate(timeout=30)
+
+        assert out.strip() == "UNWOUND _Terminated"
+        assert driver.returncode == -signal.SIGTERM
+        assert "cancelled" in err
+
+    def test_a_handler_the_program_installed_is_never_replaced(self):
+        import signal
+
+        from clustrix.decorator import _sigterm_stops_the_call
+
+        def mine(signum, frame):
+            pass
+
+        previous = signal.signal(signal.SIGTERM, mine)
+        try:
+            with _sigterm_stops_the_call():
+                assert signal.getsignal(signal.SIGTERM) is mine
+            assert signal.getsignal(signal.SIGTERM) is mine
+        finally:
+            signal.signal(signal.SIGTERM, previous)
+
+    def test_the_default_is_replaced_only_inside_the_block(self):
+        import signal
+
+        from clustrix.decorator import _sigterm_stops_the_call
+
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+        with _sigterm_stops_the_call():
+            assert callable(signal.getsignal(signal.SIGTERM))
+            with _sigterm_stops_the_call():  # a decorated call inside another
+                pass
+            assert callable(signal.getsignal(signal.SIGTERM))
+        assert signal.getsignal(signal.SIGTERM) is signal.SIG_DFL
+
+    def test_a_call_from_another_thread_touches_nothing(self):
+        import signal
+        import threading
+
+        from clustrix.decorator import _sigterm_stops_the_call
+
+        seen = []
+
+        def call():
+            with _sigterm_stops_the_call():
+                seen.append(signal.getsignal(signal.SIGTERM))
+
+        thread = threading.Thread(target=call)
+        thread.start()
+        thread.join()
+
+        assert seen == [signal.SIG_DFL]

@@ -1,9 +1,12 @@
+import contextlib
 import functools
 import logging
+import os
+import signal
 import threading
 import weakref
 from dataclasses import fields
-from typing import Any, Callable, NamedTuple, Optional, Dict, List, Sequence
+from typing import Any, Callable, Iterator, NamedTuple, Optional, Dict, List, Sequence
 
 from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
@@ -350,28 +353,31 @@ def cluster(
                     # can read them, before anything is serialized: an
                     # argument may come back pointing at the cluster's copy.
                     data_plan = auto_stage.DataPlan()
-                    if config.auto_stage and config.cluster_type in ("ssh", "slurm"):
-                        executor.connect()
-                        args, func_kwargs, data_plan = auto_stage.prepare(
-                            executor.connection_manager,
-                            config,
-                            func,
-                            args,
-                            func_kwargs,
-                            extra=kwargs.get("data", ()),
-                            exclude=kwargs.get("no_data", ()),
-                        )
-                        job_config["data_links"] = data_plan.links
-
                     try:
-                        return _run_remotely(
-                            executor,
-                            func,
-                            args,
-                            func_kwargs,
-                            job_config,
-                            should_parallelize,
-                        )
+                        with _sigterm_stops_the_call():
+                            if config.auto_stage and config.cluster_type in (
+                                "ssh",
+                                "slurm",
+                            ):
+                                executor.connect()
+                                args, func_kwargs, data_plan = auto_stage.prepare(
+                                    executor.connection_manager,
+                                    config,
+                                    func,
+                                    args,
+                                    func_kwargs,
+                                    extra=kwargs.get("data", ()),
+                                    exclude=kwargs.get("no_data", ()),
+                                )
+                                job_config["data_links"] = data_plan.links
+                            return _run_remotely(
+                                executor,
+                                func,
+                                args,
+                                func_kwargs,
+                                job_config,
+                                should_parallelize,
+                            )
                     except PermissionError as error:
                         note = auto_stage.staged_read_only(error, data_plan)
                         if note is None:
@@ -429,6 +435,61 @@ def _shared_async_executor(config):
         if _ASYNC_EXECUTOR is None:
             _ASYNC_EXECUTOR = AsyncClusterExecutor(config)
         return _ASYNC_EXECUTOR
+
+
+class _Terminated(SystemExit):
+    """SIGTERM arrived while a call was waiting for jobs it had submitted."""
+
+
+@contextlib.contextmanager
+def _sigterm_stops_the_call() -> Iterator[None]:
+    """Make SIGTERM unwind a remote call, so the jobs it started are cancelled.
+
+    Left alone, SIGTERM ends the process where it stands -- a batch
+    system's time limit, ``kill``, a stopped notebook server -- and every
+    job the call had submitted keeps running on the cluster with nobody to
+    collect it. Inside this block the signal is raised as an exception in
+    the main thread instead, exactly as Ctrl-C is, so the same handlers
+    cancel the jobs. When the block has unwound the previous disposition is
+    put back and the signal is sent again, so the process still ends *by
+    SIGTERM* (status 143 to a shell), not by an exception.
+
+    Only the default disposition is replaced. A handler the program
+    installed is left in charge: if it raises (``sys.exit`` is the usual
+    one), that exception cancels the jobs the same way; if it returns, the
+    program has decided to carry on and so do its jobs. Signal handlers
+    belong to the main thread, so a call made from any other thread is not
+    covered, and neither is ``async_submit=True``, which does not wait.
+
+    A second SIGTERM during the clean-up ends the process at once.
+    **SIGKILL cannot be caught**: after ``kill -9``, or a crash of the
+    interpreter, the jobs are still on the cluster and have to be cancelled
+    by hand (``scancel``, or ``kill`` on an ssh host).
+    """
+    if (
+        threading.current_thread() is not threading.main_thread()
+        or signal.getsignal(signal.SIGTERM) is not signal.SIG_DFL
+    ):
+        yield
+        return
+    received: List[int] = []
+
+    def stop(signum: int, frame: Any) -> None:
+        received.append(signum)
+        signal.signal(signum, signal.SIG_DFL)
+        raise _Terminated(128 + signum)
+
+    signal.signal(signal.SIGTERM, stop)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        if received:
+            logger.warning(
+                "Terminated (SIGTERM): the jobs this call had started were "
+                "cancelled."
+            )
+            os.kill(os.getpid(), signal.SIGTERM)
 
 
 def _run_remotely(
@@ -504,9 +565,25 @@ def _execute_single(
     job_id = executor.submit_job(func_data, job_config)
 
     # Wait for completion and get result
-    result = executor.wait_for_result(job_id)
+    try:
+        return executor.wait_for_result(job_id)
+    except (KeyboardInterrupt, SystemExit):
+        # The caller stopped waiting -- Ctrl-C, or SIGTERM (see
+        # ``_sigterm_stops_the_call``). Nobody will collect this job's
+        # result, so it is not left running. A job that *failed*, or one
+        # that outlasted job_wait_timeout, is a different matter and is
+        # not touched.
+        _cancel_abandoned(executor, [job_id])
+        raise
 
-    return result
+
+def _cancel_abandoned(executor: ClusterExecutor, job_ids: Sequence[str]) -> None:
+    """Cancel jobs whose results nobody is going to collect."""
+    for job_id in job_ids:
+        try:
+            executor.cancel_job(job_id)
+        except Exception as error:  # noqa: BLE001 - best effort
+            logger.warning("Could not cancel job %s: %s", job_id, error)
 
 
 #: What is known about a function's loop is kept against its *code object*,
@@ -648,11 +725,7 @@ def _run_split_remotely(
             # result was not collected is doing work nobody will use -- the
             # one being waited for included: after an interrupt it is still
             # running, and it used to be the one job left behind.
-            for job_id in job_ids[len(results) :]:
-                try:
-                    executor.cancel_job(job_id)
-                except Exception as error:  # noqa: BLE001 - best effort
-                    logger.warning("Could not cancel job %s: %s", job_id, error)
+            _cancel_abandoned(executor, job_ids[len(results) :])
             raise
         return results
 
