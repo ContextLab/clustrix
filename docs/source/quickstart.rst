@@ -3,478 +3,212 @@
 Quickstart
 ==========
 
-Five minutes, from nothing to a real result. Every Python block on this page
-is complete and self-contained -- copy it into a file and run it.
-
-Blocks whose first line is ``# cluster-required`` are the only ones that need
-infrastructure you have to supply. Everything else runs on the machine you are
-reading this on.
+Five minutes, from an installed package to a function running on a cluster.
+Blocks whose first line is ``# cluster-required`` need a machine you supply;
+the others run anywhere and are executed by
+``scripts/check_docs_examples.py``. The :doc:`tutorials <tutorials/index>`
+cover each step in depth, with real output.
 
 Install
 -------
 
 .. code-block:: bash
 
-   pip install clustrix
-
-Clustrix requires Python 3.10 or newer. See :doc:`installation` for the
-optional extras (Jupyter widget, docs).
+   pip install clustrix              # Python 3.10 or newer
+   pip install "clustrix[widget]"    # plus the Jupyter configuration widget
 
 .. _quickstart-first-result:
 
-Step 1: your first result, with no cluster at all
--------------------------------------------------
-
-``cluster_type="local"`` executes the decorated function in the calling
-process. It exists so that you can write and debug the code *before* you have
-credentials for anything, and so that the same script keeps working when you
-do not.
+Step 1: decorate a function
+---------------------------
 
 .. code-block:: python
 
     from clustrix import cluster, configure
 
-    configure(cluster_type="local")
+    configure(cluster_type="local", cluster_host=None)
 
-    @cluster(cores=4, memory="8GB", time="00:30:00")
-    def estimate_pi(n_points: int, seed: int = 0) -> float:
-        import random
+    @cluster
+    def mean_root(n):
+        import math
 
-        rng = random.Random(seed)
-        inside = 0
-        for _ in range(n_points):
-            x, y = rng.random(), rng.random()
-            if x * x + y * y <= 1.0:
-                inside += 1
-        return 4.0 * inside / n_points
+        total = 0.0
+        for i in range(n):
+            total += math.sqrt(i)
+        return total / n
 
-    print(f"pi ~= {estimate_pi(200_000):.4f}")
+    print(mean_root(100_000))
 
-Two things to notice:
-
-- The local backend does not reserve memory or enforce a wall time. An explicit
-  ``cores>1`` also has no effect on an ordinary call, and Clustrix warns that
-  it was discarded. These resource arguments let the same decorated function
-  work unchanged against a scheduler; locally, ``cores`` sizes a worker pool
-  only on the narrow path where the loop analysis finds a supported loop and
-  the function accepts the matching chunk argument.
-- The ``import random`` is **inside** the function body. Do that
-  consistently. The remote worker starts a fresh interpreter that has not run
-  your module's top-level imports, so anything the body names must either be
-  imported inside it or be something Clustrix can pickle by value along with
-  the function.
-
-.. _quickstart-sweep:
-
-Step 2: a parameter sweep
--------------------------
-
-The most common real use: the same function, many inputs, each call
-independent. Call it in a loop. Against a scheduler each call becomes its own
-job; locally each call just runs.
-
-.. code-block:: python
-
-    from clustrix import cluster, configure
-
-    configure(cluster_type="local")
-
-    @cluster(cores=2, memory="4GB", time="00:30:00")
-    def score_threshold(threshold: float, n: int = 20_000) -> dict:
-        import random
-
-        rng = random.Random(int(threshold * 1000))
-        hits = sum(1 for _ in range(n) if rng.random() < threshold)
-        return {"threshold": threshold, "hit_rate": hits / n}
-
-    results = [score_threshold(t) for t in (0.1, 0.25, 0.5, 0.75)]
-    for r in results:
-        print(f"threshold={r['threshold']:<5} hit_rate={r['hit_rate']:.3f}")
-
-Keep the return value small. It comes back through a pickle file, so return
-the summary you need, not the intermediate arrays you needed to compute it.
+With no ``cluster_host`` configured, the function runs on this machine. It is
+called, and returns, exactly as before.
 
 .. _quickstart-parallel:
 
-Step 3: use all your cores on one machine
-------------------------------------------
+Step 2: let a loop use your CPUs
+--------------------------------
 
-``parallel=True`` asks Clustrix to split a ``for`` loop across worker
-processes. It is picky about which loops it will take, and the requirements
-are easy to miss, so they are worth stating before the example:
-
-1. **The loop's range must be a literal** -- ``range(50_000)``, not
-   ``range(n)``. A bound only known at run time is declined, because guessing
-   it would change the answer.
-2. **The loop body must not carry a dependency between iterations.** An
-   accumulator like ``total += math.sqrt(i)`` disqualifies the loop: every
-   iteration depends on the last.
-3. **Your function must accept the chunk.** Locally that means a keyword
-   argument named ``_parallel_<loop variable>``. A function without it is run
-   whole -- correctly, just not in parallel -- and Clustrix says so at
-   ``INFO``.
-
-Fail any of the three and the function still returns the right answer; it
-simply is not distributed. :doc:`limitations` has the full contract.
+If the function has a loop whose iterations do not depend on one another,
+``cores`` is the number of worker processes the loop is divided among.
 
 .. code-block:: python
 
-    # roots.py
-    import math
+    import os
 
-    from clustrix import cluster, configure
+    import clustrix
+    from clustrix import cluster
 
-    configure(cluster_type="local")
+    @cluster(cores=4)
+    def simulate(seeds, steps):
+        import os
+        import random
 
-    @cluster(cores=4, parallel=True)
-    def roots_of_slice(_parallel_i=None):
-        """Square-root every index this worker was handed.
+        finals, workers = {}, set()
+        for seed in seeds:
+            rng = random.Random(seed)
+            position = 0.0
+            for _ in range(steps):
+                position += rng.gauss(0.0, 1.0)
+            finals[seed] = position
+            workers.add(os.getpid())
+        return finals, workers
 
-        ``_parallel_i`` is this worker's slice of the range. When it is None,
-        this process is the only worker and does the whole thing.
-        """
-        import math
+    finals, workers = simulate(list(range(8)), 20_000)
+    print(len(finals), "results from", len(workers), "process(es)")
+    print(clustrix.explain(simulate))
 
-        indices = range(50_000) if _parallel_i is None else _parallel_i
-
-        # This loop is what the analyser splits. It looks pointless and is
-        # load-bearing: the analyser needs a literal `range()` whose body has
-        # no dependency between iterations, and it is that loop -- not the
-        # comprehension below -- that defines the range being divided up.
-        # Delete it and parallelization silently stops while the printed
-        # answer stays the same.
-        for i in range(50_000):
-            pass
-
-        return [math.sqrt(j) for j in indices]
-
-    if __name__ == "__main__":
-        values = roots_of_slice()
-        print(len(values), f"{sum(values):.2f}")
-
-Run it as a file rather than pasting it into a REPL -- both because loop
-detection reads the source, and because the worker processes re-import the
-module, which is what the ``__main__`` guard is for::
-
-    $ python roots.py
-    50000 7453447.91
-
-The work is divided into chunks, executed across worker processes, and
-concatenated back into one list in the original order -- identical to what the
-undecorated function returns. The chunk count depends on your machine
-(``os.cpu_count() * 2``); on a 12-core machine it is 25.
-
-.. important::
-
-   Whether this runs locally at all depends on ``cluster_host``, **not** on
-   ``cluster_type``. ``_choose_execution_mode`` returns ``"local"`` only when
-   no host is configured. If a configuration file in ``~/.clustrix`` or the
-   working directory sets ``cluster_host`` -- and Step 8 writes one -- this
-   same code takes the *remote* path, which wants ``_chunk_range_i`` and
-   ``_chunk_index`` instead of ``_parallel_i``, and will decline to
-   parallelize while printing exactly the output above. :doc:`execution_model`
-   has the full rule.
-
-.. _quickstart-filesystem:
-
-Step 4: find your data before you compute on it
-------------------------------------------------
-
-The filesystem helpers take a :class:`~clustrix.config.ClusterConfig` and run
-against whichever machine that config points at. With
-``cluster_type="local"`` they operate on the local disk, so the same code you
-debug here works unchanged once the config names a remote host.
-
-.. code-block:: python
-
-    from pathlib import Path
-
-    from clustrix import (
-        ClusterConfig,
-        cluster_count_files,
-        cluster_du,
-        cluster_exists,
-        cluster_glob,
-        cluster_ls,
-        cluster_stat,
-    )
-
-    # Make a small dataset to look at.
-    Path("data").mkdir(exist_ok=True)
-    for i in range(3):
-        Path(f"data/sample_{i}.csv").write_text("a,b\n1,2\n")
-
-    cfg = ClusterConfig(cluster_type="local")
-
-    print("contents:", sorted(cluster_ls("data", cfg)))
-    print("csv files:", sorted(cluster_glob("*.csv", "data", cfg)))
-    print("exists:", cluster_exists("data/sample_0.csv", cfg))
-    print("count:", cluster_count_files("data", "*.csv", cfg))
-
-    info = cluster_stat("data/sample_0.csv", cfg)
-    print(f"sample_0.csv: {info.size} bytes, is_file={info.is_file}")
-
-    usage = cluster_du("data", cfg)
-    print(f"{usage.file_count} files, {usage.total_bytes} bytes")
-
-Full reference: :doc:`tutorials/filesystem_tutorial`.
-
-.. _quickstart-slurm:
-
-Step 5: a real SLURM cluster
-----------------------------
-
-This is one of the three backends verified end to end against real
-infrastructure. Nothing about the decorated function changes -- only the
-configuration.
-
-.. code-block:: python
-
-    # cluster-required: needs an account on a real SLURM login node
-    from clustrix import cluster, configure
-
-    configure(
-        cluster_type="slurm",
-        cluster_host="login.hpc.example.edu",
-        username="your-username",
-        # Read the password from an environment variable instead of writing it
-        # into a file. Both settings are required for this to take effect.
-        use_env_password=True,
-        password_env_var="CLUSTRIX_SLURM_PASSWORD",
-        remote_work_dir="/scratch/your-username/clustrix",
-        default_cores=4,
-        default_memory="8GB",
-        default_time="00:30:00",
-        job_poll_interval=10,
-    )
-
-    @cluster(cores=8, memory="16GB", time="01:00:00", partition="standard")
-    def where_did_this_run(n: int) -> dict:
-        import socket
-
-        return {"host": socket.gethostname(), "answer": sum(range(n))}
-
-    print(where_did_this_run(1_000_000))
-
-What happens when you call it: Clustrix opens an SSH connection, creates
-``remote_work_dir``, uploads the pickled function and arguments, builds a
-Python environment there from your local requirements, writes an ``sbatch``
-script carrying the ``cores`` / ``memory`` / ``time`` / ``partition`` you
-asked for, submits it, polls every ``job_poll_interval`` seconds, and then
-downloads the result -- or the remote traceback, which it re-raises in your
-process.
-
-.. note::
-
-   **The first call is slow.** Building the remote environment takes minutes.
-   Later calls reuse it.
-
-.. warning::
-
-   Clustrix verifies the host's SSH key against your ``known_hosts`` files.
-   An unrecognized key is **rejected** with a message telling you the exact
-   ``ssh-keyscan`` command to run. If you understand the risk and want unknown
-   keys trusted automatically, set ``ssh_host_key_policy="auto_add"`` --
-   that opt-in exposes you to machine-in-the-middle attacks. See
-   :doc:`ssh_setup`.
+``clustrix.explain`` says whether a loop will be divided and, if not, which
+line prevents it. The result is the same as an undivided run, in the same
+order. Clustrix checks what it can, before and while the loop runs, and falls
+back to running the loop in order when a check fails; it cannot see side
+effects outside the values the loop was handed (files, module-level caches).
+:doc:`tutorials/02_parallel_loops` goes through all of this.
 
 .. _quickstart-ssh:
 
-Step 6: one big machine over SSH
----------------------------------
+Step 3: run it on a remote machine
+----------------------------------
 
-``cluster_type="ssh"`` runs the job directly on the host, with no scheduler
-in between. This is the right backend for a lab GPU box or a rented instance
-you already have a login on. It is verified end to end against a real GPU
-host.
+Only the configuration changes.
 
 .. code-block:: python
 
-    # cluster-required: needs SSH access to a real host
-    from clustrix import cluster, configure
+    # cluster-required: needs a host you can ssh to
+    import os
+
+    from clustrix import configure
 
     configure(
         cluster_type="ssh",
         cluster_host="gpu-box.example.edu",
         username="your-username",
-        key_file="~/.ssh/id_ed25519",
-        remote_work_dir="~/.clustrix/work",
-        job_poll_interval=5,
+        key_file=os.path.expanduser("~/.ssh/id_ed25519"),
+        remote_work_dir="~/clustrix",
     )
 
-    @cluster(cores=8, memory="32GB")
-    def gpu_inventory() -> dict:
-        import shutil
-        import socket
-        import subprocess
+    print(mean_root(100_000))      # now runs over there
 
-        report = {"host": socket.gethostname(), "gpus": []}
-        if shutil.which("nvidia-smi"):
-            out = subprocess.run(
-                ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            report["gpus"] = [line for line in out.stdout.splitlines() if line]
-        return report
+The host must be in your ``~/.ssh/known_hosts`` (it is, if you have logged in
+to it with ``ssh`` from this computer); otherwise the first call is refused
+with the host's fingerprint and instructions. The first job also builds a
+Python environment on the remote machine, which is reused afterwards.
+:doc:`tutorials/03_ssh_cluster` shows each of these.
 
-    print(gpu_inventory())
+.. _quickstart-slurm:
 
-.. _quickstart-hf:
-
-Step 7: no cluster of your own
--------------------------------
-
-``cluster_type="huggingface"`` submits to Hugging Face Jobs, which runs your
-function in a container. There is no host to SSH into and no ``cluster_host``
-to set. This backend is verified end to end against real Hugging Face Jobs
-containers.
+Step 4: or submit to SLURM
+--------------------------
 
 .. code-block:: python
 
-    # cluster-required: needs a Hugging Face token with job-write scope
+    # cluster-required: needs a SLURM login node
     import os
 
     from clustrix import cluster, configure
 
     configure(
-        cluster_type="huggingface",
-        hf_token=os.environ["HF_TOKEN"],
-        hf_namespace="your-username-or-org",
-        hf_flavor="cpu-basic",
-        hf_job_timeout="15m",
+        cluster_type="slurm",
+        cluster_host="login.cluster.example.edu",
+        username="your-username",
+        key_file=os.path.expanduser("~/.ssh/id_ed25519"),
+        remote_work_dir="/scratch/your-username/clustrix",
+        default_partition="short",
+        max_parallel_jobs=20,
     )
 
-    @cluster(cores=2, memory="8GB")
-    def container_report(n: int) -> dict:
-        import platform
+    @cluster(cores=1, memory="2GB", time="00:30:00")
+    def simulate(seeds, steps):
+        ...
 
-        return {"python": platform.python_version(), "answer": sum(range(n))}
+``cores``, ``memory`` and ``time`` describe one job. A loop that can be
+divided becomes one job per chunk, at most ``max_parallel_jobs`` of them.
+See :doc:`tutorials/04_slurm`.
 
-    print(container_report(1_000_000))
+.. _quickstart-filesystem:
 
-.. warning::
+Step 5: input files
+-------------------
 
-   GPU flavors bill by the second. Clustrix refuses a GPU ``hf_flavor``
-   unless you also set ``hf_allow_gpu_flavors=True``, so that paying for one
-   is always a deliberate act.
+On ``ssh`` and ``slurm``, local files that a call names -- in its arguments,
+or as string constants in the function -- are uploaded once and made readable
+by the job at the same path. Paths computed at run time are not found; list
+them with ``@cluster(data=[...])``. **Output files are not brought back**:
+return the data, or write to a directory on the cluster and fetch it
+yourself. See :doc:`tutorials/05_data`.
+
+.. _quickstart-hf:
+
+No cluster? Hugging Face Jobs
+-----------------------------
+
+``configure(cluster_type="huggingface")`` runs the function in a rented
+container. It needs a Hugging Face token and is billed per second; see
+:doc:`tutorials/07_huggingface_jobs`.
 
 .. _quickstart-config-file:
 
-Step 8: stop repeating your configuration
-------------------------------------------
-
-Write the settings once and load them, instead of calling
-:func:`~clustrix.config.configure` at the top of every script.
+Keeping the configuration
+-------------------------
 
 .. code-block:: python
 
     from clustrix.config import configure, get_config, load_config, save_config
 
-    configure(
-        cluster_type="ssh",
-        cluster_host="gpu-box.example.edu",
-        username="your-username",
-        use_env_password=True,
-        password_env_var="CLUSTRIX_GPU_PASSWORD",
-        default_cores=8,
-    )
-
-    save_config("my-cluster.yml")
+    configure(cluster_type="local", cluster_host=None, default_cores=2)
+    save_config("my-cluster.yml")       # passwords and tokens are left out
 
     # ... in another session ...
     load_config("my-cluster.yml")
-    print(get_config().cluster_type, get_config().cluster_host)
+    print(get_config().default_cores)
 
-Two things the saved file does for you:
+A ``config.yml`` in ``~/.clustrix/`` is loaded automatically at import. In a
+notebook, ``%load_ext clustrix`` followed by a ``%%remote`` cell opens a
+widget that edits, tests and saves named profiles
+(:doc:`tutorials/06_notebook_widget`). :doc:`configuration` lists every
+setting.
 
-- It is created with ``0600`` permissions (owner read/write only), set before
-  any content is written.
-- Secret-bearing fields such as ``password`` are **omitted** by default. What
-  is written is ``password_env_var`` -- the *name* of the variable to read the
-  credential from at run time. That environment-variable indirection is
-  currently the only supported way to supply a credential without putting it
-  on disk; there is no general "override any config field from the
-  environment" mechanism.
-
-Clustrix also loads a configuration automatically at import time if it finds
-one, checking ``~/.clustrix/config.{yml,yaml,json}`` and then
-``./clustrix.{yml,yaml,json}``.
-
-.. warning::
-
-   The file above is deliberately **not** called ``clustrix.yml``. That name
-   in the current working directory is adopted automatically, by whatever
-   directory you happen to be in -- ``git clone`` and ``cd`` is enough for a
-   repository to supply one -- so a ``cluster_host`` it sets is **not**
-   trusted with a stored credential.
-
-   ``load_config(path)`` *is* trusted, because naming a path is a call in
-   your own Python. It is not a check on what is in the file, though:
-   clustrix cannot tell a configuration file you wrote from one that
-   arrived with a checkout, so point it at one you wrote. Note that this
-   applies to any path, not only to ones the automatic search would have
-   found -- ``my-cluster.yml`` above is never picked up automatically, which
-   is exactly why it is a safe name to save under and exactly why
-   ``load_config`` is the only thing that will read it.
-
-   If a ``clustrix.yml`` has already been adopted in this process, the
-   refusal that follows is permanent for that process: calling
-   ``configure(cluster_host=...)`` or ``load_config`` with the same hostname
-   does not lift it, because the notebook widget's *Apply* button makes that
-   same call automatically and clustrix cannot tell the two apart. The two
-   things that do work are setting ``SSH_HOST`` in ``~/.clustrix/.env`` to
-   the host that may receive the secret, or removing the file and starting a
-   new process.
-
-   For settings you want loaded automatically *and* trusted, put them in
-   ``~/.clustrix/config.yml``. Setting ``CLUSTRIX_CONFIG_DIR`` still moves
-   that search, but a directory named by an environment variable is not
-   trusted with credentials either -- an environment variable is inherited
-   from whatever started the process, and neither is a ``profiles.yml``
-   found under a directory it named. :doc:`configuration` has the full rule.
-
-The command line does the same thing:
-
-.. code-block:: bash
-
-   clustrix config --cluster-type slurm \
-                   --cluster-host login.hpc.example.edu \
-                   --username your-username \
-                   --cores 8 --memory 16GB \
-                   --config-file clustrix.yml
-
-   clustrix config   # print the current settings
-
-Which backend should I use?
----------------------------
+Which backend?
+--------------
 
 +----------------------------------------+---------------------------+
 | Situation                              | ``cluster_type``          |
 +========================================+===========================+
-| Writing and debugging the function     | ``local``                 |
+| Writing and debugging; one machine     | ``local``                 |
 +----------------------------------------+---------------------------+
-| University / national HPC allocation   | ``slurm``                 |
+| A cluster with a SLURM scheduler       | ``slurm``                 |
 +----------------------------------------+---------------------------+
-| One lab machine or rented GPU box      | ``ssh``                   |
+| One lab machine or rented server       | ``ssh``                   |
 +----------------------------------------+---------------------------+
 | No machine of your own                 | ``huggingface``           |
 +----------------------------------------+---------------------------+
 
-Those four are the only ``cluster_type`` values Clustrix accepts, and each one
-has been proven to work against real infrastructure. ``pbs``, ``sge``,
-``kubernetes`` and the cloud VM providers (AWS / GCP / Azure / Lambda Cloud)
-are **not supported**, and naming one raises a ``ValueError`` that points at
-its tracking issue. Each is planned for a future release; see
-:ref:`removed-backends`.
+Those four are the only values accepted. ``pbs``, ``sge``, ``kubernetes`` and
+the cloud VM providers are not supported, and naming one raises a
+``ValueError`` that points at its tracking issue; see :ref:`removed-backends`.
 
 Where to go next
 ----------------
 
+- :doc:`tutorials/index` -- the seven tutorials, in order.
 - :doc:`introduction` -- what Clustrix is for, and when to use something else.
-- :doc:`execution_model` -- what happens between your call and your result.
 - :doc:`configuration` -- every setting and where it can be set.
-- :doc:`ssh_setup` -- keys, host keys and passwordless access.
-- :doc:`tutorials/usage_patterns` -- how to structure real code around
-  ``@cluster``.
+- :doc:`troubleshooting` -- when something goes wrong.
