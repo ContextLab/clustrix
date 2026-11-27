@@ -111,18 +111,13 @@ python scripts/run_real_world_tests.py --all
 ### Moved Test Files
 All test files have been reorganized into the `tests/` directory:
 
-- **tests/real_world/cluster_validation/**: Cluster-specific test files
-  - `test_slurm_*.py` - SLURM cluster tests
-  - `test_ssh_*.py` - SSH connectivity tests  
-  - `test_*_comprehensive.py` - Comprehensive cluster tests
+- **tests/real_world/**: tests that run against a real sshd and SLURM
+  controller (`scripts/setup_local_slurm.sh` creates one); see
+  `docs/REAL_WORLD_TESTING.md`
 
-- **tests/real_world/api_validation/**: External API validation tests
+- **tests/real_world/api_validation/**: standalone scripts, not collected by pytest
   - `validate_*.py` - Service-specific validation scripts
   - `debug_*.py` - API debugging utilities
-
-- **tests/real_world/validation/**: Shell scripts and validation utilities
-  - `*.sh` - Bash test scripts
-  - `*.json` - Test reports and configurations
 
 ### Scripts Removed
 The following categories of files were removed during cleanup:

@@ -243,8 +243,7 @@ is `[tool.pytest.ini_options] markers` in `pyproject.toml`:
 @pytest.mark.real_world    # opens real SSH or API connections
 @pytest.mark.slow          # takes a long time
 @pytest.mark.unit          # a unit test
-@pytest.mark.integration   # exercises several components together
-@pytest.mark.expensive     # provisions billable resources
+@pytest.mark.expensive     # costs money or cluster time; opt in with --run-expensive
 @pytest.mark.performance   # a benchmark
 ```
 
@@ -356,8 +355,6 @@ What the credential-free run covers, in the order it fails fastest:
    blocks on the published pages, and the Sphinx build runs with `-W`.
 
 There is no cloud-provider stage, because there is no cloud backend to test.
-`tests/integration/` provisions real billable AWS resources through boto3 and
-never runs in CI at all; it refuses to start without `CLUSTRIX_ALLOW_BILLABLE=1`.
 
 ## Best Practices
 

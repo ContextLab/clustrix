@@ -32,26 +32,19 @@ file applies the decorator. That is deliberate: six files once lacked the
 decorator, so `-m "not real_world"` collected 26 tests capable of real SSH and
 cloud calls. Location in the directory is now sufficient.
 
-### Hybrid tests
-
-`tests/test_filesystem_hybrid.py` uses real files for the primary assertions
-and mocks only the error conditions that are hard to provoke on demand.
-
 ## Directory layout
 
 ```
 tests/
 ├── real_world/
-│   ├── __init__.py                  # test_manager, TempResourceManager, credentials
+│   ├── __init__.py                  # test_manager, TempResourceManager
 │   ├── conftest.py                  # markers, options, automatic real_world marking
 │   ├── credential_manager.py        # credential lookup
-│   ├── cluster_job_validator.py     # job monitoring and validation
-│   ├── cluster_validation/          # cluster job test runner and helpers
+│   ├── api_validation/              # standalone scripts, not collected by pytest
+│   ├── test_local_sshd_slurm.py     # @cluster against a real sshd and SLURM
+│   ├── test_*_real.py               # the same cluster: staging, GPUs, signals, paths, ...
 │   ├── test_filesystem_real.py      # real filesystem tests
-│   ├── test_ssh_real.py             # real SSH tests
-│   ├── test_visual_verification.py  # widget visual tests
-│   └── screenshots/                 # visual verification outputs
-├── integration/                     # provisions billable resources; opt-in
+│   └── test_ssh_real.py             # SSH key handling; needs no cluster
 ├── unit/
 └── test_*.py
 ```
@@ -88,93 +81,60 @@ with TempResourceManager() as temp_mgr:
     # everything above is removed on exit
 ```
 
-### TestCredentials
+### Credentials
 
-A thin wrapper over `credential_manager.py`:
+`tests/real_world/credential_manager.py` resolves credentials from
+`~/.clustrix/.env` and the environment:
 
 ```python
-from tests.real_world import credentials
+from tests.real_world.credential_manager import get_credential_manager
 
-ssh_creds = credentials.get_ssh_credentials()
-if ssh_creds:
-    ...
+manager = get_credential_manager()
+ssh_creds = manager.get_ssh_credentials()
 ```
 
-The available lookups are `get_ssh_credentials`, `get_slurm_credentials`,
-`get_huggingface_credentials`, `get_gpu_cluster_credentials`,
-`get_slurm_cluster_credentials`, plus `get_credential_status` and
+The lookups are `get_ssh_credentials`, `get_slurm_credentials` and
+`get_huggingface_credentials`, plus `get_credential_status` and
 `print_credential_status`. There is no cloud-provider lookup, because clustrix
-has no cloud backend to hand credentials to.
+has no cloud backend to hand credentials to. The cluster tests do not use it:
+they read the four variables below.
 
 ## Environment variables
 
-See the [Credential Setup Guide](CREDENTIAL_SETUP.md) for the full list. The
-short version, for local runs:
+The tests that run jobs read four variables naming one host that has an sshd
+and, for the SLURM half, `sbatch`. `scripts/setup_local_slurm.sh` stands such
+a host up on the machine you are sitting at:
 
 ```bash
-export TEST_SSH_HOST="localhost"
-export TEST_SSH_USERNAME="$USER"
-export TEST_SSH_PRIVATE_KEY_PATH="$HOME/.ssh/id_rsa"
-
-export TEST_SLURM_HOST="slurm.example.edu"
-export TEST_SLURM_USERNAME="user"
-
-export HF_TOKEN="your-hf-token"
-export HF_USERNAME="your-hf-username"
+sudo scripts/setup_local_slurm.sh
+export CLUSTRIX_TEST_SSH_HOST=127.0.0.1 CLUSTRIX_TEST_SSH_PORT=2222 \
+       CLUSTRIX_TEST_SSH_USER=clx \
+       CLUSTRIX_TEST_SSH_KEY=/tmp/clustrix-local-cluster/id_ed25519
 ```
 
-## Prerequisite: host keys must be in `known_hosts`
+With none of them set those tests skip and say which variables to set. The
+[Credential Setup Guide](CREDENTIAL_SETUP.md) covers the credential file and
+`HF_TOKEN`.
 
-**Every real-world test that opens an SSH connection fails unless the target
-host's key is already in your `known_hosts`.** This is a hard prerequisite,
-not a recommendation.
+## Host keys
 
-SSH connections go through
-`clustrix.ssh_security.configure_host_key_policy()`, whose default policy is
-`"reject"`. An unknown host key raises `HostKeyVerificationError` rather than
-being trusted on sight.
+`tests/conftest.py` gives every test its own empty `$HOME`, so no host is ever
+in `known_hosts` when a test starts, and clustrix's default host-key policy is
+`"reject"`. A test that connects therefore has to say what it trusts: the
+cluster tests configure `ssh_host_key_policy="auto_add"` for the host named by
+the variables above, which is a machine the developer chose. A test that
+connects with the default policy can only fail with
+`HostKeyVerificationError`; the tests that did were removed for that reason.
 
-Add each host you intend to test against, once, deliberately:
-
-```bash
-# Replace cluster.example.edu with the host under test.
-ssh-keyscan cluster.example.edu >> ~/.ssh/known_hosts
-
-# Non-standard SSH port:
-ssh-keyscan -p 2222 cluster.example.edu >> ~/.ssh/known_hosts
-
-# Local sshd used by the localhost-only SSH tests:
-ssh-keyscan localhost 127.0.0.1 >> ~/.ssh/known_hosts
-```
-
-Check a host is present before running the suite:
-
-```bash
-ssh-keygen -F cluster.example.edu
-```
-
-Hosts come from `CLUSTRIX_TEST_SSH_HOST`, `CLUSTRIX_TEST_SSH_HOST_2`,
-`CLUSTRIX_TEST_SLURM_HOST` and `CLUSTRIX_TEST_SLURM_HOST_2` (see
-`tests/real_world/credential_manager.py`), so scan whichever of those you have
-set. In GitHub Actions, the `real-world-tests` workflow does this in its
-"Populate known_hosts for host key verification" step.
-
-`ssh-keyscan` trusts the network at the moment you run it. On a host you have
-never reached before, compare the fingerprint it prints against one you got
-out-of-band from the cluster's administrators before appending it.
-
-Turning verification off is possible, but it is not a fix for a failing test —
-it is a decision to stop verifying host keys at all:
-
-```python
-config = ClusterConfig(..., ssh_host_key_policy="auto_add")
-```
+Outside the test suite the rule is the opposite: add a host's key to
+`known_hosts` deliberately (`ssh-keyscan host >> ~/.ssh/known_hosts`, after
+checking the fingerprint out-of-band) rather than turning verification off.
 
 ## Running tests
 
 ```bash
 # What CI runs: everything safe without credentials or money
-pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+pytest tests/ -m "not real_world" --ignore=tests/real_world
 
 # Real-world tests
 pytest tests/real_world/ -m real_world
@@ -187,25 +147,18 @@ are available when that directory is part of the run:
 # Include tests marked expensive
 pytest tests/real_world/ --run-expensive
 
-# Include visual tests, which produce artifacts for a human to look at
-pytest tests/real_world/ --run-visual
-
 # Raise or lower the cost ceiling for the session
 pytest tests/real_world/ --api-cost-limit=10.0 --api-call-limit=200
 ```
 
-Markers registered for this suite are `real_world`, `expensive`, `visual` and
-`ssh_required`. Selecting specific files works as usual:
+Markers registered for this suite are `real_world`, `expensive` and
+`ssh_required`; no test is marked `expensive` at present. Selecting specific
+files works as usual:
 
 ```bash
 pytest tests/real_world/test_filesystem_real.py
-TEST_SSH_HOST=cluster.example.edu pytest tests/real_world/test_ssh_real.py
-pytest tests/test_filesystem_hybrid.py
-pytest tests/real_world/test_visual_verification.py --run-visual
+pytest tests/real_world/test_local_sshd_slurm.py -m real_world
 ```
-
-`tests/integration/` is separate and provisions real, billable AWS resources.
-It refuses to run unless `CLUSTRIX_ALLOW_BILLABLE=1` is set.
 
 ## Cost management
 
@@ -237,13 +190,15 @@ print(f"Cost limit: ${test_manager.cost_limit_usd:.2f}")
 ### Filesystem operations
 
 Real tests create actual files and directories, exercise permissions, and
-handle large files. The hybrid file uses real files for the main path and
-mocks SSH/SFTP only to produce failures that are otherwise hard to arrange.
+handle large files.
 
-### SSH operations
+### SSH and SLURM
 
-Real tests connect to an actual SSH server — localhost by default — and cover
-key-based authentication, SFTP transfers, and connection timeouts.
+`test_local_sshd_slurm.py` drives `@cluster` at a real sshd and a real SLURM
+controller: key authentication, SFTP, virtualenv builds, `sbatch`, `squeue`,
+`sacct`, `scancel`. The other `test_*_real.py` files use the same host for
+input staging, GPU requests, signals, job names and `~` in paths.
+`test_ssh_real.py` covers key discovery and generation and needs no host.
 
 ### HuggingFace Jobs
 
@@ -253,13 +208,6 @@ which submits a `cpu-basic` job to the `contextlab` namespace through the
 `@cluster` decorator and asserts on the returned value. It needs a token
 rather than a cluster account, which makes it the cheapest end-to-end check
 the project has.
-
-### Visual verification
-
-Tests generate widget HTML and write it under
-`tests/real_world/screenshots/`, along with `index.html` and
-`screenshot_instructions.json`. A person opens those files and looks at them;
-there is no automated image comparison.
 
 ## Writing a real-world test
 
@@ -278,20 +226,16 @@ class TestComponentReal:
     @pytest.mark.expensive
     def test_expensive_operation_real(self):
         ...
-
-    @pytest.mark.visual
-    def test_visual_verification(self):
-        ...
 ```
 
 Skip when a resource is genuinely unavailable, and say which one:
 
 ```python
-def test_against_remote():
-    creds = credentials.get_ssh_credentials()
-    if not creds:
-        pytest.skip("No SSH credentials available")
-    ...
+HOST = os.environ.get("CLUSTRIX_TEST_SSH_HOST")
+
+pytestmark = pytest.mark.skipif(
+    not HOST, reason="No test cluster named: set CLUSTRIX_TEST_SSH_HOST"
+)
 ```
 
 Do not wrap the whole body in `try/except Exception: pytest.skip(...)`. That
@@ -342,9 +286,10 @@ conditions, so the presence check has to become a job output first.
 interactively but not under pytest is usually in a shell profile the test
 process never sourced.
 
-**SSH connection failures.** Check the daemon is up, that key permissions are
-`600`, and that the host key is in `known_hosts` — see the prerequisite
-section above. `ssh -vvv` will tell you which of the three it is.
+**SSH connection failures.** Check the daemon is up and that key permissions
+are `600`; `ssh -vvv` will tell you which. A `HostKeyVerificationError` inside
+a test means the test connected without naming a host-key policy — see "Host
+keys" above.
 
 **Cost or call limits reached.** Raise them with `--api-cost-limit` and
 `--api-call-limit`, or work out why a test is making more calls than it needs.

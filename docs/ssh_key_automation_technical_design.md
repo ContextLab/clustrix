@@ -12,10 +12,11 @@
 **Status: implemented.** The architecture described here is in the codebase;
 see "What is built" at the end for the module-by-module mapping. The one
 proposed piece that was not built is `detect_cluster_requirements`, noted at
-the point it appears. `tests/test_ssh_automation.py` holds 14 unit tests for
-this path, and
-`tests/real_world/cluster_validation/test_ssh_key_automation_real_clusters.py`
-exercises it against real hosts.
+the point it appears. `tests/test_ssh_automation.py` holds the tests for this
+path; they run against a real SSH protocol exchange with the in-process
+server in `tests/ssh_server.py`. The standalone script that once exercised it
+against the original author's clusters was removed: it was not a pytest
+module and nothing in the repository could run it.
 
 **📖 Try the interactive [SSH Key Automation Tutorial](ssh_key_automation_tutorial.ipynb)** [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/ContextLab/clustrix/blob/master/docs/ssh_key_automation_tutorial.ipynb)
 
@@ -284,7 +285,7 @@ This piece was proposed and not built — there is no
 
 ### Validation Script
 ```python
-# tests/real_world/cluster_validation/test_ssh_key_automation_real_clusters.py
+# Proposed at design time; the script it became was removed (see the status note).
 def validate_ssh_automation(cluster_configs: List[Dict]):
     """
     Test SSH key automation on real clusters:

@@ -332,12 +332,13 @@ flavor that does not start with `cpu-` is refused unless
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+pytest tests/ -m "not real_world" --ignore=tests/real_world
 python scripts/pre_push_check.py
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). `tests/integration/` provisions
-billable AWS resources and refuses to run unless `CLUSTRIX_ALLOW_BILLABLE=1`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). `tests/real_world/` runs against a real
+sshd and SLURM controller (`scripts/setup_local_slurm.sh` creates one) and
+skips, with the reason, when none is named.
 
 ## License
 

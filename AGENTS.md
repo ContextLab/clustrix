@@ -13,7 +13,7 @@ Clustrix is a Python distributed computing framework: `@cluster` on a function s
 ```
 clustrix/
 ├── clustrix/            # the package — flat, no subpackages (see clustrix/AGENTS.md)
-├── tests/               # unit/ + real_world/ + integration/ + comprehensive/ (see tests/AGENTS.md)
+├── tests/               # unit/ + real_world/ + comprehensive/ (see tests/AGENTS.md)
 ├── scripts/             # dev/ops tooling; aws/ is operator cleanup, NOT a backend
 ├── docs/                # source/ (Sphinx) + evidence/ (committed proof) + build/ (generated)
 ├── notes/               # session notes; per user policy, update as work proceeds
@@ -61,7 +61,7 @@ clustrix/
 
 - black line-length 88, target py310, **pinned `black==26.3.1`** (unbounded `>=` broke CI, #110); flake8 is configured in `.flake8` only; mypy python_version 3.10, `files=["clustrix/"]`, tests ignored, `follow_imports="skip"`.
 - **pyproject.toml is the only pytest config.** No pytest.ini/tox.ini/setup.cfg — the first found shadows this block (#130); `tests/unit/test_pytest_config.py` enforces it.
-- pytest `--strict-markers`; all 6 markers registered in pyproject. `testpaths` must never list `tests/integration` (billable, #109).
+- pytest `--strict-markers`; all 5 markers registered in pyproject.
 - Coverage `fail_under = 66` — a floor 2 points under measured 68%, not a target (#115).
 - Pre-commit runs on python3.12 explicitly (system python3 may be 3.9, which the project does not support).
 - Version string lives in 3 places and must stay identical: `pyproject.toml`, `clustrix/__init__.py`, `docs/source/conf.py` (`setup.py` is a shim).
@@ -91,7 +91,7 @@ clustrix/
 ```bash
 pip install -e ".[dev]"                 # dev env (widget extra needed for widget tests)
 python scripts/pre_push_check.py        # black+flake8+mypy+pytest, retries until clean — run before EVERY commit
-pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration   # what CI runs
+pytest tests/ -m "not real_world" --ignore=tests/real_world   # what CI runs
 pytest tests/unit/ -q                   # fast loop
 python scripts/collect_execution_evidence.py   # real job per reachable backend; needs credentials
 cd docs && make html                    # docs build
@@ -101,6 +101,5 @@ cd docs && make html                    # docs build
 
 - **`build/lib/clustrix/` is stale**: it still contains `kubernetes/`, `cloud_providers/`, `pricing_clients/`, `cost_providers/` — modules deleted from the source tree. Grep results there are ghosts; exclude `build/` from searches.
 - `htmlcov/`, `performance_test_results/`, `docs/build/` are generated output, not source.
-- `tests/integration/` provisions real billable AWS resources; refuses without `CLUSTRIX_ALLOW_BILLABLE=1` (guard reads `config.args`, deliberately).
 - `remote_work_dir` must be on a filesystem compute nodes see — `/tmp` dies with exit 127 on SLURM.
 - Some test modules still use `unittest.mock` (issue #117 migrates them; new tests must not add to it). Recount before quoting a figure: `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l`.

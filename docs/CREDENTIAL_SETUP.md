@@ -134,7 +134,6 @@ python scripts/run_real_world_tests.py --check-creds
 python scripts/run_real_world_tests.py --filesystem
 python scripts/run_real_world_tests.py --ssh
 python scripts/run_real_world_tests.py --api
-python scripts/run_real_world_tests.py --visual
 
 # Everything
 python scripts/run_real_world_tests.py --all

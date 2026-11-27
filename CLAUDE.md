@@ -269,23 +269,22 @@ There is exactly one mocking policy, and it is this one. Do not cite `.claude/CL
 4. **Production code must never know it is being tested.** No `isinstance(x, Mock)`, no test-only branches, no importable module of fake widgets. This is issue #116; `grep -rn "unittest.mock\|MagicMock\|isinstance(.*Mock" clustrix/` must stay empty.
 5. **Never weaken a test to make it pass.** If a test fails, fix the code. If the test itself asserts wrong behaviour, say so explicitly and rewrite the assertion — do not quietly relax it.
 
-No test module uses `unittest.mock`: the last three were replaced with tests against real files, real subprocesses and real SSH (issue #117). 1 of the 193 test modules still matches the pattern below, and it is `tests/unit/test_no_mocks_in_shipped_code.py`, which spells the names because it scans shipped code for them. New tests must not add to that number. Recount with `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l` and `find tests -name "test_*.py" | wc -l` before quoting a figure.
+No test module uses `unittest.mock`: the last three were replaced with tests against real files, real subprocesses and real SSH (issue #117). 1 of the 123 test modules still matches the pattern below, and it is `tests/unit/test_no_mocks_in_shipped_code.py`, which spells the names because it scans shipped code for them. New tests must not add to that number. Recount with `grep -lE "unittest\.mock|Mock\(|MagicMock\(|@patch" $(find tests -name "test_*.py") | wc -l` and `find tests -name "test_*.py" | wc -l` before quoting a figure.
 
 ### Test Organization
 
-**Unit Tests** (`tests/` excluding `real_world/` and `integration/`):
+**Unit Tests** (`tests/` excluding `real_world/`):
 - Run in GitHub Actions CI
 - No external resources required; fast
 - Included in coverage reports
 
 **Real-World Tests** (`tests/real_world/`):
-- Test actual cluster functionality, API calls, SSH connections
+- Test actual cluster functionality against a real sshd and a real SLURM controller. `scripts/setup_local_slurm.sh` stands both up on one machine; the tests find them through `CLUSTRIX_TEST_SSH_HOST`, `CLUSTRIX_TEST_SSH_PORT`, `CLUSTRIX_TEST_SSH_USER` and `CLUSTRIX_TEST_SSH_KEY`, and skip with those names in the reason when they are unset.
+- **Every test here must be able to run**: it passes against that cluster or skips for a resource that is genuinely optional (an HF token, a real GPU, a Colab runtime). `tests/conftest.py` gives each test an empty `$HOME`, so a test that connects must set `ssh_host_key_policy="auto_add"` for the named host — one that relies on `known_hosts` can only fail. Do not add tests that load a config file the repository does not contain, or debug scripts named `test_*.py`.
 - `tests/real_world/conftest.py` applies `@pytest.mark.real_world` to **every** item in that directory automatically. Do not rely on a per-file decorator; a file that lacks one is still marked, and a file that has one adds nothing.
 - Run manually via the `real-world-tests` workflow (`workflow_dispatch`), which is gated on the required secrets being present
 
-**Integration Tests** (`tests/integration/`):
-- **These provision real, billable AWS resources.** They refuse to run unless `CLUSTRIX_ALLOW_BILLABLE=1` is set.
-- The guard reads `config.args`, **not** `config.invocation_params.args`. This is deliberate: `invocation_params.args` misses cases that red-teaming the guard turned up. Do not "simplify" it.
+There is no `tests/integration/`. It held GPU and complexity-threshold scripts for the original author's machines, none of which could run, behind a `CLUSTRIX_ALLOW_BILLABLE` guard; both were removed together. If tests that cost money are ever added, they need a collection-time guard again — a marker is not enough, because pytest imports a module to collect it.
 
 ### Pre-Push Hook Workflow
 
@@ -302,9 +301,9 @@ A custom pre-push hook (`.git/hooks/pre-push`) automatically runs real-world tes
 
 ```bash
 # Everything that is safe to run without credentials or money.
-# The --ignore flags are belt-and-braces alongside the marker: this is
+# The --ignore flag is belt-and-braces alongside the marker: this is
 # exactly what CI runs, so a green run here means a green run there.
-pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration
+pytest tests/ -m "not real_world" --ignore=tests/real_world
 
 # Real-world tests only -- makes real SSH and cloud API calls
 pytest tests/real_world/ -m real_world
@@ -313,7 +312,6 @@ pytest tests/real_world/ -m real_world
 python scripts/run_real_world_tests.py --filesystem
 python scripts/run_real_world_tests.py --ssh  
 python scripts/run_real_world_tests.py --api
-python scripts/run_real_world_tests.py --visual
 ```
 
 ### External Function Validation

@@ -175,7 +175,7 @@ clustrix/
 │   ├── notebook_magic_core.py                       # %%remote, %clustrix
 │   ├── cli.py, cli_credentials.py                   # the clustrix command
 │   └── utils.py              # serialization, environments, job scripts
-├── tests/                     # unit/, real_world/, integration/ (billable)
+├── tests/                     # unit/, real_world/ (needs a real cluster)
 ├── docs/                      # source/ (Sphinx), evidence/
 ├── examples/
 ├── scripts/                   # quality checks, docs checkers, evidence
