@@ -185,12 +185,12 @@ class RealWorldTestRunner:
 
         # Define test categories
         all_categories = {
-            "executor": ["test_executor_real.py", "test_executor_real_standalone.py"],
+            "executor": ["test_executor.py"],
             "decorator": ["test_decorator_real.py"],
             "config": ["test_config_real.py"],
             "credentials": [
                 "test_secure_credentials_real.py",
-                "test_auth_fallbacks_real.py",
+                "test_auth_fallbacks.py",
             ],
             "ssh": ["real_world/test_ssh_job_execution_real.py"],
             "notebook": ["test_notebook_magic_real.py"],

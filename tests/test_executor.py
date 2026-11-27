@@ -1,4 +1,6 @@
 import os
+import sys
+from pathlib import Path
 
 import cloudpickle
 import paramiko
@@ -52,6 +54,18 @@ def _real_config(server, **overrides):
     return ClusterConfig(**kwargs)
 
 
+def _unconnected_config(**overrides):
+    """A scheduler config naming a host nothing here ever dials."""
+    kwargs = dict(
+        cluster_type="slurm",
+        cluster_host="test.cluster.com",
+        username="testuser",
+        remote_work_dir="/tmp/test_clustrix",
+    )
+    kwargs.update(overrides)
+    return ClusterConfig(**kwargs)
+
+
 def _double(x):
     """Module-level so it can really be serialized and really be run."""
     return x * 2
@@ -60,6 +74,19 @@ def _double(x):
 def _explode():
     """A real failure with a real traceback."""
     return 1 / 0
+
+
+def _refuse_negative(x):
+    if x < 0:
+        raise ValueError(f"Negative value not allowed: {x}")
+    return x * 2
+
+
+def _square_slowly(n):
+    import time
+
+    time.sleep(0.1)
+    return n * n
 
 
 #: (cluster_type, ClusterExecutor submission method, directive unique to it).
@@ -75,15 +102,16 @@ class TestClusterExecutor:
     """Test ClusterExecutor class."""
 
     @pytest.fixture
-    def executor(self, mock_config):
-        """Create a ClusterExecutor instance with mock config."""
-        return ClusterExecutor(mock_config)
+    def executor(self):
+        """A real executor for a cluster it has not connected to."""
+        return ClusterExecutor(_unconnected_config())
 
-    def test_initialization(self, executor, mock_config):
-        """Test executor initialization."""
-        assert executor.config == mock_config
+    def test_initialization(self, executor):
+        """Constructing an executor opens nothing."""
+        assert executor.config.cluster_host == "test.cluster.com"
         assert executor.ssh_client is None
         assert executor.sftp_client is None
+        assert executor.active_jobs == {}
 
     def test_connect(self, ssh_server):
         """A real SSH connection, authenticated with a real key.
@@ -529,3 +557,256 @@ class TestJobStatusAndResults:
 
         status = executor.get_job_status("job123")
         assert status == "unknown"
+
+
+class TestLocalBackend:
+    """``cluster_type="local"`` is a real backend: the function really runs."""
+
+    def test_submission_records_which_manager_owns_the_job(self):
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+
+        job_id = executor.submit_job(
+            serialize_function(_double, (5,), {}), {"cores": 1}
+        )
+
+        assert executor.active_jobs[job_id] == {"manager": "local", "job_id": job_id}
+        assert job_id in executor.local_manager.active_jobs
+
+    def test_wait_for_result_returns_the_value_once(self):
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(
+            serialize_function(_double, (21,), {}), {"cores": 1}
+        )
+
+        assert executor.wait_for_result(job_id) == 42
+        assert job_id not in executor.active_jobs
+
+    def test_a_job_that_raised_re_raises_the_original_exception(self):
+        """The user's own exception type and message, not a wrapper.
+
+        ``test_executor_real.py`` accepted any ``Exception`` whose text
+        contained "error", which every failure there is satisfies.
+        """
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+        job_id = executor.submit_job(
+            serialize_function(_refuse_negative, (-5,), {}), {"cores": 1}
+        )
+
+        with pytest.raises(ValueError, match="^Negative value not allowed: -5$"):
+            executor.wait_for_result(job_id)
+
+    def test_execute_runs_the_function_and_returns_its_value(self):
+        """``execute`` used to be tested by replacing submit and wait with Mocks."""
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+
+        assert executor.execute(_double, (5,), {}) == 10
+        assert executor.execute(_refuse_negative, (), {"x": 4}) == 8
+        assert executor.active_jobs == {}
+
+    def test_several_jobs_keep_their_own_results(self):
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+
+        job_ids = [
+            executor.submit_job(
+                serialize_function(_square_slowly, (n,), {}), {"cores": 1}
+            )
+            for n in range(5)
+        ]
+
+        assert len(set(job_ids)) == 5
+        # Collected in reverse, so a result cannot be matched by order.
+        results = {
+            job_id: executor.wait_for_result(job_id) for job_id in reversed(job_ids)
+        }
+        assert [results[job_id] for job_id in job_ids] == [0, 1, 4, 9, 16]
+        assert executor.active_jobs == {}
+
+    def test_connect_and_disconnect_open_nothing(self):
+        executor = ClusterExecutor(ClusterConfig(cluster_type="local"))
+
+        executor.connect()
+        assert executor.ssh_client is None and executor.sftp_client is None
+        executor.disconnect()
+        executor.disconnect()
+        assert executor.ssh_client is None
+
+
+class TestWithoutAConnection:
+    """What a scheduler executor does when it cannot reach the scheduler."""
+
+    def test_submission_names_the_missing_setting_and_records_nothing(self):
+        executor = ClusterExecutor(_unconnected_config(cluster_host=None))
+
+        with pytest.raises(ValueError, match="cluster_host must be specified"):
+            executor.submit_job(serialize_function(_double, (5,), {}), {"cores": 1})
+
+        assert executor.active_jobs == {}
+
+    def test_connect_names_the_missing_setting(self):
+        executor = ClusterExecutor(_unconnected_config(cluster_host=None))
+
+        with pytest.raises(ValueError, match="cluster_host must be specified"):
+            executor.connect()
+
+        assert executor.ssh_client is None
+
+    def test_an_untracked_job_id_is_still_sent_to_the_scheduler_to_cancel(self):
+        """Silently returning would make a job clustrix lost uncancellable."""
+        executor = ClusterExecutor(_unconnected_config())
+
+        assert "123456" not in executor.active_jobs
+        with pytest.raises(RuntimeError, match="SSH client not connected"):
+            executor.cancel_job("123456")
+
+    def test_a_status_that_cannot_be_asked_for_is_unknown(self):
+        """``wait_for_result`` polls this; raising would abandon a live job."""
+        executor = ClusterExecutor(_unconnected_config())
+
+        assert executor.get_job_status("job_123") == "unknown"
+
+
+class TestOverARealConnection:
+    """File transfer and a whole job, through tests/ssh_server.py."""
+
+    @pytest.fixture
+    def connected(self, ssh_server):
+        executor = ClusterExecutor(_real_config(ssh_server, key_file=None))
+        executor.connect()
+        try:
+            yield executor
+        finally:
+            executor.disconnect()
+
+    def test_upload_download_create_and_exists(self, connected, ssh_server, tmp_path):
+        """Real bytes over real SFTP, read back from the server's real disk.
+
+        Was: four Mocks, and ``mock_sftp.put.assert_called_with(...)``.
+        """
+        payload = bytes(range(256)) * 64
+        local_source = tmp_path / "upload.bin"
+        local_source.write_bytes(payload)
+        remote_path = str(ssh_server.root_path / "uploaded.bin")
+
+        assert connected._remote_file_exists(remote_path) is False
+        connected._upload_file(str(local_source), remote_path)
+        assert connected._remote_file_exists(remote_path) is True
+        assert (ssh_server.root_path / "uploaded.bin").read_bytes() == payload
+
+        local_copy = tmp_path / "download.bin"
+        connected._download_file(remote_path, str(local_copy))
+        assert local_copy.read_bytes() == payload
+
+        script_path = str(ssh_server.root_path / "created.sh")
+        content = '#!/bin/bash\necho "it\'s $HOME" # ünïcödé\n'
+        connected._create_remote_file(script_path, content)
+        assert (ssh_server.root_path / "created.sh").read_text() == content
+
+    def test_downloading_a_file_that_is_not_there_fails(self, connected, tmp_path):
+        target = tmp_path / "never.bin"
+
+        with pytest.raises(OSError):
+            connected._download_file("/no/such/remote/file.bin", str(target))
+
+    def test_execute_runs_the_job_on_the_far_side_of_the_connection(
+        self, ssh_server, tmp_path
+    ):
+        """Submission, the generated job script, polling and the signed result.
+
+        The function reports its own pid and working directory and leaves a
+        file behind, so the assertion is on where it ran rather than on the
+        value alone -- a local fallback would return the same ``marker``.
+        """
+        work_dir = ssh_server.root_path / "jobs"
+        config = _real_config(
+            ssh_server,
+            cluster_type="ssh",
+            key_file=None,
+            remote_work_dir=str(work_dir),
+            replicate_local_environment=False,
+            python_executable=sys.executable,
+            cleanup_on_success=False,
+        )
+
+        def where_am_i(marker):
+            import os
+
+            with open("ran_here.txt", "w") as handle:
+                handle.write(marker)
+            return {"pid": os.getpid(), "cwd": os.getcwd(), "marker": marker}
+
+        with ClusterExecutor(config) as executor:
+            result = executor.execute(where_am_i, ("made-on-the-far-side",), {})
+            assert executor.active_jobs == {}
+
+        print(result)
+        assert result["marker"] == "made-on-the-far-side"
+        assert result["pid"] != os.getpid()
+        job_dir = Path(result["cwd"])
+        assert work_dir in job_dir.parents or job_dir.parent == work_dir
+        assert (job_dir / "ran_here.txt").read_text() == "made-on-the-far-side"
+        assert any("job" in command for command in ssh_server.commands)
+
+    def test_a_remote_job_that_raised_re_raises_the_original_exception(
+        self, ssh_server
+    ):
+        config = _real_config(
+            ssh_server,
+            cluster_type="ssh",
+            key_file=None,
+            remote_work_dir=str(ssh_server.root_path / "jobs"),
+            replicate_local_environment=False,
+            python_executable=sys.executable,
+        )
+
+        def refuse_negative(x):
+            if x < 0:
+                raise ValueError(f"Negative value not allowed: {x}")
+            return x * 2
+
+        with ClusterExecutor(config) as executor:
+            with pytest.raises(ValueError, match="Negative value not allowed: -5"):
+                executor.execute(refuse_negative, (-5,), {})
+
+    def test_a_function_from_a_module_the_far_side_lacks_arrives_by_value(
+        self, ssh_server
+    ):
+        """``_double`` lives in this test module, which the worker cannot import.
+
+        ``serialize_function`` ships such a function by value; this is the
+        path ``@cluster`` takes.
+        """
+        config = _real_config(
+            ssh_server,
+            cluster_type="ssh",
+            key_file=None,
+            remote_work_dir=str(ssh_server.root_path / "jobs"),
+            replicate_local_environment=False,
+            python_executable=sys.executable,
+        )
+
+        with ClusterExecutor(config) as executor:
+            job_id = executor.submit_job(
+                serialize_function(_double, (21,), {}), {"cores": 1}
+            )
+            assert executor.wait_for_result(job_id) == 42
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=RuntimeError,
+        reason="ClusterExecutor.execute() pickles the function with a bare "
+        "cloudpickle.dumps instead of serialize_function, so a function "
+        "defined in a local module is sent by reference and the worker "
+        "fails with ModuleNotFoundError. The fix is in executor_core.py.",
+    )
+    def test_execute_ships_a_local_module_function_by_value_too(self, ssh_server):
+        config = _real_config(
+            ssh_server,
+            cluster_type="ssh",
+            key_file=None,
+            remote_work_dir=str(ssh_server.root_path / "jobs"),
+            replicate_local_environment=False,
+            python_executable=sys.executable,
+        )
+
+        with ClusterExecutor(config) as executor:
+            assert executor.execute(_double, (21,), {}) == 42
