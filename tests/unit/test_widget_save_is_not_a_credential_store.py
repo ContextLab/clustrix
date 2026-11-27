@@ -205,7 +205,16 @@ class TestWhatSurvives:
         assert widget.secret("password") == SENTINELS["draft_password"]
         widget.widgets["profile_dropdown"].value = "SSH remote machine"
         assert widget.secret("password") == SENTINELS["password"]
-        assert SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"] in (
+        # Usable, and not by being left in the field: that would put it in
+        # the notebook file the moment Jupyter saved the form's state.
+        assert (
+            widget._config_data_from_widgets()["environment_variables"][
+                "SSH_PASSPHRASE"
+            ]
+            == SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"]
+        )
+        assert "SSH_PASSPHRASE=" in widget.widgets["env_vars"].value
+        assert SENTINEL_ENVIRONMENT["SSH_PASSPHRASE"] not in (
             widget.widgets["env_vars"].value
         )
 

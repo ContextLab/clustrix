@@ -205,7 +205,7 @@ class TestTheOffendingControlsAreOutlined:
 
     def test_a_refused_action_outlines_exactly_the_controls_at_fault(self):
         widget = _widget("slurm", cpus=0, ram="banana", host="", port=0)
-        widget.widgets["env_vars"].value = "export NOPE"
+        widget.widgets["env_vars"].value = "export NOPE=1"
 
         widget._on_apply_config(widget.widgets["apply_btn"])
 

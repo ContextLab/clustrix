@@ -38,7 +38,10 @@ from clustrix.modern_notebook_widget import (  # noqa: E402
     FORM_CONTROLS,
     WIDGET_MANAGED_FIELDS,
     ModernClustrixWidget,
-    _parse_environment_variables,
+    ENVIRONMENT_LINE_REMOVED,
+    ENVIRONMENT_MASK,
+    _environment_problems,
+    _merge_environment_edit,
     create_modern_cluster_widget,
     display_modern_widget,
     show_widget,
@@ -313,12 +316,13 @@ class TestFormAndConfigurationAgree:
 
 class TestEnvironmentVariables:
     def test_one_per_line_and_only_the_first_equals_splits(self):
-        variables, malformed = _parse_environment_variables(
+        variables, notes = _merge_environment_edit(
             "OMP_NUM_THREADS=4\n\n  PADDED = kept as typed \nURL=postgres://h/db?a=b\n"
-            "EMPTY=\n_UNDERSCORE1=x"
+            "EMPTY=\n_UNDERSCORE1=x",
+            {},
         )
 
-        assert malformed == []
+        assert notes == [] and _environment_problems(variables) == []
         assert variables == {
             "OMP_NUM_THREADS": "4",
             "PADDED": " kept as typed",
@@ -328,14 +332,26 @@ class TestEnvironmentVariables:
         }
 
     @pytest.mark.parametrize(
-        "line",
-        ["NO_EQUALS", "=value", "1STARTS_WITH_DIGIT=x", "HAS-DASH=x", "HAS SPACE=x"],
+        "line,named",
+        [
+            ("NO_EQUALS", "NO_EQUALS has no value"),
+            ("=value", "name ''"),
+            ("1STARTS_WITH_DIGIT=x", "name '1STARTS_WITH_DIGIT'"),
+            ("HAS-DASH=x", "name 'HAS-DASH'"),
+            ("HAS SPACE=x", "name 'HAS SPACE'"),
+        ],
     )
-    def test_a_line_that_is_not_key_equals_value_is_named(self, line):
-        variables, malformed = _parse_environment_variables(f"GOOD=1\n{line}\nALSO=2")
+    def test_a_line_that_is_not_key_equals_value_is_named(self, line, named):
+        widget = ModernClustrixWidget()
+        widget.widgets["env_vars"].value = f"GOOD=1\n{line}\nALSO=2"
 
-        assert malformed == [line]
-        assert variables == {"GOOD": "1", "ALSO": "2"}, "a typo cost the valid lines"
+        (problem,) = [text for key, text in widget._validation_problems()]
+
+        assert named in problem
+        assert widget._config_data_from_widgets()["environment_variables"] == {
+            "GOOD": "1",
+            "ALSO": "2",
+        }, "a typo cost the valid lines"
 
     def test_a_malformed_line_is_reported_and_blocks_apply(self, capsys):
         widget = ModernClustrixWidget()
@@ -346,7 +362,7 @@ class TestEnvironmentVariables:
 
         assert pill(widget) == "invalid"
         assert "Cannot apply this configuration" in told
-        assert "'export BAD=2'" in told
+        assert "'export BAD'" in told and "BAD=2" not in told
         assert "KEY=value" in told
         assert (
             get_config().environment_variables == before
@@ -354,7 +370,7 @@ class TestEnvironmentVariables:
 
     def test_a_malformed_line_blocks_the_test_buttons_too(self, capsys):
         widget = ModernClustrixWidget()
-        widget.widgets["env_vars"].value = "not a variable"
+        widget.widgets["env_vars"].value = "not a variable=1"
 
         told = _click(widget, "test_submit_btn", capsys)
 
@@ -1437,3 +1453,257 @@ class TestSecretsAreNotLeftInTheForm:
         saved = repr([control.get_state() for control in widget.widgets.values()])
 
         assert "typed-by-the-user" not in saved
+
+
+def _every_state(widget) -> str:
+    """Everything Jupyter would write for this form: the state of every
+    control in it, the console included, as "Save Widget State" takes it."""
+    import json
+
+    import ipywidgets
+
+    states = []
+
+    def walk(control):
+        states.append(json.dumps(control.get_state(), default=str))
+        for child in getattr(control, "children", ()):
+            walk(child)
+
+    walk(widget.get_widget())
+    for control in widget.widgets.values():
+        if isinstance(control, ipywidgets.Widget):
+            states.append(json.dumps(control.get_state(), default=str))
+    return "\n".join(states)
+
+
+class TestEnvironmentVariableValuesAreNotLeftInTheForm:
+    """#176 M1. ``DB_PASSWORD=...`` typed into "Environment variables" sat
+    in the field's ``value`` trait, which "Save Widget State" writes into
+    the notebook -- the exposure the password field was changed to avoid.
+    Setting ``value`` here is what the browser does when the field is left."""
+
+    SECRET = "s3cr3t-typed-into-the-variables-field"
+
+    def _typed(self, text):
+        widget = ModernClustrixWidget()
+        widget.widgets["env_vars"].value = text
+        return widget, widget.widgets["env_vars"]
+
+    def _held(self, widget):
+        return widget._config_data_from_widgets()["environment_variables"]
+
+    def test_a_committed_value_is_held_and_only_the_name_is_shown(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nOMP_NUM_THREADS=4")
+
+        assert field.value == (
+            f"DB_PASSWORD={ENVIRONMENT_MASK}\nOMP_NUM_THREADS={ENVIRONMENT_MASK}"
+        )
+        assert self._held(widget) == {
+            "DB_PASSWORD": self.SECRET,
+            "OMP_NUM_THREADS": "4",
+        }
+        assert self.SECRET not in _every_state(widget)
+
+    def test_an_unchanged_masked_line_keeps_its_value(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+
+        field.value = field.value + "\n"  # left again, nothing retyped
+
+        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
+
+    def test_adding_a_line_keeps_the_others(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+
+        field.value = field.value + "\nREGION=eu-west-1"
+
+        assert self._held(widget) == {
+            "DB_PASSWORD": self.SECRET,
+            "REGION": "eu-west-1",
+        }
+        assert field.value.splitlines() == [
+            f"DB_PASSWORD={ENVIRONMENT_MASK}",
+            f"REGION={ENVIRONMENT_MASK}",
+        ]
+
+    def test_deleting_a_line_drops_that_variable(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+
+        field.value = f"REGION={ENVIRONMENT_MASK}"
+
+        assert self._held(widget) == {"REGION": "eu-west-1"}
+        field.value = ""
+        assert self._held(widget) == {} and widget._environment == {}
+
+    def test_retyping_a_line_replaces_that_variable_s_value(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+
+        field.value = f"DB_PASSWORD=a-new-one\nREGION={ENVIRONMENT_MASK}"
+
+        assert self._held(widget) == {
+            "DB_PASSWORD": "a-new-one",
+            "REGION": "eu-west-1",
+        }
+        assert "a-new-one" not in _every_state(widget)
+
+    def test_renaming_a_masked_line_keeps_the_value_under_the_new_name(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}\nREGION=eu-west-1")
+
+        field.value = f"DATABASE_PASSWORD={ENVIRONMENT_MASK}\nREGION={ENVIRONMENT_MASK}"
+
+        assert self._held(widget) == {
+            "DATABASE_PASSWORD": self.SECRET,
+            "REGION": "eu-west-1",
+        }
+
+    def test_a_masked_name_that_cannot_be_matched_to_a_value_is_reported(self, capsys):
+        """Two renamed at once: which value is whose cannot be known."""
+        widget, field = self._typed("A=1\nB=2")
+
+        field.value = f"C={ENVIRONMENT_MASK}\nD={ENVIRONMENT_MASK}"
+
+        assert self._held(widget) == {}
+        assert field.value == "C\nD"
+        told = _click(widget, "apply_btn", capsys)
+        assert "C has no value: write C=value" in told and pill(widget) == "invalid"
+
+    def test_typing_into_the_mask_changes_nothing_and_says_so(self):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+
+        field.value = f"DB_PASSWORD={ENVIRONMENT_MASK}x"
+
+        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
+        assert field.value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
+        assert pill(widget) == "check the variables"
+        (said,) = widget._environment_notes
+        assert "DB_PASSWORD" in said and "Nothing was changed" in said
+        # ... and the next clean edit clears the complaint.
+        field.value = f"DB_PASSWORD={ENVIRONMENT_MASK}\nB=2"
+        assert widget._environment_notes == [] and pill(widget) != "check the variables"
+
+    def test_an_empty_value_is_a_value_and_has_nothing_to_mask(self):
+        widget, field = self._typed("EMPTY=")
+
+        assert field.value == "EMPTY=" and self._held(widget) == {"EMPTY": ""}
+
+    def test_a_line_that_is_not_a_variable_is_not_shown_back(self):
+        """It may be a secret pasted on its own; it is removed, and the
+        form says a line was removed without repeating it."""
+        widget, field = self._typed(f"GOOD=1\n{self.SECRET} pasted alone")
+
+        assert field.value == f"GOOD={ENVIRONMENT_MASK}"
+        assert widget._environment_notes == [ENVIRONMENT_LINE_REMOVED]
+        assert self.SECRET not in _every_state(widget)
+        assert pill(widget) == "check the variables"
+        assert "cx-invalid" in field._dom_classes
+        # Said once. The field is consistent again, so nothing is refused.
+        assert widget._validation_problems() == []
+
+    def test_a_value_under_a_bad_name_is_masked_too(self, capsys):
+        widget, field = self._typed(f"export TOKEN={self.SECRET}")
+
+        told = _click(widget, "apply_btn", capsys)
+
+        assert field.value == f"export TOKEN={ENVIRONMENT_MASK}"
+        assert "'export TOKEN'" in told
+        assert self.SECRET not in told + _every_state(widget)
+        # Correcting the name in place keeps the value.
+        field.value = f"TOKEN={ENVIRONMENT_MASK}"
+        assert self._held(widget) == {"TOKEN": self.SECRET}
+
+    def test_values_survive_a_switch_of_profile_and_back_still_masked(self):
+        widget = ModernClustrixWidget()
+        first = widget.widgets["profile_dropdown"].value
+        other = next(
+            name for name in widget.profile_manager.get_profile_names() if name != first
+        )
+        widget.widgets["env_vars"].value = f"DB_PASSWORD={self.SECRET}"
+
+        widget.widgets["profile_dropdown"].value = other
+        assert widget.widgets["env_vars"].value == ""
+        widget.widgets["profile_dropdown"].value = first
+
+        assert widget.widgets["env_vars"].value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
+        assert self._held(widget) == {"DB_PASSWORD": self.SECRET}
+        assert self.SECRET not in _every_state(widget)
+
+    def test_applied_values_reach_the_configuration_and_nothing_else(self, capsys):
+        widget, field = self._typed(f"DB_PASSWORD={self.SECRET}")
+
+        told = _click(widget, "apply_btn", capsys)
+
+        assert pill(widget) == "applied"
+        assert get_config().environment_variables == {"DB_PASSWORD": self.SECRET}
+        assert "environment variables" in told, "said to be session-only"
+        assert self.SECRET not in told + _every_state(widget)
+        assert field.value == f"DB_PASSWORD={ENVIRONMENT_MASK}"
+
+    def test_no_typed_secret_of_any_kind_is_in_any_control_s_state(self, capsys):
+        widget = ModernClustrixWidget()
+        widget.widgets["password"].value = "pw-" + self.SECRET
+        widget.widgets["hf_token"].value = "hf-" + self.SECRET
+        widget.widgets["env_vars"].value = (
+            f"A=env-{self.SECRET}\nnot a line {self.SECRET}"
+        )
+        _click(widget, "apply_btn", capsys)
+        widget.widgets["env_vars"].value = (
+            f"A={ENVIRONMENT_MASK}\nB=again-{self.SECRET}"
+        )
+        _click(widget, "add_profile_btn", capsys)
+
+        assert self.SECRET not in _every_state(widget)
+
+
+class TestAHeldSecretCanBeDropped:
+    """#176 M2. The field is always empty, so emptying it forgot nothing,
+    and Duplicate copied the held password into the new profile."""
+
+    @pytest.mark.parametrize("key", ["password", "hf_token"])
+    def test_forget_is_offered_only_while_something_is_held_and_drops_it(self, key):
+        from clustrix.modern_notebook_widget import SECRET_PLACEHOLDERS
+
+        widget = ModernClustrixWidget()
+        button = widget.widgets[f"{key}_forget"]
+        assert button.layout.display == "none"
+
+        widget.widgets[key].value = "typed-by-the-user"
+        assert button.layout.display == ""
+
+        button.click()
+
+        assert widget.secret(key) == ""
+        assert widget._config_data_from_widgets()[key] is None
+        assert widget.widgets[key].placeholder == SECRET_PLACEHOLDERS[key]
+        assert button.layout.display == "none"
+
+    def test_the_forget_buttons_are_in_the_layout_beside_their_fields(self):
+        widget = ModernClustrixWidget()
+        shown = _in_layout(widget.get_widget())
+
+        for key in ("password", "hf_token"):
+            assert id(widget.widgets[f"{key}_forget"]) in shown
+            assert "cx-forget" in widget.widgets[f"{key}_forget"]._dom_classes
+
+    def test_duplicate_does_not_carry_a_held_password_or_token(self, capsys):
+        widget = ModernClustrixWidget()
+        original = widget.widgets["profile_dropdown"].value
+        widget.widgets["password"].value = "typed-password"
+        widget.widgets["hf_token"].value = "typed-token"
+        widget.widgets["host"].value = "login.example.edu"
+
+        told = _click(widget, "add_profile_btn", capsys)
+
+        copy = widget.widgets["profile_dropdown"].value
+        assert copy != original
+        assert widget.widgets["host"].value == "login.example.edu", "the rest is copied"
+        assert widget.secret("password") == "" and widget.secret("hf_token") == ""
+        saved = widget.profile_manager.profiles[copy]
+        assert saved.password is None and saved.hf_token is None
+        assert "password and token" in told and "not copied" in told
+        assert "typed-password" not in told and "typed-token" not in told
+
+    def test_duplicate_says_nothing_about_secrets_when_none_was_held(self, capsys):
+        widget = ModernClustrixWidget()
+
+        told = _click(widget, "add_profile_btn", capsys)
+
+        assert "not copied" not in told

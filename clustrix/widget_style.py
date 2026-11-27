@@ -313,6 +313,18 @@ STYLESHEET = """
     background-color: var(--cx-err);
     border-color: var(--cx-err);
 }
+/* A secret field and the button that forgets what it holds. The button is
+   only there while something is held, and the field takes the room. */
+.clustrix-widget .cx-secret {
+    display: flex;
+    flex-flow: row nowrap;
+    align-items: flex-end;
+    gap: 8px;
+    min-width: 0;
+    overflow: visible;
+}
+.clustrix-widget .cx-secret > .cx-field { flex: 1 1 auto; min-width: 0; }
+.clustrix-widget .jupyter-button.cx-forget { color: var(--cx-fg-muted); }
 /* Buttons that belong together stay on one line when their row wraps. */
 .clustrix-widget .cx-group {
     display: flex;
