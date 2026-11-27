@@ -131,8 +131,17 @@ was not is marked.
   otherwise it is uploaded once over SSH and linked at the path the code
   uses. Limits: a path found in code must be inside the project; credential
   files are refused; a path computed at run time is not found; it does not
-  apply to `async_submit=True` or HuggingFace Jobs; files a job writes are
-  not brought back; staged data is never deleted automatically.
+  apply to `async_submit=True` (which now warns) or HuggingFace Jobs; files a
+  job writes are not brought back; staged data is never deleted
+  automatically. Inside a staged directory, credential files, `no_data`
+  paths, symbolic links and `.git`/`__pycache__`/`.ipynb_checkpoints` are
+  left out, and each credential left out is named in a warning. The project
+  directory, the working directory, the home directory and anything above
+  them are refused, as constants and as arguments. **Staged copies are
+  read-only**: a job that writes into a staged input gets `PermissionError`,
+  and removing the store by hand needs `chmod -R u+w <remote_work_dir>/data`
+  first. A copy is only used once its upload finished; an upload cut short
+  by a lost connection leaves a `.incoming-*` directory that nothing removes.
 - **Project modules travel with the job**, including a module imported
   inside a function body.
 - **Dependency detection** from the serialized job (`required_packages`).
@@ -169,6 +178,17 @@ was not is marked.
 - **A class sent to a worker by value comes back as the caller's class**, so
   `isinstance` and `except MyError` work on results and remote errors.
 - **`cancel_job` on the `ssh` backend kills the process tree.**
+- **Ctrl-C during a divided loop stops it.** Locally the call returns at
+  once and no worker is left running; on `ssh` and `slurm` every job the
+  loop started is cancelled, including the one being waited for.
+- **Local workers see the caller's current directory and environment
+  variables** as they are at the call, not as they were when the workers
+  started. What iterations write to standard error is shown on standard
+  error, warnings reach the caller's warning filters, and an exception
+  arrives as its own type even when its class cannot be rebuilt from its
+  arguments.
+- **A loop that reads something which cannot be pickled runs in order here**
+  instead of failing.
 - **An SSH connection attempt gives up after `ssh_connect_timeout`** (30 s).
 
 ### Fixed
