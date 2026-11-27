@@ -503,3 +503,102 @@ def test_a_connection_that_cannot_be_made_fails_promptly(backend, override, expe
     assert time.monotonic() - started < 60
     assert expected.lower() in f"{type(caught.value).__name__} {caught.value}".lower()
     assert sys.exc_info()[0] is None
+
+
+# --------------------------------------------------------------------------
+# A loop divided into jobs
+# --------------------------------------------------------------------------
+
+
+def _slurm_jobs_that_ran(job_ids):
+    """What the accounting database says about ``job_ids``: {id: state}."""
+    listing = _remote(
+        f"sacct -X -n -P -o JobID,State -j {','.join(sorted(job_ids))}"
+    ).stdout
+    return dict(line.split("|")[:2] for line in listing.split() if "|" in line)
+
+
+def _wait_for_accounting(job_ids, seconds=30):
+    """slurmdbd records a finished job a moment after the job's result is back."""
+    deadline = time.monotonic() + seconds
+    while True:
+        states = _slurm_jobs_that_ran(job_ids)
+        finished = all(states.get(job_id) == "COMPLETED" for job_id in job_ids)
+        if finished or time.monotonic() > deadline:
+            return states
+        time.sleep(1)
+
+
+def test_a_loop_is_divided_into_jobs_and_returns_the_direct_answer(backend):
+    configure(max_parallel_jobs=4)
+
+    def where(values):
+        out = []
+        for value in values:
+            import os
+
+            out.append((value * value, os.getpid(), os.environ.get("SLURM_JOB_ID")))
+        return out
+
+    values = list(range(6))
+    result = cluster(**RESOURCES)(where)(values)
+
+    assert [v for v, _, _ in result] == [v for v, _, _ in where(values)]
+    pids = {pid for _, pid, _ in result}
+    assert len(pids) == 4 and os.getpid() not in pids, "four chunks, four processes"
+
+    slurm_ids = {job_id for _, _, job_id in result}
+    if backend == "ssh":
+        assert slurm_ids == {None}
+        return
+    assert None not in slurm_ids and len(slurm_ids) == 4, slurm_ids
+    states = _wait_for_accounting(slurm_ids)
+    assert states == dict.fromkeys(
+        slurm_ids, "COMPLETED"
+    ), f"sacct -X does not show four completed jobs: {states}"
+
+
+def test_a_loop_that_cannot_be_divided_is_one_job(backend):
+    @cluster(**RESOURCES)
+    def running_total(values):
+        import os
+
+        total, seen = 0, []
+        for value in values:
+            total = total + value
+            seen.append((total, os.getpid(), os.environ.get("SLURM_JOB_ID")))
+        return seen
+
+    result = running_total([1, 2, 3, 4])
+
+    assert [total for total, _, _ in result] == [1, 3, 6, 10]
+    assert len({pid for _, pid, _ in result}) == 1
+    assert os.getpid() not in {pid for _, pid, _ in result}
+    slurm_ids = {job_id for _, _, job_id in result}
+    assert len(slurm_ids) == 1 and (slurm_ids == {None}) == (backend == "ssh")
+
+
+def test_a_split_found_unsafe_on_the_cluster_falls_back_to_the_direct_answer(
+    backend, caplog
+):
+    """Each chunk reports that it changed a value its iterations share; the
+    loop is then run again whole, in order, as one job."""
+    configure(max_parallel_jobs=2)
+
+    def tallied(values, counter):
+        def bump(amount):
+            counter["total"] += amount
+            return counter["total"]
+
+        out = []
+        for value in values:
+            out.append(bump(value))
+        return out
+
+    expected = tallied([1, 2, 3, 4], {"total": 10})
+
+    with caplog.at_level("WARNING", logger="clustrix.decorator"):
+        result = cluster(**RESOURCES)(tallied)([1, 2, 3, 4], {"total": 10})
+
+    assert result == expected == [11, 13, 16, 20]
+    assert "tallied: not split -- the loop changed" in caplog.text
