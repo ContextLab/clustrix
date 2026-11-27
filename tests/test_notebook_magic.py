@@ -1,851 +1,737 @@
-"""
-Tests for the enhanced notebook magic functionality.
+"""The IPython side of clustrix: ``%load_ext``, ``%clustrix`` and ``%%remote``.
+
+Driven through a real ``IPython.core.interactiveshell.InteractiveShell`` --
+the object a notebook kernel's shell is -- with real configuration files in a
+real temporary directory. Nothing is mocked: the magics are found the way
+IPython finds them, cells are run with ``run_cell``, and what a cell displays
+is read with IPython's own ``capture_output``.
+
+Where a test needs something this process cannot honestly provide -- a shell
+that existed *before* clustrix was imported, or a real kernel -- it starts a
+real interpreter and does it there.
 """
 
 import json
+import os
+import subprocess
 import sys
-import tempfile
-import yaml
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+import textwrap
+import warnings
+
 import pytest
+import yaml
 
-# Import only non-widget functionality at module level
-from clustrix.notebook_magic import (
-    DEFAULT_CONFIGS,
-    detect_config_files,
-    load_config_from_file,
-    validate_ip_address,
-    validate_hostname,
-)
+pytest.importorskip("IPython")
+pytest.importorskip("ipywidgets")
 
-# Import widget conditionally to avoid GitHub Actions import issues
-try:
-    from clustrix.notebook_magic import EnhancedClusterConfigWidget
-except ImportError:
-    # In GitHub Actions, widget import fails - will be handled by fixture
-    EnhancedClusterConfigWidget = None  # type: ignore
+from IPython import get_ipython  # noqa: E402
+from IPython.core.interactiveshell import InteractiveShell  # noqa: E402
+from IPython.utils.capture import capture_output  # noqa: E402
+from traitlets.config import Config  # noqa: E402
 
+import clustrix  # noqa: E402
+from clustrix import configure, get_config  # noqa: E402
+from clustrix import notebook_magic, notebook_magic_fallback  # noqa: E402
+from clustrix.config import ClusterConfig  # noqa: E402
+from clustrix.profile_manager import ProfileManager  # noqa: E402
 
-class TestEnhancedDefaultConfigs:
-    """Test enhanced default configurations."""
-
-    def test_default_configs_structure(self):
-        """Test that default configs have required structure."""
-        assert isinstance(DEFAULT_CONFIGS, dict)
-        assert len(DEFAULT_CONFIGS) >= 2  # local and local_multicore
-        for config_name, config in DEFAULT_CONFIGS.items():
-            assert isinstance(config, dict)
-            assert "cluster_type" in config
-            # Note: 'name' and 'description' fields were removed for ClusterConfig compatibility
-            # Basic configs should have these core fields
-            if config.get("cluster_type") == "local":
-                assert "default_cores" in config
-                assert "default_memory" in config
-
-    def test_default_configs_values(self):
-        """Test that default configs have reasonable values."""
-        for config_name, config in DEFAULT_CONFIGS.items():
-            # Check cores are integers (can be -1 for all cores)
-            if "default_cores" in config:
-                assert isinstance(config["default_cores"], int)
-                assert config["default_cores"] == -1 or config["default_cores"] > 0
-            # Check memory format
-            if "default_memory" in config:
-                assert isinstance(config["default_memory"], str)
-                assert (
-                    "GB" in config["default_memory"] or "MB" in config["default_memory"]
-                )
-
-    def test_local_configs_present(self):
-        """Test that local configurations are present."""
-        assert "Local Single-core" in DEFAULT_CONFIGS
-        assert "Local Multi-core" in DEFAULT_CONFIGS
-        assert DEFAULT_CONFIGS["Local Single-core"]["cluster_type"] == "local"
-        assert DEFAULT_CONFIGS["Local Multi-core"]["cluster_type"] == "local"
-        assert DEFAULT_CONFIGS["Local Multi-core"]["default_cores"] == -1
-
-
-class TestConfigFileDetection:
-    """Test configuration file detection functionality."""
-
-    def test_detect_config_files_empty_dirs(self):
-        """Test config file detection with no config files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            files = detect_config_files([tmpdir])
-            assert files == []
-
-    def test_detect_config_files_with_configs(self):
-        """Test config file detection with config files present."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            # Create test config files
-            (tmpdir_path / "clustrix.yml").touch()
-            (tmpdir_path / "config.yaml").touch()
-            (tmpdir_path / "other.txt").touch()  # Should be ignored
-            files = detect_config_files([tmpdir])
-            assert len(files) == 2
-            file_names = [f.name for f in files]
-            assert "clustrix.yml" in file_names
-            assert "config.yaml" in file_names
-            assert "other.txt" not in file_names
-
-    def test_load_config_from_yaml_file(self):
-        """Test loading configuration from YAML file."""
-        test_config = {
-            "test_cluster": {
-                "cluster_type": "ssh",
-                "cluster_host": "test.example.com",
-                "username": "testuser",
-                "default_cores": 8,
-            }
-        }
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False) as f:
-            yaml.dump(test_config, f)
-            temp_path = Path(f.name)
-        try:
-            loaded_config = load_config_from_file(temp_path)
-            assert loaded_config == test_config
-        finally:
-            temp_path.unlink()
-
-    def test_load_config_from_json_file(self):
-        """Test loading configuration from JSON file."""
-        test_config = {
-            "test_cluster": {
-                "cluster_type": "slurm",
-                "cluster_host": "hpc.example.com",
-                "default_cores": 4,
-            }
-        }
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump(test_config, f)
-            temp_path = Path(f.name)
-        try:
-            loaded_config = load_config_from_file(temp_path)
-            assert loaded_config == test_config
-        finally:
-            temp_path.unlink()
-
-
-class TestValidationFunctions:
-    """Test input validation functions."""
-
-    def test_validate_ip_address(self):
-        """Test IP address validation."""
-        # Valid IPv4 addresses
-        assert validate_ip_address("192.168.1.1") is True
-        assert validate_ip_address("10.0.0.1") is True
-        assert validate_ip_address("127.0.0.1") is True
-        # Invalid IP addresses
-        assert validate_ip_address("256.1.1.1") is False
-        assert validate_ip_address("192.168.1") is False
-        assert validate_ip_address("not.an.ip") is False
-        assert validate_ip_address("") is False
-
-    def test_validate_hostname(self):
-        """Test hostname validation."""
-        # Valid hostnames
-        assert validate_hostname("example.com") is True
-        assert validate_hostname("subdomain.example.com") is True
-        assert validate_hostname("host-name") is True
-        assert validate_hostname("host123") is True
-        # Invalid hostnames
-        assert validate_hostname("") is False
-        assert validate_hostname("host..com") is False
-        assert validate_hostname("-hostname") is False
-        assert validate_hostname("hostname-") is False
-        assert validate_hostname("a" * 256) is False  # Too long
+WIDGET_VIEW = "application/vnd.jupyter.widget-view+json"
 
 
 @pytest.fixture
-def mock_ipython_environment():
-    """Mock IPython environment for testing."""
-    # Save current module state and global variable
-    original_module = sys.modules.get("clustrix.notebook_magic")
-    global EnhancedClusterConfigWidget
-    original_widget_class = EnhancedClusterConfigWidget
+def shell():
+    """A real, fresh IPython shell that is the process's current one.
 
+    The singleton rather than a bare ``InteractiveShell()``, because that is
+    what ``get_ipython()`` and ``capture_output`` look for -- and it is
+    cleared afterwards so the next test starts without one, exactly as the
+    rest of the suite expects. History is off: it would open a SQLite file
+    and a writer thread for a shell that lives a few milliseconds.
+    """
+    assert get_ipython() is None, "a previous test left an IPython shell behind"
+    config = Config()
+    config.HistoryManager.enabled = False
+    ip = InteractiveShell.instance(config=config)
     try:
-        # Clear the module to force re-import with mocks
-        if "clustrix.notebook_magic" in sys.modules:
-            del sys.modules["clustrix.notebook_magic"]
-
-        # Mock the IPython/ipywidgets modules
-        with patch.dict(
-            "sys.modules",
-            {
-                "IPython": MagicMock(),
-                "IPython.core": MagicMock(),
-                "IPython.core.magic": MagicMock(),
-                "IPython.display": MagicMock(),
-                "ipywidgets": MagicMock(),
-            },
-        ):
-            # Re-import the module with mocked dependencies
-            import clustrix.notebook_magic
-
-            # Mock get_ipython
-            with patch("clustrix.notebook_magic.get_ipython") as mock_get_ipython:
-                mock_ipython = MagicMock()
-                mock_ipython.kernel = True
-                mock_ipython.register_magic_function = MagicMock()
-                mock_get_ipython.return_value = mock_ipython
-
-                # Make the widget class available globally
-                EnhancedClusterConfigWidget = (
-                    clustrix.notebook_magic.EnhancedClusterConfigWidget
-                )
-
-                yield mock_ipython
+        yield ip
     finally:
-        # Restore original module and global variable
-        if original_module:
-            sys.modules["clustrix.notebook_magic"] = original_module
-        EnhancedClusterConfigWidget = original_widget_class
+        InteractiveShell.clear_instance()
 
 
-class TestEnhancedClusterConfigWidget:
-    """Test the enhanced cluster configuration widget."""
-
-    def test_widget_initialization(self, mock_ipython_environment):
-        """Test widget initialization with defaults."""
-        widget = EnhancedClusterConfigWidget()
-        # Check that default configs are loaded
-        assert len(widget.configs) >= len(DEFAULT_CONFIGS)
-        assert "Local Single-core" in widget.configs
-        assert "Local Multi-core" in widget.configs
-        # Check initial state
-        assert widget.current_config_name is not None
-        assert widget.auto_display is False
-
-    def test_widget_auto_display_flag(self, mock_ipython_environment):
-        """Test widget with auto_display flag."""
-        widget = EnhancedClusterConfigWidget(auto_display=True)
-        assert widget.auto_display is True
-
-    def test_widget_without_ipython(self):
-        """Test widget creation fails without IPython."""
-        # Clear the module cache to ensure clean import
-        import sys
-
-        import clustrix
-
-        # The widget class lives in clustrix.notebook_magic_widget and is only
-        # re-exported by clustrix.notebook_magic, so both modules have to be
-        # evicted from the cache -- otherwise the facade re-imports and hands
-        # back the already-imported class that captured IPYTHON_AVAILABLE=True.
-        cached_modules = {
-            name: sys.modules[name]
-            for name in ("clustrix.notebook_magic", "clustrix.notebook_magic_widget")
-            if name in sys.modules
-        }
-        try:
-            for name in cached_modules:
-                del sys.modules[name]
-
-            with patch.dict("sys.modules", {"IPython": None, "ipywidgets": None}):
-                from clustrix.notebook_magic import EnhancedClusterConfigWidget
-
-                with pytest.raises(
-                    ImportError, match="IPython and ipywidgets are required"
-                ):
-                    EnhancedClusterConfigWidget()
-        finally:
-            # Restore the original modules
-            for name, module in cached_modules.items():
-                sys.modules[name] = module
-                setattr(clustrix, name.rsplit(".", 1)[1], module)
-
-    def test_config_file_loading(self, mock_ipython_environment):
-        """Test configuration loading from files."""
-        test_configs = {
-            "remote_cluster": {
-                "cluster_type": "ssh",
-                "cluster_host": "remote.example.com",
-                "username": "testuser",
-                "default_cores": 16,
-            }
-        }
-        with tempfile.TemporaryDirectory() as tmpdir:
-            config_file = Path(tmpdir) / "clustrix.yml"
-            with open(config_file, "w") as f:
-                yaml.dump(test_configs, f)
-            with patch(
-                "clustrix.notebook_magic_widget.detect_config_files",
-                return_value=[config_file],
-            ):
-                # Use the widget class from the mocked module
-                import clustrix.notebook_magic
-
-                widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-                # Check that file config was loaded
-                assert "remote_cluster" in widget.configs
-                assert (
-                    widget.configs["remote_cluster"]["cluster_host"]
-                    == "remote.example.com"
-                )
-                assert widget.config_file_map["remote_cluster"] == config_file
-
-    def test_save_config_from_widgets(self, mock_ipython_environment):
-        """Test saving configuration from widget values."""
-        widget = EnhancedClusterConfigWidget()
-
-        # Mock the widget fields directly to avoid complex mock interactions
-        widget.config_name = MagicMock()
-        widget.config_name.value = "Test Config"
-        widget.cluster_type = MagicMock()
-        widget.cluster_type.value = "ssh"
-        widget.host_field = MagicMock()
-        widget.host_field.value = "test.example.com"
-        widget.username_field = MagicMock()
-        widget.username_field.value = "testuser"
-        widget.cores_field = MagicMock()
-        widget.cores_field.value = 8
-        widget.memory_field = MagicMock()
-        widget.memory_field.value = "32GB"
-        widget.package_manager = MagicMock()
-        widget.package_manager.value = "conda"
-        widget.time_field = MagicMock()
-        widget.time_field.value = "01:00:00"
-        widget.python_version = MagicMock()
-        widget.python_version.value = "python"
-        widget.env_vars = MagicMock()
-        widget.env_vars.value = ""
-        widget.module_loads_field.value = ""
-        widget.pre_exec_commands = MagicMock()
-        widget.pre_exec_commands.value = ""
-        widget.port_field = MagicMock()
-        widget.port_field.value = 22
-        widget.work_dir_field = MagicMock()
-        widget.work_dir_field.value = "/tmp/clustrix"
-        widget.ssh_key_field = MagicMock()
-        widget.ssh_key_field.value = ""
-
-        # Test save functionality
-        config = widget._save_config_from_widgets()
-        assert config["name"] == "Test Config"
-        assert config["cluster_type"] == "ssh"
-        assert config["cluster_host"] == "test.example.com"
-        assert config["username"] == "testuser"
-        assert config["default_cores"] == 8
-        assert config["default_memory"] == "32GB"
-        assert config["package_manager"] == "conda"
-
-    def test_load_config_to_widgets(self, mock_ipython_environment):
-        """Test loading configuration into widgets."""
-        widget = EnhancedClusterConfigWidget()
-
-        # Mock the widget fields to test the loading functionality
-        widget.config_name = MagicMock()
-        widget.cluster_type = MagicMock()
-        widget.host_field = MagicMock()
-        widget.port_field = MagicMock()
-        widget.cores_field = MagicMock()
-        widget.memory_field = MagicMock()
-        widget.package_manager = MagicMock()
-        widget.username_field = MagicMock()
-        widget.ssh_key_field = MagicMock()
-        widget.work_dir_field = MagicMock()
-        widget.time_field = MagicMock()
-        widget.env_vars_field = MagicMock()
-
-        test_config = {
-            "name": "Test Load Config",
-            "cluster_type": "slurm",
-            "cluster_host": "hpc.example.com",
-            "cluster_port": 443,
-            "default_cores": 12,
-            "default_memory": "64GB",
-            # ``queue`` until #165: not a ClusterConfig field, so the value
-            # went into the profile and no further. #158 removed its last
-            # consumer; ``default_partition`` is what SLURM actually reads.
-            "default_partition": "production",
-            "package_manager": "uv",
-        }
-        # Add test config and load it
-        widget.configs["test_load"] = test_config
-        widget._load_config_to_widgets("test_load")
-        # Check that widget values were updated
-        # Widget uses "name" field from config if present, otherwise falls back to config key
-        assert (
-            widget.config_name.value == "Test Load Config"
-        )  # Uses the "name" field from test_config
-        assert widget.cluster_type.value == "slurm"
-        assert widget.host_field.value == "hpc.example.com"
-        assert widget.port_field.value == 443
-        assert widget.cores_field.value == 12
-        assert widget.memory_field.value == "64GB"
-        assert widget.partition_field.value == "production"
-        assert widget.package_manager.value == "uv"
-
-    def test_cluster_type_field_visibility(self, mock_ipython_environment):
-        """Test field visibility changes based on cluster type."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        # Test local cluster type (should hide remote fields)
-        widget._on_cluster_type_change({"new": "local"})
-        # Check that layout.display attribute is properly set
-        # Note: In mock environment, this tests the logic, not actual UI behavior
-        # Test SSH cluster type (should show SSH fields)
-        widget._on_cluster_type_change({"new": "ssh"})
-        # In a real environment, fields would be shown/hidden
-        # Test HuggingFace cluster type (should show HF Jobs fields)
-        widget._on_cluster_type_change({"new": "huggingface"})
-        # In a real environment, different fields would be shown/hidden
-        # The key test is that the method executes without error
-        assert True  # Method executed successfully
-
-    def test_host_validation(self, mock_ipython_environment):
-        """Test host field validation."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        # Test valid hostname
-        widget._validate_host({"new": "example.com"})
-        assert widget.host_field.layout.border == ""
-        # Test valid IP
-        widget._validate_host({"new": "192.168.1.1"})
-        assert widget.host_field.layout.border == ""
-        # Test invalid input
-        widget._validate_host({"new": "invalid..hostname"})
-        assert widget.host_field.layout.border == "2px solid red"
-
-    def test_environment_variable_parsing(self, mock_ipython_environment):
-        """Test environment variable parsing from textarea."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        # Set environment variables (the textarea takes a JSON object now)
-        expected_env = {"KEY1": "value1", "KEY2": "value2", "KEY3": "value with spaces"}
-        widget.env_vars_field.value = json.dumps(expected_env)
-        config = widget._save_config_from_widgets()
-        assert config["environment_variables"] == expected_env
-
-    def test_module_loads_parsing(self, mock_ipython_environment):
-        """Test module loads parsing from textarea."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        # KNOWN FAILURE (shipped-code regression, not a stale test): commit
-        # 46ad192 dropped the module-loads textarea from the widget, so
-        # config["module_loads"] is now silently discarded on save even though
-        # ClusterConfig supports it and the job scripts emit "module load".
-        # Set module loads
-        widget.module_loads_field.value = "gcc/9.3.0\npython/3.11\ncuda/11.8"
-        config = widget._save_config_from_widgets()
-        expected_modules = ["gcc/9.3.0", "python/3.11", "cuda/11.8"]
-        assert config["module_loads"] == expected_modules
-
-    def test_add_new_config(self, mock_ipython_environment):
-        """Test adding a new configuration."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
-
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        initial_count = len(widget.configs)
-        # Mock status output
-        widget.status_output = MagicMock()
-        widget.status_output.clear_output = MagicMock()
-        # Add new config
-        widget._on_add_config(None)
-        # Check that config was added
-        assert len(widget.configs) == initial_count + 1
-        assert "New Configuration" in widget.configs
+@pytest.fixture
+def loaded(shell):
+    """The shell after ``%load_ext clustrix``."""
+    shell.run_line_magic("load_ext", "clustrix")
+    return shell
 
 
-class TestAutoDisplayFunctionality:
-    """Test automatic widget display functionality."""
+def _run(shell, cell):
+    """Run a cell; return (result, captured). Fails loudly if the cell raised."""
+    with capture_output() as captured:
+        result = shell.run_cell(cell)
+    assert (
+        result.success
+    ), f"the cell raised: {result.error_in_exec!r}\n{captured.stdout}"
+    return result, captured
 
-    def test_display_config_widget_function(self, mock_ipython_environment):
-        """Test display_config_widget function."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
 
-        # Test that display_config_widget function runs without error
-        # It should only use the modern widget (no fallback)
-        try:
-            result = clustrix.notebook_magic.display_config_widget(auto_display=True)
-            # Function should not raise any exceptions and should return the modern widget
-            assert result is not None
-        except Exception as e:
-            pytest.fail(f"display_config_widget raised an exception: {e}")
+def _widgets_displayed(captured):
+    return [output for output in captured.outputs if WIDGET_VIEW in output.data]
 
-    def test_auto_display_on_import_notebook(
-        self, mock_ipython_environment, monkeypatch
+
+# --------------------------------------------------------------------------
+# %load_ext clustrix
+# --------------------------------------------------------------------------
+
+
+class TestLoadingTheExtension:
+    def test_the_magics_do_not_exist_until_it_is_loaded(self, shell):
+        """The control for everything below."""
+        assert "clustrix" not in shell.magics_manager.magics["line"]
+        assert "remote" not in shell.magics_manager.magics["cell"]
+        assert "cluster" not in shell.user_ns
+
+    def test_load_ext_registers_the_three_magics(self, shell):
+        """``clustrix`` was imported before this shell existed, which is the
+        order that used to answer "The clustrix module is not an IPython
+        extension"."""
+        with capture_output() as captured:
+            shell.run_line_magic("load_ext", "clustrix")
+
+        assert "not an IPython extension" not in captured.stdout
+        assert "clustrix" in shell.magics_manager.magics["line"]
+        assert "remote" in shell.magics_manager.magics["cell"]
+        assert "clusterfy" in shell.magics_manager.magics["cell"]
+        assert "clustrix" in shell.extension_manager.loaded
+
+    def test_load_ext_says_and_shows_nothing(self, shell):
+        """Loading is not a request to see the widget."""
+        with capture_output() as captured:
+            shell.run_line_magic("load_ext", "clustrix")
+
+        assert captured.stdout == ""
+        assert captured.outputs == []
+
+    def test_it_puts_the_three_entry_points_in_the_notebook_namespace(self, loaded):
+        """So the notebook can *use* clustrix, not merely type its magics."""
+        assert loaded.user_ns["cluster"] is clustrix.cluster
+        assert loaded.user_ns["configure"] is clustrix.configure
+        assert loaded.user_ns["get_config"] is clustrix.get_config
+
+        _run(
+            loaded,
+            "configure(default_cores=9)\n"
+            "@cluster(cores=1)\n"
+            "def triple(x):\n"
+            "    return 3 * x\n"
+            "answer = triple(14)\n"
+            "cores = get_config().default_cores\n",
+        )
+        assert loaded.user_ns["answer"] == 42
+        assert loaded.user_ns["cores"] == 9
+
+    def test_it_does_not_overwrite_a_name_the_notebook_already_uses(self, shell):
+        shell.user_ns["cluster"] = "my own variable"
+
+        shell.run_line_magic("load_ext", "clustrix")
+
+        assert shell.user_ns["cluster"] == "my own variable"
+        assert shell.user_ns["configure"] is clustrix.configure
+
+    def test_loading_twice_is_harmless(self, loaded):
+        with capture_output() as captured:
+            loaded.run_line_magic("load_ext", "clustrix")
+            loaded.run_line_magic("reload_ext", "clustrix")
+
+        assert "Traceback" not in captured.stdout
+        assert "clustrix" in loaded.magics_manager.magics["line"]
+        result, _ = _run(loaded, "%clustrix status")
+        assert result.result is get_config()
+
+    def test_the_extension_hook_is_importable_from_every_documented_place(self):
+        assert clustrix.load_ipython_extension is notebook_magic.load_ipython_extension
+        assert sorted(notebook_magic.__all__) == [
+            "ClusterfyMagics",
+            "IPYTHON_AVAILABLE",
+            "auto_display_on_import",
+            "display_config_widget",
+            "load_ipython_extension",
+        ]
+        assert notebook_magic.IPYTHON_AVAILABLE is True
+
+
+# --------------------------------------------------------------------------
+# %clustrix
+# --------------------------------------------------------------------------
+
+
+class TestStatus:
+    @pytest.mark.parametrize("line", ["status", "config", ""])
+    def test_it_prints_and_returns_the_live_configuration(self, loaded, line):
+        configure(
+            cluster_type="slurm",
+            cluster_host="hpc.example.edu",
+            username="researcher",
+            default_cores=12,
+            default_memory="48GB",
+            default_time="03:00:00",
+            remote_work_dir="/scratch/researcher",
+        )
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", line)
+
+        assert returned is get_config()
+        assert captured.stdout.splitlines() == [
+            "cluster_type : slurm",
+            "host         : hpc.example.edu",
+            "username     : researcher",
+            "resources    : 12 cores, 48GB, 03:00:00",
+            "work dir     : /scratch/researcher",
+        ]
+
+    def test_no_host_line_is_printed_when_there_is_no_host(self, loaded):
+        configure(cluster_type="local", cluster_host=None, username=None)
+
+        with capture_output() as captured:
+            loaded.run_line_magic("clustrix", "status")
+
+        assert "cluster_type : local" in captured.stdout
+        assert "host" not in captured.stdout
+        assert "username" not in captured.stdout
+
+    def test_it_follows_a_change_made_after_the_extension_was_loaded(self, loaded):
+        with capture_output() as first:
+            loaded.run_line_magic("clustrix", "status")
+        configure(default_cores=64)
+        with capture_output() as second:
+            loaded.run_line_magic("clustrix", "status")
+
+        assert "64 cores" not in first.stdout
+        assert "64 cores" in second.stdout
+
+    def test_a_secret_is_not_echoed_as_the_cells_result(self, loaded):
+        """The magic returns the configuration, so a notebook shows it as the
+        cell's ``Out[]`` -- and a notebook's outputs are saved to disk."""
+        configure(
+            cluster_type="ssh",
+            cluster_host="h.example.edu",
+            username="me",
+            password="typed-password-value",
+            hf_token="typed-token-value",
+        )
+
+        _, captured = _run(loaded, "%clustrix status")
+
+        assert "ClusterConfig(" in captured.stdout, "the result was not shown at all"
+        assert "typed-password-value" not in captured.stdout
+        assert "typed-token-value" not in captured.stdout
+
+    def test_an_unknown_command_is_refused_and_lists_the_real_ones(self, loaded):
+        before = ClusterConfig(**_fields(get_config()))
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", "frobnicate now")
+
+        assert returned is None
+        assert "Unknown command 'frobnicate'" in captured.stdout
+        assert "status | config | config <profile> | load <file>" in captured.stdout
+        assert _fields(get_config()) == _fields(before)
+
+
+def _fields(config):
+    from dataclasses import asdict
+
+    return asdict(config)
+
+
+class TestApplyingASavedProfile:
+    def test_config_with_a_name_makes_that_profile_the_live_configuration(self, loaded):
+        manager = ProfileManager()
+        manager.save_profile(
+            "Discovery",
+            ClusterConfig(
+                cluster_type="slurm",
+                cluster_host="discovery.example.edu",
+                username="researcher",
+                default_cores=16,
+                default_partition="gpu",
+            ),
+        )
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", "config Discovery")
+
+        assert "Applied profile 'Discovery'" in captured.stdout
+        live = get_config()
+        assert returned is live
+        assert (live.cluster_type, live.cluster_host, live.username) == (
+            "slurm",
+            "discovery.example.edu",
+            "researcher",
+        )
+        assert live.default_cores == 16
+        # A profile is the whole configuration, not just what a form shows.
+        assert live.default_partition == "gpu"
+
+    def test_a_profile_name_may_contain_spaces(self, loaded):
+        with capture_output() as captured:
+            loaded.run_line_magic("clustrix", "config Local all cores")
+
+        assert "Applied profile 'Local all cores'" in captured.stdout
+        assert get_config().cluster_type == "local"
+        assert get_config().default_cores == -1
+
+    def test_it_also_becomes_the_active_profile_in_the_store(self, loaded):
+        """ "Make a saved profile active": the widget opened next shows it."""
+        assert ProfileManager().active_profile == "Local single-core"
+
+        loaded.run_line_magic("clustrix", "config SLURM cluster")
+
+        assert ProfileManager().active_profile == "SLURM cluster"
+
+    def test_the_profile_replaces_the_configuration_rather_than_merging(self, loaded):
+        """Dropping a profile's unset fields left the previous host live, so
+        a local profile applied after a cluster one still ran on the cluster."""
+        configure(
+            cluster_type="slurm",
+            cluster_host="hpc.example.edu",
+            username="researcher",
+            key_file="~/.ssh/id_hpc",
+        )
+
+        loaded.run_line_magic("clustrix", "config Local single-core")
+
+        live = get_config()
+        assert live.cluster_type == "local"
+        assert live.cluster_host is None
+        assert live.username is None
+        assert live.key_file is None
+
+    def test_a_function_runs_according_to_the_profile_just_applied(self, loaded):
+        configure(cluster_type="ssh", cluster_host="no-such-host.invalid")
+        _run(
+            loaded,
+            "import os\n"
+            "@cluster(cores=1)\n"
+            "def here():\n"
+            "    return os.getpid()\n",
+        )
+
+        _run(loaded, "%clustrix config Local single-core\nran_in = here()\n")
+
+        assert loaded.user_ns["ran_in"] == os.getpid()
+
+    def test_an_unknown_profile_is_refused_and_the_real_ones_are_listed(self, loaded):
+        before = _fields(get_config())
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", "config No such profile")
+
+        assert returned is None
+        assert "No profile named 'No such profile'" in captured.stdout
+        for name in ProfileManager().get_profile_names():
+            assert name in captured.stdout
+        assert _fields(get_config()) == before
+        assert ProfileManager().active_profile == "Local single-core"
+
+
+class TestLoadingAFile:
+    SETTINGS = {
+        "cluster_type": "slurm",
+        "cluster_host": "from-file.example.edu",
+        "username": "researcher",
+        "default_cores": 24,
+        "default_memory": "96GB",
+        "module_loads": ["python/3.11"],
+    }
+
+    def _assert_loaded(self):
+        live = get_config()
+        for name, value in self.SETTINGS.items():
+            assert getattr(live, name) == value, name
+
+    def test_a_yaml_file_becomes_the_live_configuration(self, loaded, tmp_path):
+        path = tmp_path / "cluster.yml"
+        path.write_text(yaml.safe_dump(self.SETTINGS), encoding="utf-8")
+
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", f"load {path}")
+
+        assert f"Loaded configuration from {path}" in captured.stdout
+        assert returned is get_config()
+        self._assert_loaded()
+
+    def test_a_json_file_becomes_the_live_configuration(self, loaded, tmp_path):
+        path = tmp_path / "cluster.json"
+        path.write_text(json.dumps(self.SETTINGS), encoding="utf-8")
+
+        loaded.run_line_magic("clustrix", f"load {path}")
+
+        self._assert_loaded()
+
+    def test_a_relative_path_is_relative_to_the_working_directory(
+        self, loaded, tmp_path, monkeypatch
     ):
-        """Test auto display when imported in notebook."""
-        # Use functions from the mocked module
-        import clustrix.notebook_magic
-        from clustrix.notebook_magic_core import AUTO_WIDGET_ENV_VAR
+        (tmp_path / "here.yml").write_text(
+            yaml.safe_dump(self.SETTINGS), encoding="utf-8"
+        )
+        monkeypatch.chdir(tmp_path)
 
-        # Display-on-import is opt-in now, so the caller has to ask for it.
-        monkeypatch.setenv(AUTO_WIDGET_ENV_VAR, "1")
+        loaded.run_line_magic("clustrix", "load here.yml")
 
-        # auto_display_on_import lives in notebook_magic_core, so the names it
-        # calls have to be patched there rather than on the re-exporting facade.
-        with patch(
-            "clustrix.notebook_magic_core.get_ipython",
-            return_value=mock_ipython_environment,
-        ):
-            with patch(
-                "clustrix.notebook_magic_core.display_config_widget"
-            ) as mock_display:
-                clustrix.notebook_magic.auto_display_on_import()
-                mock_display.assert_called_once_with(auto_display=True)
+        self._assert_loaded()
 
-    def test_auto_display_no_ipython(self, monkeypatch):
-        """Test auto display when IPython not available."""
-        # Import functions from the module
-        from clustrix.notebook_magic import auto_display_on_import
-        from clustrix.notebook_magic_core import AUTO_WIDGET_ENV_VAR
+    def test_a_path_with_a_space_in_it_is_one_path(self, loaded, tmp_path):
+        directory = tmp_path / "my project"
+        directory.mkdir()
+        path = directory / "cluster.yml"
+        path.write_text(yaml.safe_dump(self.SETTINGS), encoding="utf-8")
 
-        # Opt in, so the only thing that can stop the display is the missing
-        # IPython -- otherwise this would pass without exercising anything.
-        monkeypatch.setenv(AUTO_WIDGET_ENV_VAR, "1")
+        loaded.run_line_magic("clustrix", f"load {path}")
 
-        with patch("clustrix.notebook_magic_core.IPYTHON_AVAILABLE", False):
-            with patch(
-                "clustrix.notebook_magic_core.display_config_widget"
-            ) as mock_display:
-                auto_display_on_import()
-                mock_display.assert_not_called()
+        self._assert_loaded()
 
+    def test_a_file_written_by_save_to_file_loads_back(self, loaded, tmp_path):
+        """The round trip the two halves of the library promise each other."""
+        path = tmp_path / "saved.yml"
+        ClusterConfig(**self.SETTINGS).save_to_file(str(path))
+        configure(cluster_type="local", cluster_host=None, default_cores=1)
 
-class TestMagicCommands:
-    """Test IPython magic command functionality."""
+        loaded.run_line_magic("clustrix", f"load {path}")
 
-    def test_load_ipython_extension(self, mock_ipython_environment):
-        """Test loading IPython extension."""
-        # Import functions from the mocked module
-        import clustrix.notebook_magic
+        self._assert_loaded()
 
-        mock_ipython = mock_ipython_environment
-        # Mock the ClusterfyMagics class to avoid trait validation issues.
-        # load_ipython_extension resolves the class in notebook_magic_core, so
-        # that is where it has to be patched.
-        with patch("clustrix.notebook_magic_core.ClusterfyMagics") as MockMagics:
-            mock_magic_instance = MagicMock()
-            MockMagics.return_value = mock_magic_instance
-            clustrix.notebook_magic.load_ipython_extension(mock_ipython)
-            MockMagics.assert_called_once_with(mock_ipython)
-            # %%remote plus the deprecated %%clusterfy alias
-            registered = [
-                call.args[2]
-                for call in mock_ipython.register_magic_function.call_args_list
-            ]
-            # %clustrix is a line magic (status / config / config <profile> /
-        # load <file>); %%remote opens the widget; %%clusterfy is its
-        # deprecated alias.
-        assert registered == ["clustrix", "remote", "clusterfy"]
-        # Note: No print message expected since widget displays automatically
+    def test_load_without_a_path_says_how_to_use_it(self, loaded):
+        before = _fields(get_config())
 
-    def test_clusterfy_magic_without_ipython(self):
-        """Test magic command fails gracefully without IPython."""
-        # Import the magic class directly - avoid module reloading issues
-        from clustrix.notebook_magic import ClusterfyMagics
+        with capture_output() as captured:
+            returned = loaded.run_line_magic("clustrix", "load")
 
-        # Test with thorough patching to override any existing state
-        with (
-            patch("clustrix.notebook_magic.IPYTHON_AVAILABLE", False),
-            patch("builtins.print") as mock_print,
-            patch("clustrix.notebook_magic.display_config_widget") as mock_display,
-            patch("clustrix.notebook_magic.get_ipython", return_value=None),
-        ):
-            magic = ClusterfyMagics()
-            magic.shell = MagicMock()
+        assert returned is None
+        assert "Usage: %clustrix load <path-to-config-file>" in captured.stdout
+        assert _fields(get_config()) == before
 
-            # Test that the clusterfy method exists and is callable
-            assert hasattr(magic, "clusterfy")
-            assert callable(magic.clusterfy)
+    def test_a_missing_file_is_an_error_and_changes_nothing(self, loaded, tmp_path):
+        """The user named the file, so not finding it is not "no settings"."""
+        configure(default_cores=5)
+        before = _fields(get_config())
+        missing = tmp_path / "nowhere.yml"
 
-            # Call the magic method
-            result = magic.clusterfy("", "")
+        with pytest.raises(FileNotFoundError, match="nowhere.yml"):
+            loaded.run_line_magic("clustrix", f"load {missing}")
 
-            # Collect all print messages
-            print_messages = []
-            if mock_print.call_args_list:
-                for call in mock_print.call_args_list:
-                    if call[0]:  # Ensure there are positional arguments
-                        print_messages.append(str(call[0][0]))
+        assert _fields(get_config()) == before
 
-            # Check for expected behavior patterns (robust for different environments)
-            has_error_messages = any(
-                any(
-                    keyword in msg.lower()
-                    for keyword in ["ipython", "widget", "magic", "requires"]
-                )
-                for msg in print_messages
-            )
-            display_not_called = not mock_display.called
-            returned_none_or_empty = result is None or result == ""
+    def test_a_malformed_file_is_an_error_and_changes_nothing(self, loaded, tmp_path):
+        configure(default_cores=5)
+        before = _fields(get_config())
+        bad = tmp_path / "bad.yml"
+        bad.write_text("cluster_type: [unterminated", encoding="utf-8")
 
-            # Success criteria: graceful handling of missing IPython
-            # This can manifest as error messages, avoiding widget display, or returning None
-            success = has_error_messages or display_not_called or returned_none_or_empty
+        with pytest.raises(yaml.YAMLError):
+            loaded.run_line_magic("clustrix", f"load {bad}")
 
-            # For CI debugging - provide comprehensive info if test fails
-            if not success:
-                debug_info = {
-                    "print_messages": print_messages,
-                    "has_error_messages": has_error_messages,
-                    "display_not_called": display_not_called,
-                    "result": result,
-                    "python_version": sys.version_info[:2],
-                    "mock_display_call_count": mock_display.call_count,
-                    "mock_print_call_count": mock_print.call_count,
-                }
-                print(f"DEBUG: Test failure details: {debug_info}")
+        assert _fields(get_config()) == before
 
-            assert (
-                success
-            ), "Magic command should handle missing IPython gracefully. Check debug output above."
+    def test_a_file_naming_a_removed_backend_says_which_and_changes_nothing(
+        self, loaded, tmp_path
+    ):
+        before = _fields(get_config())
+        old = tmp_path / "old.yml"
+        old.write_text("cluster_type: pbs\ncluster_host: h.example.edu\n")
+
+        with pytest.raises(ValueError, match="#140"):
+            loaded.run_line_magic("clustrix", f"load {old}")
+
+        assert _fields(get_config()) == before
 
 
-class TestConfigurationSaveLoad:
-    """Test configuration save/load functionality integration."""
+# --------------------------------------------------------------------------
+# %%remote and its deprecated alias
+# --------------------------------------------------------------------------
 
-    def test_save_load_cycle(self, mock_ipython_environment, monkeypatch):
-        """Test complete save and load cycle."""
-        # Use the widget class from the mocked module
-        import clustrix.notebook_magic
 
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-        # Create a test configuration
-        test_config = {
-            "name": "Integration Test Config",
-            "cluster_type": "slurm",
-            "cluster_host": "hpc.university.edu",
-            "username": "researcher",
-            "default_cores": 32,
-            "default_memory": "128GB",
-            "package_manager": "conda",
-        }
-        # Add config to widget. The widget keys configs by their display name
-        # (typing in the name field renames the key), so use that as the key.
-        widget.configs["Integration Test Config"] = test_config
-        widget.current_config_name = "Integration Test Config"
-        with tempfile.TemporaryDirectory() as tmpdir:
-            save_path = Path(tmpdir) / "test_config.yml"
-            # Mock the save file dropdown
-            widget.save_file_dropdown = MagicMock()
-            widget.save_file_dropdown.value = f"New file: {save_path.name}"
-            widget.config_files = []
-            # Mock status output
-            widget.status_output = MagicMock()
-            widget.status_output.clear_output = MagicMock()
-            # Mock the widget values to match test config
-            widget.config_name = MagicMock()
-            widget.config_name.value = test_config["name"]
-            widget.cluster_type = MagicMock()
-            widget.cluster_type.value = test_config["cluster_type"]
-            widget.host_field = MagicMock()
-            widget.host_field.value = test_config["cluster_host"]
-            widget.username_field = MagicMock()
-            widget.username_field.value = test_config["username"]
-            widget.cores_field = MagicMock()
-            widget.cores_field.value = test_config["default_cores"]
-            widget.memory_field = MagicMock()
-            widget.memory_field.value = test_config["default_memory"]
-            widget.package_manager = MagicMock()
-            widget.package_manager.value = test_config["package_manager"]
-            widget.time_field = MagicMock()
-            widget.time_field.value = "01:00:00"
-            widget.python_version = MagicMock()
-            widget.python_version.value = "python"
-            widget.env_vars = MagicMock()
-            widget.env_vars.value = ""
-            widget.module_loads_field = MagicMock()
-            widget.module_loads_field.value = ""
-            widget.pre_exec_commands = MagicMock()
-            widget.pre_exec_commands.value = ""
-            # Mock the new filename input field
-            widget.save_filename_input = MagicMock()
-            widget.save_filename_input.value = "clustrix.yml"
-            # The widget saves into the clustrix config directory, not the
-            # working directory, so point that at the tmpdir for this test.
-            from clustrix.config import CONFIG_DIR_ENV_VAR
+class TestTheRemoteCellMagic:
+    def test_it_displays_the_widget_once_and_runs_the_cell_body(self, loaded):
+        _, captured = _run(loaded, "%%remote\nvalue = 6 * 7\n")
 
-            monkeypatch.setenv(CONFIG_DIR_ENV_VAR, tmpdir)
-            # Trigger save
-            widget._on_save_config(None)
-            # Check that file was created (default name is clustrix.yml)
-            default_save_path = Path(tmpdir) / "clustrix.yml"
-            assert default_save_path.exists()
-            # Load and verify content
-            with open(default_save_path, "r") as f:
-                saved_data = yaml.safe_load(f)
-            assert "Integration Test Config" in saved_data
-            saved_config = saved_data["Integration Test Config"]
-            assert saved_config["name"] == test_config["name"]
-            assert saved_config["cluster_type"] == test_config["cluster_type"]
-            assert saved_config["cluster_host"] == test_config["cluster_host"]
+        assert len(_widgets_displayed(captured)) == 1
+        assert loaded.user_ns["value"] == 42
 
-    def test_multiple_config_file_handling(self, mock_ipython_environment):
-        """Test handling multiple configuration files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # Create multiple config files
-            config1_path = Path(tmpdir) / "config1.yml"
-            config2_path = Path(tmpdir) / "config2.yml"
-            config1_data = {
-                "cluster1": {"cluster_type": "ssh", "cluster_host": "host1.com"}
-            }
-            config2_data = {
-                "cluster2": {"cluster_type": "slurm", "cluster_host": "host2.com"}
-            }
-            with open(config1_path, "w") as f:
-                yaml.dump(config1_data, f)
-            with open(config2_path, "w") as f:
-                yaml.dump(config2_data, f)
-            # Mock file detection
-            with patch(
-                "clustrix.notebook_magic_widget.detect_config_files",
-                return_value=[config1_path, config2_path],
-            ):
-                # Use the widget class from the mocked module
-                import clustrix.notebook_magic
+    def test_what_it_displays_is_the_configuration_widget(self, loaded):
+        _, captured = _run(loaded, "%%remote\npass\n")
 
-                widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
-                # Check that both configs were loaded
-                assert "cluster1" in widget.configs
-                assert "cluster2" in widget.configs
-                assert widget.configs["cluster1"]["cluster_host"] == "host1.com"
-                assert widget.configs["cluster2"]["cluster_host"] == "host2.com"
+        (shown,) = _widgets_displayed(captured)
+        assert shown.data["text/plain"].startswith("VBox(")
+        assert "clustrix-widget" in shown.data["text/plain"]
+        assert shown.data[WIDGET_VIEW]["model_id"]
 
-    def test_save_all_configurations(self, mock_ipython_environment, monkeypatch):
-        """Test saving all configurations from widget dropdown."""
-        import clustrix.notebook_magic
+    def test_an_empty_cell_just_shows_the_widget(self, loaded):
+        with capture_output() as captured:
+            returned = loaded.run_cell_magic("remote", "", "   \n")
 
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        assert returned is None
+        assert len(_widgets_displayed(captured)) == 1
 
-        # Add multiple test configurations
-        config1 = {
-            "name": "Test Config 1",
-            "cluster_type": "ssh",
-            "cluster_host": "host1.com",
-            "default_cores": 4,
-            "default_memory": "8GB",
-        }
-        config2 = {
-            "name": "Test Config 2",
-            "cluster_type": "slurm",
-            "cluster_host": "host2.com",
-            "default_cores": 8,
-            "default_memory": "16GB",
-        }
+    def test_the_body_runs_in_the_notebook_namespace(self, loaded):
+        """It can see earlier cells' names and leave its own behind, and
+        ``cluster`` is the one ``%load_ext`` put there."""
+        _run(loaded, "factor = 7")
 
-        widget.configs["test_config_1"] = config1
-        widget.configs["test_config_2"] = config2
-        widget.current_config_name = "test_config_1"
+        _run(
+            loaded,
+            "%%remote\n"
+            "@cluster(cores=1)\n"
+            "def scaled(x):\n"
+            "    return x * factor\n"
+            "result = scaled(6)\n",
+        )
 
-        # Mock required widget fields
-        widget.config_name = MagicMock()
-        widget.config_name.value = "test_config_1"
-        widget.cluster_type = MagicMock()
-        widget.cluster_type.value = "ssh"
-        widget.host_field = MagicMock()
-        widget.host_field.value = "host1.com"
-        widget.username_field = MagicMock()
-        widget.username_field.value = "user"
-        widget.cores_field = MagicMock()
-        widget.cores_field.value = 4
-        widget.memory_field = MagicMock()
-        widget.memory_field.value = "8GB"
-        widget.time_field = MagicMock()
-        widget.time_field.value = "01:00:00"
-        widget.python_version = MagicMock()
-        widget.python_version.value = "python"
-        widget.package_manager = MagicMock()
-        widget.package_manager.value = "pip"
-        widget.env_vars = MagicMock()
-        widget.env_vars.value = ""
-        widget.module_loads_field.value = ""
-        widget.pre_exec_commands = MagicMock()
-        widget.pre_exec_commands.value = ""
-        widget.port_field = MagicMock()
-        widget.port_field.value = 22
-        widget.work_dir_field = MagicMock()
-        widget.work_dir_field.value = "/tmp/clustrix"
-        widget.ssh_key_field = MagicMock()
-        widget.ssh_key_field.value = ""
-        widget.save_filename_input = MagicMock()
-        widget.save_filename_input.value = "test_all_configs.yml"
-        widget.status_output = MagicMock()
-        widget.status_output.clear_output = MagicMock()
+        assert loaded.user_ns["result"] == 42
+        assert callable(loaded.user_ns["scaled"])
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            # The widget saves into the clustrix config directory, not the
-            # working directory, so point that at the tmpdir for this test.
-            from clustrix.config import CONFIG_DIR_ENV_VAR
+    def test_a_function_defined_under_remote_follows_a_loaded_configuration(
+        self, loaded, tmp_path
+    ):
+        """The workflow in one piece: load a file, define, call."""
+        path = tmp_path / "local.yml"
+        path.write_text(
+            yaml.safe_dump({"cluster_type": "local", "default_cores": 2}),
+            encoding="utf-8",
+        )
+        _run(loaded, f"%clustrix load {path}")
 
-            monkeypatch.setenv(CONFIG_DIR_ENV_VAR, tmpdir)
+        _run(
+            loaded,
+            "%%remote\n"
+            "import os\n"
+            "@cluster(cores=2)\n"
+            "def statistics(values):\n"
+            "    return {'sum': sum(values), 'pid': os.getpid()}\n"
+            "summary = statistics([1, 2, 3, 4, 5])\n",
+        )
 
-            # Trigger save - should save all configurations
-            widget._on_save_config(None)
+        assert loaded.user_ns["summary"] == {"sum": 15, "pid": os.getpid()}
 
-            # Check that file was created
-            save_path = Path(tmpdir) / "test_all_configs.yml"
-            assert save_path.exists()
+    def test_an_error_in_the_body_is_the_cells_error(self, loaded):
+        with capture_output() as captured:
+            loaded.run_cell("%%remote\nraise RuntimeError('from the cell body')\n")
 
-            # Load and verify content - should contain both configurations
-            with open(save_path, "r") as f:
-                saved_data = yaml.safe_load(f)
+        assert "RuntimeError" in captured.stdout
+        assert "from the cell body" in captured.stdout
+        assert len(_widgets_displayed(captured)) == 1
 
-            # Should have both configs (defaults are skipped)
-            assert "test_config_1" in saved_data
-            assert "test_config_2" in saved_data
-            assert saved_data["test_config_1"]["cluster_host"] == "host1.com"
-            assert saved_data["test_config_2"]["cluster_host"] == "host2.com"
+    def test_it_does_not_change_the_configuration_by_being_run(self, loaded):
+        configure(cluster_type="slurm", cluster_host="hpc.example.edu")
+        before = _fields(get_config())
 
-    def test_test_configuration_functionality(self, mock_ipython_environment):
-        """Test the test configuration button functionality."""
-        import clustrix.notebook_magic
+        _run(loaded, "%%remote\npass\n")
 
-        widget = clustrix.notebook_magic.EnhancedClusterConfigWidget()
+        assert _fields(get_config()) == before
 
-        # Set up a test configuration
-        widget.current_config_name = "test_config"
 
-        # Mock required widget fields for SSH configuration
-        widget.config_name = MagicMock()
-        widget.config_name.value = "Test SSH Config"
-        widget.cluster_type = MagicMock()
-        widget.cluster_type.value = "ssh"
-        widget.host_field = MagicMock()
-        widget.host_field.value = "example.com"
-        widget.username_field = MagicMock()
-        widget.username_field.value = "testuser"
-        widget.cores_field = MagicMock()
-        widget.cores_field.value = 8
-        widget.memory_field = MagicMock()
-        widget.memory_field.value = "16GB"
-        widget.time_field = MagicMock()
-        widget.time_field.value = "02:00:00"
-        widget.python_version = MagicMock()
-        widget.python_version.value = "python"
-        widget.package_manager = MagicMock()
-        widget.package_manager.value = "conda"
-        widget.env_vars = MagicMock()
-        widget.env_vars.value = ""
-        widget.module_loads_field.value = ""
-        widget.pre_exec_commands = MagicMock()
-        widget.pre_exec_commands.value = ""
-        widget.port_field = MagicMock()
-        widget.port_field.value = 22
-        widget.work_dir_field = MagicMock()
-        widget.work_dir_field.value = "/tmp/clustrix"
-        widget.ssh_key_field = MagicMock()
-        widget.ssh_key_field.value = "~/.ssh/id_rsa"
-        widget.status_output = MagicMock()
-        widget.status_output.clear_output = MagicMock()
+class TestTheDeprecatedAlias:
+    def test_clusterfy_warns_and_then_does_what_remote_does(self, loaded):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with capture_output() as captured:
+                loaded.run_cell_magic("clusterfy", "", "legacy_value = 'ran'\n")
 
-        # Test the configuration - should succeed without errors
-        widget._on_test_config(None)
+        deprecations = [w for w in caught if w.category is DeprecationWarning]
+        assert len(deprecations) == 1
+        assert "%%clusterfy is deprecated; use %%remote instead" in str(
+            deprecations[0].message
+        )
+        assert len(_widgets_displayed(captured)) == 1
+        assert loaded.user_ns["legacy_value"] == "ran"
 
-        # Verify the status output was used
-        widget.status_output.clear_output.assert_called_once()
+    def test_remote_itself_does_not_warn(self, loaded):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with capture_output():
+                loaded.run_cell_magic("remote", "", "pass\n")
+
+        assert [w for w in caught if w.category is DeprecationWarning] == []
+
+
+# --------------------------------------------------------------------------
+# Showing the widget without a magic
+# --------------------------------------------------------------------------
+
+
+class TestDisplayingTheWidgetDirectly:
+    def test_display_config_widget_shows_it_and_returns_nothing(self, shell):
+        with capture_output() as captured:
+            returned = notebook_magic.display_config_widget()
+
+        assert returned is None
+        assert len(_widgets_displayed(captured)) == 1
+
+    @pytest.mark.parametrize("setting", ["", "0", "no", "1", "true", "yes"])
+    def test_importing_never_shows_the_widget_outside_a_notebook_kernel(
+        self, shell, monkeypatch, setting
+    ):
+        """A terminal IPython shell has no kernel, so even opted in there is
+        nowhere for a widget to go."""
+        monkeypatch.setenv("CLUSTRIX_AUTO_WIDGET", setting)
+        assert not hasattr(shell, "kernel")
+
+        with capture_output() as captured:
+            notebook_magic.auto_display_on_import()
+
+        assert captured.outputs == []
+        assert captured.stdout == ""
+
+
+#: Run in a child, because a real kernel replaces the process's stdout and
+#: display machinery and would not give them back to pytest.
+_IN_A_REAL_KERNEL = """
+    import json, os
+    from ipykernel.inprocess import InProcessKernelManager
+    from IPython import get_ipython
+    from IPython.utils.capture import capture_output
+
+    manager = InProcessKernelManager()
+    manager.start_kernel()
+    shell = manager.kernel.shell
+    assert get_ipython() is shell and hasattr(shell, "kernel")
+
+    view = "application/vnd.jupyter.widget-view+json"
+    report = {}
+    with capture_output() as captured:
+        import clustrix
+    report["shown_on_import"] = sum(view in o.data for o in captured.outputs)
+    report["magics"] = sorted(
+        name
+        for kind in ("line", "cell")
+        for name in shell.magics_manager.magics[kind]
+        if name in ("clustrix", "remote", "clusterfy")
+    )
+    report["namespace"] = sorted(
+        name for name in ("cluster", "configure", "get_config") if name in shell.user_ns
+    )
+    with capture_output() as captured:
+        result = shell.run_cell("%%remote\\nvalue = 6 * 7\\n")
+    report["remote_ok"] = result.success
+    report["remote_shown"] = sum(view in o.data for o in captured.outputs)
+    report["value"] = shell.user_ns.get("value")
+    manager.shutdown_kernel()
+    print()
+    print(json.dumps(report))
+"""
+
+
+def _in_a_real_kernel(tmp_path, auto_widget):
+    pytest.importorskip("ipykernel")
+    environment = dict(os.environ)
+    environment["HOME"] = str(tmp_path)
+    environment["CLUSTRIX_CONFIG_DIR"] = str(tmp_path / ".clustrix")
+    environment.pop("CLUSTRIX_AUTO_WIDGET", None)
+    if auto_widget is not None:
+        environment["CLUSTRIX_AUTO_WIDGET"] = auto_widget
+    completed = subprocess.run(
+        [sys.executable, "-c", textwrap.dedent(_IN_A_REAL_KERNEL)],
+        capture_output=True,
+        text=True,
+        env=environment,
+        cwd=str(tmp_path),
+        timeout=180,
+    )
+    assert (
+        completed.returncode == 0
+    ), f"--- stdout ---\n{completed.stdout}\n--- stderr ---\n{completed.stderr}"
+    return json.loads(completed.stdout.strip().splitlines()[-1])
+
+
+class TestImportingClustrixInsideARealKernel:
+    """``import clustrix`` in a notebook, with a real (in-process) kernel."""
+
+    def test_importing_registers_the_magics_and_shows_nothing(self, tmp_path):
+        """A library must not paint UI as a side effect of being imported."""
+        report = _in_a_real_kernel(tmp_path, auto_widget=None)
+
+        assert report["shown_on_import"] == 0
+        assert report["magics"] == ["clusterfy", "clustrix", "remote"]
+        assert report["namespace"] == ["cluster", "configure", "get_config"]
+        assert report["remote_ok"] is True
+        assert report["remote_shown"] == 1
+        assert report["value"] == 42
+
+    def test_the_opt_in_shows_the_widget_on_import_once(self, tmp_path):
+        report = _in_a_real_kernel(tmp_path, auto_widget="1")
+
+        assert report["shown_on_import"] == 1
+        assert report["magics"] == ["clusterfy", "clustrix", "remote"]
+        # ...and %%remote afterwards still shows exactly one more.
+        assert report["remote_shown"] == 1
+
+
+# --------------------------------------------------------------------------
+# The stand-ins used when IPython is not installed
+# --------------------------------------------------------------------------
+
+
+class TestTheNoIPythonStandIns:
+    """``notebook_magic_fallback`` is importable with or without IPython, so
+    its pieces are exercised directly here. That the package really selects
+    them when IPython is missing is ``tests/test_github_actions_compat.py``.
+
+    An earlier version of these decorators returned an inner function when
+    applied bare, so every magic silently did nothing without IPython.
+    """
+
+    @pytest.mark.parametrize(
+        "decorator",
+        [notebook_magic_fallback.cell_magic, notebook_magic_fallback.line_magic],
+        ids=["cell_magic", "line_magic"],
+    )
+    def test_a_bare_decorator_leaves_a_method_that_runs_its_body(self, decorator):
+        @notebook_magic_fallback.magics_class
+        class Magics(notebook_magic_fallback.Magics):
+            @decorator
+            def shout(self, line, cell=""):
+                return (line + cell).upper()
+
+        assert Magics().shout("a", "b") == "AB"
+        assert Magics.shout.__name__ == "shout"
+
+    @pytest.mark.parametrize(
+        "decorator",
+        [notebook_magic_fallback.cell_magic, notebook_magic_fallback.line_magic],
+        ids=["cell_magic", "line_magic"],
+    )
+    def test_a_named_decorator_leaves_a_method_that_runs_its_body(self, decorator):
+        class Magics(notebook_magic_fallback.Magics):
+            @decorator("renamed")
+            def shout(self, line, cell=""):
+                return (line + cell).upper()
+
+        assert Magics().shout("a", "b") == "AB"
+
+    def test_magics_class_returns_the_class_it_was_given(self):
+        class Plain:
+            pass
+
+        assert notebook_magic_fallback.magics_class(Plain) is Plain
+
+    def test_get_ipython_is_none_as_it_is_outside_a_session(self):
+        assert notebook_magic_fallback.get_ipython() is None
+
+    def test_the_stand_ins_take_the_same_shapes_as_the_real_decorators(self):
+        """The real ones accept a bare method and a name too; if IPython
+        changes that, the stand-ins are no longer stand-ins."""
+        from IPython.core.magic import Magics, cell_magic, line_magic, magics_class
+
+        @magics_class
+        class Real(Magics):
+            @line_magic
+            def bare(self, line):
+                return line
+
+            @cell_magic("named")
+            def with_name(self, line, cell):
+                return cell
+
+        assert Real.magics["line"]["bare"] == "bare"
+        assert Real.magics["cell"]["named"] == "with_name"

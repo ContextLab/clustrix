@@ -12,9 +12,8 @@ imported. Nothing in the child is patched or replaced: the fallback code that
 runs is the code a user without IPython gets.
 
 These used to purge and re-import ``clustrix.*`` inside the pytest process
-under ``patch.dict(sys.modules, ...)``, which left every later test holding a
-second copy of the configuration singleton, and called the magics on a
-``MagicMock`` shell.
+with ``sys.modules`` patched, which left every later test holding a second
+copy of the configuration singleton, and called the magics on a fake shell.
 """
 
 import os
