@@ -4,7 +4,8 @@ import threading
 import time
 import logging
 from typing import Any, Dict, Optional, Callable
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import CancelledError, Future, ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeoutError
 
 from .config import ClusterConfig
 from .executor import ClusterExecutor
@@ -28,7 +29,12 @@ class AsyncJobResult:
         return self._future.done()
 
     def get_status(self) -> str:
-        """Get current job status."""
+        """Get current job status: running, completed, failed or cancelled."""
+        # Asked first: ``Future.exception()`` on a cancelled future raises
+        # CancelledError -- a BaseException -- so a job the caller had just
+        # cancelled successfully blew up the next time its status was read.
+        if self._future.cancelled():
+            return "cancelled"
         if self._future.done():
             if self._future.exception():
                 return "failed"
@@ -47,20 +53,23 @@ class AsyncJobResult:
 
         Raises:
             TimeoutError: If timeout exceeded
-            RuntimeError: If job failed
+            RuntimeError: If job failed or was cancelled. For a failure the
+                exception the job raised is ``__cause__``.
         """
         try:
-            from concurrent.futures import TimeoutError as FutureTimeoutError
-
             return self._future.result(timeout=timeout)
         except FutureTimeoutError:
             # Convert concurrent.futures.TimeoutError to builtin TimeoutError
             raise TimeoutError(
                 f"Job {self.job_id} did not complete within {timeout} seconds"
             )
+        except CancelledError:
+            # Not an Exception subclass, so the clause below never saw it
+            # and it escaped to the caller as a bare BaseException.
+            raise RuntimeError(f"Job {self.job_id} was cancelled") from None
         except Exception as e:
             # Handle other exceptions from the job execution
-            raise RuntimeError(f"Job {self.job_id} failed: {e}")
+            raise RuntimeError(f"Job {self.job_id} failed: {e}") from e
 
     def cancel(self) -> bool:
         """Cancel the job if still running."""
@@ -229,7 +238,7 @@ class SimpleAsyncClusterExecutor:
 
     def get_status_summary(self) -> Dict[str, int]:
         """Get summary of job statuses."""
-        summary = {"running": 0, "completed": 0, "failed": 0}
+        summary = {"running": 0, "completed": 0, "failed": 0, "cancelled": 0}
 
         for result in self._active_jobs.values():
             status = result.get_status()
