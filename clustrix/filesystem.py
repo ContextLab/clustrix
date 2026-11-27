@@ -12,7 +12,6 @@ import posixpath
 import shlex
 import stat as stat_module
 import glob as glob_module
-from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional
 
 import paramiko
@@ -358,22 +357,30 @@ class ClusterFilesystem:
             return []
 
     def _local_find(self, pattern: str, path: str) -> List[str]:
-        """Local file finding."""
+        """Regular files under ``path`` whose *name* matches ``pattern``.
+
+        The same question ``_remote_find`` asks with ``find -name PATTERN
+        -type f``, so that a call gives one answer wherever it runs: the
+        pattern is matched against the file name alone, a leading dot is
+        nothing special, directories are never results, and neither are
+        symbolic links. This used to be ``Path.rglob(pattern)``, which
+        returned directories as well -- ``find("*.csv")`` listed a directory
+        named ``runs.csv`` locally and not remotely, and
+        ``count_files(".", "d*")`` counted directories on one side only.
+        """
         full_path = self._get_full_path(path)
-        base_path = Path(full_path)
 
         results = []
-        for item in base_path.rglob(pattern):
-            # Return relative paths from the search directory
-            try:
-                rel_path = item.relative_to(base_path)
-                # Normalize path separators to forward slashes for consistency
-                normalized_path = str(rel_path).replace(os.sep, "/")
-                results.append(normalized_path)
-            except ValueError:
-                # If relative_to fails, use absolute path
-                normalized_path = str(item).replace(os.sep, "/")
-                results.append(normalized_path)
+        for directory, _, filenames in os.walk(full_path):
+            for filename in filenames:
+                if not fnmatch.fnmatchcase(filename, pattern):
+                    continue
+                candidate = os.path.join(directory, filename)
+                if os.path.islink(candidate) or not os.path.isfile(candidate):
+                    continue
+                relative = os.path.relpath(candidate, full_path)
+                # Forward slashes on every platform, as the remote side gives.
+                results.append(relative.replace(os.sep, "/"))
 
         return sorted(results)
 
@@ -440,17 +447,12 @@ class ClusterFilesystem:
         return DiskUsage(total_bytes=total_size, file_count=file_count)
 
     def _local_count_files(self, path: str, pattern: str) -> int:
-        """Count local files matching pattern."""
-        if pattern == "*":
-            # Optimize for counting all files
-            full_path = self._get_full_path(path)
-            count = 0
-            for _, _, filenames in os.walk(full_path):
-                count += len(filenames)
-            return count
-        else:
-            # Use find for pattern matching
-            return len(self._local_find(pattern, path))
+        """Count local files matching pattern: exactly what ``find`` returns.
+
+        ``"*"`` used to take a shortcut through ``os.walk`` that counted
+        symbolic links, which ``find`` (here and remotely) does not.
+        """
+        return len(self._local_find(pattern, path))
 
     # ===== Remote Implementations =====
     #

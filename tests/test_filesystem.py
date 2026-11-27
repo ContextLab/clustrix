@@ -24,6 +24,7 @@ from clustrix.filesystem import (
     DiskUsage,
 )
 from clustrix.config import ClusterConfig, configure
+from tests.markers import needs_permission_denial
 from tests.ssh_server import LocalSSHServer
 
 #: A real password for a real server that lives for one test.
@@ -487,6 +488,64 @@ class TestErrorHandling:
         files = fs.ls(".")
         assert files == []
 
+    @needs_permission_denial
+    def test_a_directory_that_may_not_be_read_lists_as_empty(self, tmp_path):
+        """A real ``chmod 000`` directory, and the documented answer for it.
+
+        The version of this in ``test_filesystem_hybrid.py`` accepted a
+        list, a ``PermissionError`` or any ``OSError`` -- every outcome
+        there is. ``ls`` documents one: an unreadable directory lists as
+        empty, exactly as a missing one does.
+        """
+        locked = tmp_path / "locked"
+        locked.mkdir()
+        (locked / "inside.txt").write_text("x")
+        locked.chmod(0o000)
+        fs = ClusterFilesystem(
+            ClusterConfig(cluster_type="local", local_work_dir=str(tmp_path))
+        )
+        try:
+            assert fs.ls("locked") == []
+            assert fs.exists("locked/inside.txt") is False
+            assert fs.find("*.txt") == []
+        finally:
+            locked.chmod(0o755)
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "file with spaces.txt",
+            "file@#$%.txt",
+            "-leading-dash.txt",
+            "semi;colon && echo.txt",
+            "ünïcödé.txt",
+            "a" * 200 + ".txt",
+        ],
+    )
+    def test_awkward_local_file_names_are_just_names(self, tmp_path, name):
+        (tmp_path / name).write_bytes(bytes(range(256)))
+        fs = ClusterFilesystem(
+            ClusterConfig(cluster_type="local", local_work_dir=str(tmp_path))
+        )
+
+        assert fs.ls(".") == [name]
+        assert fs.exists(name) and fs.isfile(name) and not fs.isdir(name)
+        assert fs.stat(name).size == 256
+        assert fs.stat(name).name == name
+        assert fs.find("*.txt") == [name]
+        assert fs.glob("*.txt") == [name]
+        assert fs.du(".") == DiskUsage(256, 1)
+
+    def test_a_name_too_long_for_any_filesystem_does_not_exist(self, tmp_path):
+        fs = ClusterFilesystem(
+            ClusterConfig(cluster_type="local", local_work_dir=str(tmp_path))
+        )
+
+        assert fs.exists("a" * 5000) is False
+        assert fs.isfile("a" * 5000) is False
+        with pytest.raises(OSError):
+            fs.stat("a" * 5000)
+
     def test_remote_connection_failure(self):
         """A host that is not listening really fails, and fails quickly.
 
@@ -728,6 +787,63 @@ class TestLocalAndRemoteAgree:
             assert there.permissions == here.permissions
             assert int(there.modified) == int(here.modified)
 
+    @pytest.mark.parametrize(
+        "pattern", ["*.csv", "*", "*.txt", "delta.*", ".*", "absent*", "d*"]
+    )
+    def test_find_agrees_about_which_files_match(self, both, pattern):
+        """``find`` is "files named like this, at any depth" on both sides.
 
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])
+        The tree has a *directory* called ``dir.csv`` and directories whose
+        names start with ``d``. The remote side runs ``find -type f``; the
+        local side used ``Path.rglob`` and returned the directories too, so
+        the same call gave a different answer depending on where it ran.
+        """
+        local, remote = both
+
+        found_locally, found_remotely = local.find(pattern), remote.find(pattern)
+
+        print(f"{pattern!r}: local {found_locally} remote {found_remotely}")
+        assert found_locally == found_remotely
+        assert "dir.csv" not in found_locally
+        assert "data" not in found_locally
+
+    @pytest.mark.parametrize("pattern", ["*.csv", "*", "d*", "absent*"])
+    def test_count_files_agrees_and_counts_what_find_returns(self, both, pattern):
+        local, remote = both
+
+        assert local.count_files(".", pattern) == remote.count_files(".", pattern)
+        assert local.count_files(".", pattern) == len(local.find(pattern))
+
+    def test_find_agrees_about_a_subdirectory(self, both):
+        local, remote = both
+
+        assert local.find("*.csv", "data") == remote.find("*.csv", "data")
+        assert local.find("*.csv", "data") == ["deep/delta.csv", "gamma.csv"]
+
+    def test_find_and_count_agree_about_symlinks(self, both, tree):
+        (tree / "link.csv").symlink_to(tree / "alpha.csv")
+        (tree / "linked_dir").symlink_to(tree / "data", target_is_directory=True)
+        local, remote = both
+
+        print("local:", local.find("*.csv"), "remote:", remote.find("*.csv"))
+        assert local.find("*.csv") == remote.find("*.csv")
+        assert local.count_files(".", "*") == remote.count_files(".", "*")
+
+    def test_predicates_agree(self, both, tree):
+        (tree / "link.csv").symlink_to(tree / "alpha.csv")
+        (tree / "dangling").symlink_to(tree / "nowhere")
+        local, remote = both
+
+        for name in ("alpha.csv", "data", "dir.csv", "absent", "link.csv", "dangling"):
+            answers = [
+                (fs.exists(name), fs.isfile(name), fs.isdir(name))
+                for fs in (local, remote)
+            ]
+            print(name, answers)
+            assert answers[0] == answers[1], name
+
+    def test_ls_agrees(self, both):
+        local, remote = both
+
+        for directory in (".", "data", "data/deep", "absent", "alpha.csv"):
+            assert local.ls(directory) == remote.ls(directory), directory
