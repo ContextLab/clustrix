@@ -46,6 +46,10 @@ was not is marked.
   value is refused. `configure(default_cores=0)`, `cluster_port="abc"` and
   `ssh_host_key_policy="yolo"` now raise `ValueError`.
 - **`clustrix status` exits 1 when the connection fails.** It used to exit 0.
+  With no `ssh` or `slurm` host configured it no longer prints "No cluster
+  configured": it prints where `@cluster` runs a function, in the words
+  `%clustrix status` uses (`backend      : local (...)`), makes no
+  connection, and exits 0.
 - **`clustrix config --api-key` is removed.** It set a field nothing reads
   and put a secret on a command line.
 - **`clustrix config --cores 0` is an error** rather than "not given".
@@ -118,10 +122,18 @@ was not is marked.
 - **`@cluster(gpus=N)`**: GPUs per job. `--gres=gpu:N` on SLURM; on `ssh`
   and locally, each piece of a divided loop is given its own devices through
   `CUDA_VISIBLE_DEVICES` and no more pieces run at once than there are
-  devices for. Too few GPUs raises instead of running without one. The SLURM
-  request was run against a real scheduler with placeholder `gpu` resources;
-  **no computation was run on a real GPU**, and GPU counting on `ssh` and
-  locally was not run on a machine that has one.
+  devices for. Too few GPUs raises instead of running without one, on every
+  local and `ssh` route: a function with no loop, `cores=1`,
+  `parallel=False` and `async_submit=True` are checked like a divided loop,
+  before anything is submitted (on `ssh`, one remote command per host per
+  session). The devices are the ones the caller may use: when
+  `CUDA_VISIBLE_DEVICES` is set, that list is what is divided, with its ids
+  as spelled (indices or UUIDs), and only entries `nvidia-smi` lists count.
+  The SLURM request was run against a real scheduler with placeholder `gpu`
+  resources; **no computation was run on a real GPU**, and GPU counting on
+  `ssh` and locally was not run on a machine that has one -- what was run
+  there is the refusal when there is none, and the id rules against the
+  text `nvidia-smi` prints.
 - **`clustrix.explain(function)`** returns the decision and, for a loop that
   is not divided, the line and the reason.
 - **Local timing.** A function's first local call divides its loop and
@@ -130,10 +142,22 @@ was not is marked.
 - **Automatic staging of input files** on `ssh` and `slurm`
   (`clustrix.auto_stage`; `ClusterConfig.auto_stage`, default on;
   `auto_stage_max_bytes`, default 1 GB; `@cluster(data=[...], no_data=[...])`).
-  A file already on the cluster at the same path and size is used in place;
-  otherwise it is uploaded once over SSH and linked at the path the code
-  uses. Limits: a path found in code must be inside the project; credential
-  files are refused; a path computed at run time is not found; it does not
+  An input already on the cluster at the same path is used in place only
+  when it is shown to be the same data: same size and SHA-256 for a file,
+  the same files with the same sizes and SHA-256 for a directory, computed
+  on the cluster. Different data stops the call with what differs; a
+  cluster that cannot hash gets an upload. Otherwise the input is uploaded
+  once over SSH and linked at the path the code uses. Limits: a path found
+  in code must be inside the project, and the code must be the project's
+  own (nothing under `site-packages`/`dist-packages`); the home directory,
+  a directory containing it and `/` are never a project, so from there
+  nothing found in code is staged; credential files are refused, judged by
+  the path as written and by its real path behind any symbolic link, from a
+  list of names (`staging.SENSITIVE_PATTERNS`: keys, `.env`/`*.env`,
+  `.netrc`, `.pgpass`, `.my.cnf`, `.vault-token`, `kaggle.json`, cloud and
+  HuggingFace credential locations, ...) plus one content check for Google
+  service-account JSON -- a secret in an ordinarily named file is not
+  recognised; a path computed at run time is not found; it does not
   apply to `async_submit=True` (which now warns) or HuggingFace Jobs; files a
   job writes are not brought back; staged data is never deleted
   automatically. Inside a staged directory, credential files, `no_data`
@@ -141,9 +165,15 @@ was not is marked.
   left out, and each credential left out is named in a warning. The project
   directory, the working directory, the home directory and anything above
   them are refused, as constants and as arguments. **Staged copies are
-  read-only**: a job that writes into a staged input gets `PermissionError`,
-  and removing the store by hand needs `chmod -R u+w <remote_work_dir>/data`
-  first. A copy is only used once its upload finished; an upload cut short
+  read-only and private** (store `0700`, copies `0500`, files `0400`,
+  whatever the remote umask; an open store is closed when next used): a job
+  that writes into a staged input gets `PermissionError`, now with a
+  sentence saying the path was staged as an input and that
+  `@cluster(no_data=[path])` keeps it out; removing the store by hand needs
+  `chmod -R u+w <remote_work_dir>/data` first. A relative input named like
+  a file clustrix writes in the job directory (`result.pkl`, `job.sh`, ...)
+  is refused at submission. A copy is only used once its upload finished;
+  an upload cut short
   by a lost connection leaves a `.incoming-*` directory that nothing removes.
 - **Project modules travel with the job**, including a module imported
   inside a function body.
@@ -184,6 +214,14 @@ was not is marked.
 - **Ctrl-C during a divided loop stops it.** Locally the call returns at
   once and no worker is left running; on `ssh` and `slurm` every job the
   loop started is cancelled, including the one being waited for.
+- **SIGTERM does the same, and so does the death of the client.** On `ssh`
+  and `slurm`, SIGTERM while a call waits cancels the jobs it started -- a
+  divided loop's, or a single job's, which Ctrl-C now cancels too -- and the
+  process then ends by the signal. A SIGTERM handler the program installed
+  is left in charge; calls from other threads and `async_submit=True` are
+  not covered. Local loop workers exit within about a second of their
+  parent's death, however it died. **SIGKILL of a client with remote jobs
+  cannot be handled**: those jobs keep running.
 - **Local workers see the caller's current directory and environment
   variables** as they are at the call, not as they were when the workers
   started. What iterations write to standard error is shown on standard
@@ -244,7 +282,21 @@ was not is marked.
 - **A password or token typed into the notebook widget is not left in the
   form.** With "Save Widget State Automatically" on, Jupyter writes every
   field's content into the `.ipynb` file. The widget now moves a typed secret
-  into memory and empties the field as soon as it is entered.
+  into memory and empties the field as soon as it is entered. The same now
+  holds for **environment variables**: each value is held in memory and the
+  field shows `NAME=••••`; an unchanged line keeps its value, a retyped one
+  replaces it. A **Forget** button drops a held password or token, and
+  **Duplicate** no longer copies one into the new profile. Not covered: a
+  line that is only a valid name with no `=` stays in the field as typed.
+  Checked in a real Jupyter Notebook 7 with widget-state saving on, light
+  theme only.
+- **Automatic staging no longer treats the home directory as a project.**
+  With the home directory as the working directory and no git repository,
+  a constant such as `"~/.kaggle/kaggle.json"` in an installed library was
+  uploaded. See "Automatic staging of input files" for the rules now.
+- **A symbolic link in a parent directory no longer hides a credential from
+  staging** (`keys -> ~/.ssh`, then `keys/aws-prod` or `keys`).
+- **Staged copies are no longer world-readable** on the cluster.
 
 ## [0.2.0] — unreleased
 

@@ -115,7 +115,10 @@ Controls
    * - Saved profile, Rename to, Duplicate, Delete
      - Choose, rename, copy and remove profiles. Six are provided at first:
        Local single-core, Local all cores, SLURM cluster, SSH remote machine,
-       HuggingFace Jobs (CPU) and HuggingFace Jobs (GPU).
+       HuggingFace Jobs (CPU) and HuggingFace Jobs (GPU). **Duplicate** copies
+       what is on screen except a password or token that was entered: those
+       are not copied, are no longer held afterwards, and the result panel
+       says so.
    * - Where to run
      - One tile per supported backend: Local, SSH, SLURM, Hugging Face. The
        tiles are built from ``clustrix.config.SUPPORTED_CLUSTER_TYPES``.
@@ -186,17 +189,51 @@ the one your cluster's administrators publish before pressing it.
 Security note
 ~~~~~~~~~~~~~
 
-The widget itself never writes a password or token to a profile or to an
-exported file. The notebook file is a different matter. If JupyterLab's
-**Settings → Save Widget State Automatically** is on, the state of every
-widget, including the text typed into the Password and Token fields, is
-stored in the ``.ipynb`` file when the notebook is saved. Anyone who can
-read that file, or a repository it is committed to, can read the secret.
+The widget never writes a password, a token or an environment variable to a
+profile or to an exported file. The notebook file is a different matter. If
+JupyterLab's **Settings → Save Widget State Automatically** is on, the state
+of every widget -- whatever is *in* each field -- is stored in the ``.ipynb``
+file when the notebook is saved, where anyone who can read the file, or a
+repository it is committed to, can read it. So the widget does not leave a
+secret in a field:
 
-Turn that setting off before typing a secret into the widget, or do not type
-one: use an SSH key, the environment-variable field, ``HF_TOKEN`` or
-``hf auth login``. If a notebook was saved with a secret in it, clear its
-outputs and widget state and change the secret.
+Password and Token
+   When you leave the field, what you typed is moved into the kernel's
+   memory and the field is emptied; its placeholder changes to ``entered;
+   kept in memory only``. A **Forget** button appears beside the field
+   while something is held and drops it. The field is always empty, so
+   emptying it does not forget anything -- the button does.
+
+Environment variables
+   When you leave the field, each value is moved into memory and its line
+   is rewritten as ``NAME=••••``. The names stay readable; a value is never
+   shown again. To edit:
+
+   * leave a masked line alone and it keeps its value;
+   * replace everything after the ``=`` to give a variable a new value;
+   * delete a line to remove the variable; add a line to add one;
+   * change the name on a masked line to rename the variable (one at a
+     time: two renamed in one edit cannot be matched to their values and
+     are reported as having none).
+
+   Typing *into* the dots changes nothing and says so. A line that is not
+   ``NAME=value`` is removed and reported without being shown back, in case
+   it was a secret pasted on its own. One exception: a line that is a
+   single valid name with no ``=`` (``DB_PASSWORD``) is kept as typed, on
+   the reading that it is a name whose value is still to come -- so a secret
+   that happens to look like a name, typed on a line by itself, **is** left
+   in the field. Type ``NAME=value``.
+
+With the setting on, a notebook saved after typing a password, a token and
+variables into the widget in a real Jupyter Notebook 7 contained none of
+the typed values (it does contain the variable *names*). That was checked in
+one browser, in the light theme only.
+
+What still applies: a secret typed anywhere else in a notebook -- a code
+cell, another widget -- is saved like any other text. If a notebook was
+saved with a secret in it, clear its outputs and widget state and change
+the secret. An SSH key, the environment-variable field, ``HF_TOKEN`` and
+``hf auth login`` avoid typing one at all.
 
 In code
 -------

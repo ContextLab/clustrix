@@ -71,7 +71,13 @@ Arguments
 
 The function's code
    String constants in the decorated function, in the project functions it
-   calls, and the values of the globals they read.
+   calls, and the values of the globals they read. Only your own code is
+   read this way: a function from an installed package (anything under a
+   ``site-packages`` or ``dist-packages`` directory) is never searched, and
+   neither is one whose file is outside the project. If the working
+   directory is your home directory, a directory containing it, or ``/``,
+   there is no project and nothing is looked for in code at all; see
+   :ref:`auto-stage-limits`.
 
 ``@cluster(data=[...])``
    Paths you list. Use this for anything the two sources above cannot see.
@@ -88,10 +94,20 @@ What happens to a file that was found
 
    * - Situation
      - Result
-   * - The same absolute path exists on the cluster with the same size
+   * - The same absolute path exists on the cluster and holds the same data
      - Used in place. Nothing is copied. This is the shared-filesystem case.
-   * - The same absolute path exists on the cluster with a different size
-     - ``StagingError``. Clustrix does not guess which copy is right.
+       "The same data" is checked, not assumed from the path: a file must
+       have the same size and the same SHA-256, computed on the cluster
+       with ``sha256sum`` (or ``shasum``); a directory must hold the same
+       files, each with the same size and SHA-256. Files left out here
+       (credentials, ``no_data``, symbolic links) may be there too.
+   * - The same absolute path exists on the cluster and holds something else
+     - ``StagingError``, naming what differs. Clustrix does not guess which
+       copy is right. ``no_data=[path]`` uses the cluster's copy as it is.
+   * - The same absolute path exists there but cannot be compared
+     - Uploaded, as if it were not there. This is what happens when the
+       cluster has no SHA-256 command, or a file name in the directory has
+       a newline in it.
    * - A relative path (``"data/scores.csv"``)
      - Uploaded once over the existing SSH connection into
        ``<remote_work_dir>/data/<content id>/`` and linked into each job's
@@ -108,6 +124,52 @@ What happens to a file that was found
 Files are identified by content (by name, size and modification time above
 256 MB), so an unchanged file is uploaded once however many calls name it.
 
+With logging at ``INFO`` each input is reported with what was done and why:
+
+.. code-block:: text
+
+   INFO clustrix.auto_stage: Input /shared/project/data/table.csv (8 B): in place (the cluster has it at the same path: same size and sha256)
+   INFO clustrix.auto_stage: Input /home/researcher/project/data/in.csv (8 B): uploaded as /home/clx/clustrix/data/2d75b0345428fe7c99e2/in.csv (not readable at that path on the cluster)
+
+Comparing in place hashes the whole file on both sides, however large. It
+is done once per input per Python session: a second call does not hash
+again unless the local file's size or modification time changed. A copy
+changed *on the cluster* between two calls of one session is therefore not
+noticed.
+
+The copies are private and read-only
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``<remote_work_dir>/data`` is mode ``0700``, each copy inside it ``0500``
+and each file ``0400``, whatever the cluster's umask: a file that only you
+can read here is not readable by other accounts there. A store created by
+an earlier version with open permissions is closed the next time a call
+stages something.
+
+Because a copy is read-only, **a job cannot write to a path that was
+staged**. That matters when an existing *output* file is among the
+arguments -- last run's ``results/out.csv`` -- because an existing path
+looks the same whether the function reads it or is about to overwrite it.
+The job then fails, and the error says why:
+
+.. code-block:: text
+
+   PermissionError: [Errno 13] Permission denied (data/out.txt exists on this machine, so it was staged for the job as an input, and staged inputs are read-only. If the job writes it, keep it out with @cluster(no_data=['data/out.txt'])): 'data/out.txt'
+
+Names clustrix uses itself
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+A relative input is linked into the job's working directory under its own
+name, and clustrix writes its own files there: ``job.sh``, ``job.out``,
+``job.err``, ``job.exit``, ``function_data.pkl``, ``result.pkl``,
+``error.pkl``, ``slurm-<id>.out`` and a few more
+(``clustrix.utils.RESERVED_JOB_DIRECTORY_NAMES``). An input whose first
+path component is one of those is refused before anything is submitted:
+
+.. code-block:: text
+
+   StagingError: An input's name collides with a file clustrix itself writes in every job directory: 'result.pkl' (argument 'path') would be linked into the job directory as 'result.pkl'. Rename the input, pass it by an absolute path, or keep it out with no_data=[...].
+
 .. _auto-stage-limits:
 
 Limits
@@ -121,13 +183,43 @@ A path found in code must be inside the project
    outside it that appears only in code is skipped. A path you pass as an
    argument or list in ``data=[...]`` may be anywhere, because you named it.
 
+The home directory is never a project
+   Neither is a directory that contains it, or ``/``. Under a home directory
+   are ``~/.ssh``, ``~/.kaggle`` and every package installed with ``pip
+   install --user``, so "inside the project" would describe a token file
+   named by a constant in somebody else's library. When a git checkout is
+   that wide (dotfiles kept in ``~``) the project is narrowed to the working
+   directory. When the working directory itself is that wide, **nothing
+   found in code is staged**; with logging at ``INFO`` the call says so.
+   Pass the inputs as arguments or list them in ``data=[...]``, or run from
+   the project's own directory.
+
 Credential files are refused
-   A path that looks like a credential (for example a ``.env`` file or a
-   private key) is never uploaded, however it was named:
+   A path that looks like a credential is never uploaded, however it was
+   named, and whether it was named itself or is inside a directory that
+   was:
 
    .. code-block:: text
 
       WARNING clustrix.auto_stage: Not staging: /home/researcher/project/data/.env looks like a credential and is never uploaded
+
+   The path is judged twice: as written, and with every symbolic link in it
+   resolved. ``keys/aws-prod`` where ``keys`` is a link to ``~/.ssh`` is
+   refused, and the message names the real path.
+
+   What counts is a list of names, not an understanding of the file:
+   private keys and certificates (``*.pem``, ``*.key``, ``id_rsa*``,
+   ``id_ed25519*``, ``id_ecdsa*``, ...), ``.env`` and ``*.env``,
+   ``.netrc``, ``.pgpass``, ``.my.cnf``, ``.vault-token``, ``.npmrc``,
+   ``.pypirc``, ``kaggle.json``, ``application_default_credentials.json``,
+   a HuggingFace ``token`` file, and anything inside ``.ssh``, ``.aws``,
+   ``.azure``, ``.gnupg``, ``.kube``, ``.docker``, ``.kaggle`` or
+   ``.config/gcloud``. The full list is
+   ``clustrix.staging.SENSITIVE_PATTERNS``. One check reads the file: a
+   ``.json`` file of at most 64 kB that contains ``"type":
+   "service_account"`` is a Google Cloud key whatever it is called.
+   **A secret in a file with an ordinary name is not recognised** --
+   ``notes.txt`` with a password in it is staged like any other file.
 
 Large inputs stop the call
    When one call names more than ``auto_stage_max_bytes`` (default

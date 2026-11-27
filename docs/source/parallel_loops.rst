@@ -248,6 +248,11 @@ Local behaviour in more detail
   iteration order.
 * A decorated function called from inside an iteration that is already
   running in a worker is not divided again.
+* The workers do not outlive the process that started them. If it is killed
+  -- ``SIGTERM``, ``SIGKILL``, a restarted notebook kernel -- each worker
+  exits within about a second, in the middle of whatever iteration it was
+  running: a file that iteration was writing is left as it is, and a
+  process the iteration itself started is not stopped.
 * The loop's iterable is turned into a list before it is divided, so a
   generator is consumed completely first.
 
@@ -291,6 +296,29 @@ The function below was run against a single-node SLURM installation with
 There are no SLURM job arrays yet. Each piece is a separate ``sbatch``
 submission, and Clustrix does not throttle beyond ``max_parallel_jobs``
 (default 100); set it to what your site allows.
+
+Stopping a call that is waiting for jobs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+On ``ssh`` and ``slurm``, interrupting the call cancels the jobs it started
+and has not collected -- the pieces of a divided loop, or the one job of a
+function that was not divided:
+
+* **Ctrl-C** (``KeyboardInterrupt``), in a terminal or a notebook.
+* **SIGTERM** -- ``kill``, a batch system's time limit, a notebook server
+  shutting down. While a call waits, clustrix turns the signal into an
+  exception in the main thread, the jobs are cancelled, and the process
+  then ends by SIGTERM as it would have (exit status 143 in a shell). If
+  your program has installed its own SIGTERM handler, that handler is left
+  in charge: the jobs are cancelled if it raises (``sys.exit`` does) and
+  keep running if it returns. A call made from a thread other than the main
+  one is not covered, and neither is ``async_submit=True``, which does not
+  wait.
+
+Not covered: **SIGKILL** (``kill -9``), a crash of the interpreter, and
+loss of power or network cannot be caught. The jobs stay on the cluster;
+cancel them with ``scancel``, or ``kill`` on an ssh host. A job that fails,
+and one that outlasts ``job_wait_timeout``, is not cancelled either.
 
 What is checked while the loop runs
 -----------------------------------
@@ -463,11 +491,12 @@ that means each piece.
        back while the devices are busy. A request the partition cannot meet
        is refused by ``sbatch``, and that message is what you see.
    * - ``ssh``
-     - There is no scheduler. When a loop is divided, the GPUs on the host
-       are counted, each piece is given its own through
-       ``CUDA_VISIBLE_DEVICES``, and there are no more pieces than
-       ``GPUs // N``. A function whose loop is not divided is left alone and
-       sees every GPU.
+     - There is no scheduler, so every call first asks the host which GPUs
+       it has (once per Python session) and raises if there are fewer than
+       ``N``. When a loop is divided, each piece is given its own devices
+       through ``CUDA_VISIBLE_DEVICES``, and there are no more pieces than
+       ``GPUs // N``. A function whose loop is not divided is checked and
+       then left alone: it sees every GPU the host shows it.
    * - local
      - The same, with worker processes in place of jobs: at most
        ``min(cores, GPUs // N)`` workers, each started seeing only its own
@@ -476,9 +505,20 @@ that means each piece.
      - No effect, with a warning. The hardware is the flavor: pass
        ``hf_flavor``.
 
-If the host or this machine has fewer GPUs than one piece needs, the call
+If the host or this machine has fewer GPUs than one job needs, the call
 raises ``ValueError`` (``gpus=1 was requested and 0 GPU(s) were found on
-...``) instead of running without one.
+...``) instead of running without one. That holds on every local and
+``ssh`` route -- a function with no loop, ``cores=1``, ``parallel=False``
+and ``async_submit=True`` included -- and nothing is submitted.
+
+The GPUs counted are the ones the calling process may use. If
+``CUDA_VISIBLE_DEVICES`` is set -- by a scheduler, a container or you --
+the devices handed to the pieces are taken from *that* list, in its order
+and its spelling (indices or ``GPU-...`` UUIDs): a process restricted to
+device ``3`` gives its workers device ``3``, never ``0``. An entry is used
+only if ``nvidia-smi`` lists such a device, so a variable left in a shell
+profile on a machine without a GPU does not count as one. On an ``ssh``
+host the variable is read from the environment a job would start in.
 
 .. warning::
 
@@ -489,7 +529,9 @@ raises ``ValueError`` (``gpus=1 was requested and 0 GPU(s) were found on
    were placeholders, not graphics cards. **No computation has been run on a
    real GPU through any of these paths**, and the counting of GPUs on an
    ``ssh`` host and on a local machine has not been run on a machine that has
-   one. Check ``CUDA_VISIBLE_DEVICES`` in your first job.
+   one. What was run there is the refusal when there is none, and the rules
+   for ``CUDA_VISIBLE_DEVICES`` against the text ``nvidia-smi`` prints.
+   Check ``CUDA_VISIBLE_DEVICES`` in your first job.
 
 Random state on a GPU is outside what the run-time checks can see; seed it
 per iteration, as with any generator.
