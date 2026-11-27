@@ -11,7 +11,7 @@ import time
 import tempfile
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 
 from .utils import loads_remote_payload, verify_signed_payload
 
@@ -34,6 +34,103 @@ class RemoteTraceback(Exception):
 
     def __str__(self) -> str:
         return "\n" + self.text
+
+
+#: How many lines of a failed job's log its error message quotes.
+ERROR_LOG_TAIL_LINES = 8
+
+#: The longest quoted log line. A progress bar is one line of any length.
+ERROR_LOG_LINE_WIDTH = 300
+
+
+def condense_error_log(text: str) -> List[str]:
+    """The lines of a job's error log worth showing: its end, minus the echo.
+
+    When a process a shell script started is killed, bash reports it by
+    printing the *command* -- and the command here is ``python -c "<the
+    whole program clustrix generated>"``, eighty lines of it. That echo was
+    most of what a user saw after an ``scancel`` or an out-of-memory kill.
+    It says nothing the first line of it does not, so each one is folded
+    into that line; what the job itself wrote is left alone.
+
+    Returns at most :data:`ERROR_LOG_TAIL_LINES` lines, the last ones.
+    """
+    lines = text.rstrip().splitlines()
+    kept: List[str] = []
+    index = 0
+    while index < len(lines):
+        line = lines[index]
+        if line.rstrip().endswith('-c "'):
+            try:
+                end = lines.index('"', index + 1)
+            except ValueError:
+                end = -1
+            if end > 0:
+                kept.append(
+                    f'{line.rstrip()}<the job program, {end - index - 1} lines>"'
+                )
+                index = end + 1
+                continue
+        kept.append(line)
+        index += 1
+    return [
+        (
+            line
+            if len(line) <= ERROR_LOG_LINE_WIDTH
+            else line[:ERROR_LOG_LINE_WIDTH] + " ..."
+        )
+        for line in kept[-ERROR_LOG_TAIL_LINES:]
+    ]
+
+
+class JobFailedError(RuntimeError):
+    """A remote job ended with no result and no exception of its own to raise.
+
+    Cancelled, killed, out of time, ``sys.exit`` -- the endings where the
+    function did not raise. (When it did, the caller gets that exception
+    itself, not this.) The message is a few lines: what happened, where the
+    job's files are, and the end of its log. Everything else is on the
+    exception:
+
+    Attributes:
+        job_id: The job, as the scheduler or clustrix names it.
+        reason: How it ended, as far as clustrix could find out; may be
+            empty.
+        remote_dir: The job's directory on the cluster. Its logs are there
+            -- ``job.err``/``job.out``, or ``slurm-<id>.err``/``.out`` --
+            and a failed job's directory is never cleaned up.
+        error_log: The whole error log, unabridged.
+    """
+
+    def __init__(
+        self,
+        job_id: str,
+        outcome: str,
+        reason: str,
+        remote_dir: Optional[str],
+        host: Optional[str],
+        error_log: str,
+    ):
+        self.job_id = job_id
+        self.reason = reason
+        self.remote_dir = remote_dir
+        self.error_log = error_log
+
+        message = [f"Job {job_id} {outcome}{reason}."]
+        if remote_dir:
+            where = f" on {host}" if host else ""
+            message.append(f"Its files and logs are in {remote_dir}{where}.")
+        total = len(error_log.rstrip().splitlines())
+        tail = condense_error_log(error_log)
+        if tail:
+            message.append(
+                "Its error log:"
+                if len(tail) == total
+                else f"The end of its error log ({total} lines, all of them "
+                "in this exception's .error_log):"
+            )
+            message.extend(f"  {line}" for line in tail)
+        super().__init__("\n".join(message))
 
 
 def describe_exit_status(status: str) -> str:
@@ -282,7 +379,7 @@ class SchedulerStatusManager:
                 return "running"
             if any(state.startswith(f) for f in self._TERMINAL_FAILURE_STATES):
                 reason = self._get_scheduler_failure_reason(job_id)
-                logger.info(f"Job {job_id} {reason or 'failed'}")
+                logger.info(f"Job {job_id} failed {reason or ''}".rstrip())
                 if job_id in active_jobs:
                     active_jobs[job_id]["scheduler_state"] = state
                 return "failed"
@@ -469,7 +566,7 @@ class SchedulerStatusManager:
         # expensive to diagnose.
         accounting = self._get_scheduler_failure_reason(job_id)
         if accounting:
-            logger.error(f"Job {job_id} {accounting}")
+            logger.error(f"Job {job_id} failed {accounting}")
             return "failed"
 
         return "unknown"
@@ -542,7 +639,7 @@ class SchedulerStatusManager:
             return None
 
         detail = (
-            f"failed according to sacct: state={state} "
+            f"according to sacct: state={state} "
             f"exit_code={info['exit_code']} node={info['nodelist']} "
             f"workdir={info['workdir']}"
         )
@@ -577,6 +674,21 @@ class SchedulerStatusManager:
         if job_info.get("scheduler_state"):
             return f" (SLURM state {job_info['scheduler_state']})"
         return ""
+
+    def job_failure(
+        self, job_id: str, active_jobs: Dict[str, Any], error_log: str
+    ) -> JobFailedError:
+        """The exception for a job that failed without raising one itself."""
+        job_info = active_jobs.get(job_id) or {}
+        state = str(job_info.get("scheduler_state") or "")
+        return JobFailedError(
+            job_id=job_id,
+            outcome="was cancelled" if state.startswith("CANCELLED") else "failed",
+            reason=self.failure_summary(job_id, active_jobs),
+            remote_dir=job_info.get("remote_dir"),
+            host=getattr(self.config, "cluster_host", None),
+            error_log=error_log,
+        )
 
     def _authenticated_error_payload(
         self, job_id: str, job_info: Dict[str, Any]

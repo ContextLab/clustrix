@@ -254,12 +254,11 @@ class ClusterExecutor:
                     # Re-raise the original exception
                     raise original_exception
                 else:
-                    # Fallback to RuntimeError with log
-                    summary = self.scheduler_manager.status_manager.failure_summary(
-                        job_id, self.scheduler_manager.active_jobs
-                    )
-                    raise RuntimeError(
-                        f"Job {job_id} failed{summary}. Error log:\n{error_log}"
+                    # Nothing to re-raise: the function did not raise, it
+                    # was stopped. A short message; the whole log rides on
+                    # the exception (a RuntimeError, as this always was).
+                    raise self.scheduler_manager.status_manager.job_failure(
+                        job_id, self.scheduler_manager.active_jobs, error_log
                     )
 
             if deadline is not None and time.monotonic() >= deadline:
