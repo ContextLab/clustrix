@@ -34,8 +34,12 @@ accept one, so an ordinary function raised::
 
     TypeError: collect() got an unexpected keyword argument '_chunk_range_i'
 
-``config.auto_parallel`` also defaults to ``True``. The local path already
-declines in this case; the remote path now uses the same check.
+and a function that did accept it got back a list of per-chunk results
+instead of its own return value. That protocol is gone: ``@cluster`` now
+divides a loop with ``clustrix.parallelize``, which never calls the user's
+function with anything but the caller's arguments. What is guarded here is
+that the remote path returns the function's own answer -- when it divides the
+loop into jobs, and when it declines to.
 
 Nothing here is mocked. ``SubprocessJobRunner`` is the real two-method executor
 from ``test_execute_single_no_fabrication``: it writes the exact bytes
@@ -51,8 +55,7 @@ from pathlib import Path
 import pytest
 
 import clustrix
-from clustrix.decorator import _create_work_chunks, _execute_parallel
-from clustrix.utils import detect_loops
+from clustrix.decorator import _execute_single, _plan_for, _run_split_remotely
 
 # The real executor, reused rather than re-written. tests/unit has no
 # __init__.py, so pytest's default "prepend" import mode puts this directory on
@@ -126,89 +129,99 @@ def test_no_clustrix_module_fabricates_a_gpu_result():
 # These are module-level so dill can ship them to the worker interpreter.
 # ---------------------------------------------------------------------------
 
+JOB = {"cores": 1, "memory": "1GB"}
+
 
 def collect(n):
-    """An ordinary looping function. It cannot accept a chunk keyword."""
+    """An ordinary looping function, with exactly the one parameter."""
     values = []
-    for i in range(4):
+    for i in range(n):
         values.append(i * 10)
     return values
 
 
 def collects_extra(n, **kwargs):
-    """Declares ``**kwargs``, so it can receive whatever it is handed."""
-    return sorted(kwargs)
+    """Declares ``**kwargs``: the old protocol would have filled it."""
+    seen = []
+    for i in range(n):
+        seen.append(sorted(kwargs))
+    return seen
 
 
-def squares_for_chunk(_chunk_range_i=None, _chunk_index=0):
-    """A chunk-aware callee: it computes only its assigned slice."""
-    return [i * i for i in _chunk_range_i]
+def running_maximum(values):
+    """Each iteration needs the previous one, so this loop is not divided."""
+    best = values[0]
+    history = []
+    for value in values:
+        best = max(best, value)
+        history.append(best)
+    return history
 
 
-def test_create_work_chunks_declines_a_call_the_callee_cannot_answer():
-    """The remote chunker must not invent a keyword the function has no slot for.
+def test_the_chunk_keyword_protocol_no_longer_exists():
+    """No module builds a call with a keyword the user never wrote."""
+    import clustrix.decorator as decorator_module
 
-    ``collect`` takes exactly one parameter and no ``**kwargs``. Building a
-    chunk for it produced ``collect(4, _chunk_range_i=[...], _chunk_index=0)``,
-    which is a TypeError on every chunk -- clustrix constructing a call its own
-    callee cannot answer.
-    """
-    loop_info = detect_loops(collect, (4,), {})
-    assert loop_info is not None and loop_info["variable"] == "i"
+    for name in (
+        "_execute_parallel",
+        "_create_work_chunks",
+        "_combine_results",
+        "_accepts_chunk_kwargs",
+        "_execute_local_parallel",
+        "_create_local_work_chunks",
+        "_combine_local_results",
+    ):
+        assert not hasattr(decorator_module, name), f"clustrix.decorator.{name} is back"
 
-    assert _create_work_chunks(collect, (4,), {}, loop_info, 4) == []
-
-
-def test_create_work_chunks_still_chunks_a_callee_that_can_answer():
-    """The guard must decline only what is genuinely unanswerable.
-
-    A ``**kwargs`` function can receive any keyword, and a function that
-    declares the chunk parameters by name can too; both must still be chunked.
-    """
-    loop_info = {"type": "for", "variable": "i", "range": range(8)}
-
-    kwargs_chunks = _create_work_chunks(collects_extra, (8,), {}, loop_info, 4)
-    assert len(kwargs_chunks) == 4
-    assert set(kwargs_chunks[0]["kwargs"]) == {"_chunk_range_i", "_chunk_index"}
-
-    named_chunks = _create_work_chunks(squares_for_chunk, (), {}, loop_info, 4)
-    assert len(named_chunks) == 4
+    protocol = re.compile(r"_chunk_range_|_chunk_index|_parallel_\{")
+    offenders = [
+        f"{path}:{lineno}: {line.strip()}"
+        for path in sorted(PACKAGE_DIR.rglob("*.py"))
+        for lineno, line in enumerate(
+            path.read_text(encoding="utf-8").splitlines(), start=1
+        )
+        if protocol.search(line)
+    ]
+    assert offenders == [], f"a chunk keyword is injected at: {offenders}"
 
 
-def test_remote_parallel_returns_the_users_answer_when_it_cannot_chunk(runner):
-    """Declining to parallelize must run the function, not return an empty list.
+def test_a_loop_divided_into_jobs_returns_the_users_answer(runner):
+    """Four jobs, each a fresh interpreter, and the caller's own return value
+    -- not a list of four pieces of it."""
+    plan = _plan_for(collect)
+    assert plan.parallelizable, plan.explain()
 
-    Before the fix this raised
-    ``TypeError: collect() got an unexpected keyword argument '_chunk_range_i'``
-    inside the worker. Returning ``[]`` -- what an empty chunk list would have
-    combined to -- would be a fabricated answer of the same class as defect 1,
-    so the path falls back to a single ordinary submission instead.
-    """
-    loop_info = detect_loops(collect, (4,), {})
+    result = _run_split_remotely(plan, runner, collect, (8,), {}, JOB, max_jobs=4)
 
-    result = _execute_parallel(
-        runner, collect, (4,), {}, {"cores": 1, "memory": "1GB"}, loop_info
+    assert result == collect(8) == [0, 10, 20, 30, 40, 50, 60, 70]
+    assert len(runner.submitted) == 4, "one job per chunk of the loop"
+
+
+def test_a_function_is_never_handed_a_keyword_its_caller_did_not_pass(runner):
+    """``**kwargs`` would receive anything invented. It receives nothing."""
+    plan = _plan_for(collects_extra)
+    assert plan.parallelizable, plan.explain()
+
+    result = _run_split_remotely(
+        plan, runner, collects_extra, (3,), {"mine": 1}, JOB, max_jobs=3
     )
 
-    assert result == collect(4) == [0, 10, 20, 30]
-    assert len(runner.submitted) == 1, "declining to chunk must submit one plain job"
+    assert result == collects_extra(3, mine=1) == [["mine"]] * 3
 
 
-def test_remote_parallel_really_chunks_a_chunk_aware_callee(runner):
-    """The guard must not switch remote parallelization off wholesale.
+def test_a_loop_that_cannot_be_divided_is_one_plain_job_with_the_users_answer(runner):
+    """Declining to divide must run the function, not return an empty list.
 
-    ``squares_for_chunk`` declares both chunk parameters, so the work is split,
-    each slice is genuinely executed in its own interpreter, and the pieces
-    combine to the whole answer.
+    ``[]`` -- what no chunks would have combined to -- would be a fabricated
+    answer of the same class as defect 1. This is what ``@cluster`` does on
+    the remote path when the plan says no.
     """
-    loop_info = {"type": "for", "variable": "i", "range": range(8)}
+    assert not _plan_for(running_maximum).parallelizable
 
-    result = _execute_parallel(
-        runner, squares_for_chunk, (), {}, {"cores": 1, "memory": "1GB"}, loop_info
-    )
+    result = _execute_single(runner, running_maximum, ([3, 1, 4, 1, 5],), {}, JOB)
 
-    assert len(runner.submitted) > 1, "a chunk-aware callee must be split up"
-    assert [value for chunk in result for value in chunk] == [i * i for i in range(8)]
+    assert result == running_maximum([3, 1, 4, 1, 5]) == [3, 3, 4, 4, 5]
+    assert len(runner.submitted) == 1
 
 
 # ---------------------------------------------------------------------------
