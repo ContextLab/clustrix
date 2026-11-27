@@ -172,6 +172,12 @@ ENVIRONMENT_LOOKUP_ALLOWLIST = {
 LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST = {
     # ``$SLURM_CPUS_PER_TASK``: how many CPUs the scheduler granted. A count.
     ("loop_workers.py", "available_cpus"),
+    # ``$CUDA_VISIBLE_DEVICES``: which GPUs this process may use -- device
+    # indices or UUIDs, never a secret. Read to hand out only those devices
+    # (#176), and once more to name the variable in the refusal when it
+    # leaves too few.
+    ("utils.py", "local_gpu_devices"),
+    ("decorator.py", "_gpu_devices_for"),
     # ``$EDITOR``: which program opens the credential file, not what is in
     # it.
     ("cli_credentials.py", "edit_credentials_command"),
