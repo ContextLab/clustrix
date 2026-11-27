@@ -170,6 +170,14 @@ class ClusterConfig:
     # into hours; set it to None to restore the unbounded wait.
     job_wait_timeout: Optional[int] = 86400
     cleanup_on_success: bool = True
+    # Find the local files a call names and stage them on the cluster
+    # (clustrix.auto_stage; ssh and slurm). Off means a job sees only what
+    # is already on the cluster or declared with data_package().
+    auto_stage: bool = True
+    # The most local input one call may copy to a cluster without being
+    # asked. Above it the call stops and lists the sizes: the right answer
+    # for a large dataset is to find it on the cluster, not to copy it.
+    auto_stage_max_bytes: int = 1_000_000_000
     prefer_local_parallel: bool = False
     local_parallel_threshold: int = 1000  # Use local if iterations < threshold
     async_submit: bool = False  # Use asynchronous job submission
