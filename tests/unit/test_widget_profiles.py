@@ -102,6 +102,135 @@ class TestSwitchingProfiles:
         assert widget.profile_manager.active_profile == "B"
 
 
+def _on_disk(widget, name):
+    """Profile ``name`` as a second process would read it right now."""
+    return ProfileManager(str(widget.profile_manager.config_dir)).load_profile(name)
+
+
+class TestEditingIsADraft:
+    """Editing never writes to a profile; only Apply does.
+
+    Every edit used to be written into the profile on the way out of it, so
+    clicking a backend tile while looking at "Local single-core" and then
+    choosing another profile turned that saved profile into a SLURM one.
+    """
+
+    def test_a_tile_click_and_a_profile_switch_leave_the_saved_profile_alone(
+        self, widget
+    ):
+        widget.widgets["profile_dropdown"].value = "Local single-core"
+        before = asdict(_on_disk(widget, "Local single-core"))
+
+        widget.widgets["cluster_type"].value = "slurm"
+        widget.widgets["host"].value = "oops.example.edu"
+        widget.widgets["profile_dropdown"].value = "B"
+
+        assert asdict(_on_disk(widget, "Local single-core")) == before
+        in_memory = widget.profile_manager.load_profile("Local single-core")
+        assert in_memory.cluster_type == "local"
+        assert in_memory.cluster_host is None
+
+    def test_the_draft_is_what_comes_back_not_the_saved_profile(self, widget):
+        widget.widgets["profile_dropdown"].value = "Local single-core"
+        widget.widgets["cluster_type"].value = "slurm"
+        widget.widgets["host"].value = "draft.example.edu"
+
+        widget.widgets["profile_dropdown"].value = "B"
+        widget.widgets["profile_dropdown"].value = "Local single-core"
+
+        assert widget.widgets["cluster_type"].value == "slurm"
+        assert widget.widgets["host"].value == "draft.example.edu"
+        assert widget.widgets["remote_section"].layout.display != "none"
+        assert "Edited" in widget.widgets["profile_state"].value
+
+    def test_a_draft_is_not_seen_by_a_second_widget(self, widget):
+        """It lives in the widget, for the widget's life, and nowhere else."""
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "draft.example.edu"
+        widget.widgets["profile_dropdown"].value = "B"
+
+        other = ModernClustrixWidget()
+        other.widgets["profile_dropdown"].value = "A"
+
+        assert other.widgets["host"].value == "a.edu"
+
+    def test_revert_is_only_offered_when_there_is_something_to_revert(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        revert = widget.widgets["revert_btn"]
+        assert revert.disabled is True
+        assert widget.widgets["profile_state"].value == ""
+
+        widget.widgets["cpus"].value = 64
+        assert revert.disabled is False
+
+        widget.widgets["cpus"].value = widget.profile_manager.load_profile(
+            "A"
+        ).default_cores
+        assert revert.disabled is True, "undoing the edit by hand is not an edit"
+
+    def test_revert_restores_the_profile_as_saved(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["cluster_type"].value = "huggingface"
+        widget.widgets["host"].value = "edited.edu"
+        widget.widgets["cpus"].value = 64
+
+        widget._on_revert_profile(widget.widgets["revert_btn"])
+
+        assert widget.widgets["cluster_type"].value == "slurm"
+        assert widget.widgets["host"].value == "a.edu"
+        assert widget.widgets["cpus"].value == _on_disk(widget, "A").default_cores
+        assert widget.widgets["revert_btn"].disabled is True
+        assert widget.widgets["profile_state"].value == ""
+
+    def test_revert_also_forgets_a_draft_that_was_parked(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "edited.edu"
+        widget.widgets["profile_dropdown"].value = "B"
+        widget.widgets["profile_dropdown"].value = "A"
+        assert widget.widgets["host"].value == "edited.edu"
+
+        widget._on_revert_profile(widget.widgets["revert_btn"])
+        widget.widgets["profile_dropdown"].value = "B"
+        widget.widgets["profile_dropdown"].value = "A"
+
+        assert widget.widgets["host"].value == "a.edu"
+
+    def test_apply_is_what_saves_the_form_to_the_profile(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "applied.example.edu"
+        widget.widgets["cpus"].value = 12
+        assert _on_disk(widget, "A").cluster_host == "a.edu"
+
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        saved = _on_disk(widget, "A")
+        assert saved.cluster_host == "applied.example.edu"
+        assert saved.default_cores == 12
+        assert widget.widgets["revert_btn"].disabled is True
+        # And nothing else was written by the same press.
+        assert _on_disk(widget, "B").cluster_host == "b.edu"
+
+    def test_an_invalid_form_is_neither_applied_nor_saved(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = ""
+
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert _on_disk(widget, "A").cluster_host == "a.edu"
+        assert widget.widgets["revert_btn"].disabled is False
+
+    def test_applying_one_profile_does_not_save_another_profiles_draft(self, widget):
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "draft-of-a.example.edu"
+        widget.widgets["profile_dropdown"].value = "B"
+
+        widget._on_apply_config(widget.widgets["apply_btn"])
+
+        assert _on_disk(widget, "A").cluster_host == "a.edu"
+        widget.widgets["profile_dropdown"].value = "A"
+        assert widget.widgets["host"].value == "draft-of-a.example.edu"
+
+
 class TestAddingAndRemoving:
     def test_add_clones_what_is_on_screen(self, widget):
         """Cloning the *stored* profile silently threw away every edit."""
@@ -114,19 +243,35 @@ class TestAddingAndRemoving:
         assert widget.widgets["cpus"].value == 99
         assert widget.widgets["host"].value == "onscreen.edu"
 
-    def test_add_leaves_the_original_intact(self, widget):
+    def test_add_leaves_the_original_as_it_was_saved(self, widget):
+        """Duplicate saves what is on screen as the *new* profile.
+
+        This used to assert that the original had absorbed the edit (99
+        cores), because every edit was written into the profile being
+        looked at. Editing no longer writes anywhere, so the original keeps
+        what was saved and the copy alone carries the edit.
+        """
         widget.widgets["profile_dropdown"].value = "A"
+        saved = widget.profile_manager.load_profile("A").default_cores
         widget.widgets["cpus"].value = 99
-        before = len(widget.profile_manager.get_profile_names())
+        before = widget.profile_manager.get_profile_names()
 
         widget._on_add_profile(widget.widgets["add_profile_btn"])
 
-        assert widget.profile_manager.load_profile("A").default_cores == 99
-        assert len(widget.profile_manager.get_profile_names()) == before + 1
+        names = widget.profile_manager.get_profile_names()
+        (copy_name,) = set(names) - set(before)
+        assert widget.profile_manager.load_profile(copy_name).default_cores == 99
+        assert widget.profile_manager.load_profile("A").default_cores == saved != 99
+        # ...and the original's unapplied edit went with the copy, not back
+        # onto the original's form.
+        widget.widgets["profile_dropdown"].value = "A"
+        assert widget.widgets["cpus"].value == saved
+        assert _on_disk(widget, "A").default_cores == saved
+        assert _on_disk(widget, copy_name).default_cores == 99
 
 
 class TestSaveAndLoad:
-    def test_saving_reports_where_the_file_went(self, widget, tmp_path):
+    def test_exporting_reports_where_the_file_went(self, widget, tmp_path):
         """A bare filename resolves under ~/.clustrix, so silence reads as
         'nothing happened'."""
         target = tmp_path / "profiles.yml"
@@ -135,13 +280,15 @@ class TestSaveAndLoad:
         widget._on_save_config(widget.widgets["save_btn"])
 
         assert target.exists() and target.stat().st_size > 0
-        assert "saved" in widget.widgets["status_pill"].value
+        assert "exported" in widget.widgets["status_pill"].value
 
-    def test_a_saved_file_reloads_into_a_fresh_widget(self, widget, tmp_path):
+    def test_an_exported_file_reloads_into_a_fresh_widget(self, widget, tmp_path):
         target = tmp_path / "profiles.yml"
         widget.widgets["config_filename"].value = str(target)
         widget.widgets["profile_dropdown"].value = "A"
         widget.widgets["host"].value = "roundtrip.edu"
+        # Export writes saved profiles, and Apply is what saves one.
+        widget._on_apply_config(widget.widgets["apply_btn"])
         widget._on_save_config(widget.widgets["save_btn"])
 
         fresh = ModernClustrixWidget()
@@ -150,12 +297,60 @@ class TestSaveAndLoad:
 
         assert {"A", "B"} <= set(fresh.profile_manager.get_profile_names())
         assert fresh.profile_manager.load_profile("A").cluster_host == "roundtrip.edu"
-        assert "loaded" in fresh.widgets["status_pill"].value
+        assert "imported" in fresh.widgets["status_pill"].value
 
-    def test_a_failed_load_says_so(self, widget, tmp_path):
+    def test_an_unapplied_edit_is_not_exported_and_the_user_is_told(
+        self, widget, tmp_path, capsys
+    ):
+        """The file holds what is saved. Leaving the draft out silently would
+        hand a colleague a profile the user believes they changed."""
+        target = tmp_path / "profiles.yml"
+        widget.widgets["config_filename"].value = str(target)
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "only-a-draft.edu"
+        capsys.readouterr()
+
+        widget._on_save_config(widget.widgets["save_btn"])
+
+        told = capsys.readouterr().out
+        text = target.read_text(encoding="utf-8")
+        assert "only-a-draft.edu" not in text
+        assert "a.edu" in text
+        assert "Edits that have not been applied are not included." in told
+        # The draft is still on screen afterwards.
+        assert widget.widgets["host"].value == "only-a-draft.edu"
+
+    def test_nothing_is_said_about_unapplied_edits_when_there_are_none(
+        self, widget, tmp_path, capsys
+    ):
+        widget.widgets["config_filename"].value = str(tmp_path / "profiles.yml")
+        capsys.readouterr()
+
+        widget._on_save_config(widget.widgets["save_btn"])
+
+        assert "not been applied" not in capsys.readouterr().out
+
+    def test_importing_discards_drafts_of_the_profiles_it_replaced(
+        self, widget, tmp_path
+    ):
+        """Import replaces every profile; a draft of a profile that no longer
+        exists, laid over a new one of the same name, would be a third thing."""
+        target = tmp_path / "profiles.yml"
+        widget.widgets["config_filename"].value = str(target)
+        widget._on_save_config(widget.widgets["save_btn"])
+        widget.widgets["profile_dropdown"].value = "A"
+        widget.widgets["host"].value = "stale-draft.edu"
+        widget.widgets["profile_dropdown"].value = "B"
+
+        widget._on_load_config(widget.widgets["load_btn"])
+        widget.widgets["profile_dropdown"].value = "A"
+
+        assert widget.widgets["host"].value == "a.edu"
+
+    def test_a_failed_import_says_so(self, widget, tmp_path):
         widget.widgets["config_filename"].value = str(tmp_path / "not-here.yml")
         widget._on_load_config(widget.widgets["load_btn"])
-        assert "failed" in widget.widgets["status_pill"].value
+        assert "import failed" in widget.widgets["status_pill"].value
 
 
 class TestTestJobButton:
@@ -608,9 +803,13 @@ class TestGlancingAtAnotherBackend:
         widget.widgets["profile_dropdown"].value = "myssh"
         widget.widgets["cluster_type"].value = "local"
         widget._update_ui_for_cluster_type()
+        # Applied, not merely glanced at: only Apply writes to a profile now,
+        # so without it this would hold whatever the form collected.
+        widget._on_apply_config(widget.widgets["apply_btn"])
         widget.widgets["profile_dropdown"].value = "other"
 
-        kept = manager.load_profile("myssh")
+        kept = PM(config_dir=str(tmp_path / "store")).load_profile("myssh")
+        assert kept.cluster_type == "local"
         assert (kept.cluster_host, kept.username) == ("h.edu", "bob")
         assert kept.remote_work_dir == "/scratch/bob"
 
