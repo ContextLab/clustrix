@@ -204,7 +204,11 @@ class TestCLI:
 
         result = runner.invoke(cli, ["status"])
 
-        assert result.exit_code == 0
+        # This asserted exit code 0: "the connection failed" reported as
+        # success to anything reading the exit status. Corrected, not
+        # relaxed -- tests/unit/test_cli_settings_persist.py checks the same
+        # thing against a real closed port.
+        assert result.exit_code == 1
         assert "Connection: ✗ Failed" in result.output
         assert "Connection failed" in result.output
 

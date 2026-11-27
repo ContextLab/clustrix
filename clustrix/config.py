@@ -21,10 +21,11 @@ from typing import (
     Mapping,
     Optional,
     Tuple,
+    Union,
     get_args,
     get_origin,
 )
-from dataclasses import dataclass, asdict, fields
+from dataclasses import InitVar, dataclass, asdict, fields
 
 logger = logging.getLogger(__name__)
 
@@ -184,7 +185,6 @@ class ClusterConfig:
     password_env_var: str = ""  # Name of environment variable containing password
     cache_credentials: bool = True  # Cache credentials in memory
     credential_cache_ttl: int = 300  # Credential cache TTL in seconds (5 minutes)
-    ssh_port: int = 22  # SSH port (for consistency with cluster_port)
     # Controls what clustrix does when a remote host's SSH key is not already
     # in your known_hosts files. "reject" (default, secure) refuses the
     # connection and tells you the exact ssh-keyscan command to add it.
@@ -230,6 +230,14 @@ class ClusterConfig:
     # Runtime venv information (set during execution)
     venv_info: Optional[dict] = None  # Information about created virtual environments
 
+    #: Deprecated spelling of ``cluster_port``, accepted on input only. There
+    #: used to be two port fields: the executor connected to ``cluster_port``
+    #: while the auth helpers read ``ssh_port``, so a user who set one had the
+    #: other half of clustrix dial 22. It is an ``InitVar`` rather than a
+    #: field, so it is not stored, not saved, and cannot be read back -- see
+    #: :func:`_resolve_deprecated_ssh_port`.
+    ssh_port: InitVar[Optional[int]] = None
+
     def __repr__(self) -> str:
         """Render the config with credentials masked.
 
@@ -255,53 +263,15 @@ class ClusterConfig:
             parts.append(f"{field_def.name}={value!r}")
         return f"{type(self).__name__}({', '.join(parts)})"
 
-    def __post_init__(self):
-        if self.environment_variables is None:
-            self.environment_variables = {}
-        if self.module_loads is None:
-            self.module_loads = []
-        if self.pre_execution_commands is None:
-            self.pre_execution_commands = []
-        if self.cluster_packages is None:
-            self.cluster_packages = []
-        if self.excluded_packages is None:
-            self.excluded_packages = []
-        if self.venv_post_install_commands is None:
-            self.venv_post_install_commands = []
+    def __post_init__(self, ssh_port: Optional[int] = None):
+        self.cluster_port = _resolve_deprecated_ssh_port(ssh_port, self.cluster_port)
+        for name, empty in _EMPTY_WHEN_NONE.items():
+            if getattr(self, name) is None:
+                setattr(self, name, empty())
 
         self._warn_about_dead_fields()
 
-        if self.ssh_host_key_policy not in ("reject", "auto_add"):
-            raise ValueError(
-                f"Invalid ssh_host_key_policy={self.ssh_host_key_policy!r}. "
-                f"Valid values are 'reject' (default, secure) or 'auto_add' "
-                f"(insecure, trusts unknown host keys automatically)."
-            )
-
-        validate_cluster_type(self.cluster_type)
-        validate_conda_env_name(self.conda_env_name)
-
-        # A ``cluster_host`` that is truthy but not a usable hostname is
-        # rejected here rather than carried. ``normalize_hostname`` is the one
-        # comparison the provenance record and every credential check are
-        # built on, and it answers ``""`` for anything that is not a non-empty
-        # string -- so a host it cannot normalise is a host that cannot be
-        # recorded as tainted and cannot be matched against a credential.
-        # ``set_config_source`` skipped such a value silently, which let it
-        # slip past the record entirely: PyYAML parses ``cluster_host:
-        # 0x7f000001`` as the *int* 2130706433, and an int is exactly the kind
-        # of "truthy, unnormalisable" value that was never written down and so
-        # was laundered to ``runtime`` by the next rebuild. Failing closed at
-        # construction closes that off at the only point every route passes
-        # through, and gives the user an error naming their own file instead
-        # of a refusal much later.
-        if self.cluster_host and not normalize_hostname(self.cluster_host):
-            raise ValueError(
-                f"cluster_host={self.cluster_host!r} is not a usable hostname. "
-                f"It must be a non-empty string; note that YAML parses an "
-                f"unquoted 0x7f000001 or 1e5 as a number, so quote a hostname "
-                f"that could be read as one."
-            )
+        _validate_config_values({f.name: getattr(self, f.name) for f in fields(self)})
 
         # Where this configuration came from. A ``ClusterConfig(...)`` call is
         # somebody's Python, so the default is the trusted end of the scale --
@@ -372,7 +342,8 @@ class ClusterConfig:
         that stops it becoming a laundering route in its own right.
         """
         write_config_file_securely(
-            Path(config_path), config_document(self, include_secrets=include_secrets)
+            Path(config_path).expanduser(),
+            config_document(self, include_secrets=include_secrets),
         )
 
     @classmethod
@@ -384,7 +355,7 @@ class ClusterConfig:
         have. Declared rather than left to ``__post_init__``'s default,
         because the default is ``runtime`` and this content came off a disk.
         """
-        config_path_obj = Path(config_path)
+        config_path_obj = Path(config_path).expanduser()
         if not config_path_obj.exists():
             raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
@@ -434,13 +405,21 @@ class ClusterConfig:
         ``origin`` names the file in error messages and is cosmetic;
         ``source`` is the security-relevant one.
         """
+        where = origin or f"the {source} configuration"
+        if not isinstance(mapping, collections_abc.Mapping):
+            # An empty YAML file parses to ``None`` and a list to a list;
+            # ``dict(None)`` answered "'NoneType' object is not iterable".
+            raise ValueError(
+                f"{where} does not contain a configuration: expected a "
+                f"mapping of settings, found "
+                f"{'nothing (the file is empty)' if mapping is None else type(mapping).__name__}."
+            )
         # Work on a copy: the mapping belongs to the caller, and removing the
         # bookkeeping key from the caller's dict would make a second load of
         # the same content validate differently than the first.
         content = dict(mapping)
         recorded = content.pop(CONFIG_SOURCES_KEY, None)
         effective = config_source_for_saved_entry(source, recorded)
-        where = origin or f"the {source} configuration"
         _validate_config_mapping(content, where)
         with config_built_from_file(effective):
             config = cls(**content)
@@ -548,7 +527,7 @@ def _validate_config_mapping(mapping: Mapping[str, Any], origin: str) -> None:
     'cleanup_remote_files'", which names the internals rather than the file
     the user wrote, and stops at the first offender.
     """
-    known = {f.name for f in fields(ClusterConfig)}
+    known = ACCEPTED_SETTING_NAMES
     unknown = sorted(set(mapping) - known)
     if unknown:
         import difflib
@@ -566,15 +545,171 @@ def _validate_config_mapping(mapping: Mapping[str, Any], origin: str) -> None:
             hints.append(f"{name}" + (f" (did you mean {close[0]}?)" if close else ""))
         raise ValueError(f"{origin} contains unknown setting(s): {'; '.join(hints)}")
 
-    if "cluster_type" in mapping:
-        validate_cluster_type(mapping["cluster_type"], source=f"{origin}: cluster_type")
+    # Named by the file, so the refusal names the file: a bare message
+    # would send the user hunting for the configure() call that did not
+    # write it.
+    _validate_config_values(mapping, origin)
 
-    if "conda_env_name" in mapping:
-        # Named by the file, so the refusal names the file: a bare message
-        # would send the user hunting for the configure() call that did not
-        # write it.
+
+#: Fields for which ``None`` means "empty". One table, applied by
+#: ``__post_init__`` and by :func:`configure`: ``setattr`` does not re-run
+#: ``__post_init__``, so ``configure(environment_variables=None)`` used to
+#: leave a literal ``None`` where every reader calls ``.items()``.
+_EMPTY_WHEN_NONE: Dict[str, Any] = {
+    "environment_variables": dict,
+    "module_loads": list,
+    "pre_execution_commands": list,
+    "cluster_packages": list,
+    "excluded_packages": list,
+    "venv_post_install_commands": list,
+}
+
+#: The one value ``ssh_port`` had when nobody set it. Every configuration
+#: file saved before the field was removed carries it, so it is not a claim.
+_SSH_PORT_OLD_DEFAULT = 22
+
+
+def _resolve_deprecated_ssh_port(ssh_port: Any, cluster_port: Any) -> Any:
+    """``cluster_port`` after the deprecated ``ssh_port`` has had its say.
+
+    ``cluster_port`` is the port clustrix connects to and the only one it
+    stores. ``ssh_port`` is still accepted so existing files and calls keep
+    working: left at its old default it is ignored silently, otherwise it
+    supplies ``cluster_port`` when that was not set, with a
+    ``DeprecationWarning`` either way. Where the two disagree
+    ``cluster_port`` wins, because that is the port jobs were already using.
+    """
+    if ssh_port is None or ssh_port == _SSH_PORT_OLD_DEFAULT:
+        return cluster_port
+    if cluster_port in (_SSH_PORT_OLD_DEFAULT, ssh_port):
+        warnings.warn(
+            f"ssh_port is deprecated; use cluster_port={ssh_port!r} instead. "
+            f"It has been applied as cluster_port.",
+            DeprecationWarning,
+            stacklevel=4,
+        )
+        return ssh_port
+    warnings.warn(
+        f"ssh_port={ssh_port!r} is deprecated and was ignored, because "
+        f"cluster_port={cluster_port!r} is also set and is the port clustrix "
+        f"connects to. Remove ssh_port.",
+        DeprecationWarning,
+        stacklevel=4,
+    )
+    return cluster_port
+
+
+def _runtime_types(field_type: object) -> Optional[Tuple[type, ...]]:
+    """The Python types a field's annotation admits, or ``None`` for any.
+
+    Only the container and scalar types worth refusing are answered for:
+    ``int``, ``float``, ``bool``, ``list`` and ``dict``, with ``Optional``
+    unwrapped. ``str`` fields are left alone on purpose -- YAML reads an
+    unquoted ``default_memory: 8`` or ``cuda_version_preference: 11.8`` as a
+    number, and refusing a file for that would be a new way to fail to load.
+    """
+    members = get_args(field_type) if get_origin(field_type) is Union else (field_type,)
+    allowed: List[type] = []
+    for member in members:
+        concrete = get_origin(member) or member
+        if concrete is float:
+            allowed += [float, int]
+        elif concrete in (int, bool, list, dict, type(None)):
+            allowed.append(concrete)  # type: ignore[arg-type]
+        else:
+            return None
+    return tuple(allowed)
+
+
+def _type_names(types: Tuple[type, ...]) -> str:
+    names = ["None" if t is type(None) else t.__name__ for t in types]
+    return " or ".join(dict.fromkeys(names))
+
+
+def _validate_config_values(values: Mapping[str, Any], origin: str = "") -> None:
+    """Refuse a setting whose *value* clustrix could not act on.
+
+    The one place values are checked. ``ClusterConfig.__post_init__`` calls it
+    with every field, :func:`configure` with its keywords, and every file
+    loader reaches it through :func:`_validate_config_mapping` -- so a value
+    is refused identically however it arrives. They used to disagree:
+    ``configure(ssh_host_key_policy="yolo")``, ``cluster_port="abc"`` and
+    ``default_cores=-3`` were all accepted because ``setattr`` does not re-run
+    ``__post_init__``, and a ``save_config`` afterwards wrote a file that no
+    later process could load.
+
+    Only the names present in ``values`` are checked. ``origin`` names the
+    file a value came from and is empty for values passed in Python.
+    """
+
+    def label(name: str) -> str:
+        return f"{origin}: {name}" if origin else name
+
+    for name, value in values.items():
+        types = _FIELD_RUNTIME_TYPES.get(name)
+        if types is None:
+            continue
+        # ``bool`` is a subclass of ``int``; ``cluster_port: true`` is not 1.
+        acceptable = isinstance(value, types) and (
+            not isinstance(value, bool) or bool in types
+        )
+        if not acceptable:
+            raise ValueError(
+                f"{label(name)}={value!r} is not valid: expected "
+                f"{_type_names(types)}, got {type(value).__name__}."
+            )
+
+    if "ssh_host_key_policy" in values:
+        policy = values["ssh_host_key_policy"]
+        if policy not in ("reject", "auto_add"):
+            raise ValueError(
+                f"Invalid {label('ssh_host_key_policy')}={policy!r}. "
+                f"Valid values are 'reject' (default, secure) or 'auto_add' "
+                f"(insecure, trusts unknown host keys automatically)."
+            )
+
+    if "cluster_port" in values and not 1 <= values["cluster_port"] <= 65535:
+        raise ValueError(
+            f"{label('cluster_port')}={values['cluster_port']!r} is not a TCP "
+            f"port; it must be between 1 and 65535."
+        )
+
+    if "default_cores" in values:
+        cores = values["default_cores"]
+        if cores != -1 and cores < 1:
+            raise ValueError(
+                f"{label('default_cores')}={cores!r} is not valid: use a "
+                f"positive number of cores, or -1 for every core available."
+            )
+
+    if "cluster_type" in values:
+        validate_cluster_type(values["cluster_type"], source=label("cluster_type"))
+
+    if "conda_env_name" in values:
         validate_conda_env_name(
-            mapping["conda_env_name"], source=f"{origin}: conda_env_name"
+            values["conda_env_name"], source=label("conda_env_name")
+        )
+
+    # A ``cluster_host`` that is truthy but not a usable hostname is rejected
+    # here rather than carried. ``normalize_hostname`` is the one comparison
+    # the provenance record and every credential check are built on, and it
+    # answers ``""`` for anything that is not a non-empty string -- so a host
+    # it cannot normalise is a host that cannot be recorded as tainted and
+    # cannot be matched against a credential. ``set_config_source`` skipped
+    # such a value silently, which let it slip past the record entirely:
+    # PyYAML parses ``cluster_host: 0x7f000001`` as the *int* 2130706433, and
+    # an int is exactly the kind of "truthy, unnormalisable" value that was
+    # never written down and so was laundered to ``runtime`` by the next
+    # rebuild. Failing closed here closes that off at the only point every
+    # route passes through, and gives the user an error naming their own
+    # file instead of a refusal much later.
+    host = values.get("cluster_host")
+    if host and not normalize_hostname(host):
+        raise ValueError(
+            f"{label('cluster_host')}={host!r} is not a usable hostname. "
+            f"It must be a non-empty string; note that YAML parses an "
+            f"unquoted 0x7f000001 or 1e5 as a number, so quote a hostname "
+            f"that could be read as one."
         )
 
 
@@ -633,6 +768,53 @@ _NOT_ACTUALLY_SECRET = re.compile(r"^use_|_env_var$", re.IGNORECASE)
 #: over the ``ClusterConfig`` fields it was written for and over nothing
 #: else, so this is the domain, enforced rather than described.
 DECLARED_FIELD_NAMES = frozenset(f.name for f in fields(ClusterConfig))
+
+#: What each declared field's annotation admits at runtime, for the fields
+#: :func:`_runtime_types` answers for. Derived, so a new field is covered.
+#: The dead-but-accepted fields are left out: nothing reads them, so refusing
+#: a value in one could only ever stop an old file from loading.
+_FIELD_RUNTIME_TYPES: Dict[str, Tuple[type, ...]] = {
+    f.name: types
+    for f in fields(ClusterConfig)
+    if f.name not in DEAD_BUT_ACCEPTED_FIELDS
+    for types in [_runtime_types(f.type)]
+    if types is not None
+}
+
+#: Old names still accepted on input, mapped to the field that replaced them.
+DEPRECATED_SETTING_ALIASES: Dict[str, str] = {"ssh_port": "cluster_port"}
+
+
+def _assign_deprecated_ssh_port(config: ClusterConfig, value: Any) -> None:
+    """``config.ssh_port = n`` sets ``cluster_port``, and says so."""
+    warnings.warn(
+        "ClusterConfig.ssh_port is deprecated; assign cluster_port instead. "
+        "The value has been applied as cluster_port.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+    _validate_config_values({"cluster_port": value})
+    config.cluster_port = value
+
+
+# The dataclass leaves an ``InitVar``'s default behind as a class attribute,
+# so ``config.ssh_port`` already answered ``None``; this keeps that answer and
+# adds the setter. The getter has to exist and has to say ``None``:
+# ``dataclasses.replace`` reads every ``InitVar`` back off the instance and
+# passes it to ``__init__``, where ``None`` means "not given". There is one
+# port, and it is read as ``cluster_port``.
+setattr(
+    ClusterConfig,
+    "ssh_port",
+    property(
+        fget=lambda config: None,
+        fset=_assign_deprecated_ssh_port,
+        doc="Deprecated alias of cluster_port: assignable, and always reads None.",
+    ),
+)
+
+#: Every name a configuration file or :func:`configure` may use.
+ACCEPTED_SETTING_NAMES = DECLARED_FIELD_NAMES | frozenset(DEPRECATED_SETTING_ALIASES)
 
 
 def _is_secret_field(field_name: str) -> bool:
@@ -1648,16 +1830,6 @@ def configure(**kwargs) -> None:
         # RLock.
         _ensure_default_config_loaded()
 
-        # Validate everything before applying anything: a rejected keyword
-        # used to leave the earlier ones already written to the live config,
-        # so a failed configure() call still changed the process's behaviour.
-        for key in kwargs:
-            if hasattr(_config, key):
-                continue
-            removed = _removed_setting_reason(key)
-            if removed:
-                raise ValueError(removed)
-            raise ValueError(f"Unknown configuration parameter: {key}")
         # Validate everything before applying anything: a rejected keyword used
         # to leave the earlier ones already written to the live config, so a
         # failed configure() call still changed the process's behaviour.
@@ -1673,7 +1845,7 @@ def configure(**kwargs) -> None:
         # a fourth spelling of ``{f.name for f in fields(ClusterConfig)}`` is how
         # these drift apart.
         for key in kwargs:
-            if key in DECLARED_FIELD_NAMES:
+            if key in ACCEPTED_SETTING_NAMES:
                 continue
             removed = _removed_setting_reason(key)
             if removed:
@@ -1695,30 +1867,38 @@ def configure(**kwargs) -> None:
                 )
             raise ValueError(f"Unknown configuration parameter: {key}")
 
-        if "cluster_host" in kwargs:
-            # Same rule as ``__post_init__``, which ``setattr`` below does not
-            # re-run: a host the one normaliser cannot make sense of can neither
-            # be recorded as tainted nor compared against a credential, so it may
-            # not be written to the live config at all.
-            host = kwargs["cluster_host"]
-            if host and not normalize_hostname(host):
-                raise ValueError(
-                    f"cluster_host={host!r} is not a usable hostname. It must be "
-                    f"a non-empty string."
+        if "ssh_port" in kwargs:
+            # The deprecated spelling of ``cluster_port``. Naming it here is
+            # an instruction to change the port, so it is applied unless the
+            # same call also names ``cluster_port`` -- then the two are
+            # reconciled exactly as at construction.
+            ssh_port = kwargs.pop("ssh_port")
+            if "cluster_port" in kwargs:
+                kwargs["cluster_port"] = _resolve_deprecated_ssh_port(
+                    ssh_port, kwargs["cluster_port"]
                 )
+            elif ssh_port is not None:
+                warnings.warn(
+                    f"configure(ssh_port=...) is deprecated; use "
+                    f"configure(cluster_port={ssh_port!r}). It has been "
+                    f"applied as cluster_port.",
+                    DeprecationWarning,
+                    stacklevel=2,
+                )
+                kwargs["cluster_port"] = ssh_port
 
-        if "cluster_type" in kwargs:
-            # setattr below does not re-run __post_init__, so without this a
-            # removed backend reaches the executor and fails there instead --
-            # after connect(), i.e. after an SSH round trip to a host that was
-            # never going to be used.
-            validate_cluster_type(kwargs["cluster_type"])
-
-        if "conda_env_name" in kwargs:
-            # Same reason, and the same setattr: without this the refusal
-            # happens at submission, with the job directory already created
-            # on the cluster and the pickle already uploaded.
-            validate_conda_env_name(kwargs["conda_env_name"])
+        # ``setattr`` below does not re-run ``__post_init__``, so everything
+        # construction does to a value has to be done to these too, by the
+        # same two pieces of code: the None-means-empty table and the one
+        # value validator. Without them ``configure(cluster_type="pbs")``
+        # reached the executor and failed after an SSH round trip,
+        # ``conda_env_name="/a/path"`` was refused only at submission, and
+        # ``ssh_host_key_policy="yolo"`` could be saved to a file no later
+        # process was able to load.
+        for name, empty in _EMPTY_WHEN_NONE.items():
+            if name in kwargs and kwargs[name] is None:
+                kwargs[name] = empty()
+        _validate_config_values(kwargs)
 
         # Bound once. Even under the lock, re-reading the global on every
         # iteration would make this loop depend on _config not being rebound
@@ -1887,7 +2067,7 @@ def _load_config_file(config_path: str, file_source: str) -> str:
     """
     global _config, _default_config_loaded
 
-    config_path_obj = Path(config_path)
+    config_path_obj = Path(config_path).expanduser()
     if not config_path_obj.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
@@ -2048,6 +2228,25 @@ def get_config() -> ClusterConfig:
     return _config
 
 
+#: The per-user configuration file's names, in the order they are searched.
+_CONFIG_DIR_FILENAMES = ("config.yml", "config.yaml", "config.json")
+
+
+def default_config_file() -> Path:
+    """The per-user configuration file: where a setting is saved to persist.
+
+    It is the file in :func:`get_config_dir` that the search of the standard
+    locations would adopt -- the first of ``config.yml``, ``config.yaml`` and
+    ``config.json`` that exists -- so that what is saved here is what the
+    next process reads. ``config.yml`` when there is none yet.
+    """
+    config_dir = get_config_dir()
+    for name in _CONFIG_DIR_FILENAMES:
+        if (config_dir / name).exists():
+            return config_dir / name
+    return config_dir / _CONFIG_DIR_FILENAMES[0]
+
+
 def _default_config_candidates() -> List[Tuple[Path, str]]:
     """The paths searched for a user configuration file, in priority order.
 
@@ -2080,9 +2279,7 @@ def _default_config_candidates() -> List[Tuple[Path, str]]:
             else CONFIG_SOURCE_REDIRECTED_CONFIG_DIR
         )
         candidates += [
-            (config_dir / "config.yml", config_dir_source),
-            (config_dir / "config.yaml", config_dir_source),
-            (config_dir / "config.json", config_dir_source),
+            (config_dir / name, config_dir_source) for name in _CONFIG_DIR_FILENAMES
         ]
     try:
         cwd = Path.cwd()

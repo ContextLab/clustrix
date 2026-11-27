@@ -994,10 +994,10 @@ def hostless_secret_refusal(
     kind of secret**, which is why route 13 is this rule and not a new one.
     :attr:`CredentialRelease.local_identities` is this answer as a boolean,
     carried on every release so the connection paths cannot forget it;
-    ``validation.validate_ssh_key_auth`` and ``ssh_utils.setup_ssh_keys``
-    ask here directly, because neither is asking for a credential -- they
-    are about to offer identities the user already has -- and both were
-    doing it with no provenance check anywhere in the path.
+    ``ssh_utils.setup_ssh_keys`` asks here directly, because it is not
+    asking for a credential -- it is about to offer identities the user
+    already has -- and it was doing so with no provenance check anywhere in
+    the path.
     """
     return stored_credential_is_for_config(config, {}, hostname=target.hostname)
 

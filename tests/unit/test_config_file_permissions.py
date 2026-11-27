@@ -224,7 +224,7 @@ def test_secret_fields_derived_from_dataclass_covers_known_credential_names():
         "cluster_host",
         "username",
         "cluster_type",
-        "ssh_port",
+        "cluster_port",
         # Not secrets despite matching on name: a boolean flag, and a
         # field holding the NAME of an environment variable rather than
         # its value. Dropping these broke the auth-fallback round trip

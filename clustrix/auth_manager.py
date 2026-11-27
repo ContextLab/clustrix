@@ -50,7 +50,7 @@ class AuthenticationManager:
         connection_params = {
             "hostname": self.config.cluster_host,
             "username": self.config.username,
-            "port": self.config.ssh_port,
+            "port": self.config.cluster_port,
         }
 
         # 1. Check widget password first (immediate use)
@@ -256,7 +256,7 @@ class AuthenticationManager:
                 "SSH_HOST": hostname,
                 "SSH_USERNAME": username,
                 "SSH_PASSWORD": password,
-                "SSH_PORT": str(self.config.ssh_port or 22),
+                "SSH_PORT": str(self.config.cluster_port),
             }
 
             # Use the credential manager's file writing function

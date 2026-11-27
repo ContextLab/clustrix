@@ -1,8 +1,12 @@
 import click
 import getpass
+from pathlib import Path
 
 from .config import (
+    ConfigFileError,
+    _read_config_bundle,
     configure,
+    default_config_file,
     load_config,
     save_config,
     get_config,
@@ -10,6 +14,7 @@ from .config import (
     SUPPORTED_CLUSTER_TYPES,
 )
 from .executor import ClusterExecutor
+from .profile_manager import _mkdir_private
 from .ssh_utils import setup_ssh_keys, detect_working_ssh_key
 from .cli_credentials import (
     setup_credentials_interactive,
@@ -21,10 +26,57 @@ from .cli_credentials import (
 )
 
 
-@click.group()
+class _CleanErrorGroup(click.Group):
+    """Report an unusable configuration file as an error, not a traceback.
+
+    Every command reads the configuration, and a configuration file that was
+    found but cannot be loaded raises ``ConfigFileError`` on first use. The
+    message already names the file and what to do about it; this is the one
+    place it is turned into ``Error: ...`` and exit status 1.
+    """
+
+    def invoke(self, ctx):
+        try:
+            return super().invoke(ctx)
+        except ConfigFileError as exc:
+            raise click.ClickException(str(exc)) from exc
+
+
+@click.group(cls=_CleanErrorGroup)
 def cli():
     """Clustrix CLI - Distributed computing for Python functions."""
     pass
+
+
+def _save_configuration(config_file=None) -> Path:
+    """Write the live configuration where the next process will find it.
+
+    ``config_file`` is the path the user named, if they named one; otherwise
+    it is the per-user configuration file, which is what makes
+    ``clustrix config --cluster-host ...`` followed by ``clustrix status``
+    work at all -- each is a separate process, and until this existed the
+    first one changed nothing but its own memory. Secrets are left out and
+    the file is owner-only: both are ``ClusterConfig.save_to_file``'s rules.
+    """
+    if config_file is not None:
+        destination = Path(config_file).expanduser()
+    else:
+        destination = default_config_file()
+        if _read_config_bundle(destination) is not None:
+            raise click.ClickException(
+                f"{destination} holds named profiles saved by the notebook "
+                f"widget, and saving here would replace all of them. Nothing "
+                f"was changed. Move that file aside, or name another one "
+                f"with --config-file and load it with 'clustrix load'."
+            )
+        _mkdir_private(destination.parent)
+    try:
+        save_config(str(destination))
+    except OSError as exc:
+        raise click.ClickException(
+            f"Could not write {destination}: {exc}. Nothing was saved."
+        ) from exc
+    return destination
 
 
 @cli.command()
@@ -35,47 +87,56 @@ def cli():
 )
 @click.option("--cluster-host", help="Cluster hostname")
 @click.option("--username", help="Username for cluster access")
-@click.option("--api-key", help="API key for authentication")
-@click.option("--cores", type=int, help="Default number of cores")
+@click.option(
+    "--cores", type=int, help="Default number of cores (-1 for every core available)"
+)
 @click.option("--memory", help="Default memory allocation (e.g., 8GB)")
 @click.option("--time", help="Default time allocation (e.g., 04:00:00)")
-@click.option("--config-file", type=click.Path(), help="Save configuration to file")
+@click.option(
+    "--config-file",
+    type=click.Path(),
+    help="Save to this file instead of the per-user configuration file",
+)
 def config(
     cluster_type,
     cluster_host,
     username,
-    api_key,
     cores,
     memory,
     time,
     config_file,
 ):
-    """Configure Clustrix settings."""
+    """Show Clustrix settings, or change them and save the change."""
 
-    config_updates = {}
+    # ``is not None``, not truthiness: ``--cores 0`` is a value the user
+    # typed, and it has to reach the validation that refuses it rather than
+    # being mistaken for the option not having been given.
+    config_updates = {
+        name: value
+        for name, value in (
+            ("cluster_type", cluster_type),
+            ("cluster_host", cluster_host),
+            ("username", username),
+            ("default_cores", cores),
+            ("default_memory", memory),
+            ("default_time", time),
+        )
+        if value is not None
+    }
 
-    if cluster_type:
-        config_updates["cluster_type"] = cluster_type
-    if cluster_host:
-        config_updates["cluster_host"] = cluster_host
-    if username:
-        config_updates["username"] = username
-    if api_key:
-        config_updates["api_key"] = api_key
-    if cores:
-        config_updates["default_cores"] = cores
-    if memory:
-        config_updates["default_memory"] = memory
-    if time:
-        config_updates["default_time"] = time
-
-    if config_updates:
-        configure(**config_updates)
+    if config_updates or config_file:
+        try:
+            configure(**config_updates)
+        except ValueError as exc:
+            raise click.ClickException(str(exc)) from exc
+        destination = _save_configuration(config_file)
         click.echo("Configuration updated successfully!")
-
+        click.echo(f"Configuration saved to {destination}")
         if config_file:
-            save_config(config_file)
-            click.echo(f"Configuration saved to {config_file}")
+            click.echo(
+                f"It is not read automatically from there; use "
+                f"'clustrix load {config_file}' to make it the default."
+            )
     else:
         # Display current configuration
         current_config = get_config()
@@ -91,21 +152,23 @@ def config(
 @cli.command()
 @click.argument("config_file", type=click.Path())
 def load(config_file):
-    """Load configuration from file."""
+    """Load configuration from a file and make it the default."""
     try:
         load_config(config_file)
-        click.echo(f"Configuration loaded from {config_file}")
     except FileNotFoundError:
         click.echo("Error: File not found", err=True)
         raise SystemExit(1)
     except Exception as e:
         click.echo(f"Error loading configuration: {e}", err=True)
         raise SystemExit(1)
+    destination = _save_configuration()
+    click.echo(f"Configuration loaded from {config_file}")
+    click.echo(f"Configuration saved to {destination}")
 
 
 @cli.command()
 def status():
-    """Show cluster status and active jobs."""
+    """Show cluster status; exits non-zero when the cluster is unreachable."""
     current_config = get_config()
 
     if not current_config.cluster_host:
@@ -118,14 +181,20 @@ def status():
     click.echo(f"  User: {current_config.username}")
 
     # Try to connect and get status
+    executor = None
     try:
         executor = ClusterExecutor(current_config)
         executor.connect()
         click.echo("  Connection: ✓ Connected")
-        executor.disconnect()
     except Exception as e:
         click.echo("  Connection: ✗ Failed")
         click.echo(f"  Error: {e}")
+        # A script asking "is the cluster up?" reads the exit status. This
+        # used to be 0 either way.
+        raise SystemExit(1)
+    finally:
+        if executor is not None:
+            executor.disconnect()
 
 
 @cli.command(name="ssh-setup")

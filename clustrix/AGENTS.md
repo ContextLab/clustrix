@@ -13,7 +13,7 @@ Flat layout: 34 modules, no subpackages. `__init__.py` re-exports 53 symbols —
 | SSH | `ssh_security.py`, `ssh_utils.py` | Host-key policy lives ONLY in `ssh_security.configure_host_key_policy` |
 | Notebook | `notebook_magic.py`, `notebook_magic_core.py`, `notebook_magic_config.py`, `notebook_magic_widget.py`, `notebook_magic_fallback.py`, `modern_notebook_widget.py` | `notebook_magic.py` re-exports core; fallback provides no-IPython stubs |
 | Data/packaging | `staging.py`, `file_packaging.py`, `dependency_analysis.py`, `loop_analysis.py` | staging = declared `data_package` objects; packaging = function shipping |
-| Misc | `utils.py` (serialization, two-venv commands, env setup), `filesystem.py` (read-only `cluster_*`), `validation.py`, `cli.py`, `modern_notebook_widget.py` | `cli.py` is the `clustrix` entry point (`pyproject [project.scripts]`) |
+| Misc | `utils.py` (serialization, two-venv commands, env setup), `filesystem.py` (read-only `cluster_*`), `cli.py`, `modern_notebook_widget.py` | `cli.py` is the `clustrix` entry point (`pyproject [project.scripts]`) |
 
 ## CONVENTIONS
 

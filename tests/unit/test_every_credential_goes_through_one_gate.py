@@ -180,11 +180,6 @@ LITERAL_ENVIRONMENT_LOOKUP_ALLOWLIST = {
     # username is not a credential -- it is half of who the credential is
     # *for*, which the gate compares rather than consumes.
     ("executor_connections.py", "ConnectionManager.setup_ssh_connection"),
-    ("validation.py", "validate_on_test_clusters"),
-    # Which hosts the operator's own validation run should talk to. Host
-    # names, no secret, and they are read from the operator's environment
-    # rather than from any file clustrix discovered.
-    ("validation.py", "_validation_clusters"),
 }
 
 #: Places that hand over the **whole** environment rather than reading one
@@ -1069,7 +1064,7 @@ PROVENANCE_GOVERNED_SETTINGS = ("ssh_host_key_policy", "hf_image")
 #: definitions)``. ``config.py`` is where the field is declared and
 #: validated; the others are the single reader that also asks who set it.
 PROVENANCE_GOVERNED_READER_ALLOWLIST = {
-    ("ssh_host_key_policy", "config.py", "ClusterConfig.__post_init__"),
+    ("ssh_host_key_policy", "config.py", "_validate_config_values"),
     ("ssh_host_key_policy", "ssh_security.py", "host_key_policy_name"),
     ("hf_image", "hf_jobs.py", "HFJobsManager._image"),
 }

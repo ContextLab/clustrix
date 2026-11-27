@@ -8,7 +8,7 @@ import warnings
 import yaml
 from pathlib import Path
 from typing import Dict, List, Optional, Any
-from dataclasses import asdict, fields as dataclass_fields
+from dataclasses import asdict
 
 from .config import (
     CONFIG_SOURCE_EXPLICIT_FILE,
@@ -808,7 +808,6 @@ class ProfileManager:
             recorded_sources = {}
 
         loaded: Dict[str, ClusterConfig] = {}
-        known = {f.name for f in dataclass_fields(ClusterConfig)}
         profiles_section = data.get("profiles") or {}
         if not isinstance(profiles_section, dict):
             raise ValueError(f"'profiles' in {filepath} is not a mapping")
@@ -816,12 +815,6 @@ class ProfileManager:
             try:
                 if not isinstance(config_dict, dict):
                     raise ValueError(f"Profile {name!r} in {filepath} is not a mapping")
-                unknown = set(config_dict) - known
-                if unknown:
-                    raise ValueError(
-                        f"Profile {name!r} in {filepath} has unknown setting(s): "
-                        f"{', '.join(sorted(unknown))}"
-                    )
                 # ``from_file_content`` takes the source as an argument, so
                 # this loader cannot forget to say where the bytes came from
                 # -- which is exactly what it used to do. It also makes the
