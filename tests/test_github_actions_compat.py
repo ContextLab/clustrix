@@ -106,15 +106,19 @@ def test_the_line_magic_still_reports_the_configuration(tmp_path):
         from clustrix.notebook_magic import ClusterfyMagics
 
         configure(cluster_type="slurm", cluster_host="hpc.example.edu")
-        returned = ClusterfyMagics().clustrix("status")
-        print("returned", returned.cluster_host)
+        print("status returned", ClusterfyMagics().clustrix("status"))
+        returned = ClusterfyMagics().clustrix("config")
+        print("config returned", returned.cluster_host)
         """,
         tmp_path,
     )
 
-    assert "cluster_type : slurm" in out
-    assert "host         : hpc.example.edu" in out
-    assert "returned hpc.example.edu" in out
+    # ``status`` prints the backend in effect and returns nothing; ``config``
+    # prints the same summary and returns the configuration.
+    assert out.count("backend      : slurm") == 2
+    assert out.count("host         : hpc.example.edu") == 2
+    assert "status returned None" in out
+    assert "config returned hpc.example.edu" in out
 
 
 def test_the_cell_magic_says_what_is_missing_and_runs_nothing(tmp_path):
