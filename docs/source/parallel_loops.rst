@@ -360,6 +360,11 @@ lives anywhere else:
 * process-wide settings made before the loop -- ``decimal.getcontext().prec``,
   the working directory, an environment variable set inside the function --
   which a worker process does not have,
+* a module attribute assigned at run time (``settings.SCALE = 10`` after
+  ``import settings``): a worker imports the module afresh and sees the value
+  in the file. Pass such values as arguments. Local workers are kept between
+  calls, so they also keep the version of an imported module they first
+  loaded; a module edited and reloaded in the notebook is not reloaded there,
 * an object whose pickle leaves its state out (a custom ``__getstate__``):
   pickling is how a change is noticed.
 
