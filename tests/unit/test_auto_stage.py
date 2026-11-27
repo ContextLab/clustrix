@@ -368,3 +368,361 @@ class TestOnACluster:
 
         assert (args, kwargs) == ((3,), {"mode": "fast"})
         assert plan.inputs == [] and "no local input files" in plan.explain()
+
+
+# -- what an adversarial review found ------------------------------------------
+
+
+def takes_folder(folder):
+    return folder
+
+
+def named_misleadingly(direction="up", profile="up", metadata="up", mode="up"):
+    return direction, profile, metadata, mode
+
+
+def named_for_paths(weights_file=None, out_dir=None, csv=None, path2=None):
+    return weights_file, out_dir, csv, path2
+
+
+def lists_the_working_directory():
+    return os.listdir("./"), os.listdir("."), os.listdir(".."), os.listdir("/")
+
+
+@pytest.fixture
+def project_with_secrets(project):
+    data = project / "data"
+    (data / ".aws").mkdir()
+    (data / ".aws" / "credentials").write_text("[default]\naws_secret_access_key=x\n")
+    (data / ".env").write_text("API_KEY=hunter2\n")
+    (data / "id_rsa").write_text("-----BEGIN OPENSSH PRIVATE KEY-----\n")
+    (data / "private").mkdir()
+    (data / "private" / "patients.csv").write_text("name,dx\n")
+    os.symlink("/etc/hostname", data / "link_out.txt")
+    os.symlink(project / "train", data / "linked_dir")
+    return project
+
+
+class TestMembersOfADirectory:
+    """B1, B2, L1, M1: the same rules inside a directory as at its top."""
+
+    def test_credentials_inside_a_directory_are_left_out_and_named(
+        self, project_with_secrets
+    ):
+        data = project_with_secrets / "data"
+        left_out = {}
+
+        members = auto_stage._files_under(data, (), left_out)
+
+        names = [name for name, _ in members]
+        print("members:", names, "left out:", left_out)
+        assert names == [
+            "private/patients.csv",
+            "subjects/s1.txt",
+            "subjects/s2.txt",
+            "table.csv",
+        ]
+        assert sorted(left_out["credential"]) == [
+            data / ".aws" / "credentials",
+            data / ".env",
+            data / "id_rsa",
+        ]
+
+    def test_links_inside_a_directory_are_named_not_dropped_in_silence(
+        self, project_with_secrets
+    ):
+        data = project_with_secrets / "data"
+        left_out = {}
+
+        auto_stage._files_under(data, (), left_out)
+
+        assert sorted(left_out["link"]) == [data / "link_out.txt", data / "linked_dir"]
+
+    @pytest.mark.parametrize("spelling", ["data/private", "{root}/data/private"])
+    def test_an_excluded_path_removes_members_and_whole_subtrees(
+        self, project_with_secrets, spelling
+    ):
+        data = project_with_secrets / "data"
+        excluded = auto_stage._excluded_paths(
+            [spelling.format(root=project_with_secrets), "data/subjects/s2.txt"]
+        )
+
+        names = [name for name, _ in auto_stage._files_under(data, excluded)]
+
+        assert names == ["subjects/s1.txt", "table.csv"]
+
+    def test_version_control_and_caches_are_never_members(self, project):
+        (project / "data" / "__pycache__").mkdir()
+        (project / "data" / "__pycache__" / "x.pyc").write_bytes(b"\x00")
+        (project / "data" / ".ipynb_checkpoints").mkdir()
+        (project / "data" / ".ipynb_checkpoints" / "nb.ipynb").write_text("{}")
+        (project / "data" / ".git").mkdir()
+        (project / "data" / ".git" / "HEAD").write_text("ref: x\n")
+
+        names = [name for name, _ in auto_stage._files_under(project / "data")]
+
+        assert names == ["subjects/s1.txt", "subjects/s2.txt", "table.csv"]
+
+    def test_a_constant_naming_the_project_or_above_stages_nothing(self, project):
+        """``os.listdir("./")`` used to upload the project, ``.git`` and all."""
+        found = auto_stage.discover(lists_the_working_directory, (), {})
+        refusals = {
+            c.written: auto_stage._refusal(c, auto_stage.project_root()) for c in found
+        }
+
+        print(refusals)
+        assert set(refusals) == {"./", "/"}, "'.' and '..' are not path-like"
+        assert all(refusals.values()), refusals
+        assert "the project directory" in refusals["./"]
+        assert "contains the project" in refusals["/"]
+
+    @pytest.mark.parametrize("named", [".", "./", "..", "/", "~"])
+    def test_an_argument_naming_the_project_or_above_is_refused_too(
+        self, project, named
+    ):
+        (candidate,) = auto_stage.discover(takes_folder, (named,), {})
+
+        refusal = auto_stage._refusal(candidate, auto_stage.project_root())
+
+        assert refusal and "name the files or directories" in refusal
+
+    def test_the_working_directory_below_the_project_root_is_refused(
+        self, project, monkeypatch
+    ):
+        monkeypatch.chdir(project / "data")
+        root = auto_stage.project_root()
+        (here,) = auto_stage.discover(takes_folder, (".",), {})
+        (inside,) = auto_stage.discover(takes_folder, ("subjects",), {})
+
+        assert "the working directory" in auto_stage._refusal(here, root)
+        assert auto_stage._refusal(inside, root) is None
+
+
+class TestParameterNames:
+    """M2: ``direction`` contains "dir"; it does not name a directory."""
+
+    @pytest.mark.parametrize("parameter", ["direction", "profile", "metadata", "mode"])
+    def test_a_word_that_merely_contains_a_path_word_is_not_a_hint(
+        self, project, parameter
+    ):
+        (project / "up").mkdir()
+        (project / "up" / "junk.bin").write_text("junk")
+
+        assert auto_stage.discover(named_misleadingly, (), {parameter: "up"}) == []
+
+    @pytest.mark.parametrize("parameter", ["weights_file", "out_dir", "csv", "path2"])
+    def test_a_whole_word_is(self, project, parameter):
+        (candidate,) = auto_stage.discover(named_for_paths, (), {parameter: "train"})
+
+        assert candidate.written == "train"
+
+    @pytest.mark.parametrize("vague", ["data", "input", "root", "input_data"])
+    def test_vague_words_are_not_hints(self, vague):
+        assert not auto_stage._named_like_a_path(vague)
+
+
+class TestIdentity:
+    """B4: what a copy is named after decides whether a stale one is served."""
+
+    def test_a_directory_changed_behind_the_same_size_and_time_is_a_new_input(
+        self, project
+    ):
+        folder, table = project / "data", project / "data" / "table.csv"
+        before = auto_stage._identity(folder, auto_stage._files_under(folder))
+        stat = table.stat()
+        table.write_text("a,b\n9,9\n")
+        os.utime(table, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+        assert table.stat().st_size == stat.st_size
+        assert table.stat().st_mtime_ns == stat.st_mtime_ns
+
+        after = auto_stage._identity(folder, auto_stage._files_under(folder))
+
+        assert before[1] is True and after[1] is True
+        assert before[0] != after[0]
+
+    def test_above_the_limit_it_is_metadata_and_says_so(self, project, monkeypatch):
+        monkeypatch.setattr(auto_stage, "_HASH_LIMIT_BYTES", 4)
+        folder, table = project / "data", project / "data" / "table.csv"
+
+        for path in (folder, table):
+            identity, by_content = auto_stage._identity(
+                path, auto_stage._files_under(path)
+            )
+            assert by_content is False and len(identity) == 20
+
+        plan = auto_stage.DataPlan(
+            [
+                auto_stage.StagedInput(
+                    folder, "/store/x/data", 8, "uploaded", "t", None, False
+                )
+            ]
+        )
+        assert "identified by size and time, not content" in plan.explain()
+
+    def test_the_same_bytes_under_two_names_are_two_inputs(self, project):
+        """They are stored as ``<identity>/<name>``, and one identity is
+        declared complete as a whole."""
+        twin = project / "data" / "twin.csv"
+        twin.write_text((project / "data" / "table.csv").read_text())
+        table = project / "data" / "table.csv"
+
+        assert (
+            auto_stage._identity(table, [("", table)])[0]
+            != auto_stage._identity(twin, [("", twin)])[0]
+        )
+
+
+class TestRewritingKeepsWhatItDidNotChange:
+    """H2: one rewritten path used to rebuild every container as a builtin."""
+
+    REPLACEMENTS = {"/local/w.bin": "/cluster/w.bin"}
+
+    def test_an_argument_with_no_path_in_it_is_the_same_object(self):
+        import collections
+
+        Point = collections.namedtuple("Point", "path n")
+        untouched = [
+            Point("x", 1),
+            collections.defaultdict(int, a=1),
+            collections.OrderedDict(a=1),
+            {"/somewhere/else"},
+            [1, [2, {"k": ("v",)}]],
+        ]
+
+        for value in untouched:
+            assert auto_stage._rewritten(value, self.REPLACEMENTS) is value
+
+    def test_a_named_tuple_stays_one(self):
+        import collections
+
+        Point = collections.namedtuple("Point", "path n")
+
+        result = auto_stage._rewritten(Point("/local/w.bin", 3), self.REPLACEMENTS)
+
+        assert type(result) is Point and result == Point("/cluster/w.bin", 3)
+
+    def test_dict_subclasses_keep_their_type_order_and_factory(self):
+        import collections
+
+        counts = collections.defaultdict(list, first="/local/w.bin", second=2)
+        ordered = collections.OrderedDict(z="/local/w.bin", a=1)
+
+        new_counts = auto_stage._rewritten(counts, self.REPLACEMENTS)
+        new_ordered = auto_stage._rewritten(ordered, self.REPLACEMENTS)
+
+        assert type(new_counts) is collections.defaultdict
+        assert new_counts.default_factory is list
+        assert new_counts == {"first": "/cluster/w.bin", "second": 2}
+        assert type(new_ordered) is collections.OrderedDict
+        assert list(new_ordered.items()) == [("z", "/cluster/w.bin"), ("a", 1)]
+        assert counts["first"] == "/local/w.bin", "the caller's object is not edited"
+
+    def test_a_path_inside_a_set_is_rewritten(self):
+        assert auto_stage._rewritten({"/local/w.bin", "other"}, self.REPLACEMENTS) == {
+            "/cluster/w.bin",
+            "other",
+        }
+        frozen = auto_stage._rewritten(frozenset({"/local/w.bin"}), self.REPLACEMENTS)
+        assert frozen == frozenset({"/cluster/w.bin"}) and type(frozen) is frozenset
+
+    def test_list_and_tuple_subclasses_keep_their_type(self):
+        class Batch(list):
+            pass
+
+        class Pair(tuple):
+            pass
+
+        batch = Batch(["/local/w.bin", 1])
+        batch.label = "kept"
+
+        new_batch = auto_stage._rewritten(batch, self.REPLACEMENTS)
+        new_pair = auto_stage._rewritten(Pair(("/local/w.bin", 1)), self.REPLACEMENTS)
+
+        assert type(new_batch) is Batch and new_batch == ["/cluster/w.bin", 1]
+        assert new_batch.label == "kept" and batch[0] == "/local/w.bin"
+        assert type(new_pair) is Pair and new_pair == ("/cluster/w.bin", 1)
+
+    def test_only_the_changed_branch_is_rebuilt(self):
+        untouched = {"deep": [1, 2]}
+        value = [untouched, ["/local/w.bin"]]
+
+        result = auto_stage._rewritten(value, self.REPLACEMENTS)
+
+        assert result == [untouched, ["/cluster/w.bin"]]
+        assert result[0] is untouched and result is not value
+
+    def test_objects_are_not_descended_into(self):
+        """The documented limit: a path held by a dataclass is not found by
+        ``discover`` either, so it is neither uploaded nor rewritten."""
+        import dataclasses
+
+        @dataclasses.dataclass
+        class Settings:
+            weights: str
+
+        settings = Settings("/local/w.bin")
+
+        assert auto_stage._rewritten(settings, self.REPLACEMENTS) is settings
+        assert settings.weights == "/local/w.bin"
+
+
+class TestLinksOnASharedFilesystem:
+    """H1, against the in-process SSH server, which shares this filesystem."""
+
+    connected = TestOnACluster.connected
+
+    def test_a_relative_path_used_in_place_is_still_linked(self, project, connected):
+        """The job runs in its own directory: ``open("data/table.csv")``
+        finds nothing there unless a link says where the file is."""
+        connection, config, remote = connected
+
+        args, _, plan = auto_stage.prepare(connection, config, reads_a_literal, (), {})
+
+        (staged,) = plan.inputs
+        table = project / "data" / "table.csv"
+        assert staged.how == "in place" and staged.remote == str(table)
+        assert plan.links == [("data/table.csv", str(table))]
+
+        job_dir = remote / "job"
+        job_dir.mkdir()
+        auto_stage.link_into_job_directory(connection, str(job_dir), plan.links)
+        assert (job_dir / "data" / "table.csv").read_text() == "a,b\n1,2\n"
+
+    def test_a_link_inside_a_linked_directory_is_not_made(self, project, connected):
+        """It would be created *through* the outer link: inside the user's
+        own directory, replacing the file with a link to itself."""
+        connection, config, remote = connected
+
+        def reads_both(folder):
+            return open("data/table.csv").read(), os.listdir(folder)
+
+        _, _, plan = auto_stage.prepare(connection, config, reads_both, ("data",), {})
+
+        assert {item.link for item in plan.inputs} == {"data", "data/table.csv"}
+        assert plan.links == [("data", str(project / "data"))]
+        job_dir = remote / "job"
+        job_dir.mkdir()
+        auto_stage.link_into_job_directory(connection, str(job_dir), plan.links)
+        table = project / "data" / "table.csv"
+        assert not table.is_symlink() and table.read_text() == "a,b\n1,2\n"
+        assert (job_dir / "data" / "table.csv").read_text() == "a,b\n1,2\n"
+
+    def test_sizes_are_matched_to_paths_by_index_not_by_position(
+        self, project, connected
+    ):
+        """A path whose answer never arrives must not shift the others."""
+        connection, _, _ = connected
+        table, folder = project / "data" / "table.csv", project / "data"
+        odd = project / "data" / "a name; echo 7\nwith a newline"
+        odd.write_text("12345")
+
+        sizes = auto_stage._remote_sizes(
+            connection, [str(project / "absent"), str(odd), str(table), str(folder)]
+        )
+
+        assert sizes == {
+            str(project / "absent"): None,
+            str(odd): 5,
+            str(table): table.stat().st_size,
+            str(folder): -1,
+        }
