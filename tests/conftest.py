@@ -10,100 +10,9 @@ import clustrix.credential_manager as credential_manager_module
 import clustrix.decorator as decorator_module
 from clustrix.config import CONFIG_DIR_ENV_VAR
 
-_INTEGRATION_DIR = (pathlib.Path(__file__).parent / "integration").resolve()
-_OPT_IN_VAR = "CLUSTRIX_ALLOW_BILLABLE"
-_TRUTHY = {"1", "true", "yes", "on"}
-
-
-def _billable_tests_enabled():
-    return os.environ.get(_OPT_IN_VAR, "").strip().lower() in _TRUTHY
-
-
-def _iter_candidate_targets(config):
-    """Yield every path-ish string this run could end up collecting from.
-
-    Reads `config.args` -- the *effective* target list -- rather than
-    `config.invocation_params.args`, which is only what the operator literally
-    typed. The difference is the whole ballgame, because there are three ways
-    to aim pytest at a directory without typing its path:
-
-        PYTEST_ADDOPTS=tests/integration/test_x.py pytest
-        pytest -o testpaths=tests/integration/test_x.py
-        (testpaths in pyproject.toml)
-
-    All three land in `config.args` and none appear in `invocation_params.args`.
-    Red-teaming confirmed the first two collected billable modules when the
-    guard read the typed argv.
-
-    Reading `config.args` is only safe because `testpaths` is `["tests"]`. If
-    it ever names tests/integration again, a bare `pytest` will be refused --
-    loudly and correctly, since testpaths would then be pointing every default
-    run at billable tests.
-    """
-    for arg in config.args:
-        yield str(arg).split("::")[0]
-    # --pyargs addresses modules by dotted name, which never looks like a path.
-    if getattr(config.option, "pyargs", False):
-        for arg in config.args:
-            yield str(arg).split("::")[0].replace(".", os.sep)
-    # -p imports a plugin by dotted name, before collection begins.
-    for plugin in getattr(config.option, "plugins", None) or []:
-        yield str(plugin).replace(".", os.sep)
-
-
-def _targets_integration_dir(candidate, config):
-    """True if `candidate` names tests/integration under any sane resolution.
-
-    Paths on the command line resolve against the invocation directory, while
-    `testpaths` resolves against rootdir. Those differ whenever pytest is run
-    from a subdirectory, and resolving against only one of them was a real
-    hole: from `tests/`, `pytest integration/test_x.py` was not recognised.
-
-    Both bases are tried. A guard protecting real money should over-match
-    rather than under-match.
-    """
-    raw = pathlib.Path(candidate)
-    if raw.is_absolute():
-        attempts = [raw]
-    else:
-        invocation_dir = getattr(config.invocation_params, "dir", None)
-        bases = [invocation_dir, pathlib.Path.cwd(), pathlib.Path(str(config.rootpath))]
-        attempts = [pathlib.Path(str(base)) / raw for base in bases if base]
-    for attempt in attempts:
-        try:
-            resolved = attempt.resolve()
-        except OSError:  # pragma: no cover - defensive, unresolvable path
-            continue
-        if resolved == _INTEGRATION_DIR or _INTEGRATION_DIR in resolved.parents:
-            return True
-    return False
-
 
 def pytest_configure(config):
-    """Refuse to start when a run explicitly targets tests/integration.
-
-    See issue #109. `tests/integration/conftest.py` sets `collect_ignore_glob`,
-    which keeps the directory out of ordinary runs -- but that only filters
-    *directory traversal*. A path named explicitly as a pytest argument is not
-    filtered by it, so
-
-        pytest tests/integration/test_timeout_mechanism.py
-
-    collected and imported the module anyway. Those modules reach real cloud
-    APIs, so the check has to happen before collection begins.
-
-    This runs at configure time, which is before any test module is imported.
-
-    Deliberately scoped to *explicit* targeting: a plain `pytest tests/` must
-    keep working and silently skip the directory, while someone who asked for
-    these tests by name gets told why they got nothing, rather than an
-    inscrutable empty run.
-
-    Target discovery is in `_iter_candidate_targets` and path matching is in
-    `_targets_integration_dir`; both carry the reasoning for why they look
-    where they do. In short: read the *effective* target list, and resolve
-    relative paths against every plausible base.
-    """
+    """Declare the marker the private-cluster tests are skipped by."""
     # Registered here rather than in pyproject.toml because the suite that
     # uses it (tests/real_world) is routinely excluded from a run, and
     # --strict-markers needs the name declared in *every* run for
@@ -113,17 +22,6 @@ def pytest_configure(config):
         "cluster_network: mark test as requiring network access to a private "
         "test cluster named by CLUSTRIX_TEST_*_HOST",
     )
-
-    if _billable_tests_enabled():
-        return
-    for candidate in _iter_candidate_targets(config):
-        if _targets_integration_dir(candidate, config):
-            raise pytest.UsageError(
-                f"Refusing to run {candidate!r}: tests/integration provisions "
-                f"real, billable cloud resources (AWS EKS/EC2). Set "
-                f"{_OPT_IN_VAR}=1 to run them deliberately, e.g.\n"
-                f"    {_OPT_IN_VAR}=1 pytest {candidate}"
-            )
 
 
 @pytest.fixture

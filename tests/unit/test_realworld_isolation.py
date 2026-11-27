@@ -31,7 +31,6 @@ import pytest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 REAL_WORLD_DIR = REPO_ROOT / "tests" / "real_world"
-OPT_IN_VAR = "CLUSTRIX_ALLOW_BILLABLE"
 
 _COUNT_RE = re.compile(r"(\d+)(?:/\d+)? tests? collected")
 
@@ -41,10 +40,7 @@ _COUNT_RE = re.compile(r"(\d+)(?:/\d+)? tests? collected")
 # `-m "not real_world"` before the conftest.py fix, so they get their own
 # regression coverage in addition to the whole-directory check.
 _PREVIOUSLY_UNMARKED_FILES = (
-    "test_cluster_job_system.py",
     "test_credential_access.py",
-    "test_filesystem_utilities.py",
-    "test_slurm_cluster_environment_setup.py",
     "test_real_world_credentials.py",
 )
 
@@ -73,14 +69,13 @@ def _run_pytest(argv, tmp_home, cwd=None, env_extra=None):
     quietly making real network calls or spending money.
     """
     env = dict(os.environ)
-    env.pop(OPT_IN_VAR, None)
     env["HOME"] = str(tmp_home)
     env["USERPROFILE"] = str(tmp_home)
     sitecustomize = tmp_home / "sitecustomize.py"
     sitecustomize.write_text(
         "import socket\n"
         "def _deny(*a, **k):\n"
-        "    raise OSError('network disabled by test_billable_and_realworld_isolation')\n"
+        "    raise OSError('network disabled by test_realworld_isolation')\n"
         "socket.socket.connect = _deny\n"
         "socket.socket.connect_ex = _deny\n"
         "socket.create_connection = _deny\n",
@@ -242,83 +237,13 @@ def test_real_world_marker_does_not_leak_onto_the_rest_of_the_suite(tmp_path):
         "marker is leaking onto tests outside tests/real_world/.\n"
         + combined_filtered[-3000:]
     )
-    # Only the real_world tests (and anything already excluded, e.g.
-    # tests/integration) should be missing; the drop must be far smaller than
+    # Only the real_world tests should be missing; the drop must be far smaller than
     # the full suite, not equal to it.
     assert total_count - filtered_count < total_count * 0.5, (
         f'`-m "not real_world"` deselected {total_count - filtered_count} of '
         f"{total_count} tests -- suspiciously large, consistent with the "
         "real_world marker leaking onto unrelated tests.\n" + combined_filtered[-2000:]
     )
-
-
-def test_billable_guard_survives_cwd_change(tmp_path):
-    """Adversarial check: running pytest from a different cwd must not bypass the gate.
-
-    tests/conftest.py's `pytest_configure` guard resolves relative targets
-    against invocation dir, cwd, and rootpath -- this proves that holds when
-    pytest is invoked from an entirely unrelated directory outside the repo.
-    """
-    outside_cwd = tmp_path / "elsewhere"
-    outside_cwd.mkdir()
-    result = _run_pytest(
-        [
-            str(REPO_ROOT / "tests" / "integration"),
-            "--collect-only",
-            "-q",
-            "-o",
-            "addopts=",
-        ],
-        tmp_home=tmp_path,
-        cwd=outside_cwd,
-    )
-    combined = (result.stdout or "") + (result.stderr or "")
-    assert "Refusing to run" in combined, (
-        "Running pytest from an unrelated cwd bypassed the billable-resources "
-        f"guard.\n{combined[-2000:]}"
-    )
-    assert result.returncode != 0
-
-
-def test_billable_guard_survives_no_cacheprovider(tmp_path):
-    """Adversarial check: `-p no:cacheprovider` must not disturb the guard.
-
-    The guard lives in a `pytest_configure` hook in tests/conftest.py, not in
-    the cache plugin, but this is cheap insurance against the guard having
-    accidentally grown a dependency on cache-plugin state.
-    """
-    result = _run_pytest(
-        [
-            str(REPO_ROOT / "tests" / "integration"),
-            "-p",
-            "no:cacheprovider",
-            "--collect-only",
-            "-q",
-            "-o",
-            "addopts=",
-        ],
-        tmp_home=tmp_path,
-    )
-    combined = (result.stdout or "") + (result.stderr or "")
-    assert "Refusing to run" in combined
-    assert result.returncode != 0
-
-
-def test_billable_guard_survives_co_shorthand(tmp_path):
-    """Adversarial check: the `--co` shorthand for `--collect-only` must not bypass the gate.
-
-    The gate fires in `pytest_configure`, before pytest has parsed which
-    collection mode was requested, so this should behave identically to
-    `--collect-only` -- but the shorthand is worth pinning explicitly since a
-    future guard implementation could accidentally special-case the long form.
-    """
-    result = _run_pytest(
-        [str(REPO_ROOT / "tests" / "integration"), "--co", "-q", "-o", "addopts="],
-        tmp_home=tmp_path,
-    )
-    combined = (result.stdout or "") + (result.stderr or "")
-    assert "Refusing to run" in combined
-    assert result.returncode != 0
 
 
 def test_importing_a_real_world_test_module_directly_does_not_bypass_pytest():

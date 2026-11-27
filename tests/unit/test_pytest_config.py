@@ -47,7 +47,6 @@ SHADOWING_CONFIG_NAMES = ("pytest.ini", ".pytest.ini")
 REQUIRED_MARKERS = (
     "real_world",
     "expensive",
-    "integration",
     "cluster_network",
     "performance",
     "slow",

@@ -30,7 +30,6 @@ def check_tests():
             "-m",
             "not real_world",
             "--ignore=tests/real_world",
-            "--ignore=tests/integration",
         ],
         capture_output=True,
         text=True,

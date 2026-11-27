@@ -81,7 +81,7 @@ def main():
             # connections. Real-world tests are run deliberately through
             # scripts/run_real_world_tests.py, not from this gate.
             (
-                'pytest tests/ -m "not real_world" --ignore=tests/real_world --ignore=tests/integration',
+                'pytest tests/ -m "not real_world" --ignore=tests/real_world',
                 "Tests",
             ),
         ]

@@ -201,10 +201,6 @@ ignore_errors = true
 # then stops searching, so any of those would silently shadow this block --
 # which is exactly what happened for months under #130. Enforced by
 # tests/unit/test_pytest_config.py.
-#
-# testpaths must NOT list tests/integration. Those tests provision billable
-# cloud resources and are gated by tests/integration/conftest.py (#109); naming
-# the directory here would make a bare `pytest` resolve to it.
 testpaths = ["tests"]
 python_files = "test_*.py"
 python_classes = "Test*" 
@@ -224,17 +220,15 @@ markers = [
     "real_world: marks tests as real world tests (deselect with '-m \"not real_world\"')",
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "unit: marks tests as unit tests",
-    "integration: marks tests as integration tests",
-    "expensive: marks tests that provision billable resources (applied automatically to tests/integration; see #109)",
+    "expensive: marks tests that cost money or cluster time; tests/real_world skips them without --run-expensive",
     "performance: marks performance benchmark tests",
 ]
 # Carried over from the deleted pytest.ini, where it never took effect. These
 # suppress third-party noise only; nothing here hides a warning raised by
 # clustrix itself.
-# NB: markers visual/ssh_required/aws_required/azure_required/gcp_required are
-# deliberately NOT listed. tests/real_world/conftest.py registers them with
-# addinivalue_line at the point they are used, so --strict-markers is satisfied
-# there and they stay scoped to the suite that actually defines them.
+# NB: ssh_required is deliberately NOT listed. tests/real_world/conftest.py
+# registers it with addinivalue_line, so --strict-markers is satisfied there
+# and it stays scoped to the suite that defines it.
 filterwarnings = [
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
