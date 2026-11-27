@@ -1,17 +1,17 @@
 import functools
-import inspect
 import logging
-import os
 import threading
+import weakref
 from dataclasses import fields
-from typing import Any, Callable, NamedTuple, Optional, Dict, List
+from typing import Any, Callable, NamedTuple, Optional, Dict, List, Sequence
 
 from .config import ClusterConfig, get_config
 from .executor import ClusterExecutor
 from .async_executor_simple import AsyncClusterExecutor
-from .local_executor import create_local_executor, is_worker_count
-from .loop_analysis import find_parallelizable_loops
-from .utils import detect_loops, serialize_function
+from . import parallelize
+from .local_executor import is_worker_count
+from .loop_workers import available_cpus, shared_pool, timed_call
+from .utils import serialize_function
 
 logger = logging.getLogger(__name__)
 
@@ -243,7 +243,7 @@ def cluster(
                         func, args, func_kwargs, job_config
                     )
                 elif should_parallelize:
-                    return _execute_local_parallel(
+                    return _run_split_locally(
                         func, args, func_kwargs, job_config, requested=requested
                     )
                 else:
@@ -263,16 +263,22 @@ def cluster(
                     executor = ClusterExecutor(config)
 
                     if should_parallelize:
-                        loop_info = detect_loops(func, args, func_kwargs)
-                        if loop_info:
-                            return _execute_parallel(
+                        loop_plan = _plan_for(func)
+                        if loop_plan.parallelizable:
+                            return _run_split_remotely(
+                                loop_plan,
                                 executor,
                                 func,
                                 args,
                                 func_kwargs,
                                 job_config,
-                                loop_info,
+                                config.max_parallel_jobs,
                             )
+                        logger.info(
+                            "%s runs as one job.\n%s",
+                            getattr(func, "__name__", repr(func)),
+                            loop_plan.explain(),
+                        )
 
                     # Execute normally on cluster
                     return _execute_single(
@@ -373,125 +379,79 @@ def _execute_single(
     return result
 
 
-def _execute_parallel(
+#: One plan per function. Planning reads and parses the function's source,
+#: which does not change between calls; what the function *reads* is looked
+#: up afresh by ``parallelize.bind`` each time.
+_PLANS: "weakref.WeakKeyDictionary[Callable, parallelize.ParallelPlan]" = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _plan_for(func: Callable) -> parallelize.ParallelPlan:
+    """The split of ``func``'s loop into jobs, or the reasons there is none."""
+    plan = _PLANS.get(func)
+    if plan is None:
+        plan = _PLANS[func] = parallelize.plan(func)
+    return plan
+
+
+def _run_split_remotely(
+    plan: parallelize.ParallelPlan,
     executor: ClusterExecutor,
     func: Callable,
     args: tuple,
     kwargs: dict,
     job_config: dict,
-    loop_info: Dict[str, Any],
+    max_jobs: int,
 ) -> Any:
-    """Execute function with parallelized loops."""
+    """Run ``func`` on the cluster with its loop divided among jobs.
 
-    config = get_config()
-
-    # Split work based on loop information
-    work_chunks = _create_work_chunks(
-        func, args, kwargs, loop_info, config.max_parallel_jobs
-    )
-
-    if not work_chunks:
-        # Nothing was split, so there is nothing to combine. Falling through
-        # would hand _combine_results an empty list and return [] -- a
-        # fabricated answer. Run the function itself instead.
-        return _execute_single(executor, func, args, kwargs, job_config)
-
-    # Submit parallel jobs
-    job_ids = []
-    for chunk in work_chunks:
-        func_data = serialize_function(func, chunk["args"], chunk["kwargs"])
-        job_id = executor.submit_job(func_data, job_config)
-        job_ids.append((job_id, chunk))
-
-    # Collect results
-    results = []
-    for job_id, chunk in job_ids:
-        result = executor.wait_for_result(job_id)
-        results.append((chunk["index"], result))
-
-    # Combine results
-    return _combine_results(results, loop_info)
-
-
-def _accepts_chunk_kwargs(func: Callable, names: List[str]) -> bool:
-    """Report whether ``func`` can receive every keyword in ``names``.
-
-    Work chunks are handed to the callee as keyword arguments. A function that
-    declares none of them -- and does not collect ``**kwargs`` -- cannot
-    receive them, so parallelizing would raise
-    ``TypeError: f() got an unexpected keyword argument '...'`` on every chunk.
-    The callers decline instead and let the function run whole, which is the
-    correct answer.
+    Each chunk of the loop is one job with the resources the caller asked
+    for, so ``@cluster(cores=4, memory="8GB")`` describes *a* job, not the
+    total. The code around the loop runs as a job of its own unless it only
+    unpacks arguments or returns what was collected.
     """
-    params = inspect.signature(func).parameters
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return True
-    return all(name in params for name in names)
+    name = getattr(func, "__name__", repr(func))
 
+    def invoke(function: Callable, *arguments: Any) -> Any:
+        return _execute_single(executor, function, arguments, {}, job_config)
 
-def _create_work_chunks(
-    func: Callable, args: tuple, kwargs: dict, loop_info: Dict, max_jobs: int
-) -> List[Dict]:
-    """Create chunks of work for parallel execution."""
-
-    # This is a simplified implementation
-    # In practice, you'd need sophisticated analysis of the function
-    # to determine how to split loops and iterations
-
-    chunks = []
-    loop_var = loop_info.get("variable")
-    # No default. Guessing the range is how a loop over range(n) came to be
-    # split into ten chunks, returning a tenth of the work with no error.
-    # detect_loops now declines rather than inventing one, so an absent range
-    # means "not parallelizable" and must be treated as such here too.
-    loop_range = loop_info.get("range")
-    if loop_range is None:
+    def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
         logger.info(
-            "Not parallelizing %s: the loop's range could not be determined.",
-            getattr(func, "__name__", repr(func)),
+            "%s: running its loop as %d job(s) of up to %d iteration(s).",
+            name,
+            len(chunks),
+            max(len(chunk) for chunk in chunks),
         )
-        return []
+        job_ids = [
+            executor.submit_job(serialize_function(body, (env, chunk), {}), job_config)
+            for chunk in chunks
+        ]
+        results = []
+        try:
+            for job_id in job_ids:
+                results.append(executor.wait_for_result(job_id))
+        except BaseException:
+            # One chunk failed, or the caller interrupted: the rest are
+            # doing work whose result will never be used.
+            for job_id in job_ids[len(results) + 1 :]:
+                try:
+                    executor.cancel_job(job_id)
+                except Exception as error:  # noqa: BLE001 - best effort
+                    logger.warning("Could not cancel job %s: %s", job_id, error)
+            raise
+        return results
 
-    chunk_kwarg_names = [f"_chunk_range_{loop_var}", "_chunk_index"]
-    if not _accepts_chunk_kwargs(func, chunk_kwarg_names):
-        logger.info(
-            "Not parallelizing %s on the cluster: it takes no %s parameter(s).",
-            getattr(func, "__name__", repr(func)),
-            ", ".join(repr(name) for name in chunk_kwarg_names),
-        )
-        return []
-
-    chunk_size = max(1, len(loop_range) // max_jobs)
-
-    for i in range(0, len(loop_range), chunk_size):
-        chunk_range = loop_range[i : i + chunk_size]
-
-        # Create modified kwargs for this chunk
-        chunk_kwargs = kwargs.copy()
-        chunk_kwargs[f"_chunk_range_{loop_var}"] = chunk_range
-        chunk_kwargs["_chunk_index"] = i // chunk_size
-
-        chunks.append(
-            {
-                "args": args,
-                "kwargs": chunk_kwargs,
-                "index": i // chunk_size,
-                "range": chunk_range,
-            }
-        )
-
-    return chunks
-
-
-def _combine_results(results: List[tuple], loop_info: Dict) -> Any:
-    """Combine results from parallel execution."""
-
-    # Sort by index
-    results.sort(key=lambda x: x[0])
-
-    # For now, just return the list of results
-    # In practice, you'd need to intelligently combine based on the original function
-    return [result[1] for result in results]
+    return parallelize.run(
+        plan,
+        func,
+        args,
+        kwargs,
+        map_chunks,
+        jobs=max(1, max_jobs),
+        invoke=invoke,
+        on_fallback=logger.warning,
+    )
 
 
 def _choose_execution_mode(config, func: Callable, args: tuple, kwargs: dict) -> str:
@@ -684,214 +644,81 @@ def _warn_cores_unused(request: Optional[_CoreRequest], because: str) -> None:
     else:
         request.reported[key] = spoken + 1
     logger.warning(
-        "%s has no effect here: %s. Locally, cores bounds the worker pool only "
-        "when parallel=True finds a parallelizable loop and the function "
-        "accepts the matching _parallel_<var> keyword -- and even there it is "
-        "an upper bound, not a promise that many workers will be busy.",
+        "%s has no effect here: %s. Locally, cores is the number of worker "
+        "processes a loop in the function is divided among; with no loop that "
+        "can be divided, the function runs once, in this process. "
+        "clustrix.explain(function) says why a loop was not divided.",
         request.where,
         because,
     )
 
 
-def _execute_local_parallel(
+#: Below this much estimated work, a loop is not divided among workers:
+#: handing chunks out and collecting them back would cost more than it saves.
+MIN_SECONDS_WORTH_DIVIDING = 0.2
+
+
+def _run_split_locally(
     func: Callable,
     args: tuple,
     kwargs: dict,
     job_config: dict,
     requested: Optional[_CoreRequest] = None,
 ) -> Any:
-    """
-    Execute function locally with parallelization.
+    """Run ``func`` here with its loop divided among worker processes.
 
-    This is the one local route where ``cores`` changes what happens: it sizes
-    the worker pool and, through it, the number of work chunks. What it does
-    *not* do is create parallelism on its own. The pool is a bound -- the work
-    is a queue, and a chunk that costs microseconds can be pulled by the first
-    worker to reach it before its siblings have finished starting, so a run
-    with ``cores=8`` may still be observed doing its work in fewer than eight
-    processes. Wider is available; wider is not guaranteed.
+    ``cores`` is the number of workers (``-1``: every CPU this process may
+    use). The code around the loop runs in this process, as it would have.
 
-    Args:
-        func: Function to execute
-        args: Function arguments
-        kwargs: Function keyword arguments
-        job_config: Job configuration
-        requested: What the caller asked for and where, or ``None`` if they
-            asked for nothing. ``job_config["cores"]`` cannot answer that -- it
-            has already been merged with ``config.default_cores`` -- and every
-            route out of this function that declines to split the work
-            discards the request (#152).
-
-    Returns:
-        Function result
+    The first iteration is run on its own and timed. If the rest of the loop
+    looks too short to be worth dividing, one worker finishes it in order;
+    either way the result is what a direct call returns.
     """
     name = getattr(func, "__name__", repr(func))
-
-    # Find parallelizable loops
-    parallelizable_loops = find_parallelizable_loops(func, args, kwargs)
-
-    if not parallelizable_loops:
-        # No parallelizable loops found, execute normally
-        _warn_cores_unused(requested, f"no parallelizable loop was found in {name}")
+    plan = _plan_for(func)
+    if not plan.parallelizable:
+        _warn_cores_unused(requested, f"{name} has no loop that can be split")
+        logger.info("%s runs unsplit.\n%s", name, plan.explain())
         return func(*args, **kwargs)
 
-    # Use the first parallelizable loop
-    loop_info = parallelizable_loops[0]
+    cores = job_config.get("cores") or 1
+    workers = available_cpus() if cores == -1 else min(cores, available_cpus())
+    if workers < 2:
+        _warn_cores_unused(requested, "only one CPU is available to this process")
+        return func(*args, **kwargs)
 
-    # Create local executor
-    max_workers = job_config.get("cores", 4)
-    local_executor = create_local_executor(
-        max_workers=max_workers, func=func, args=args, kwargs=kwargs
+    pool = shared_pool(workers)
+
+    def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
+        total = sum(len(chunk) for chunk in chunks)
+        first, others = chunks[0], chunks[1:]
+        ((seconds, probe_result),) = pool.map(
+            timed_call, [(body, env, first[:1])], limit=1
+        )
+        remaining = [chunk for chunk in (first[1:], *others) if len(chunk)]
+        worth_dividing = seconds * (total - 1) >= MIN_SECONDS_WORTH_DIVIDING
+        if not worth_dividing:
+            logger.info(
+                "%s: its loop is too short to be worth dividing "
+                "(about %.3fs in all); one worker runs it.",
+                name,
+                seconds * total,
+            )
+        return [
+            probe_result,
+            *pool.map(
+                body,
+                [(env, chunk) for chunk in remaining],
+                limit=workers if worth_dividing else 1,
+            ),
+        ]
+
+    return parallelize.run(
+        plan,
+        func,
+        args,
+        kwargs,
+        map_chunks,
+        jobs=workers,
+        on_fallback=logger.warning,
     )
-
-    try:
-        with local_executor:
-            # Create work chunks for the loop
-            work_chunks = _create_local_work_chunks(
-                func, args, kwargs, loop_info, local_executor.max_workers
-            )
-
-            if not work_chunks:
-                # Fallback to normal execution
-                _warn_cores_unused(
-                    requested, f"the work in {name} was not split into chunks"
-                )
-                return func(*args, **kwargs)
-
-            # Execute in parallel
-            results = local_executor.execute_parallel(func, work_chunks)
-
-            # Combine results
-            return _combine_local_results(results, loop_info)
-
-    except TypeError:
-        # The callee could not receive the chunk it was handed. Work chunks are
-        # only built for functions whose signature accepts them, so reaching
-        # here means clustrix built a call the function cannot answer -- a bug
-        # in this module, not a runtime condition. Absorbing it is what let
-        # local parallelization silently never happen; let it surface.
-        raise
-    except Exception as e:
-        # Fallback to normal execution on error
-        logger.warning(
-            f"Local parallel execution failed, falling back to sequential: {e}"
-        )
-        _warn_cores_unused(
-            requested, f"parallel execution of {name} fell back to sequential"
-        )
-        return func(*args, **kwargs)
-
-
-def _create_local_work_chunks(
-    func: Callable,
-    args: tuple,
-    kwargs: dict,
-    loop_info,
-    max_workers: Optional[int] = None,
-) -> List[Dict]:
-    """
-    Create work chunks for local parallel execution.
-
-    Args:
-        func: Function to execute
-        args: Function arguments
-        kwargs: Function keyword arguments
-        loop_info: Information about the loop to parallelize
-        max_workers: How many workers the pool will have. ``None`` means the
-            caller does not know, and the machine's width is used instead.
-
-    Returns:
-        List of work chunks
-    """
-    chunks = []
-
-    # Get range information
-    if hasattr(loop_info, "range_info") and loop_info.range_info:
-        range_info = loop_info.range_info
-        start = range_info["start"]
-        stop = range_info["stop"]
-        step = range_info["step"]
-
-        # Create range object
-        loop_range = range(start, stop, step)
-        variable = loop_info.variable
-
-    elif hasattr(loop_info, "to_dict"):
-        # New loop info format
-        loop_dict = loop_info.to_dict()
-        range_info = loop_dict.get("range_info")
-        if range_info:
-            loop_range = range(
-                range_info["start"], range_info["stop"], range_info["step"]
-            )
-            variable = loop_dict["variable"]
-        else:
-            return []  # Can't parallelize without range info
-    else:
-        # Legacy format. As above: an unknown range is a refusal, not a ten.
-        loop_range = loop_info.get("range")
-        variable = loop_info.get("variable", "i")
-        if loop_range is None:
-            return []
-
-    if not variable or len(loop_range) == 0:
-        return []
-
-    name = f"_parallel_{variable}"
-    if not _accepts_chunk_kwargs(func, [name]):
-        logger.info(
-            "Not parallelizing %s locally: it takes no %r parameter.",
-            getattr(func, "__name__", repr(func)),
-            name,
-        )
-        return []
-
-    # Aim for two chunks per worker: one each leaves nothing to pick up when
-    # they finish at different times. The count follows the pool the caller
-    # asked for, not the machine. Deriving it from ``os.cpu_count()`` capped
-    # every run at the machine's width, so on a two-core box
-    # ``@cluster(cores=16)`` produced four chunks and twelve of the sixteen
-    # workers it sized had nothing they could ever pull (#152).
-    workers = max_workers or os.cpu_count() or 1
-    chunk_size = max(1, len(loop_range) // (workers * 2))
-
-    # Create chunks
-    for i in range(0, len(loop_range), chunk_size):
-        chunk_range = list(loop_range[i : i + chunk_size])
-
-        # Create modified kwargs for this chunk
-        chunk_kwargs = kwargs.copy()
-        chunk_kwargs[name] = chunk_range
-
-        chunks.append({"args": args, "kwargs": chunk_kwargs})
-
-    return chunks
-
-
-def _combine_local_results(results: List[Any], loop_info) -> Any:
-    """
-    Combine results from local parallel execution.
-
-    Args:
-        results: List of results from parallel execution
-        loop_info: Information about the parallelized loop
-
-    Returns:
-        Combined result
-    """
-    # For now, flatten list results or return as-is
-    if not results:
-        return None
-
-    if len(results) == 1:
-        return results[0]
-
-    # If all results are lists, concatenate them
-    if all(isinstance(r, list) for r in results):
-        combined = []
-        for result in results:
-            combined.extend(result)
-        return combined
-
-    # Otherwise return the list of results
-    return results

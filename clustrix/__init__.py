@@ -3,6 +3,7 @@ from .config import ClusterConfig, configure, get_config
 from .executor import ClusterExecutor
 from .local_executor import LocalExecutor, create_local_executor
 from .loop_analysis import detect_loops_in_function, find_parallelizable_loops
+from .parallelize import explain
 from .utils import setup_environment
 from .ssh_utils import (
     setup_ssh_keys,
@@ -76,6 +77,7 @@ __all__ = [
     "ClusterExecutor",
     "LocalExecutor",
     "create_local_executor",
+    "explain",
     "detect_loops_in_function",
     "find_parallelizable_loops",
     "setup_environment",
