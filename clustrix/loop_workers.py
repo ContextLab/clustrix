@@ -701,12 +701,39 @@ def shared_pool(workers: int) -> WorkerPool:
         return _SHARED
 
 
+#: Pools whose workers each see their own GPUs, by the device groups they
+#: were built for. Separate from the shared pool: which devices a process
+#: may use is fixed when it starts.
+_PINNED: Dict[Tuple[str, ...], WorkerPool] = {}
+
+
+def gpu_pool(device_groups: Sequence[str]) -> WorkerPool:
+    """A pool with one worker per group, each started with
+    ``CUDA_VISIBLE_DEVICES`` set to its group (``"0"``, ``"2,3"``).
+
+    Kept between calls like the shared pool, and for the same reason; a
+    framework's start-up on a GPU costs more than an interpreter's.
+    """
+    key = tuple(device_groups)
+    with _SHARED_LOCK:
+        pool = _PINNED.get(key)
+        if pool is None:
+            pool = _PINNED[key] = WorkerPool(
+                len(key), [{"CUDA_VISIBLE_DEVICES": group} for group in key]
+            )
+            pool.prestart()
+        return pool
+
+
 def _close_shared_pool() -> None:
     global _SHARED
     with _SHARED_LOCK:
         if _SHARED is not None:
             _SHARED.close()
             _SHARED = None
+        for pool in _PINNED.values():
+            pool.close()
+        _PINNED.clear()
 
 
 atexit.register(_close_shared_pool)

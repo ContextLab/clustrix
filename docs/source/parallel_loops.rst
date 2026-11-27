@@ -386,6 +386,71 @@ process, so that object holds what was collected before the error, as it
 would after a direct call. On a cluster the caller's objects are never
 touched, with or without a split.
 
+GPUs
+----
+
+``@cluster(gpus=N)`` says that each job needs ``N`` GPUs. For a divided loop
+that means each piece.
+
+.. code-block:: python
+
+   from clustrix import cluster, configure
+
+   configure(cluster_type="slurm", cluster_host="login.example.edu",
+             username="researcher", default_partition="gpu",
+             max_parallel_jobs=8)
+
+
+   @cluster(gpus=1, cores=4, memory="16GB", time="04:00:00")
+   def train_all(settings):
+       scores = {}
+       for name, setting in settings.items():
+           scores[name] = train_and_score(setting)   # one job, one GPU, each
+       return scores
+
+.. list-table::
+   :header-rows: 1
+   :widths: 18 82
+
+   * - Backend
+     - What ``gpus=N`` does
+   * - ``slurm``
+     - Adds ``#SBATCH --gres=gpu:N`` to every job. The scheduler chooses the
+       devices, sets ``CUDA_VISIBLE_DEVICES`` in the job and holds a job
+       back while the devices are busy. A request the partition cannot meet
+       is refused by ``sbatch``, and that message is what you see.
+   * - ``ssh``
+     - There is no scheduler. When a loop is divided, the GPUs on the host
+       are counted, each piece is given its own through
+       ``CUDA_VISIBLE_DEVICES``, and there are no more pieces than
+       ``GPUs // N``. A function whose loop is not divided is left alone and
+       sees every GPU.
+   * - local
+     - The same, with worker processes in place of jobs: at most
+       ``min(cores, GPUs // N)`` workers, each started seeing only its own
+       devices.
+   * - ``huggingface``
+     - No effect, with a warning. The hardware is the flavor: pass
+       ``hf_flavor``.
+
+If the host or this machine has fewer GPUs than one piece needs, the call
+raises ``ValueError`` (``gpus=1 was requested and 0 GPU(s) were found on
+...``) instead of running without one.
+
+.. warning::
+
+   How far this has been run. The SLURM path was run against a real scheduler
+   configured with two resources of type ``gpu``: the request is accepted,
+   two pieces run at a time, and pieces that overlap are given different
+   devices (``tests/real_world/test_gpu_requests_real.py``). Those resources
+   were placeholders, not graphics cards. **No computation has been run on a
+   real GPU through any of these paths**, and the counting of GPUs on an
+   ``ssh`` host and on a local machine has not been run on a machine that has
+   one. Check ``CUDA_VISIBLE_DEVICES`` in your first job.
+
+Random state on a GPU is outside what the run-time checks can see; seed it
+per iteration, as with any generator.
+
 Turning it off
 --------------
 

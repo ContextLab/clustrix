@@ -89,8 +89,9 @@ What it does not do
   ``if``/``with``/``try``, or whose iterations depend on each other.
 - It cannot see side effects outside the values a loop was given (module
   state, files, databases, GPU random state).
-- It does not use SLURM job arrays, and no GPU path has been verified on real
-  hardware in this release. ``auto_gpu_parallel`` does nothing.
+- It does not use SLURM job arrays. ``@cluster(gpus=N)`` requests GPUs, and
+  the request has been run against a real scheduler, but no computation has
+  been run on a real GPU in this release. ``auto_gpu_parallel`` does nothing.
 - It does not find a path that is computed at run time, does not stage files
   for HuggingFace Jobs or asynchronous calls, and does not delete staged
   data.

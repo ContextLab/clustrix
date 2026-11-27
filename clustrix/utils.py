@@ -4023,6 +4023,12 @@ def _create_slurm_script(
         partition = validate_shell_fragment("partition", job_config["partition"])
         script_lines.append(f"#SBATCH --partition={partition}")
 
+    if job_config.get("gpus"):
+        # --gres rather than --gpus: every SLURM that schedules GPUs at all
+        # understands it. The scheduler picks the devices and sets
+        # CUDA_VISIBLE_DEVICES in the job.
+        script_lines.append(f"#SBATCH --gres=gpu:{int(job_config['gpus'])}")
+
     # Add environment setup
     script_lines.extend(environment_setup_lines(config))
 
@@ -4048,6 +4054,15 @@ def _create_ssh_script(
         "",
     ]
 
+    if job_config.get("cuda_visible_devices") is not None:
+        # There is no scheduler to hand out devices on a plain host, so the
+        # caller did: each job of a divided loop sees only its own.
+        devices = validate_shell_fragment(
+            "cuda_visible_devices", job_config["cuda_visible_devices"]
+        )
+        script_lines.append(f"export CUDA_VISIBLE_DEVICES={devices}")
+        script_lines.append("")
+
     # Add environment setup (module loads, environment variables, pre-execution commands)
     setup_lines = environment_setup_lines(config)
     if setup_lines:
@@ -4063,6 +4078,44 @@ def _create_ssh_script(
     )
 
     return "\n".join(script_lines)
+
+
+def gpu_device_groups(available: int, per_job: int, at_most: int) -> List[str]:
+    """``CUDA_VISIBLE_DEVICES`` values for jobs that each get ``per_job``
+    devices of ``available``, for at most ``at_most`` jobs at a time.
+
+    ``gpu_device_groups(4, 1, 8)`` is ``["0", "1", "2", "3"]``: four jobs can
+    run at once, however many were allowed. ``gpu_device_groups(4, 2, 8)``
+    is ``["0,1", "2,3"]``. Fewer devices than one job needs is an error, not
+    an empty list: the caller asked for something this machine cannot give.
+    """
+    if per_job < 1 or at_most < 1:
+        raise ValueError("per_job and at_most must be at least 1")
+    if available < per_job:
+        raise ValueError(
+            f"gpus={per_job} was requested and {available} GPU(s) were found"
+        )
+    count = min(at_most, available // per_job)
+    return [
+        ",".join(str(index * per_job + offset) for offset in range(per_job))
+        for index in range(count)
+    ]
+
+
+def local_gpu_count() -> int:
+    """How many GPUs ``nvidia-smi`` lists on this machine; 0 without it."""
+    try:
+        listing = subprocess.run(
+            ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return 0
+    if listing.returncode != 0:
+        return 0
+    return sum(1 for line in listing.stdout.splitlines() if line.strip().isdigit())
 
 
 def detect_gpu_capabilities(

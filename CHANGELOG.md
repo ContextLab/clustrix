@@ -112,6 +112,13 @@ was not is marked.
   no SLURM job arrays, and no GPU path was verified on real hardware. One job
   per piece on HuggingFace Jobs follows from the same code path and was
   **not run**.
+- **`@cluster(gpus=N)`**: GPUs per job. `--gres=gpu:N` on SLURM; on `ssh`
+  and locally, each piece of a divided loop is given its own devices through
+  `CUDA_VISIBLE_DEVICES` and no more pieces run at once than there are
+  devices for. Too few GPUs raises instead of running without one. The SLURM
+  request was run against a real scheduler with placeholder `gpu` resources;
+  **no computation was run on a real GPU**, and GPU counting on `ssh` and
+  locally was not run on a machine that has one.
 - **`clustrix.explain(function)`** returns the decision and, for a loop that
   is not divided, the line and the reason.
 - **Local timing.** A function's first local call divides its loop and

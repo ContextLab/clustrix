@@ -152,9 +152,26 @@ JobCompType=jobcomp/none
 KillWait=5
 OverTimeLimit=0
 MinJobAge=30
-NodeName=$NODE CPUs=$CPUS RealMemory=$MEM_MB State=UNKNOWN
+GresTypes=gpu
+AccountingStorageTRES=gres/gpu
+NodeName=$NODE CPUs=$CPUS RealMemory=$MEM_MB Gres=gpu:2 State=UNKNOWN
 PartitionName=debug Nodes=$NODE Default=YES MaxTime=INFINITE State=UP
 EOF
+
+# Two resources of type "gpu" for the scheduler to hand out. There is no GPU
+# in a container: the "devices" are two more names for /dev/null. That is enough for what
+# this is for -- sbatch accepting --gres=gpu:N, the scheduler refusing to run
+# more such jobs at once than there are devices, and each job being told
+# which one is its own through CUDA_VISIBLE_DEVICES. It says nothing about
+# computing on a GPU.
+mkdir -p /etc/slurm/placeholder-gpus
+for n in 0 1; do
+    # slurmd insists on a character device; 1,3 is the null device.
+    [ -c /etc/slurm/placeholder-gpus/gpu$n ] \
+        || mknod /etc/slurm/placeholder-gpus/gpu$n c 1 3
+done
+echo "NodeName=$NODE Name=gpu File=/etc/slurm/placeholder-gpus/gpu[0-1]" \
+    > /etc/slurm/gres.conf
 
 runuser -u slurm -- /usr/sbin/slurmdbd
 for _ in $(seq 30); do

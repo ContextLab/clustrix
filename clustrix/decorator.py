@@ -14,11 +14,17 @@ from .loop_workers import (
     NotPicklable,
     TaskOutput,
     available_cpus,
+    gpu_pool,
     in_worker,
     shared_pool,
     timed_call,
 )
-from .utils import serialize_function
+from .utils import (
+    detect_gpu_capabilities,
+    gpu_device_groups,
+    local_gpu_count,
+    serialize_function,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +79,7 @@ def cluster(
     memory: Optional[str] = None,
     time: Optional[str] = None,
     partition: Optional[str] = None,
+    gpus: Optional[int] = None,
     parallel: Optional[bool] = None,
     auto_gpu_parallel: Optional[bool] = None,
     environment: Optional[str] = None,
@@ -89,6 +96,15 @@ def cluster(
         memory: Memory to request (e.g., "8GB")
         time: Time limit (e.g., "01:00:00")
         partition: Cluster partition to use
+        gpus: Number of GPUs each job needs. On SLURM it becomes
+            ``--gres=gpu:N`` and the scheduler assigns the devices. On an
+            ``ssh`` host and locally there is no scheduler, so when a loop
+            is divided each piece is given its own devices through
+            ``CUDA_VISIBLE_DEVICES`` and no more pieces run at once than
+            there are devices for; a function that is not divided is left
+            to use whatever it finds. For HuggingFace Jobs choose a GPU
+            ``hf_flavor`` instead. The SLURM request was run against a real
+            scheduler; no path has been run on a real GPU.
         parallel: Whether to parallelize loops automatically
         auto_gpu_parallel: NO EFFECT. The client-side GPU path it selected
             never called the decorated function -- it ran a fixed torch
@@ -156,6 +172,7 @@ def cluster(
                 "memory": memory or config.default_memory,
                 "time": time or config.default_time,
                 "partition": partition or config.default_partition,
+                "gpus": _validated_gpus(gpus),
                 # The per-call value only. `resolve_named_environment` falls
                 # back to `config.conda_env_name` itself, and folding the
                 # fallback in here erased the difference between "the caller
@@ -200,6 +217,14 @@ def cluster(
             # parameter at all -- it now lands in ``**kwargs`` and is reported
             # by the warning above -- but a value left behind in a config file
             # or a saved widget profile still has to say that it does nothing.
+            if job_config["gpus"] and config.cluster_type == "huggingface":
+                logger.warning(
+                    "@cluster(gpus=%d) has no effect on HuggingFace Jobs, "
+                    "where the hardware is the flavor: pass hf_flavor=... "
+                    "(and set hf_allow_gpu_flavors=True for one that is billed).",
+                    job_config["gpus"],
+                )
+
             stale_queue = getattr(config, "default_queue", None)
             if stale_queue:
                 logger.warning(
@@ -367,6 +392,7 @@ def cluster(
             "memory": memory,
             "time": time,
             "partition": partition,
+            "gpus": gpus,
             "parallel": parallel,
             "auto_gpu_parallel": auto_gpu_parallel,
             "environment": environment,
@@ -481,6 +507,18 @@ _SECONDS_PER_ITERATION: "weakref.WeakKeyDictionary[Any, float]" = (
 _ABANDONED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
 
 
+def _validated_gpus(gpus: Optional[int]) -> int:
+    """``gpus`` as a count, refusing what no backend could act on."""
+    if gpus is None:
+        return 0
+    if isinstance(gpus, bool) or not isinstance(gpus, int) or gpus < 0:
+        raise ValueError(
+            f"@cluster(gpus={gpus!r}): gpus is the number of GPUs each job "
+            "needs, a whole number of 0 or more"
+        )
+    return gpus
+
+
 def _plan_for(func: Callable) -> parallelize.ParallelPlan:
     """The split of ``func``'s loop into jobs, or the reasons there is none."""
     code = getattr(func, "__code__", None)
@@ -535,6 +573,21 @@ def _run_split_remotely(
     """
     name = getattr(func, "__name__", repr(func))
 
+    # A scheduler assigns GPUs to jobs. A plain host has nobody to do that,
+    # so each piece is told which devices are its own, and there are no more
+    # pieces than there are devices for.
+    device_groups: Optional[List[str]] = None
+    if job_config.get("gpus") and executor.config.cluster_type == "ssh":
+        executor.connect()
+        found = detect_gpu_capabilities(executor.ssh_client, executor.config)
+        try:
+            device_groups = gpu_device_groups(
+                found.get("gpu_count") or 0, job_config["gpus"], max(1, max_jobs)
+            )
+        except ValueError as error:
+            raise ValueError(f"{error} on {executor.config.cluster_host}") from None
+        max_jobs = len(device_groups)
+
     def invoke(function: Callable, *arguments: Any) -> Any:
         return _execute_single(executor, function, arguments, {}, job_config)
 
@@ -548,10 +601,16 @@ def _run_split_remotely(
         job_ids: List[str] = []
         results: list = []
         try:
-            for chunk in chunks:
+            for position, chunk in enumerate(chunks):
+                chunk_config = job_config
+                if device_groups is not None:
+                    chunk_config = {
+                        **job_config,
+                        "cuda_visible_devices": device_groups[position],
+                    }
                 job_ids.append(
                     executor.submit_job(
-                        serialize_function(body, (env, chunk), {}), job_config
+                        serialize_function(body, (env, chunk), {}), chunk_config
                     )
                 )
             for job_id in job_ids:
@@ -839,7 +898,21 @@ def _run_split_locally(
         _warn_cores_unused(requested, "only one CPU is available to this process")
         return func(*args, **kwargs)
 
-    pool = shared_pool(workers)
+    if job_config.get("gpus"):
+        # One worker per group of devices, each started seeing only its own.
+        try:
+            groups = gpu_device_groups(local_gpu_count(), job_config["gpus"], workers)
+        except ValueError as error:
+            raise ValueError(f"{error} on this machine") from None
+        if len(groups) < 2:
+            logger.info(
+                "%s runs unsplit: there are GPUs for one piece at a time.", name
+            )
+            return func(*args, **kwargs)
+        workers = len(groups)
+        pool = gpu_pool(groups)
+    else:
+        pool = shared_pool(workers)
 
     def should_split(total: int) -> bool:
         known = _SECONDS_PER_ITERATION.get(func.__code__)
