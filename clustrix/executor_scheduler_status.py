@@ -9,12 +9,11 @@ import shlex
 import signal
 import time
 import tempfile
-import dill
 
 import logging
 from typing import Dict, Any, Optional
 
-from .utils import verify_signed_payload
+from .utils import loads_remote_payload, verify_signed_payload
 
 logger = logging.getLogger(__name__)
 
@@ -696,7 +695,7 @@ class SchedulerStatusManager:
                 # a custom exception class bound to the caller's own. Safe to
                 # deserialize only because the bytes just verified against the
                 # per-job key.
-                error_data = dill.loads(payload)
+                error_data = loads_remote_payload(payload)
 
                 # Handle different error data formats
                 if isinstance(error_data, dict):
@@ -819,7 +818,7 @@ class SchedulerStatusManager:
                 # dill: matches how the stages write it, and keeps
                 # a custom exception class bound to the caller's own. Safe to
                 # deserialize only because the bytes just verified.
-                error_data = dill.loads(payload)
+                error_data = loads_remote_payload(payload)
 
                 # Return the exception object if it is one
                 if isinstance(error_data, Exception):

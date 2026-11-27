@@ -7,7 +7,6 @@ for the supported job execution backends: local, ssh, slurm and huggingface.
 import shlex
 import time
 import tempfile
-import dill
 import pickle
 import logging
 from typing import Any, Dict, Optional
@@ -19,7 +18,7 @@ from .executor_connections import ConnectionManager
 from .executor_schedulers import SchedulerManager
 from .hf_jobs import HFJobsManager
 from .local_executor import LocalJobManager
-from .utils import verify_signed_payload
+from .utils import loads_remote_payload, verify_signed_payload
 
 logger = logging.getLogger(__name__)
 
@@ -215,12 +214,9 @@ class ClusterExecutor:
 
                     self._verify_result_signature(job_id, remote_dir, payload)
                     # dill, not stdlib pickle, because the worker wrote
-                    # this with dill. Replaying dill's reconstruction opcodes
-                    # through stdlib pickle builds a *fresh* class for anything
-                    # defined in the caller's __main__, so a returned instance
-                    # failed isinstance() against the very class that defined
-                    # it. dill's loader reuses the existing one.
-                    result = dill.loads(payload)
+                    # this with dill -- through a loader that hands back the
+                    # caller's own classes rather than fresh copies of them.
+                    result = loads_remote_payload(payload)
 
                     # Cleanup
                     if self.config.cleanup_on_success:

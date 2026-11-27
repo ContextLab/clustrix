@@ -143,6 +143,20 @@ class SchedulerManager:
 
         return remote_job_dir, result_key
 
+    def _job_requirements(self, func_data: Dict[str, Any]) -> Dict[str, str]:
+        """The packages this job's execution environment is built from.
+
+        By default the whole local environment, which cannot miss anything
+        the function needs. With ``replicate_local_environment=False`` it is
+        the set the function, its arguments and the project-local code
+        shipped with it were found to import, closed over their dependencies
+        -- a small environment that builds in seconds. That setting used to
+        install nothing at all, so a function importing numpy could not run.
+        """
+        if getattr(self.config, "replicate_local_environment", True):
+            return func_data["requirements"]
+        return func_data.get("required_packages") or {}
+
     def _setup_job_environment(
         self,
         remote_job_dir: str,
@@ -183,7 +197,7 @@ class SchedulerManager:
                     venv_info = enhanced_setup_two_venv_environment(
                         self.connection_manager.ssh_client,
                         remote_job_dir,
-                        func_data["requirements"],
+                        self._job_requirements(func_data),
                         self.config,
                     )
                 except Exception as e:
@@ -242,7 +256,7 @@ class SchedulerManager:
             setup_remote_environment(
                 self.connection_manager.ssh_client,
                 remote_job_dir,
-                func_data["requirements"],
+                self._job_requirements(func_data),
                 self.config,
             )
         return config_for_job_script(self.config, None)

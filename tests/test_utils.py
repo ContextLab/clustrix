@@ -75,7 +75,11 @@ class TestSerialization:
     def test_fallback_to_dill(self, mock_cloudpickle, mock_dill):
         """Test fallback to cloudpickle when dill fails."""
         mock_dill.side_effect = Exception("Dill failed")
-        mock_cloudpickle.return_value = b"cloudpickle_data"
+        # A real pickle, not arbitrary bytes: the payload is read back to
+        # find the modules it will import on the worker, and what a
+        # serializer returns is always a pickle.
+        cloudpickle_data = pickle.dumps("cloudpickle_data", protocol=4)
+        mock_cloudpickle.return_value = cloudpickle_data
 
         def test_func():
             return "test"
@@ -84,9 +88,9 @@ class TestSerialization:
 
         # All three payloads must fall through to cloudpickle, not just the
         # function: args and kwargs are serialized by the same helper.
-        assert result["function"] == b"cloudpickle_data"
-        assert result["args"] == b"cloudpickle_data"
-        assert result["kwargs"] == b"cloudpickle_data"
+        assert result["function"] == cloudpickle_data
+        assert result["args"] == cloudpickle_data
+        assert result["kwargs"] == cloudpickle_data
         # dill is tried first for anything not carrying project-local code.
         assert mock_dill.called
         assert mock_cloudpickle.called

@@ -93,6 +93,7 @@ try:
         if not isinstance(data.get(_name), bytes):
             raise ValueError('function_data.pkl has no serialized ' + _name)
         _handoff[_name + '_bytes'] = data[_name]
+    _handoff['local_modules_bytes'] = data.get('local_modules')
     with open('function_deserialized.pkl', 'wb') as f:
         _ser.dump(_handoff, f, protocol=4)
     
@@ -154,6 +155,11 @@ try:
     with open('function_deserialized.pkl', 'rb') as f:
         exec_data = _ser.load(f)
     
+    _local_modules = exec_data.get('local_modules_bytes')
+    if _local_modules:
+        import sys as _sys
+        for _name, _module in _ser.loads(_local_modules).items():
+            _sys.modules.setdefault(_name, _module)
     # The caller's own bytes: dill first, cloudpickle when dill
     # cannot, which is the order the caller's serializer uses. When
     # neither can, both reasons are reported -- they usually differ,

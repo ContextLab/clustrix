@@ -33,7 +33,7 @@ fi
 # will run the job, before any of it runs.
 conda run -n prod python -c "
 import sys
-_want = (3, 11)
+_want = (3, 13)
 _got = sys.version_info[:2]
 if _got != _want:
     sys.stderr.write(
@@ -79,6 +79,11 @@ try:
     # dill, not stdlib pickle: args may carry classes defined
     # in the caller's __main__, which pickle stores only by name.
     _argser = dill or cloudpickle
+    _local_modules = data.get('local_modules')
+    if _local_modules:
+        import sys as _sys
+        for _name, _module in _argser.loads(_local_modules).items():
+            _sys.modules.setdefault(_name, _module)
     try:
         func = _argser.loads(data['function'])
     except Exception:

@@ -12,13 +12,17 @@ import threading
 import sys
 import textwrap
 import pickle
+import pickletools
 import inspect
+import dis
 import importlib
+import importlib.util
+import io
 import json
 import functools
 import subprocess
 from importlib import metadata as importlib_metadata
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple, Union
 import dill  # type: ignore
 import cloudpickle  # type: ignore
 
@@ -35,6 +39,57 @@ class PayloadAuthenticationError(RuntimeError):
     of the check is that the caller is told, loudly, that something it was
     about to unpickle is not what the job wrote.
     """
+
+
+def _resolve_local_class(dill_create_type: Callable) -> Callable:
+    """Wrap dill's class constructor so it prefers a class this process has.
+
+    See :func:`loads_remote_payload`.
+    """
+
+    def create_or_reuse(typeobj: Any, *args: Any) -> Any:
+        if len(args) == 3 and isinstance(args[2], dict):
+            module = sys.modules.get(str(args[2].get("__module__")))
+            found: Any = module
+            for part in str(args[2].get("__qualname__") or args[0]).split("."):
+                found = getattr(found, part, None)
+            if module is not None and isinstance(found, type):
+                return found
+        return dill_create_type(typeobj, *args)
+
+    return create_or_reuse
+
+
+class _LocalClassUnpickler(dill.Unpickler):
+    """dill's unpickler, resolving by-value classes to the caller's own."""
+
+    def find_class(self, module: str, name: str) -> Any:
+        found = super().find_class(module, name)
+        if (module, name) == ("dill._dill", "_create_type"):
+            return _resolve_local_class(found)
+        return found
+
+
+def loads_remote_payload(payload: bytes) -> Any:
+    """Deserialize a result or an error report written by a worker.
+
+    The worker has none of the user's project on disk, so a class from the
+    user's script or from a project-local module reaches it by value, and it
+    comes back by value too: dill rebuilds it here as a brand-new class with
+    the same name. A returned instance then failed ``isinstance`` against the
+    class that defined it, and -- worse -- an exception raised remotely was
+    not caught by ``except TheUsersError`` in the code that submitted it.
+    (dill repairs this for the single top-level object when its class lives
+    in ``__main__``, and for nothing else.)
+
+    A class the worker sends by value that this process already has, under
+    the same module and qualified name, *is* this process's class: it is
+    where the worker's copy came from. Anything else is built as sent.
+
+    Only ever call this on bytes that have passed ``verify_signed_payload``:
+    unpickling executes code.
+    """
+    return _LocalClassUnpickler(io.BytesIO(payload)).load()
 
 
 def verify_signed_payload(
@@ -803,6 +858,138 @@ def _walk_referenced_modules(obj: Any) -> Tuple[Dict[str, Any], Set[str]]:
     return found, installed
 
 
+def _body_imports(obj: Any) -> Set[str]:
+    """Modules imported by ``import`` statements inside the code ``obj`` runs.
+
+    ``import x`` written in a function body binds nothing in globals or in a
+    closure, so the only trace of it is the import instruction in the code
+    object. This follows the code that actually travels by value -- the
+    function, what its body names, what those name -- and reads those
+    instructions. Unlike ``_walk_referenced_modules`` it does not sweep up
+    everything else defined in the same module: an import inside some other
+    function of the user's script is not a dependency of this job.
+
+    A project-local module that is referenced as a whole (``helpers.clean``)
+    has all of its functions read, since any of them may be the one called.
+    """
+    imports: Set[str] = set()
+    seen: Set[int] = set()
+    stack = [obj]
+    while stack:
+        current = stack.pop()
+        if id(current) in seen or _is_scalar(current):
+            continue
+        seen.add(id(current))
+        if isinstance(current, (staticmethod, classmethod)):
+            stack.append(current.__func__)
+        elif isinstance(current, property):
+            stack.extend(f for f in (current.fget, current.fset, current.fdel) if f)
+        elif isinstance(current, functools.partial):
+            stack.append(current.func)
+        elif inspect.ismethod(current):
+            stack.append(current.__func__)
+        elif inspect.isfunction(current):
+            if not _travels_by_value(current):
+                continue
+            imports |= _imported_names(current.__code__)
+            for name in _names_used(current.__code__):
+                if name in current.__globals__:
+                    stack.append(current.__globals__[name])
+            for cell in current.__closure__ or ():
+                try:
+                    stack.append(cell.cell_contents)
+                except ValueError:
+                    pass  # an empty cell in a recursive definition
+        elif inspect.isclass(current):
+            if _travels_by_value(current):
+                stack.extend(vars(current).values())
+        elif inspect.ismodule(current):
+            if _is_local_module(current):
+                stack.extend(
+                    value
+                    for value in vars(current).values()
+                    if (inspect.isfunction(value) or inspect.isclass(value))
+                    and getattr(value, "__module__", None) == current.__name__
+                )
+        elif isinstance(current, (tuple, list, set, frozenset)):
+            # One level: the args tuple and what it holds. Arguments are
+            # data, and walking a million-element list to look for import
+            # statements would cost more than every other step combined.
+            if current is obj:
+                stack.extend(current)
+        elif isinstance(current, dict):
+            if current is obj:
+                stack.extend(current.values())
+        else:
+            stack.append(type(current))
+    return imports
+
+
+def _names_used(code: Any) -> Set[str]:
+    """Global and attribute names a code object refers to, nested code included."""
+    names = set(code.co_names)
+    for const in code.co_consts:
+        if inspect.iscode(const):
+            names |= _names_used(const)
+    return names
+
+
+def _travels_by_value(func: Any) -> bool:
+    """Whether ``func`` is sent as code rather than as a name to import."""
+    name = getattr(func, "__module__", None)
+    if not name or name == "__main__":
+        return True
+    module = sys.modules.get(name)
+    return module is None or _is_local_module(module)
+
+
+def _imported_names(code: Any) -> Set[str]:
+    """Absolute module names imported anywhere in ``code``, nested code included."""
+    names: Set[str] = set()
+    for instruction in dis.get_instructions(code):
+        if instruction.opname == "IMPORT_NAME" and instruction.argval:
+            names.add(str(instruction.argval))
+    for const in code.co_consts:
+        if inspect.iscode(const):
+            names |= _imported_names(const)
+    return names
+
+
+def _find_local_module(name: str) -> Any:
+    """Import ``name`` if, and only if, it is a project-local module.
+
+    A function that imports a sibling module inside its body has usually not
+    run yet, so the module is not in ``sys.modules`` and there is no object to
+    embed. It is located without being executed first; only a module that
+    turns out to live in the user's project is imported, because importing is
+    the one way to get the object cloudpickle needs. Nothing installed is
+    imported here -- that would run arbitrary package initialisation at
+    submit time for a job that may never reach that line.
+    """
+    try:
+        spec = importlib.util.find_spec(name.split(".")[0])
+    except (ImportError, ValueError):
+        return None
+    if spec is None:
+        return None
+    origin = spec.origin or next(iter(spec.submodule_search_locations or []), None)
+    if not origin or origin in ("built-in", "frozen"):
+        return None
+    resolved = os.path.realpath(origin)
+    if any(resolved.startswith(root) for root in _INSTALLED_ROOTS):
+        return None
+    try:
+        return importlib.import_module(name)
+    except ImportError as exc:
+        logger.warning(
+            "This function imports the project-local module %s, which could "
+            "not be imported here (%s), so it cannot be sent with the job.",
+            name,
+            exc,
+        )
+        return None
+
+
 def _referenced_local_modules(obj: Any) -> List[Any]:
     """Project-local modules `obj` reaches; see :func:`_walk_referenced_modules`."""
     return list(_walk_referenced_modules(obj)[0].values())
@@ -973,20 +1160,117 @@ def _refuse_unreproducible_packages(installed_modules: Set[str]) -> None:
     )
 
 
-def _dumps_by_value(obj: Any) -> bytes:
+#: The callables cloudpickle and dill emit to mean "import this module on
+#: load". Their argument is a module name, and it is the only place in a
+#: payload where a module held as a value (``np`` in ``np.sum``) is named.
+_MODULE_IMPORT_REDUCERS = frozenset({"subimport", "_import_module"})
+
+
+class _ImportedGlobal(NamedTuple):
+    """Stands for an object a pickle stores by reference, while scanning it."""
+
+    attribute: str
+
+
+def _payload_import_names(payload: bytes) -> Set[str]:
+    """Top-level modules a pickle will import when it is loaded.
+
+    Read off the pickle itself rather than inferred from the objects that
+    went into it, so it is exactly what the worker will be asked for: every
+    object stored by reference names its module in a ``GLOBAL`` or
+    ``STACK_GLOBAL`` opcode, and a module stored as a value is the argument
+    of one of ``_MODULE_IMPORT_REDUCERS``. Nothing is executed.
+    """
+    names: Set[str] = set()
+    memo: Dict[int, Any] = {}
+    recent: List[Any] = []
+    expect_module_name = False
+    for opcode, arg, _ in pickletools.genops(payload):
+        op = opcode.name
+        pushed: Any = None
+        if op in ("SHORT_BINUNICODE", "BINUNICODE", "BINUNICODE8", "UNICODE"):
+            pushed = arg
+        elif op in ("BINGET", "LONG_BINGET", "GET"):
+            # Anything seen earlier in the stream is not written again; it is
+            # fetched from the memo. That goes for a module-name string and,
+            # just as much, for the import reducer itself, which is written
+            # in full once and fetched for every module after the first.
+            pushed = memo.get(int(str(arg)))
+        elif op == "MEMOIZE":
+            memo[len(memo)] = recent[-1] if recent else None
+            continue
+        elif op in ("BINPUT", "LONG_BINPUT", "PUT"):
+            memo[int(str(arg))] = recent[-1] if recent else None
+            continue
+        elif op in ("MARK", "FRAME", "PROTO"):
+            continue
+        elif op == "STACK_GLOBAL":
+            module, attribute = (recent[-2:] + [None, None])[:2]
+            if isinstance(module, str):
+                names.add(module)
+            pushed = _ImportedGlobal(str(attribute))
+        elif op in ("GLOBAL", "INST"):
+            module, _, attribute = str(arg).partition(" ")
+            names.add(module)
+            pushed = _ImportedGlobal(attribute)
+
+        if isinstance(pushed, _ImportedGlobal):
+            expect_module_name = pushed.attribute in _MODULE_IMPORT_REDUCERS
+        elif isinstance(pushed, str) and expect_module_name:
+            names.add(pushed)
+            expect_module_name = False
+        recent.append(pushed)
+        del recent[:-4]
+    return {name.split(".")[0] for name in names if name}
+
+
+def _dumps_by_value(
+    obj: Any,
+    imports: Optional[Set[str]] = None,
+    lazy_local_modules: Optional[Dict[str, Any]] = None,
+) -> bytes:
     """Serialize `obj` so a fresh interpreter can rebuild it without imports.
 
     Tries the richest serializer first and degrades. Every fallback still
     produces bytes; if none can, the exception propagates rather than shipping
     a payload that will fail remotely with an unrelated error.
+
+    Args:
+        obj: What to serialize.
+        imports: When given, receives the top-level name of every installed
+            module the worker will have to import to use these bytes.
+        lazy_local_modules: When given, receives the project-local modules
+            that by-value code imports with a statement in a function body.
+            Embedding cannot satisfy an ``import`` that runs on the worker,
+            so the submitter sends these separately; see
+            ``serialize_function``.
     """
     # Modules from the user's own project do not exist on the worker, so
     # anything reaching into them must be embedded rather than imported.
     # A failure to walk is not swallowed: not knowing what a payload needs is
     # not the same as knowing it needs nothing.
     local_modules_map, installed_modules = _walk_referenced_modules(obj)
-    local_modules = list(local_modules_map.values())
     _refuse_unreproducible_packages(installed_modules)
+    payload = _encode_by_value(obj, list(local_modules_map.values()))
+
+    for name in _body_imports(obj):
+        module = sys.modules.get(name) or _find_local_module(name)
+        if module is None or not _is_local_module(module):
+            if imports is not None:
+                imports.add(name.split(".")[0])
+        elif lazy_local_modules is not None:
+            parts = name.split(".")
+            for depth in range(1, len(parts) + 1):
+                link = ".".join(parts[:depth])
+                if link in sys.modules:
+                    lazy_local_modules[link] = sys.modules[link]
+    if imports is not None:
+        imports |= _payload_import_names(payload)
+    return payload
+
+
+def _encode_by_value(obj: Any, local_modules: List[Any]) -> bytes:
+    """The bytes for ``obj``, with ``local_modules`` embedded rather than named."""
     if local_modules:
         # No silent degradation here. Falling back to a by-reference payload
         # would produce exactly the ModuleNotFoundError this branch exists to
@@ -1097,13 +1381,26 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
     # `NameError: name '_helper' is not defined`. `recurse=True` walks the
     # globals the body actually names and bundles them. It can fail on objects
     # that refuse deep traversal, so the plain form remains the fallback.
-    func_bytes = _dumps_by_value(func)
+    imports: Set[str] = set()
+    lazy_local_modules: Dict[str, Any] = {}
+    func_bytes = _dumps_by_value(func, imports, lazy_local_modules)
 
     # Arguments need the same treatment: stdlib pickle stores a class by
     # qualified name, so passing an instance of a class defined in the caller's
     # __main__ fails on the worker with "Can't get attribute 'Point'".
-    args_bytes = _dumps_by_value(args)
-    kwargs_bytes = _dumps_by_value(kwargs)
+    args_bytes = _dumps_by_value(args, imports, lazy_local_modules)
+    kwargs_bytes = _dumps_by_value(kwargs, imports, lazy_local_modules)
+
+    # Project-local modules that the code imports with a statement inside a
+    # function body. Embedding by value rewrites how *references* to a module
+    # are stored; it cannot answer an `import` that executes on the worker.
+    # These travel as their own payload, which the worker places in
+    # sys.modules before it loads the function. A module reached both ways
+    # exists twice on the worker -- once embedded, once importable -- and the
+    # two copies do not share state.
+    local_modules_bytes = (
+        _dumps_by_value(lazy_local_modules, imports) if lazy_local_modules else None
+    )
 
     # Get function metadata
     func_info = {
@@ -1133,7 +1430,9 @@ def serialize_function(func: Callable, args: tuple, kwargs: dict) -> Dict[str, A
         "function_source": func_source,
         "args": args_bytes,
         "kwargs": kwargs_bytes,
+        "local_modules": local_modules_bytes,
         "requirements": requirements,
+        "required_packages": required_distributions(imports),
         "func_info": func_info,
         "python_version": sys.version,
         "working_directory": os.getcwd(),
@@ -1402,6 +1701,55 @@ def get_environment_requirements() -> Dict[str, str]:
                 requirements[pkg] = version
 
     return requirements
+
+
+def required_distributions(import_names: Set[str]) -> Dict[str, str]:
+    """The installed distributions behind ``import_names``, with what they need.
+
+    This is the answer to "what does this job actually use", as opposed to
+    :func:`get_environment_requirements`, which is everything installed.
+    Each import name is mapped to the distribution that provides it, and the
+    set is closed over declared dependencies -- limited to the ones installed
+    here, which is how a dependency behind an unmet platform marker drops out
+    without evaluating it; a dependency of an optional extra is not followed.
+    Versions are the local ones.
+
+    Names with no distribution are the standard library or the user's own
+    code, and are skipped. Distributions that cannot be reinstalled are
+    skipped too; ``_refuse_unreproducible_packages`` has already refused the
+    job if it reaches one.
+
+    Imports made by name at run time (``importlib.import_module``, plugin
+    entry points, pandas reaching for an optional engine) leave no trace in a
+    code object and are not found. ``cluster_packages`` adds what this misses.
+    """
+    providers = importlib_metadata.packages_distributions()
+    records = _distribution_records()
+    pending = [
+        dist for name in import_names for dist in providers.get(name.split(".")[0], [])
+    ]
+    required: Dict[str, str] = {}
+    seen: Set[str] = set()
+    while pending:
+        canonical = _canonical_package_name(pending.pop())
+        if canonical in seen:
+            continue
+        seen.add(canonical)
+        record = records.get(canonical)
+        if record is None or record["reason"] or canonical in _NEVER_REPLICATED:
+            continue
+        required[record["name"]] = record["version"]
+        for requirement in record["dist"].requires or []:
+            spec, _, marker = requirement.partition(";")
+            if re.search(r"\bextra\b", marker):
+                # Needed only by an optional feature nobody asked for here
+                # ("pytest; extra == 'tests'"). Following these pulls in the
+                # test and documentation stack of everything.
+                continue
+            match = re.match(r"\s*([A-Za-z0-9][A-Za-z0-9._-]*)", spec)
+            if match:
+                pending.append(match.group(1))
+    return required
 
 
 def get_unreproducible_requirements() -> Dict[str, str]:
@@ -2048,14 +2396,13 @@ def _build_virtualenv_pair(
 def _mirrored_requirements(
     requirements: Dict[str, str], config: Optional[ClusterConfig]
 ) -> Dict[str, str]:
-    """The local packages to reinstall in the execution environment.
+    """The packages to install in the execution environment.
 
-    Everything the local package manager reports, less the serializers (which
-    are installed on their own, first) and anything in ``excluded_packages``.
-    Empty when ``replicate_local_environment`` is off.
+    ``requirements`` less the serializers (which are installed on their own,
+    first) and anything in ``excluded_packages``. Which set ``requirements``
+    is -- the whole local environment, or only what the job was found to use
+    -- is the submitter's choice; see ``SchedulerManager._job_requirements``.
     """
-    if not requirements or not getattr(config, "replicate_local_environment", True):
-        return {}
     excluded = {
         str(name).lower() for name in (getattr(config, "excluded_packages", None) or [])
     }
@@ -3084,6 +3431,7 @@ def generate_two_venv_execution_commands(
             "        if not isinstance(data.get(_name), bytes):",
             "            raise ValueError('function_data.pkl has no serialized ' + _name)",
             "        _handoff[_name + '_bytes'] = data[_name]",
+            "    _handoff['local_modules_bytes'] = data.get('local_modules')",
             "    with open('function_deserialized.pkl', 'wb') as f:",
             "        _ser.dump(_handoff, f, protocol=4)",
             "    ",
@@ -3127,6 +3475,9 @@ def generate_two_venv_execution_commands(
             "    with open('function_deserialized.pkl', 'rb') as f:",
             "        exec_data = _ser.load(f)",
             "    ",
+        ]
+        + local_module_registration_lines("exec_data.get('local_modules_bytes')")
+        + [
             "    # The caller's own bytes: dill first, cloudpickle when dill",
             "    # cannot, which is the order the caller's serializer uses. When",
             "    # neither can, both reasons are reported -- they usually differ,",
@@ -3300,6 +3651,28 @@ def create_job_script(
         return _create_ssh_script(job_config, remote_job_dir, config)
     else:
         raise ValueError(f"Unsupported cluster type: {cluster_type}")
+
+
+def local_module_registration_lines(source: str, serializer: str = "_ser") -> list:
+    """Worker lines that make lazily imported project modules importable.
+
+    ``serialize_function`` sends, as a payload of its own, the project-local
+    modules that the job's code imports from inside a function body. They are
+    placed in ``sys.modules`` before the function is loaded, so the ``import``
+    finds them when it runs. ``setdefault``, so a module the worker really
+    has is never shadowed.
+
+    Args:
+        source: Python expression yielding the payload bytes, or ``None``.
+        serializer: Name in scope on the worker of the module that loads it.
+    """
+    return [
+        f"    _local_modules = {source}",
+        "    if _local_modules:",
+        "        import sys as _sys",
+        f"        for _name, _module in {serializer}.loads(_local_modules).items():",
+        "            _sys.modules.setdefault(_name, _module)",
+    ]
 
 
 def key_capture_lines(indent: str = "") -> list:
@@ -3597,6 +3970,11 @@ def job_execution_lines(
                 "    # dill, not stdlib pickle: args may carry classes defined",
                 "    # in the caller's __main__, which pickle stores only by name.",
                 "    _argser = dill or cloudpickle",
+            ]
+            + local_module_registration_lines(
+                "data.get('local_modules')", serializer="_argser"
+            )
+            + [
                 "    try:",
                 "        func = _argser.loads(data['function'])",
                 "    except Exception:",

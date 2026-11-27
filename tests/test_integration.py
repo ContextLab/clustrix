@@ -85,6 +85,13 @@ class TestIntegration:
             # the job-script validator, and rightly so. The remote side is
             # stubbed out here, so nothing is created at this path.
             remote_work_dir="/scratch/clustrix-integration-test",
+            # The stubbed host answers every command with "Success", which is
+            # not a Python version, so the two-venv build has nothing to
+            # build from. That used to be absorbed: the build failed, a
+            # warning was logged, and the single-venv layout was used
+            # instead. A failed build is now an error, so this asks for the
+            # single-venv layout outright.
+            use_two_venv=False,
         )
 
         # Define and decorate function
@@ -99,6 +106,14 @@ class TestIntegration:
 
         # Mock job status checking
         def exec_side_effect(cmd):
+            if "sbatch" in cmd:
+                # `sbatch --parsable` prints the job id and nothing else. The
+                # stub used to answer "Success" here as it does everywhere,
+                # and that word was then used as the job id.
+                submit_mock = Mock()
+                submit_mock.read.return_value = b"12345\n"
+                submit_mock.channel.recv_exit_status.return_value = 0
+                return (None, submit_mock, Mock(read=lambda: b""))
             if "squeue" in cmd:
                 status_mock = Mock()
                 status_mock.read.return_value = b"COMPLETED"

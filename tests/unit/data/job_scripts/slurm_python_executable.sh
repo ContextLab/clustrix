@@ -39,6 +39,11 @@ try:
     # dill, not stdlib pickle: args may carry classes defined
     # in the caller's __main__, which pickle stores only by name.
     _argser = dill or cloudpickle
+    _local_modules = data.get('local_modules')
+    if _local_modules:
+        import sys as _sys
+        for _name, _module in _argser.loads(_local_modules).items():
+            _sys.modules.setdefault(_name, _module)
     try:
         func = _argser.loads(data['function'])
     except Exception:
