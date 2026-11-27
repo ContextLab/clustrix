@@ -314,7 +314,7 @@ def cluster(
 
                     if should_parallelize:
                         loop_plan = _plan_for(func)
-                        if loop_plan.parallelizable:
+                        if loop_plan.parallelizable and not _runs_undivided(func):
                             return _run_split_remotely(
                                 loop_plan,
                                 executor,
@@ -324,11 +324,12 @@ def cluster(
                                 job_config,
                                 config.max_parallel_jobs,
                             )
-                        logger.info(
-                            "%s runs as one job.\n%s",
-                            getattr(func, "__name__", repr(func)),
-                            loop_plan.explain(),
-                        )
+                        if not loop_plan.parallelizable:
+                            logger.info(
+                                "%s runs as one job.\n%s",
+                                getattr(func, "__name__", repr(func)),
+                                loop_plan.explain(),
+                            )
 
                     # Execute normally on cluster
                     return _execute_single(
@@ -429,27 +430,64 @@ def _execute_single(
     return result
 
 
+#: What is known about a function's loop is kept against its *code object*,
+#: not the function. A function defined inside another is a new object on
+#: every call of the outer one, so records kept against the function were
+#: never found again: such a loop was "never measured" for ever.
+
 #: One plan per function. Planning reads and parses the function's source,
 #: which does not change between calls; what the function *reads* is looked
 #: up afresh by ``parallelize.bind`` each time.
-_PLANS: "weakref.WeakKeyDictionary[Callable, parallelize.ParallelPlan]" = (
+_PLANS: "weakref.WeakKeyDictionary[Any, parallelize.ParallelPlan]" = (
     weakref.WeakKeyDictionary()
 )
-
 
 #: Seconds one iteration of each function's loop took the last time it was
 #: measured: in the workers when the loop was divided, here when it was not.
-_SECONDS_PER_ITERATION: "weakref.WeakKeyDictionary[Callable, float]" = (
+_SECONDS_PER_ITERATION: "weakref.WeakKeyDictionary[Any, float]" = (
     weakref.WeakKeyDictionary()
 )
+
+#: Functions whose loop passed the static analysis and then failed a check
+#: that needs real values, with the reason. Dividing such a loop again would
+#: run its chunks, discard them and run the loop a second time on every
+#: call -- twice the work, and twice any side effect the loop has outside
+#: its return value.
+_ABANDONED: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
 
 
 def _plan_for(func: Callable) -> parallelize.ParallelPlan:
     """The split of ``func``'s loop into jobs, or the reasons there is none."""
-    plan = _PLANS.get(func)
+    plan = _PLANS.get(func.__code__)
     if plan is None:
-        plan = _PLANS[func] = parallelize.plan(func)
+        plan = _PLANS[func.__code__] = parallelize.plan(func)
     return plan
+
+
+def _abandon(func: Callable) -> Callable[[str], None]:
+    """What to do when a split of ``func`` is abandoned at run time."""
+
+    def on_fallback(reason: str) -> None:
+        _ABANDONED[func.__code__] = reason
+        logger.warning(
+            "%s. The loop ran in order instead, so the result is correct -- "
+            "but anything it does besides computing (writing a file, calling "
+            "a service) happened in the attempt as well. It will not be "
+            "divided again in this session; pass parallel=False to say so "
+            "in the code.",
+            reason,
+        )
+
+    return on_fallback
+
+
+def _runs_undivided(func: Callable) -> bool:
+    """True, and says why once per call, for a loop abandoned earlier."""
+    reason = _ABANDONED.get(func.__code__)
+    if reason is None:
+        return False
+    logger.info("%s (found on an earlier call)", reason)
+    return True
 
 
 def _run_split_remotely(
@@ -507,7 +545,7 @@ def _run_split_remotely(
         map_chunks,
         jobs=max(1, max_jobs),
         invoke=invoke,
-        on_fallback=logger.warning,
+        on_fallback=_abandon(func),
     )
 
 
@@ -749,6 +787,9 @@ def _run_split_locally(
         logger.info("%s runs unsplit.\n%s", name, plan.explain())
         return func(*args, **kwargs)
 
+    if _runs_undivided(func):
+        return func(*args, **kwargs)
+
     if in_worker():
         # This call is itself an iteration of a loop that is already divided
         # among workers. Dividing again would start ``cores`` processes in
@@ -769,7 +810,7 @@ def _run_split_locally(
     pool = shared_pool(workers)
 
     def should_split(total: int) -> bool:
-        known = _SECONDS_PER_ITERATION.get(func)
+        known = _SECONDS_PER_ITERATION.get(func.__code__)
         if known is None or known * total >= MIN_SECONDS_WORTH_DIVIDING:
             return True
         logger.info(
@@ -781,7 +822,7 @@ def _run_split_locally(
         return False
 
     def on_unsplit(total: int, seconds: float) -> None:
-        _SECONDS_PER_ITERATION[func] = seconds / total
+        _SECONDS_PER_ITERATION[func.__code__] = seconds / total
 
     def map_chunks(body: Callable, env: dict, chunks: List[Sequence[Any]]) -> list:
         printed: List[str] = []
@@ -799,9 +840,9 @@ def _run_split_locally(
             raise
         # Timed where the work ran, so starting workers and shipping the
         # arguments are not mistaken for work.
-        _SECONDS_PER_ITERATION[func] = sum(seconds for seconds, _ in timed) / sum(
-            len(chunk) for chunk in chunks
-        )
+        _SECONDS_PER_ITERATION[func.__code__] = sum(
+            seconds for seconds, _ in timed
+        ) / sum(len(chunk) for chunk in chunks)
         results = [result for _, result in timed]
         if not parallelize.will_be_abandoned(results):
             sys.stdout.write("".join(printed))
@@ -814,7 +855,7 @@ def _run_split_locally(
         kwargs,
         map_chunks,
         jobs=workers,
-        on_fallback=logger.warning,
+        on_fallback=_abandon(func),
         should_split=should_split,
         on_unsplit=on_unsplit,
     )

@@ -389,7 +389,7 @@ class TestRequiresPasswordFallback:
         assert requires_password_fallback(result) is False
 
     def test_a_real_failed_key_setup_needs_the_fallback(self, ssh_server):
-        result = setup_ssh_keys(_config(ssh_server), password="not-the-password")
+        result = setup_ssh_keys(_config(ssh_server), password="the-wrong-password")
 
         print(result)
         assert not result["success"]
@@ -458,7 +458,7 @@ class TestSetupAuthWithFallback:
         monkeypatch.setenv(_host_variable(ssh_server), SSH_PASSWORD)
 
         result = setup_auth_with_fallback(
-            _config(ssh_server), setup_ssh_keys, password="not-the-password"
+            _config(ssh_server), setup_ssh_keys, password="the-wrong-password"
         )
 
         print(result)

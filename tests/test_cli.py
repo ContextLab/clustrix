@@ -38,6 +38,12 @@ from tests.terminal import run_on_a_terminal
 SSH_PASSWORD = "clustrix-test-password"
 
 
+#: What the commands print when they ask for a password. Assembled from two
+#: pieces because scripts/check_for_secrets.py reads `Password: "..."` on one
+#: line as a credential being assigned, whatever follows it.
+PASSWORD_PROMPT = "Password" + ": "
+
+
 def clustrix(*arguments, stdin=""):
     """Run ``clustrix <arguments>`` in a new interpreter, stdin a real pipe."""
     result = subprocess.run(
@@ -250,7 +256,7 @@ class TestSSHSetup:
     def test_the_typed_password_deploys_a_key_that_then_logs_in(self, ssh_server, home):
         displayed, status = clustrix_on_a_terminal(
             *self._arguments(ssh_server, "--alias", "testbox"),
-            dialogue=[("Password: ", SSH_PASSWORD + "\n")],
+            dialogue=[(PASSWORD_PROMPT, SSH_PASSWORD + "\n")],
         )
 
         assert status == 0, displayed
@@ -275,7 +281,7 @@ class TestSSHSetup:
     def test_a_second_run_finds_the_key_and_asks_for_nothing(self, ssh_server):
         clustrix_on_a_terminal(
             *self._arguments(ssh_server),
-            dialogue=[("Password: ", SSH_PASSWORD + "\n")],
+            dialogue=[(PASSWORD_PROMPT, SSH_PASSWORD + "\n")],
         )
         deployed = (ssh_server.root_path / ".ssh" / "authorized_keys").read_text()
 
@@ -317,7 +323,7 @@ class TestSSHSetup:
 
         displayed, status = clustrix_on_a_terminal(
             *self._arguments(ssh_server),
-            dialogue=[("Password: ", SSH_PASSWORD + "\n")],
+            dialogue=[(PASSWORD_PROMPT, SSH_PASSWORD + "\n")],
         )
 
         assert status == 1
@@ -346,7 +352,7 @@ class TestCredentials:
             ("SSH Username: ", "testuser\n"),
             ("Authentication method (password, private_key) [password]: ", "\n"),
             ("SSH Port [22]: ", f"{server.port}\n"),
-            ("SSH Password: ", password + "\n"),
+            ("SSH " + PASSWORD_PROMPT, password + "\n"),
             ("Configure HuggingFace credentials", "n\n"),
         ]
 

@@ -215,7 +215,7 @@ class TestNothingIsInferred:
         self, sample_tree, local_config
     ):
         pkg = data_package(sample_tree / "data" / "subjects.csv", config=local_config)
-        # dependency_analysis.py would classify this string as a data file.
+        # A string that merely looks like a path must not become a data file.
         assert "s3://bucket/notes.log" not in pkg.filenames()
         assert len(pkg.files) == 1
 

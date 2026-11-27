@@ -14,7 +14,6 @@ Flat layout, no subpackages. `__init__.__all__` is the public API; everything el
 | SSH | `ssh_security.py`, `ssh_utils.py` | Host-key policy lives ONLY in `ssh_security.configure_host_key_policy` |
 | Notebook | `notebook_magic.py`, `notebook_magic_core.py`, `notebook_magic_fallback.py`, `modern_notebook_widget.py`, `widget_style.py`, `widget_controls.py` | One widget (`ModernClustrixWidget`); `notebook_magic.py` re-exports core; fallback provides no-IPython stubs |
 | Data | `auto_stage.py`, `staging.py` | `auto_stage` = input files found and staged on ssh/slurm; `staging` = declared `data_package` objects |
-| Not on the execution path | `file_packaging.py`, `dependency_analysis.py` | Exported, but nothing `@cluster` does calls them |
 | Misc | `utils.py` (serialization, two-venv commands, env setup, dependency detection), `filesystem.py` (read-only `cluster_*`), `cli.py` | `cli.py` is the `clustrix` entry point (`pyproject [project.scripts]`) |
 
 ## CONVENTIONS

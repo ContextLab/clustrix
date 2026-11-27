@@ -15,7 +15,7 @@ the page that documents it. The list on this page was compared with
      - :doc:`decorator`, :doc:`../parallel_loops`
    * - ``configure``, ``get_config``, ``ClusterConfig``
      - :doc:`config`, :doc:`../configuration`
-   * - ``data_package``, ``DataPackage``, ``materialize_packages``,
+   * - ``data_package``, ``DataPackage``, ``PackagedFile``, ``materialize_packages``,
        ``list_data_packages``, ``delete_data_package``, ``StagingError``
      - :doc:`../data_packages`
    * - ``cluster_ls``, ``cluster_find``, ``cluster_glob``, ``cluster_stat``,
@@ -33,12 +33,6 @@ the page that documents it. The list on this page was compared with
    * - ``ClusterExecutor``, ``setup_environment``, ``ProfileManager``,
        ``adopt_profile_store``
      - Below
-   * - ``DependencyAnalyzer``, ``DependencyGraph``, ``ImportInfo``,
-       ``LocalFunctionCall``, ``FilesystemCall``, ``FileReference``,
-       ``analyze_function_dependencies``, ``FilePackager``, ``PackageInfo``,
-       ``PackagedFile``, ``ExecutionContext``, ``create_execution_context``,
-       ``package_function_for_execution``
-     - :ref:`Below <not-on-the-execution-path>`; not used when a job runs
 
 There is no separate module to import for loop division or input staging.
 ``clustrix.parallelize``, ``clustrix.loop_workers`` and
@@ -137,18 +131,3 @@ directory.
 
 .. autofunction:: clustrix.adopt_profile_store
 
-.. _not-on-the-execution-path:
-
-Exported, but not used when a job runs
---------------------------------------
-
-``clustrix.dependency_analysis`` (``DependencyAnalyzer``,
-``DependencyGraph``, ``ImportInfo``, ``LocalFunctionCall``,
-``FilesystemCall``, ``FileReference``, ``analyze_function_dependencies``)
-and ``clustrix.file_packaging`` (``FilePackager``, ``PackageInfo``,
-``PackagedFile``, ``ExecutionContext``, ``create_execution_context``,
-``package_function_for_execution``) are importable from ``clustrix``.
-**Nothing that** ``@cluster`` **does calls them.** A job's code, its
-dependencies and its input files are found by other means (cloudpickle, the
-payload's imports, :doc:`../input_files`). They are kept for existing callers
-and have no guide in this documentation.

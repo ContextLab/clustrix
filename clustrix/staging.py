@@ -20,10 +20,10 @@ on the worker you dereference it to get local paths back::
 
     fit(subjects)
 
-Nothing is inferred. A file moves because it was named, never because it was
-mentioned in the source -- ``dependency_analysis.py`` will happily classify the
-string ``"s3://bucket/notes.log"`` as a data file, and silently uploading on
-that basis is the worst failure mode available here.
+A package is a declaration: its files move because they were named.
+Finding the files a call names *without* being told -- for ssh and slurm --
+is ``clustrix.auto_stage``, which only ever considers paths that exist on
+this machine and are inside the project or were passed as arguments.
 
 Two places the bytes can live
 -----------------------------

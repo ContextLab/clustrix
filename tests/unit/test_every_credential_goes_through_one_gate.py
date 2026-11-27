@@ -202,10 +202,6 @@ ENVIRONMENT_BULK_READ_ALLOWLIST = {
     ("credential_manager.py", "DotEnvCredentialSource.get_credentials"),
     # The environment *is* this source.
     ("credential_manager.py", "EnvironmentCredentialSource.get_credentials"),
-    # The environment a remote job is given. Not a credential read: it is
-    # the local environment being described, and #153 removed the export
-    # that used to put credentials into it.
-    ("file_packaging.py", "create_execution_context"),
     # The environment a *local* worker process is started with: this
     # process's own, as any child process inherits it. The worker runs the
     # caller's own loop body on the caller's own machine -- the code that

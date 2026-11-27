@@ -50,6 +50,7 @@ def nothing_measured_yet():
     tests ran earlier would decide what each test observes.
     """
     decorator_module._SECONDS_PER_ITERATION.clear()
+    decorator_module._ABANDONED.clear()
 
 
 # --------------------------------------------------------------------------
@@ -500,6 +501,62 @@ def test_a_split_found_unsafe_at_run_time_is_abandoned_for_the_direct_answer(
     ), "the caller's object is not as a direct call leaves it"
     said = records(caplog, logging.WARNING, f"{function.__name__}: not split")
     assert len(said) == 1 and reason in said[0], caplog.text
+
+
+@needs_two_cpus
+def test_a_loop_abandoned_once_is_not_divided_again(caplog):
+    """Dividing it again would run the chunks, throw them away and run the
+    loop a second time on every call: twice the work, and twice anything
+    the loop does besides computing. One warning, then it simply runs."""
+    decorated = cluster(cores=4)(tallied)
+    with caplog.at_level(logging.INFO, logger="clustrix.decorator"):
+        arguments, _ = _tallied_case()
+        first = decorated(*arguments)
+        caplog.clear()
+
+        arguments, counter = _tallied_case()
+        second = decorated(*arguments)
+
+    direct_arguments, direct_counter = _tallied_case()
+    assert first == second == tallied(*direct_arguments)
+    assert counter == direct_counter
+    assert records(caplog, logging.WARNING, "not split") == []
+    assert len(records(caplog, logging.INFO, "found on an earlier call")) == 1
+
+
+@needs_two_cpus
+def test_the_first_abandonment_warns_that_side_effects_happened_twice(caplog):
+    arguments, _ = _tallied_case()
+    with caplog.at_level(logging.WARNING, logger="clustrix.decorator"):
+        cluster(cores=4)(tallied)(*arguments)
+
+    (said,) = records(caplog, logging.WARNING, "not split")
+    assert "happened in the attempt as well" in said
+    assert "parallel=False" in said
+
+
+def make_tiny(offset):
+    """A new function object on every call -- one code object throughout."""
+
+    @cluster(cores=4)
+    def tiny(values):
+        return [(value + offset, os.getpid()) for value in values]
+
+    return tiny
+
+
+@needs_two_cpus
+def test_what_was_learned_about_a_loop_belongs_to_its_code_not_one_function_object():
+    """A function defined inside another is recreated per call of the outer
+    one. Kept against the function object, its loop was "never measured"
+    every time, and so was divided every time."""
+    first = make_tiny(1)([1, 2, 3])
+    again = make_tiny(2)([1, 2, 3])
+
+    assert [value for value, _ in first] == [2, 3, 4]
+    assert [value for value, _ in again] == [3, 4, 5]
+    assert all(pid != os.getpid() for _, pid in first), "measured in workers once"
+    assert all(pid == os.getpid() for _, pid in again), "then known to be tiny"
 
 
 def printing_tally(values, counter):

@@ -41,13 +41,11 @@ parser can work out from the source, and three of them have doors that
 must stay open because real code in this package needs them:
 
 * ``__import__(module_name)`` with a name computed at runtime is
-  *permitted*: ``dependency_analysis.py``, ``file_packaging.py`` and
-  ``utils.py`` import the user's own modules by name to replicate their
-  environment. Flagging every dynamic import, as one review suggested,
-  false-positives on all three.
+  *permitted*: ``utils.py`` imports the user's own modules by name to
+  replicate their environment. Flagging every dynamic import, as one
+  review suggested, false-positives on it.
 * ``sys.modules.get(module_name)`` with a computed name is likewise
-  permitted -- ``utils.py`` and ``file_packaging.py`` do it four times for
-  the same reason. Only *subscripting* is banned, which nothing does.
+  permitted -- ``utils.py`` does it for the same reason. Only *subscripting* is banned, which nothing does.
 * ``os.environ.get(self.config.password_env_var)`` reads a variable the
   user names in their config, so the allowlist cannot see it. That is the
   documented credential channel (see ``CLAUDE.md``), not a leak in the
@@ -678,7 +676,7 @@ def test_guard_catches_every_known_bypass(name, real_package_copy):
 #:
 #: There is no AST fix for these -- ``getattr(sys, name)`` with ``name``
 #: computed at runtime is indistinguishable from legitimate reflection,
-#: which ``dependency_analysis.py`` and ``utils.py`` really do use. What
+#: which ``utils.py`` really does use. What
 #: catches this class of thing is behaviour, not source: a mock reaching
 #: production would have to change what the code *does*, and the real-run
 #: verification described in ``CLAUDE.md`` is what observes that.
@@ -739,8 +737,8 @@ INNOCENT = {
         "    # IPython components (may be mocks)\n"
         "    return widgets\n"
     ),
-    # clustrix/file_packaging.py:606 -- "unittest" as a stdlib module name
-    # in a data table. Listing it is not importing it.
+    # "unittest" as a stdlib module name in a data table (the deleted
+    # file_packaging.py had one). Listing it is not importing it.
     "stdlib_name_in_a_table": (
         "STDLIB_MODULES = [\n" '    "unittest",\n' '    "json",\n' "]\n"
     ),
