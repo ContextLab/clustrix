@@ -47,6 +47,7 @@ parts at import time, and the ``<redacted>`` spelling is the one
 
 import json
 import os
+import pathlib
 import shutil
 import stat
 import subprocess
@@ -133,9 +134,10 @@ SENTINELS = {
     "password": _awkward_sentinel("password"),
     "api_key": _sentinel("apikey"),
     "hf_token": _sentinel("hftoken"),
-    # Keys that are not ClusterConfig fields, which is how they reached
-    # disk verbatim: the widget hands strip_secret_fields whatever a
-    # previously saved file contained.
+    # Keys that are not ClusterConfig fields, which is how they once
+    # reached disk verbatim: a writer that carries whatever a previously
+    # saved file contained hands strip_secret_fields names it has never
+    # heard of.
     "aws_secret_access_key": _sentinel("aws"),
     "client_secret": _sentinel("clientsecret"),
     "private_key": PEM_SENTINEL,
@@ -163,8 +165,8 @@ SENTINEL_ENVIRONMENT = {
 }
 
 #: The top-level half: keys the configuration file format does not define,
-#: which is what a config file written by an older clustrix can contain and
-#: what the widget therefore carries around in ``self.configs``.
+#: which is what a file written by an older clustrix can contain and what
+#: the widget's Load button is therefore handed.
 SENTINEL_UNKNOWN_KEYS = {
     key: SENTINELS[key]
     for key in (
@@ -401,57 +403,75 @@ def _exercise_credential_writers(home):
     return set()
 
 
-def _exercise_notebook_widgets(home):
-    """The "Save configuration" button of both notebook widgets.
+def _exercise_notebook_widget(home):
+    """Everything the notebook widget writes: Save all, and its own store.
 
-    Included because a widget save is a mutator, not an export: it fires
-    from ordinary editing rather than from anyone asking to persist a
-    secret, and one file holds every configuration in the dropdown, so a
-    single wide file is N credentials at once. It used to be a plain
-    ``open(path, "w")`` under ``mkdir(exist_ok=True)``, which left
-    ``~/.clustrix`` at 0755 and the file at 0644 with the password in it.
+    Included because a widget save is a mutator, not an export: the store
+    under ``~/.clustrix/profiles`` is rewritten from ordinary editing rather
+    than from anyone asking to persist a secret, and one file holds every
+    profile, so a single wide file is N credentials at once.
+
+    Returns the one path that is *supposed* to hold sentinels: a bundle this
+    exercise wrote by hand, as input.
     """
     pytest.importorskip("ipywidgets")
     from clustrix.modern_notebook_widget import ModernClustrixWidget
-    from clustrix.notebook_magic_widget import EnhancedClusterConfigWidget
 
-    legacy = EnhancedClusterConfigWidget()
-    legacy.config_name.value = "widget-saved"
-    legacy.cluster_type.value = "ssh"
-    legacy.host_field.value = "cluster.example.edu"
-    legacy.username_field.value = "researcher"
-    legacy.password_field.value = SENTINELS["password"]
-    legacy.env_vars_field.value = json.dumps(SENTINEL_ENVIRONMENT)
-    legacy.current_config_name = "widget-saved"
-    legacy.configs = {"widget-saved": legacy._save_config_from_widgets()}
-    legacy.save_filename_input.value = "widget-single.yml"
-    legacy._on_save_config(None)
+    widget = ModernClustrixWidget()
+    controls = widget.widgets
 
-    # The other branch: more than one configuration goes into one file, and
-    # a HuggingFace token is a credential the SSH branch never produces.
-    legacy.cluster_type.value = "huggingface"
-    legacy.hf_token_field.value = SENTINELS["hf_token"]
-    legacy.configs["widget-hf"] = legacy._save_config_from_widgets()
-    # A configuration as it comes *off disk*: the widget stores the parsed
-    # mapping unchanged, so a file written by an older clustrix -- or by
-    # anything else -- puts keys the format does not define straight back
-    # into the next save. This is the path on which aws_secret_access_key,
-    # client_secret and token reached disk verbatim.
-    legacy.configs["widget-restored"] = {
-        "name": "widget-restored",
-        "cluster_type": "ssh",
-        "cluster_host": "cluster.example.edu",
-        "username": "researcher",
-        "environment_variables": dict(SENTINEL_ENVIRONMENT),
-        **SENTINEL_UNKNOWN_KEYS,
-    }
-    legacy.save_filename_input.value = "widget-many.yml"
-    legacy._on_save_config(None)
+    # Typed into the form, the way a user supplies them.
+    controls["profile_dropdown"].value = "SSH remote machine"
+    controls["host"].value = "cluster.example.edu"
+    controls["username"].value = "researcher"
+    controls["password"].value = SENTINELS["password"]
+    controls["env_vars"].value = "\n".join(
+        f"{key}={value}"
+        for key, value in SENTINEL_ENVIRONMENT.items()
+        # A KEY=value line cannot carry a value with a newline in it; that
+        # sentinel reaches the store through the profile below instead.
+        if "\n" not in value
+    )
+    # Switching away captures that profile into the store. A HuggingFace
+    # token is a credential the SSH section never produces.
+    controls["profile_dropdown"].value = "HuggingFace Jobs (CPU)"
+    controls["hf_namespace"].value = "contextlab"
+    controls["hf_token"].value = SENTINELS["hf_token"]
 
-    modern = ModernClustrixWidget()
-    modern.widgets["config_filename"].value = "widget-profiles.yml"
-    modern._on_save_config(None)
-    return set()
+    # A profile the user never looks at, holding every credential a
+    # ClusterConfig can -- awkward values included. Save all writes it from
+    # the store rather than from the form.
+    widget.profile_manager.save_profile("widget-held", _a_config())
+
+    controls["config_filename"].value = "widget-profiles.yml"
+    widget._on_save_config(controls["save_btn"])
+
+    # A bundle as an older clustrix, or anything else, could have left it:
+    # keys the format does not define, each carrying a credential. Whatever
+    # Load makes of it, nothing it carried may come back out of a save.
+    found = pathlib.Path.cwd() / "from-an-older-clustrix.yml"
+    descriptor = os.open(found, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        yaml.safe_dump(
+            {
+                "profiles": {
+                    "widget-restored": {
+                        "cluster_type": "ssh",
+                        "cluster_host": "cluster.example.edu",
+                        "username": "researcher",
+                        "environment_variables": dict(SENTINEL_ENVIRONMENT),
+                        **SENTINEL_UNKNOWN_KEYS,
+                    }
+                }
+            },
+            handle,
+        )
+    os.chmod(found, 0o600)
+    controls["config_filename"].value = str(found)
+    widget._on_load_config(controls["load_btn"])
+    controls["config_filename"].value = "widget-after-load.yml"
+    widget._on_save_config(controls["save_btn"])
+    return {found}
 
 
 def _exercise_ssh_writers(home):
@@ -466,7 +486,7 @@ EXERCISES = {
     "config saves": _exercise_config_saves,
     "profile manager": _exercise_profile_manager,
     "credential writers": _exercise_credential_writers,
-    "notebook widgets": _exercise_notebook_widgets,
+    "notebook widget": _exercise_notebook_widget,
     "ssh writers": _exercise_ssh_writers,
 }
 
@@ -541,9 +561,8 @@ def test_the_walk_actually_inspects_a_realistic_number_of_files(
         "stray-relative.yml",
         # The widget handlers catch and print their own exceptions, so an
         # exercise that stopped writing would otherwise go unnoticed.
-        "widget-single.yml",
-        "widget-many.yml",
         "widget-profiles.yml",
+        "widget-after-load.yml",
     }
     assert expected <= names, sorted(names)
 
@@ -631,8 +650,8 @@ def test_the_sentinels_really_were_planted(private_tree, monkeypatch):
     exercises supplied it, so it is the place to look.
 
     (The widget half is pinned the same way, against what the widget was
-    handed, in
-    ``tests/unit/test_widget_save_withholds_unnamed_secrets.py``.)
+    holding, in
+    ``tests/unit/test_widget_save_is_not_a_credential_store.py``.)
     """
     monkeypatch.setattr(config_module, "_config", _a_config())
     _exercise_config_saves(private_tree)
