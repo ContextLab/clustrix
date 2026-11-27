@@ -1,8 +1,7 @@
-"""Control helpers shared by both notebook widgets.
+"""Control helpers for the notebook configuration widget.
 
-Small enough to be tempting to copy into each widget; kept here instead so
-the two cannot disagree about what loading a saved configuration into a
-dropdown means.
+Kept apart from the widget so that what loading a saved configuration into a
+dropdown means is stated, and tested, in one place.
 """
 
 from typing import List, Protocol, Sequence
@@ -12,9 +11,8 @@ class Choice(Protocol):
     """The slice of an ``ipywidgets.Dropdown`` this module touches.
 
     A structural type rather than the real class: ipywidgets is an optional
-    dependency, and ``notebook_magic_fallback`` stands in for it when it is
-    absent, so naming ``widgets.Dropdown`` here would either make this module
-    unimportable or make it lie. ``object`` rather than ``str`` on both
+    dependency, so naming ``widgets.Dropdown`` here would make this module
+    unimportable without it. ``object`` rather than ``str`` on both
     members is deliberate -- a hand-edited YAML can put anything in a config
     field, and the point of :func:`set_choice` is that the widget still opens
     when it does -- but it is not ``Any``: every use below has to narrow.

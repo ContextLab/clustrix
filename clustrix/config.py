@@ -457,11 +457,10 @@ class ClusterConfig:
 # instead of silently leaking in plaintext until someone remembers to add it
 # here. Same approach as scripts/verify_cluster_usecases.py's redaction.
 #: Every backend ``ClusterExecutor`` can actually dispatch. This is the one
-#: place the set is written down; the CLI's ``click.Choice`` and *both*
-#: notebook widgets' dropdowns read it -- ``notebook_magic_widget`` spelled
-#: the four values out until #165, which is exactly the drift this comment
-#: claimed was impossible. Offering a type the executor cannot run is
-#: worse than not offering it, and omitting one it can run hides a feature.
+#: place the set is written down; the CLI's ``click.Choice`` and the
+#: notebook widget's backend selector read it. Offering a type the executor
+#: cannot run is worse than not offering it, and omitting one it can run
+#: hides a feature.
 SUPPORTED_CLUSTER_TYPES = (
     "local",
     "ssh",
@@ -681,9 +680,8 @@ def _is_secret_field(field_name: str) -> bool:
 SECRET_FIELDS = {name for name in DECLARED_FIELD_NAMES if _is_secret_field(name)}
 
 #: The one key a clustrix configuration file carries that is not a
-#: ``ClusterConfig`` field: the label the notebook widget shows in its
-#: dropdown, which it writes and reads back (see
-#: ``EnhancedClusterConfigWidget._initialize_configs``). Named here so that
+#: ``ClusterConfig`` field: the label a saved configuration carries for the
+#: person reading the file. Named here so that
 #: the allowlist below is the file format's own vocabulary rather than the
 #: dataclass's by accident.
 CONFIG_FILE_METADATA_KEYS = frozenset({"name"})
@@ -1108,8 +1106,9 @@ CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | UNTRUSTED_CONFIG_SOURCES
 #: the widget's multi-configuration shape, and as a bare string in the
 #: flat single-configuration file ``ClusterConfig.save_to_file`` writes.
 #:
-#: Route 12. ``_on_save_config`` writes into :func:`get_config_dir`, and
-#: :func:`detect_config_files` infers trust from exactly that directory. So
+#: Route 12, found in the notebook widget this project used to ship. Its
+#: Save button wrote into :func:`get_config_dir`, and the search of the
+#: standard locations infers trust from exactly that directory. So
 #: pressing Save on a configuration the widget had *found* in a cloned
 #: repository copied it to ``~/.clustrix/config.yml``, and the next session's
 #: widget re-derived the source from where the file now was --
@@ -1120,7 +1119,7 @@ CONFIG_SOURCES = TRUSTED_CONFIG_SOURCES | UNTRUSTED_CONFIG_SOURCES
 #: The precondition is attacker-controlled, because the filename comes from
 #: the configuration's own ``name``: ``""`` and ``Config`` both save as
 #: ``config.yml`` and ``clustrix`` saves as ``clustrix.yml``, all three of
-#: which :func:`detect_config_files` looks for. And a save writes *every*
+#: which the standard-location search looks for. And a save writes *every*
 #: configuration in the dropdown, including ones the user never selected and
 #: never looked at, verbatim -- so a repository shipping a second entry rides
 #: along with the one the user meant to keep.
@@ -1800,7 +1799,7 @@ def split_config_kwargs(
     seeded with its :class:`ClusterConfig` default before ``data`` is laid on
     top, so a control the user cleared clears the live setting instead of
     leaving the previous configuration's value standing. Without it a caller
-    that drops empty values -- which both widgets do, so a blank box does not
+    that drops empty values -- which the widget does, so a blank box does not
     overwrite a setting with an empty string -- can never say "unset this",
     and a profile the user chose as ``local`` inherits the last profile's
     ``cluster_host``. Fields outside this set are not touched at all, so

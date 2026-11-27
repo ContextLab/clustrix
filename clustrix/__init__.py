@@ -60,6 +60,13 @@ from .modern_notebook_widget import (
     show_widget,
 )
 
+# Imported unconditionally: ``%load_ext clustrix`` looks for
+# ``clustrix.load_ipython_extension``. It used to be bound only when an
+# IPython shell already existed at import time, so a process that imported
+# clustrix first and opened a shell afterwards (``IPython.embed()``, a test)
+# was told "The clustrix module is not an IPython extension".
+from .notebook_magic import auto_display_on_import, load_ipython_extension
+
 __version__ = "0.2.0"
 __all__ = [
     "cluster",
@@ -116,6 +123,7 @@ __all__ = [
     "create_modern_cluster_widget",
     "display_modern_widget",
     "show_widget",
+    "load_ipython_extension",
 ]
 
 # Auto-register IPython magic command and display widget if in notebook environment
@@ -124,8 +132,6 @@ try:
 
     ipython = get_ipython()
     if ipython is not None:
-        from .notebook_magic import load_ipython_extension, auto_display_on_import
-
         # Load the magic command (only register once)
         if not hasattr(ipython, "_clustrix_magic_loaded"):
             load_ipython_extension(ipython)

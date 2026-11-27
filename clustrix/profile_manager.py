@@ -859,7 +859,7 @@ class ProfileManager:
             # closing route 9a rather than merely labelling it. Marking the
             # *object* untrusted stops a direct use of the profile and
             # nothing else: the ordinary way to use a profile is to apply it,
-            # and both widgets' Apply is ``configure(**...)`` from the
+            # and the widget's Apply is ``configure(**...)`` from the
             # profile's own fields, which builds a fresh object whose own
             # source is ``runtime``. Measured: with the hostname left
             # unrecorded, a pre-fix store still authenticated the sentinel to

@@ -25,11 +25,11 @@ except ImportError:
     )
 
 
-def display_config_widget(auto_display: bool = False):
+def display_config_widget() -> None:
     """Display the configuration widget."""
     from .modern_notebook_widget import display_modern_widget
 
-    return display_modern_widget()
+    display_modern_widget()
 
 
 AUTO_WIDGET_ENV_VAR = "CLUSTRIX_AUTO_WIDGET"
@@ -62,7 +62,7 @@ def auto_display_on_import():
         return
     # Check if we're in a notebook environment
     if hasattr(ipython, "kernel") and hasattr(ipython, "register_magic_function"):
-        display_config_widget(auto_display=True)
+        display_config_widget()
 
 
 @magics_class
@@ -81,9 +81,8 @@ class ClusterfyMagics(Magics):
             %clustrix config <profile>  make a saved profile active
             %clustrix load <file>       load configuration from a YAML/JSON file
 
-        Tests have expected this since the notebook magic was written; it was
-        never implemented, so `%clustrix` raised "Line magic function not
-        found".
+        Each form returns the resulting ``ClusterConfig``, or ``None`` when
+        the command was refused.
         """
         from .config import configure, get_config, load_config
 
@@ -124,8 +123,11 @@ class ClusterfyMagics(Magics):
                     f"Available: {', '.join(sorted(profiles)) or 'none'}"
                 )
                 return None
-            profile = manager.get_profile(argument)
-            configure(**{k: v for k, v in asdict(profile).items() if v is not None})
+            # The profile replaces the configuration rather than being merged
+            # into it: dropping its unset fields left the previous profile's
+            # cluster_host in place, so applying a local profile after a SLURM
+            # one still sent jobs to the cluster.
+            configure(**asdict(manager.set_active_profile(argument)))
             print(f"✅ Applied profile {argument!r}")
             return get_config()
 
@@ -155,8 +157,7 @@ class ClusterfyMagics(Magics):
             print("❌ This magic command requires IPython and ipywidgets")
             print("Install with: pip install ipywidgets")
             return None
-        # Create and display the widget (not auto-display)
-        display_config_widget(auto_display=False)
+        display_config_widget()
         # Execute any code in the cell (if provided)
         if cell.strip():
             self.shell.run_cell(cell)

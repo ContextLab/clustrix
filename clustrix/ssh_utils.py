@@ -839,8 +839,8 @@ def setup_ssh_keys(
         # (``deploy_public_key``'s manual path). Those are secrets that name
         # no host, so this is the same decision as route 13 and it is asked
         # in the same place. A ``./clustrix.yml`` naming ``cluster_host``
-        # reaches here through ``clustrix ssh-setup``, both widgets' "Setup
-        # SSH keys" buttons and ``setup_auth_with_fallback`` -- and offering
+        # reaches here through ``clustrix ssh-setup``, the widget's "Set up
+        # SSH key" button and ``setup_auth_with_fallback`` -- and offering
         # the victim's whole key collection to the host that file named is
         # the leak whether or not a password was released alongside it.
         try:
