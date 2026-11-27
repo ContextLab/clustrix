@@ -324,26 +324,208 @@ def test_an_exception_in_an_iteration_propagates_with_its_type():
         split_run(divides, [1, 2, 0, 4], jobs=2)
 
 
-def test_the_caller_s_arguments_are_not_modified_by_a_refused_attempt():
-    def mutates_its_input(xs, state):
+# -- what only real values can show ------------------------------------------
+#
+# Each of these loops *looks* independent: nothing in the source proves
+# otherwise. The split is attempted, a run-time check catches the problem,
+# and the original loop runs instead -- in order, once, on the real objects.
+
+
+def run_with_fallback(func, *args, jobs=2, backend=in_process):
+    plan = parallelize.plan(func)
+    assert plan.parallelizable, plan.explain()
+    reasons = []
+    result = parallelize.run(
+        plan, func, args, {}, backend, jobs, on_fallback=reasons.append
+    )
+    return result, reasons
+
+
+def mutates_what_it_reads(xs, state):
+    out = []
+    for x in xs:
+        out.append(state.setdefault("first", x))
+    return out
+
+
+def test_a_loop_that_mutates_shared_state_falls_back_to_the_true_answer():
+    expected_state = {}
+    expected = mutates_what_it_reads([1, 2, 3, 4], expected_state)
+
+    state = {}
+    result, reasons = run_with_fallback(mutates_what_it_reads, [1, 2, 3, 4], state)
+
+    assert result == expected == [1, 1, 1, 1]
+    assert (
+        state == expected_state
+    ), "the caller's object ends as a direct call leaves it"
+    assert len(reasons) == 1 and "state" in reasons[0]
+
+
+def remember(seen, value):
+    """A helper that reads -- and so depends on -- what was collected so far."""
+    return value + 10 * len(seen)
+
+
+def collects_into_an_aliased_list(xs):
+    out = []
+    seen = out  # the same list under another name
+    for x in xs:
+        out.append(remember(seen, x))
+    return out
+
+
+def test_a_collector_reachable_through_another_name_is_caught_before_any_chunk():
+    """The research prototype of this design returned [11, 22, 31, 42] here
+    where a direct call gives [1, 12, 23, 34]: the helper sees the list grow
+    in a sequential run and sees a stale copy in a split one."""
+    chunks_run = []
+
+    def counting_backend(body, env, chunks):
+        chunks_run.append(len(chunks))
+        return in_process(body, env, chunks)
+
+    plan = parallelize.plan(collects_into_an_aliased_list)
+    assert plan.parallelizable, plan.explain()
+    reasons = []
+
+    result = parallelize.run(
+        plan,
+        collects_into_an_aliased_list,
+        ([1, 2, 3, 4],),
+        {},
+        counting_backend,
+        2,
+        on_fallback=reasons.append,
+    )
+
+    assert result == collects_into_an_aliased_list([1, 2, 3, 4]) == [1, 12, 23, 34]
+    assert chunks_run == [], "refused before a single chunk was sent anywhere"
+    assert "seen" in reasons[0] and "out" in reasons[0]
+
+
+def collects_inside_a_container_that_is_read(xs):
+    out = []
+    box = {"results": out}
+    for x in xs:
+        out.append(x + len(box["results"]))
+    return out
+
+
+def test_an_alias_buried_in_a_container_is_found_too():
+    result, reasons = run_with_fallback(
+        collects_inside_a_container_that_is_read, [5, 5, 5]
+    )
+
+    assert result == collects_inside_a_container_that_is_read([5, 5, 5]) == [5, 6, 7]
+    assert "box" in reasons[0]
+
+
+def marks_each_item(records):
+    done = []
+    for record in records:
+        record["seen"] = True
+        done.append(record["id"])
+    return done
+
+
+def test_items_modified_in_place_are_modified_for_the_caller_too():
+    """A worker would mark its own copies and the caller's would stay as
+    they were. The chunk reports that its items changed."""
+    records = [{"id": i} for i in range(4)]
+
+    result, reasons = run_with_fallback(marks_each_item, records)
+
+    assert result == [0, 1, 2, 3]
+    assert all(record.get("seen") for record in records)
+    assert "items being looped over" in reasons[0]
+
+
+def draw():
+    import random
+
+    return random.random()
+
+
+def draws_through_a_helper(n):
+    out = []
+    for _ in range(n):
+        out.append(draw())
+    return out
+
+
+def test_a_helper_that_uses_the_global_generator_is_caught_at_run_time():
+    """The loop body never mentions ``random``; only running it shows that
+    the shared generator moved. The chunks run in other processes, as they do
+    under a real backend, so this process's generator is where a direct call
+    would find it when the original loop takes over."""
+    import random
+
+    random.seed(1234)
+    expected = draws_through_a_helper(6)
+
+    random.seed(1234)
+    result, reasons = run_with_fallback(
+        draws_through_a_helper, 6, jobs=3, backend=in_worker_processes
+    )
+
+    assert result == expected
+    assert "random number generator" in reasons[0]
+
+
+def test_the_code_before_the_loop_runs_once_even_when_the_split_is_abandoned():
+    calls = []
+
+    def expensive_setup():
+        calls.append("setup")
+        return {}
+
+    def setup_then_mutate(xs):
+        state = expensive_setup()
         out = []
         for x in xs:
             out.append(state.setdefault("first", x))
         return out
 
-    state = {}
-    plan = parallelize.plan(mutates_its_input)
-    assert plan.parallelizable  # nothing in the source proves the mutation
+    result, reasons = run_with_fallback(setup_then_mutate, [7, 8, 9])
 
-    with pytest.raises(parallelize.SharedStateModified) as refused:
-        parallelize.run(
-            plan, mutates_its_input, ([1, 2, 3, 4], state), {}, in_process, 2
+    assert result == [7, 7, 7]
+    assert reasons and calls == ["setup"]
+
+
+def test_no_fallback_is_reported_when_the_split_goes_through():
+    result, reasons = run_with_fallback(squares, 9, jobs=4)
+
+    assert result == squares(9) and reasons == []
+
+
+def test_the_code_around_the_loop_goes_through_invoke_unless_it_is_cheap():
+    """``invoke`` is how a backend runs ``pre`` and ``post`` as jobs."""
+
+    def work_around(n):
+        base = sum(k for k in range(n))
+        out = []
+        for i in range(n):
+            out.append(base + i)
+        return squares(len(out)) + out
+
+    invoked = []
+
+    def recording_invoke(function, *arguments):
+        invoked.append(function.__name__)
+        return function(*arguments)
+
+    for func, expected_calls in (
+        (work_around, ["__cx_pre", "__cx_post"]),
+        (squares, []),
+    ):
+        invoked.clear()
+        plan = parallelize.plan(func)
+        got = parallelize.run(
+            plan, func, (5,), {}, in_process, 2, invoke=recording_invoke
         )
-
-    assert refused.value.names == ["state"]
-    assert state == {}, "the attempt ran on copies; the real object is untouched"
-    # ...so running it for real afterwards gives the true sequential answer.
-    assert mutates_its_input([1, 2, 3, 4], state) == [1, 1, 1, 1]
+        assert got == func(5)
+        assert invoked == expected_calls
 
 
 # -- loops that must be refused ----------------------------------------------

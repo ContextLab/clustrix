@@ -53,19 +53,33 @@ reason by :meth:`ParallelPlan.explain`, and the function runs unsplit.
 What cannot be proved from source
 ---------------------------------
 
-Python cannot tell statically that ``thing.method(x)`` leaves ``thing``
-unchanged. Two things stand behind the static rule:
+Static analysis of Python can show that a loop is unsafe to split; it can
+never show that one is safe, because it cannot see what a called function
+does. So the static rule is only the first gate. Three checks that need real
+values run behind it:
 
-* The body fingerprints every read-only value before and after its chunk. If
-  one changed, the chunk reports it, and the caller discards the parallel
-  attempt and runs the function sequentially.
-* Use of the process-wide random generators (``random.random()``,
-  ``np.random.rand()``) is a blocker unless the body seeds them first,
-  because their hidden state is exactly a value carried between iterations.
+* **Aliasing.** After ``pre``, the values the body reads are searched for a
+  reference to any object the loop collects into. ``seen = out`` followed by
+  ``out.append(f(seen, x))`` passes the static rule and is caught here,
+  before a single chunk is sent anywhere.
+* **Mutation.** The body fingerprints every value it reads, and the items it
+  was given, before and after its chunk. A difference means an iteration
+  changed something its neighbours share.
+* **Hidden randomness.** The state of the process-wide generators of
+  ``random`` and NumPy is compared around each chunk, which catches a helper
+  that draws from them. (Using them directly in the body is refused
+  statically, unless the body seeds them first.)
 
-Side effects outside the program -- files written, messages logged, requests
-sent -- still happen, once per iteration, but in an unspecified order across
-chunks. That is inherent in running iterations concurrently.
+When a check fails the split is abandoned and the original loop runs once,
+in order, on the environment ``pre`` already produced -- ``pre`` itself is
+never run twice -- so the answer is the sequential one either way.
+
+What no check can see: state that lives outside the values the loop was
+handed. A callee that updates a module-level cache, a library's internal
+counter, a file, a database or a GPU's random state passes all of the above.
+Side effects of that kind still happen once per iteration, but in an
+unspecified order across chunks. That is the residual assumption of
+splitting a loop, and it is the user's to accept.
 
 The generated functions reference nothing from clustrix, so a worker that
 does not have clustrix installed can run them.
@@ -137,6 +151,11 @@ _CHEAP_BUILTINS = frozenset(
     }
 )
 _CHEAP_METHODS = frozenset({"items", "keys", "values"})
+
+#: How two things that are not variables are named when a chunk reports that
+#: it changed them.
+_ITEMS = "the items being looped over"
+_RNG = "the global random number generator"
 
 #: Mutable builtin containers. A *global* of one of these types that the loop
 #: writes to is a blocker: the write would land in a worker and be lost.
@@ -663,8 +682,8 @@ def _dotted(node: ast.expr) -> Optional[str]:
     return ".".join(reversed(parts))
 
 
-def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
-    """Uses of a process-wide random generator that the body did not seed."""
+def _global_rng_calls(body: Sequence[ast.stmt]) -> List[Tuple[int, int, str, str]]:
+    """Calls into a process-wide random generator, in source order."""
     calls = []
     for stmt in body:
         for node in _in_scope(stmt):
@@ -676,10 +695,22 @@ def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
                 if module in _GLOBAL_RNG_MODULES:
                     if attribute not in _RNG_CONSTRUCTORS:
                         calls.append((node.lineno, node.col_offset, name, attribute))
-    calls.sort()
-    if not calls or calls[0][3] in _RNG_SEEDERS:
-        # Seeded at the top of the iteration: what follows is determined by
-        # the iteration alone.
+    return sorted(calls)
+
+
+def _body_seeds_global_rng(body: Sequence[ast.stmt]) -> bool:
+    """True when the first thing the body does with such a generator is seed it.
+
+    What follows a seed is determined by the iteration alone.
+    """
+    calls = _global_rng_calls(body)
+    return bool(calls) and calls[0][3] in _RNG_SEEDERS
+
+
+def _global_rng_blockers(body: Sequence[ast.stmt]) -> List[Blocker]:
+    """Uses of a process-wide random generator that the body did not seed."""
+    calls = _global_rng_calls(body)
+    if not calls or _body_seeds_global_rng(body):
         return []
     line, _, name, _ = calls[0]
     return [
@@ -944,7 +975,10 @@ def _bind_from_env(names: Sequence[str]) -> List[ast.stmt]:
     return statements
 
 
-_FINGERPRINT_SOURCE = f"""
+#: Functions the generated code calls. They are compiled into the same
+#: module as ``pre``/``body``/``post`` rather than imported, so a worker
+#: without clustrix can still run them.
+_HELPERS_SOURCE = f"""
 def {_P}fingerprint({_P}env, {_P}names):
     import hashlib
     import pickle
@@ -963,6 +997,69 @@ def {_P}fingerprint({_P}env, {_P}names):
         else:
             prints[name] = hashlib.sha1(data).hexdigest()
     return prints
+
+
+def {_P}rng_state():
+    import hashlib
+    import random
+    import sys
+    digest = hashlib.sha1(repr(random.getstate()).encode())
+    numpy = sys.modules.get("numpy")
+    if numpy is not None:
+        try:
+            state = numpy.random.get_state()
+            digest.update(state[1].tobytes())
+            digest.update(repr(state[2:]).encode())
+        except Exception:
+            pass
+    return digest.hexdigest()
+
+
+def {_P}aliases({_P}env, {_P}written, {_P}read):
+    import gc
+    import types
+    immutable = (int, float, complex, str, bytes, bool, type(None), tuple,
+                 frozenset, range)
+    opaque = (types.ModuleType, type, str, bytes, int, float, complex, bool,
+              type(None))
+    targets = {{
+        id({_P}env[name]): name
+        for name in {_P}written
+        if name in {_P}env and not isinstance({_P}env[name], immutable)
+    }}
+    found = set()
+    if not targets:
+        return []
+    for name in {_P}read:
+        if name not in {_P}env:
+            continue
+        seen = set()
+        stack = [{_P}env[name]]
+        while stack and len(seen) < 200000:
+            obj = stack.pop()
+            if id(obj) in seen:
+                continue
+            seen.add(id(obj))
+            if id(obj) in targets:
+                found.add((name, targets[id(obj)]))
+                continue
+            if isinstance(obj, opaque):
+                continue
+            if isinstance(obj, types.FunctionType):
+                # Not its globals: that is the whole module.
+                for cell in obj.__closure__ or ():
+                    try:
+                        stack.append(cell.cell_contents)
+                    except ValueError:
+                        pass
+                stack.extend(obj.__defaults__ or ())
+                stack.extend((obj.__kwdefaults__ or {{}}).values())
+                continue
+            if isinstance(obj, types.MethodType):
+                stack.extend((obj.__self__, obj.__func__))
+                continue
+            stack.extend(gc.get_referents(obj))
+    return sorted(found)
 """
 
 
@@ -977,6 +1074,9 @@ def _generate(
     defined_before: Set[str],
 ) -> Tuple[ast.Module, Tuple[str, ...], Tuple[str, ...]]:
     accumulators = set(analysis.accumulators)
+    # Seeded at the top of each iteration: the generator's state afterwards
+    # says nothing about whether iterations depend on each other.
+    watch_rng = not _body_seeds_global_rng(loop.body)
     body_names = tuple(sorted((_loaded(loop.body) & defined_before) - accumulators))
     post_names = tuple(sorted(((_loaded(after) & defined_before) | accumulators)))
     env_names = tuple(sorted(set(body_names) | set(post_names)))
@@ -992,10 +1092,12 @@ def _generate(
             if not isinstance({_P}items, range):
                 {_P}items = list({_P}items)
             {_P}scope = locals()
+            {_P}found = {{{_P}n: {_P}scope[{_P}n] for {_P}n in {env_names!r} if {_P}n in {_P}scope}}
             return (
                 "env",
-                {{{_P}n: {_P}scope[{_P}n] for {_P}n in {env_names!r} if {_P}n in {_P}scope}},
+                {_P}found,
                 {_P}items,
+                {_P}aliases({_P}found, {tuple(sorted(accumulators))!r}, {body_names!r}),
             )
             """))
     pre = _function(f"{_P}pre", [f"{_P}args"], pre_body)
@@ -1011,7 +1113,12 @@ def _generate(
     logged_body = [_LogWrites(numbers).visit(stmt) for stmt in body_copy]
     body_statements: List[ast.stmt] = _bind_from_env(body_names)
     body_statements.extend(_parse_statements(f"""
-            {_P}before = {_P}fingerprint({_P}env, {body_names!r})
+            {_P}watched = dict({_P}env)
+            if not isinstance({_P}items, range):
+                {_P}watched[{_ITEMS!r}] = {_P}items
+            {_P}names = ({_ITEMS!r},) + {body_names!r}
+            {_P}before = {_P}fingerprint({_P}watched, {_P}names)
+            {_P}rng_before = {_P}rng_state() if {watch_rng!r} else None
             {_P}log = []
             """))
     body_statements.append(
@@ -1023,10 +1130,13 @@ def _generate(
         )
     )
     body_statements.extend(_parse_statements(f"""
-            {_P}after = {_P}fingerprint({_P}env, {body_names!r})
+            {_P}after = {_P}fingerprint({_P}watched, {_P}names)
+            {_P}changed = sorted(n for n in {_P}before if {_P}before[n] != {_P}after[n])
+            if {watch_rng!r} and {_P}rng_state() != {_P}rng_before:
+                {_P}changed.append({_RNG!r})
             return (
                 {_P}log,
-                sorted(n for n in {_P}before if {_P}before[n] != {_P}after[n]),
+                {_P}changed,
                 sorted(n for n in {_P}before if {_P}before[n] is None),
             )
             """))
@@ -1063,8 +1173,21 @@ def _generate(
     post_statements.extend(copy.deepcopy(stmt) for stmt in after)
     post = _function(f"{_P}post", [f"{_P}env", f"{_P}log"], post_statements)
 
+    # -- rest: the original loop and what follows it, unsplit -----------------
+    rest_statements: List[ast.stmt] = _bind_from_env(env_names)
+    rest_statements.append(
+        ast.For(
+            target=copy.deepcopy(loop.target),
+            iter=ast.Name(id=f"{_P}items", ctx=ast.Load()),
+            body=copy.deepcopy(loop.body),
+            orelse=[],
+        )
+    )
+    rest_statements.extend(copy.deepcopy(stmt) for stmt in after)
+    rest = _function(f"{_P}rest", [f"{_P}env", f"{_P}items"], rest_statements)
+
     module = ast.Module(
-        body=[*_parse_statements(_FINGERPRINT_SOURCE), pre, body, post],
+        body=[*_parse_statements(_HELPERS_SOURCE), pre, body, post, rest],
         type_ignores=[],
     )
     ast.fix_missing_locations(module)
@@ -1341,11 +1464,16 @@ def explain(func: Callable) -> str:
 
 @dataclass
 class SplitFunctions:
-    """The three callables a plan compiles to, bound to one function."""
+    """The callables a plan compiles to, bound to one function.
+
+    ``rest`` is the original loop and the code after it, unsplit: what runs
+    when a split turns out not to be safe after ``pre`` has already run.
+    """
 
     pre: Callable[[Dict[str, Any]], tuple]
     body: Callable[[Dict[str, Any], Sequence[Any]], tuple]
     post: Callable[[Dict[str, Any], List[tuple]], Any]
+    rest: Callable[[Dict[str, Any], Sequence[Any]], Any]
 
 
 def bind(parallel_plan: ParallelPlan, func: Callable) -> SplitFunctions:
@@ -1373,6 +1501,7 @@ def bind(parallel_plan: ParallelPlan, func: Callable) -> SplitFunctions:
         pre=namespace[f"{_P}pre"],
         body=namespace[f"{_P}body"],
         post=namespace[f"{_P}post"],
+        rest=namespace[f"{_P}rest"],
     )
 
 
@@ -1396,19 +1525,13 @@ def chunk(items: Sequence[Any], count: int) -> List[Sequence[Any]]:
     return chunks
 
 
-class SharedStateModified(RuntimeError):
-    """A chunk changed a value the analysis took to be read-only.
+#: ``invoke(function, *arguments)``: run one of the split's functions
+#: somewhere and return its result.
+Invoke = Callable[..., Any]
 
-    The parallel result cannot be trusted, so the caller should run the
-    function sequentially instead.
-    """
 
-    def __init__(self, func_name: str, names: Sequence[str]):
-        self.names = list(names)
-        super().__init__(
-            f"{func_name}: the loop modified {', '.join(self.names)} in place, "
-            "which its iterations share; it was not split"
-        )
+def _here(function: Callable, *arguments: Any) -> Any:
+    return function(*arguments)
 
 
 def run(
@@ -1418,26 +1541,51 @@ def run(
     kwargs: dict,
     map_chunks: Callable[[Callable, Dict[str, Any], List[Sequence[Any]]], List[tuple]],
     jobs: int,
-    run_pre: Optional[Callable[[Callable, Dict[str, Any]], tuple]] = None,
-    run_post: Optional[Callable[[Callable, Dict[str, Any], List[tuple]], Any]] = None,
+    invoke: Invoke = _here,
+    on_fallback: Optional[Callable[[str], None]] = None,
 ) -> Any:
     """Execute ``func`` through its split and return what it would have.
 
     ``map_chunks(body, env, chunks)`` is the backend: it must call
-    ``body(env, chunk)`` for every chunk, wherever it likes, and return the
-    results in chunk order. ``run_pre`` and ``run_post`` say where the code
-    around the loop runs; left as ``None`` they run in this process.
+    ``body(env, chunk)`` for every chunk, each on its **own copy** of
+    ``env`` and in a **separate process** from this one, and return the
+    results in chunk order. Both conditions are what make an abandoned split
+    harmless: nothing a chunk did -- to the environment, or to this
+    process's random generators -- is visible when the original loop runs.
 
-    Raises :class:`SharedStateModified` when a chunk reports that it changed
-    shared state; nothing the caller can observe has been modified by then.
+    ``invoke`` runs the code around the loop. It is used for ``pre`` unless
+    the plan found that code cheap enough to run here, for ``post`` likewise,
+    and for the unsplit remainder if the split has to be abandoned.
+
+    The split is abandoned -- after ``pre``, before anything else the caller
+    could observe -- when a check that needs real values fails: a value the
+    loop only reads turns out to be the object it collects into, or a chunk
+    reports that it changed something its iterations share. The original
+    loop then runs once, in order, on the environment ``pre`` produced, so
+    ``pre`` is never executed twice and the result is the sequential one.
+    ``on_fallback`` is told why.
     """
     split = bind(parallel_plan, func)
     arguments = bound_arguments(func, args, kwargs)
+    around_pre = _here if parallel_plan.pre_is_cheap else invoke
+    around_post = _here if parallel_plan.post_is_cheap else invoke
 
-    outcome = run_pre(split.pre, arguments) if run_pre else split.pre(arguments)
+    outcome = around_pre(split.pre, arguments)
     if outcome[0] == "return":
         return outcome[1]
-    _, env, items = outcome
+    _, env, items, aliases = outcome
+
+    def unsplit(reason: str) -> Any:
+        if on_fallback is not None:
+            on_fallback(f"{parallel_plan.func_name}: not split -- {reason}")
+        return invoke(split.rest, env, items)
+
+    if aliases:
+        reader, collected = aliases[0]
+        return unsplit(
+            f"{reader} can reach the same object as {collected}, so an "
+            "iteration can see what earlier ones collected"
+        )
 
     body_env = {name: env[name] for name in parallel_plan.body_names if name in env}
     post_env = {name: env[name] for name in parallel_plan.post_names if name in env}
@@ -1451,8 +1599,9 @@ def run(
             log.extend(chunk_log)
             modified.update(changed)
         if modified:
-            raise SharedStateModified(parallel_plan.func_name, sorted(modified))
+            return unsplit(
+                f"the loop changed {', '.join(sorted(modified))}, which its "
+                "iterations share"
+            )
 
-    if run_post:
-        return run_post(split.post, post_env, log)
-    return split.post(post_env, log)
+    return around_post(split.post, post_env, log)
