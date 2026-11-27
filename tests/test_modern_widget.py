@@ -45,12 +45,13 @@ from clustrix.modern_notebook_widget import (  # noqa: E402
 )
 from clustrix.widget_style import STYLESHEET  # noqa: E402
 from tests.ssh_server import LocalSSHServer  # noqa: E402
-from tests.widget_console import pill, press  # noqa: E402
+from tests.widget_console import applied, pill, press  # noqa: E402
 
 PASSWORD = "the-right-password"
 
 BUTTONS = {
     "add_profile_btn": "_on_add_profile",
+    "revert_btn": "_on_revert_profile",
     "remove_profile_btn": "_on_remove_profile",
     "save_btn": "_on_save_config",
     "load_btn": "_on_load_config",
@@ -91,8 +92,10 @@ class TestTheForm:
 
         expected = set(FORM_CONTROLS) | set(BUTTONS)
         expected |= {"profile_dropdown", "profile_name", "config_filename"}
-        expected |= {"refresh_keys", "status_pill", "in_use", "output", "backend_hint"}
+        expected |= {"refresh_keys", "status_pill", "applied_pill", "in_use"}
+        expected |= {"output", "backend_hint", "profile_state"}
         expected |= {"remote_section", "hf_section", "advanced_section"}
+        expected |= {"resources_row"}
 
         assert expected <= set(widget.widgets), expected - set(widget.widgets)
         missing = sorted(
@@ -116,7 +119,8 @@ class TestTheForm:
         assert widget.widgets["advanced_toggle"].description == "Advanced settings"
 
         widget.widgets["apply_btn"].click()
-        assert pill(widget) == "in use"
+        assert pill(widget) == "applied"
+        assert applied(widget) == "in use"
         for key in BUTTONS:
             assert widget.widgets[key]._click_handlers.callbacks, f"{key} does nothing"
 
@@ -208,6 +212,10 @@ EVERYTHING_SET = dict(
     package_manager="uv",
     python_executable="python3.11",
     replicate_local_environment=False,
+    default_partition="gpu-long",
+    hf_job_timeout="45m",
+    conda_env_name="analysis",
+    cleanup_on_success=False,
     environment_variables={"OMP_NUM_THREADS": "4", "URL": "a=b=c"},
     module_loads=["python/3.11", "cuda/12.1"],
     pre_execution_commands=["source /etc/profile", "ulimit -n 4096"],
@@ -260,6 +268,10 @@ class TestFormAndConfigurationAgree:
         assert (used.key_file == "~/.ssh/id_ed25519_hpc") is uses_ssh
         assert (used.hf_token == "typed-token") is (backend == "huggingface")
         assert (used.hf_namespace == "contextlab") is (backend == "huggingface")
+        assert (used.hf_job_timeout == "45m") is (backend == "huggingface")
+        assert (used.default_partition == "gpu-long") is (backend == "slurm")
+        assert used.conda_env_name == "analysis"
+        assert used.cleanup_on_success is False
         # Settings every backend uses are never dropped.
         assert used.default_cores == 12
         assert used.module_loads == ["python/3.11", "cuda/12.1"]
@@ -281,8 +293,19 @@ class TestFormAndConfigurationAgree:
         assert expected.pop("hf_flavor") is None
         assert shown.pop("hf_flavor") == "cpu-basic"
         assert shown == expected
-        for key in ("host", "username", "password", "hf_token", "env_vars", "modules"):
+        for key in (
+            "host",
+            "username",
+            "password",
+            "hf_token",
+            "env_vars",
+            "modules",
+            "partition",
+            "conda_env",
+            "hf_timeout",
+        ):
             assert widget.widgets[key].value == "", key
+        assert widget.widgets["cleanup"].value is True
 
 
 class TestEnvironmentVariables:
@@ -344,7 +367,7 @@ class TestEnvironmentVariables:
         widget.widgets["env_vars"].value = "GOOD=2\nPATH_EXTRA=/opt/bin"
         told = _click(widget, "apply_btn", capsys)
 
-        assert pill(widget) == "in use"
+        assert pill(widget) == "applied"
         assert "Applied." in told
         assert get_config().environment_variables == {
             "GOOD": "2",
@@ -444,7 +467,7 @@ class TestApply:
         widget.widgets["profile_dropdown"].value = "Local single-core"
         told = _click(widget, "apply_btn", capsys)
 
-        assert "Applied. @cluster now runs on: local" in told
+        assert "Applied. New @cluster calls run on: local" in told
         assert clustrix.get_config().cluster_type == "local"
         assert clustrix.get_config().cluster_host is None
         assert clustrix.get_config().username is None
@@ -495,15 +518,42 @@ class TestApply:
         controls["hf_namespace"].value = "contextlab"
         controls["hf_flavor"].value = "cpu-upgrade"
         controls["cpus"].value = 2
-        controls["ram"].value = "8GB"
-        controls["time"].value = "00:20:00"
 
         told = _click(widget, "apply_btn", capsys)
 
-        assert "Applied. @cluster now runs on: huggingface" in told
+        assert "Applied. New @cluster calls run on: huggingface" in told
         assert "namespace  contextlab (cpu-upgrade)" in told
-        assert "resources  2 CPUs, 8GB, 00:20:00" in told
-        assert "huggingface (contextlab)" in widget.widgets["in_use"].value
+        # CPUs, memory and walltime are not read by that backend, so the
+        # summary does not claim them.
+        assert "per job" not in told
+        assert "Hugging Face (contextlab)" in widget.widgets["in_use"].value
+
+        controls["cluster_type"].value = "local"
+        controls["ram"].value = "8GB"
+        controls["time"].value = "00:20:00"
+        told = _click(widget, "apply_btn", capsys)
+
+        assert "per job    2 CPUs, 8GB, 00:20:00" in told
+        assert "Saved to the profile 'Local single-core'." in told
+
+    def test_every_action_button_is_disabled_while_an_action_runs(self, capsys):
+        """The kernel is busy; a click then would queue silently behind it.
+        Observed the way a front end would see it: through the trait."""
+        widget = ModernClustrixWidget()
+        seen = {}
+        for key in widget.ACTION_BUTTONS:
+            widget.widgets[key].observe(
+                lambda change, key=key: seen.setdefault(key, []).append(change["new"]),
+                names="disabled",
+            )
+        before = {key: widget.widgets[key].disabled for key in widget.ACTION_BUTTONS}
+
+        _click(widget, "test_submit_btn", capsys)
+
+        for key in ("apply_btn", "test_submit_btn", "save_btn", "add_profile_btn"):
+            assert seen[key] == [True, False], f"{key}: {seen.get(key)}"
+        after = {key: widget.widgets[key].disabled for key in widget.ACTION_BUTTONS}
+        assert after == before
 
     def test_apply_restores_its_button(self, capsys):
         """The button is relabelled and disabled while it works; a handler
@@ -523,29 +573,39 @@ class TestApply:
         widget = ModernClustrixWidget()
         _click(widget, "apply_btn", capsys)
 
-        told = _click(widget, "test_connect_btn", capsys)
+        told = _click(widget, "test_submit_btn", capsys)
 
         assert "Applied." not in told
-        assert "Nothing to connect to" in told
+        assert "Test job succeeded" in told
 
 
-class TestThePillSaysWhetherTheFormIsInUse:
+class TestTheTwoIndicators:
+    """Two questions, two places.
+
+    The header's pill says whether the form is what ``@cluster`` is using.
+    The pill beside the console says how the last action went. One pill used
+    to carry both, so a green "connected" sat on a form nobody had applied.
+    """
+
     @pytest.fixture
-    def applied(self, capsys):
-        """A widget whose form has just been applied, so it starts in use."""
+    def in_use(self, capsys):
+        """A widget whose form has just been applied."""
         widget = ModernClustrixWidget()
         _click(widget, "apply_btn", capsys)
-        assert pill(widget) == "in use"
+        assert applied(widget) == "in use"
+        assert pill(widget) == "applied"
         return widget
 
     def test_on_a_fresh_install_the_selected_template_is_not_what_is_in_use(self):
         """Nothing has been applied, and the template on screen differs from
-        clustrix's defaults, so saying "in use" would be untrue."""
+        clustrix's defaults, so saying "in use" would be untrue. And no
+        action has run, so there is no result to show."""
         widget = ModernClustrixWidget()
 
         assert widget.widgets["profile_dropdown"].value == "Local single-core"
         assert get_config().default_cores != widget.widgets["cpus"].value
-        assert pill(widget) == "not applied"
+        assert applied(widget) == "not applied"
+        assert pill(widget) == ""
 
     def test_a_widget_opened_on_a_configured_session_is_in_use(self):
         """It opens showing what clustrix is already doing."""
@@ -560,28 +620,60 @@ class TestThePillSaysWhetherTheFormIsInUse:
 
         assert widget.widgets["host"].value == "hpc.example.edu"
         assert widget.widgets["cpus"].value == 7
-        assert pill(widget) == "in use"
+        assert applied(widget) == "in use"
         assert "slurm on hpc.example.edu" in widget.widgets["in_use"].value
 
     def test_an_edit_makes_it_not_applied_and_apply_makes_it_in_use(
-        self, applied, capsys
+        self, in_use, capsys
     ):
-        applied.widgets["cpus"].value = 3
-        assert pill(applied) == "not applied"
+        in_use.widgets["cpus"].value = 3
+        assert applied(in_use) == "not applied"
 
-        _click(applied, "apply_btn", capsys)
-        assert pill(applied) == "in use"
+        _click(in_use, "apply_btn", capsys)
+        assert applied(in_use) == "in use"
         assert get_config().default_cores == 3
 
-    def test_undoing_the_edit_by_hand_is_in_use_again(self, applied):
+    def test_an_edit_clears_the_last_result(self, in_use):
+        """ "applied" described the form as it was. It does not describe this
+        one, and neither does anything still printed in the console."""
+        assert pill(in_use) == "applied"
+
+        in_use.widgets["cpus"].value = 3
+
+        assert pill(in_use) == ""
+        assert not any(
+            name.startswith("cx-state-")
+            for name in in_use.widgets["output"]._dom_classes
+        )
+
+    def test_a_successful_test_does_not_claim_the_form_is_applied(self, capsys):
+        widget = ModernClustrixWidget()
+        assert applied(widget) == "not applied"
+
+        _click(widget, "test_submit_btn", capsys)
+
+        assert pill(widget) == "job completed"
+        assert applied(widget) == "not applied"
+
+    def test_a_refused_action_does_not_change_whether_the_form_is_in_use(
+        self, in_use, capsys
+    ):
+        in_use.widgets["cpus"].value = 0
+
+        _click(in_use, "apply_btn", capsys)
+
+        assert pill(in_use) == "invalid"
+        assert applied(in_use) == "not applied"
+
+    def test_undoing_the_edit_by_hand_is_in_use_again(self, in_use):
         """It compares the form with the live configuration; it does not
         merely remember that something was touched."""
-        original = applied.widgets["ram"].value
+        original = in_use.widgets["ram"].value
 
-        applied.widgets["ram"].value = "128GB"
-        assert pill(applied) == "not applied"
-        applied.widgets["ram"].value = original
-        assert pill(applied) == "in use"
+        in_use.widgets["ram"].value = "128GB"
+        assert applied(in_use) == "not applied"
+        in_use.widgets["ram"].value = original
+        assert applied(in_use) == "in use"
 
     @pytest.mark.parametrize(
         "control, value",
@@ -590,46 +682,59 @@ class TestThePillSaysWhetherTheFormIsInUse:
             ("time", "09:00:00"),
             ("package_manager", "conda"),
             ("python_executable", "python3.12"),
+            ("conda_env", "analysis"),
             ("clone_env", False),
+            ("cleanup", False),
             ("env_vars", "A=1"),
             ("modules", "gcc"),
             ("pre_exec_commands", "true"),
             ("local_env_var", "PW"),
         ],
     )
-    def test_every_kind_of_control_is_watched(self, control, value, applied):
-        applied.widgets[control].value = value
+    def test_every_kind_of_control_is_watched(self, control, value, in_use):
+        in_use.widgets[control].value = value
 
-        assert pill(applied) == "not applied", f"editing {control} went unnoticed"
+        assert applied(in_use) == "not applied", f"editing {control} went unnoticed"
+        assert in_use.widgets["revert_btn"].disabled is False
 
-    def test_a_field_the_chosen_backend_ignores_does_not_count(self, applied):
-        """Typing a HuggingFace namespace while on ``local`` changes nothing
-        Apply would send, so the form is still what is in use."""
-        assert applied.widgets["cluster_type"].value == "local"
+    def test_a_field_the_chosen_backend_ignores_does_not_count(self, in_use):
+        """Typing a HuggingFace namespace, or a partition, while on ``local``
+        changes nothing Apply would send to ``@cluster``, so the form is
+        still what is in use -- though it *is* an unsaved edit to the profile."""
+        assert in_use.widgets["cluster_type"].value == "local"
 
-        applied.widgets["hf_namespace"].value = "contextlab"
-        applied.widgets["host"].value = "unused.example.edu"
+        in_use.widgets["hf_namespace"].value = "contextlab"
+        in_use.widgets["host"].value = "unused.example.edu"
+        in_use.widgets["partition"].value = "gpu"
 
-        assert pill(applied) == "in use"
+        assert applied(in_use) == "in use"
+        assert in_use.widgets["revert_btn"].disabled is False
+        assert "Edited" in in_use.widgets["profile_state"].value
 
-    def test_selecting_another_profile_is_not_applied_until_it_is(
-        self, applied, capsys
-    ):
-        applied.widgets["profile_dropdown"].value = "Local all cores"
-        assert pill(applied) == "not applied"
+    def test_trailing_whitespace_is_not_an_edit(self, in_use):
+        in_use.widgets["ram"].value = in_use.widgets["ram"].value + "  "
 
-        _click(applied, "apply_btn", capsys)
-        assert pill(applied) == "in use"
+        assert applied(in_use) == "in use"
+        assert in_use.widgets["revert_btn"].disabled is True
+
+    def test_selecting_another_profile_is_not_applied_until_it_is(self, in_use, capsys):
+        in_use.widgets["profile_dropdown"].value = "Local all cores"
+        assert applied(in_use) == "not applied"
+        assert pill(in_use) == ""
+
+        _click(in_use, "apply_btn", capsys)
+        assert applied(in_use) == "in use"
         assert get_config().default_cores == -1
 
     def test_a_change_made_from_code_shows_up_when_the_form_is_next_touched(
-        self, applied
+        self, in_use
     ):
         """``configure()`` behind the widget's back makes the form stale."""
         configure(default_cores=31)
-        applied.widgets["ram"].value = applied.widgets["ram"].value + " "
+        in_use.widgets["modules"].value = "gcc"
+        in_use.widgets["modules"].value = ""
 
-        assert pill(applied) == "not applied"
+        assert applied(in_use) == "not applied"
 
 
 # --------------------------------------------------------------------------
@@ -642,6 +747,9 @@ class TestProfileButtons:
         widget = ModernClustrixWidget()
         controls = widget.widgets
         controls["profile_dropdown"].value = "SSH remote machine"
+        saved_host = widget.profile_manager.load_profile(
+            "SSH remote machine"
+        ).cluster_host
         controls["host"].value = "typed-not-saved.example.edu"
         before = widget.profile_manager.get_profile_names()
 
@@ -651,12 +759,18 @@ class TestProfileButtons:
         (copy_name,) = set(names) - set(before)
         assert controls["profile_dropdown"].value == copy_name
         assert controls["profile_name"].value == copy_name
-        assert copy_name in told and "Rename it in the Name field" in told
+        assert pill(widget) == "profile created"
+        assert copy_name in told and "Rename to" in told
         copied = widget.profile_manager.load_profile(copy_name)
         original = widget.profile_manager.load_profile("SSH remote machine")
         assert copied.cluster_host == "typed-not-saved.example.edu"
-        assert original.cluster_host == "typed-not-saved.example.edu"
+        # The edit went to the copy. The original keeps what was saved, and
+        # is no longer carrying the edit as a draft either.
+        assert original.cluster_host == saved_host != "typed-not-saved.example.edu"
         assert copied is not original
+        assert controls["revert_btn"].disabled is True
+        controls["profile_dropdown"].value = "SSH remote machine"
+        assert controls["host"].value == (saved_host or "")
 
     def test_editing_the_copy_leaves_the_original_alone(self, capsys):
         widget = ModernClustrixWidget()
@@ -711,27 +825,98 @@ class TestProfileButtons:
             widget.profile_manager.BUILTIN_PROFILES
         )
 
-    def test_delete_removes_the_profile_and_shows_another(self, capsys):
+    def test_the_first_click_on_delete_only_arms_it(self, capsys):
+        """There is no undo, and the button sits beside two harmless ones."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["profile_dropdown"].value = "SLURM cluster"
+        button = controls["remove_profile_btn"]
+        assert button.description == "Delete"
+
+        _click(widget, "remove_profile_btn", capsys)
+
+        assert "SLURM cluster" in widget.profile_manager.get_profile_names()
+        assert button.description == "Confirm delete"
+        assert "cx-armed" in button._dom_classes
+        assert controls["profile_dropdown"].value == "SLURM cluster"
+
+    def test_the_second_click_deletes_the_profile_and_shows_another(self, capsys):
         widget = ModernClustrixWidget()
         controls = widget.widgets
         controls["profile_dropdown"].value = "SLURM cluster"
 
+        _click(widget, "remove_profile_btn", capsys)
         told = _click(widget, "remove_profile_btn", capsys)
 
         names = widget.profile_manager.get_profile_names()
         assert "SLURM cluster" not in names
+        assert pill(widget) == "profile deleted"
         assert "Deleted profile 'SLURM cluster'" in told
         assert controls["profile_dropdown"].value in names
         assert controls["profile_name"].value == controls["profile_dropdown"].value
         shown = widget.profile_manager.load_profile(controls["profile_dropdown"].value)
         assert controls["cluster_type"].value == shown.cluster_type
+        button = controls["remove_profile_btn"]
+        assert button.description == "Delete"
+        assert "cx-armed" not in button._dom_classes
+
+    @pytest.mark.parametrize("interruption", ["edit", "switch profile", "action"])
+    def test_anything_else_the_user_does_disarms_delete(self, interruption, capsys):
+        """Otherwise the confirming click could land minutes later, on a
+        different profile from the one that was armed."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["profile_dropdown"].value = "SLURM cluster"
+        before = widget.profile_manager.get_profile_names()
+        _click(widget, "remove_profile_btn", capsys)
+
+        if interruption == "edit":
+            controls["cpus"].value = 9
+        elif interruption == "switch profile":
+            controls["profile_dropdown"].value = "Local all cores"
+        else:
+            _click(widget, "test_submit_btn", capsys)
+
+        button = controls["remove_profile_btn"]
+        assert button.description == "Delete"
+        assert "cx-armed" not in button._dom_classes
+        _click(widget, "remove_profile_btn", capsys)
+        assert widget.profile_manager.get_profile_names() == before
+        assert button.description == "Confirm delete"
+
+    def test_deleting_a_profile_discards_its_draft(self, capsys):
+        """A profile recreated under the same name must not inherit edits
+        that were made to the one that was deleted."""
+        widget = ModernClustrixWidget()
+        controls = widget.widgets
+        controls["profile_dropdown"].value = "SLURM cluster"
+        controls["host"].value = "draft.example.edu"
+        _click(widget, "remove_profile_btn", capsys)
+        # The edit above was made before arming; arm again and confirm.
+        _click(widget, "remove_profile_btn", capsys)
+        assert "SLURM cluster" not in widget.profile_manager.get_profile_names()
+
+        widget.profile_manager.save_profile(
+            "SLURM cluster", ClusterConfig(cluster_type="slurm", cluster_host="new.edu")
+        )
+        widget._update_profile_dropdown()
+        controls["profile_dropdown"].value = "SLURM cluster"
+
+        assert controls["host"].value == "new.edu"
 
     def test_the_last_profile_cannot_be_deleted(self, capsys):
         widget = ModernClustrixWidget()
+        button = widget.widgets["remove_profile_btn"]
         while len(widget.profile_manager.get_profile_names()) > 1:
+            assert button.disabled is False
+            _click(widget, "remove_profile_btn", capsys)
             _click(widget, "remove_profile_btn", capsys)
         (last,) = widget.profile_manager.get_profile_names()
 
+        # The button says so...
+        assert button.disabled is True
+        # ...and the handler does not rely on the button saying so.
+        _click(widget, "remove_profile_btn", capsys)
         told = _click(widget, "remove_profile_btn", capsys)
 
         assert widget.profile_manager.get_profile_names() == [last]
@@ -740,57 +925,69 @@ class TestProfileButtons:
         assert widget.widgets["profile_dropdown"].value == last
 
 
-class TestSavingAndLoadingAFile:
-    def _edited(self):
+class TestExportingAndImportingAFile:
+    def _applied_twice(self, capsys):
+        """Two profiles edited and applied, so both are saved; Export writes
+        saved profiles."""
         widget = ModernClustrixWidget()
         controls = widget.widgets
         controls["profile_dropdown"].value = "SLURM cluster"
         controls["host"].value = "hpc.example.edu"
         controls["username"].value = "researcher"
         controls["password"].value = "never-written"
+        controls["partition"].value = "gpu-long"
         controls["modules"].value = "python/3.11 cuda"
         controls["pre_exec_commands"].value = "ulimit -n 4096"
         controls["time"].value = "06:00:00"
+        _click(widget, "apply_btn", capsys)
+        assert pill(widget) == "applied"
         controls["profile_dropdown"].value = "HuggingFace Jobs (CPU)"
         controls["hf_namespace"].value = "contextlab"
+        controls["hf_timeout"].value = "45m"
         controls["hf_token"].value = "never-written-either"
+        _click(widget, "apply_btn", capsys)
+        assert pill(widget) == "applied"
         return widget
 
     @pytest.mark.parametrize("extension", ["yml", "yaml", "json"])
-    def test_a_saved_file_loads_back_with_everything_but_the_secrets(
+    def test_an_exported_file_imports_with_everything_but_the_secrets(
         self, extension, tmp_path, capsys
     ):
         target = tmp_path / f"shared.{extension}"
-        first = self._edited()
+        first = self._applied_twice(capsys)
         first.widgets["config_filename"].value = str(target)
         told = _click(first, "save_btn", capsys)
-        assert (
-            f"Saved {len(first.profile_manager.profiles)} profile(s) to {target}"
-            in (told)
-        )
+        count = len(first.profile_manager.profiles)
+        assert pill(first) == "exported"
+        assert f"Exported {count} profile(s) to {target}" in told
+        assert "not been applied" not in told
 
         second = ModernClustrixWidget()
         second.widgets["profile_dropdown"].value = "Local all cores"
         second.widgets["config_filename"].value = str(target)
         told = _click(second, "load_btn", capsys)
 
-        assert pill(second) == "loaded"
-        assert "Loaded" in told and "SLURM cluster" in told
+        assert pill(second) == "imported"
+        assert "Imported" in told and "SLURM cluster" in told
         assert sorted(second.profile_manager.get_profile_names()) == sorted(
             first.profile_manager.get_profile_names()
         )
         # The selection travels with the file.
         assert second.widgets["profile_dropdown"].value == "HuggingFace Jobs (CPU)"
         assert second.widgets["hf_namespace"].value == "contextlab"
+        assert second.widgets["hf_timeout"].value == "45m"
         assert second.widgets["hf_token"].value == ""
         second.widgets["profile_dropdown"].value = "SLURM cluster"
         controls = second.widgets
         assert controls["host"].value == "hpc.example.edu"
         assert controls["username"].value == "researcher"
+        assert controls["partition"].value == "gpu-long"
         assert controls["modules"].value == "python/3.11 cuda"
         assert controls["pre_exec_commands"].value == "ulimit -n 4096"
         assert controls["time"].value == "06:00:00"
         assert controls["password"].value == ""
+        # What was imported is what is saved: nothing on screen is a draft.
+        assert controls["revert_btn"].disabled is True
         text = target.read_text(encoding="utf-8")
         assert "never-written" not in text
 
@@ -798,7 +995,7 @@ class TestSavingAndLoadingAFile:
         self, tmp_path, monkeypatch, capsys
     ):
         monkeypatch.chdir(tmp_path)
-        widget = self._edited()
+        widget = ModernClustrixWidget()
         widget.widgets["config_filename"].value = "team.yml"
 
         told = _click(widget, "save_btn", capsys)
@@ -810,7 +1007,27 @@ class TestSavingAndLoadingAFile:
         assert "team.yml" in widget.widgets["config_filename"].options
         assert widget.widgets["config_filename"].value == "team.yml"
 
-    def test_saving_somewhere_unwritable_says_so(self, tmp_path, capsys):
+    @pytest.mark.parametrize("blank", ["", "   "])
+    def test_an_empty_filename_means_the_profile_bundle_not_the_library_config(
+        self, blank, tmp_path, monkeypatch, capsys
+    ):
+        """``clustrix.yml`` is the library's own configuration file, in a
+        different format; a profile bundle written over it would be read by
+        the next ``import clustrix`` as a broken configuration."""
+        monkeypatch.chdir(tmp_path)
+        widget = ModernClustrixWidget()
+        widget.widgets["config_filename"].value = blank
+
+        told = _click(widget, "save_btn", capsys)
+
+        config_dir = pathlib.Path(os.environ["CLUSTRIX_CONFIG_DIR"])
+        assert pill(widget) == "exported"
+        assert str(config_dir / "profiles.yml") in told
+        assert (config_dir / "profiles.yml").exists()
+        assert not (config_dir / "clustrix.yml").exists()
+        assert not (tmp_path / "clustrix.yml").exists()
+
+    def test_exporting_somewhere_unwritable_says_so(self, tmp_path, capsys):
         blocker = tmp_path / "a-file"
         blocker.write_text("not a directory", encoding="utf-8")
         widget = ModernClustrixWidget()
@@ -818,9 +1035,9 @@ class TestSavingAndLoadingAFile:
 
         told = _click(widget, "save_btn", capsys)
 
-        assert pill(widget) == "save failed"
-        assert "Could not save" in told
-        assert widget.widgets["save_btn"].description == "Save all"
+        assert pill(widget) == "export failed"
+        assert "Could not export" in told
+        assert widget.widgets["save_btn"].description == "Export"
         assert widget.widgets["save_btn"].disabled is False
 
 
@@ -844,13 +1061,19 @@ class TestTheTestButtonsOnThisMachine:
         button = widget.widgets["test_submit_btn"]
         assert (button.description, button.disabled) == ("Run test job", False)
 
-    def test_local_has_nothing_to_connect_to_and_says_so(self, capsys):
+    def test_there_is_no_connection_to_test_on_this_machine(self):
+        """The button used to answer "Nothing to connect to" with a green
+        "connected". It is not offered for ``local`` at all now."""
         widget = ModernClustrixWidget()
+        button = widget.widgets["test_connect_btn"]
+        assert widget.widgets["cluster_type"].value == "local"
+        assert button.layout.display == "none"
 
-        told = _click(widget, "test_connect_btn", capsys)
-
-        assert pill(widget) == "connected"
-        assert "Nothing to connect to: local jobs run in this Python process." in told
+        widget.widgets["cluster_type"].value = "ssh"
+        assert button.layout.display is None
+        widget.widgets["cluster_type"].value = "local"
+        assert button.layout.display == "none"
+        assert widget.widgets["test_submit_btn"].layout.display != "none"
 
     def test_a_huggingface_token_that_is_not_one_is_not_reported_connected(
         self, monkeypatch, capsys
@@ -1084,8 +1307,8 @@ class TestSetUpSSHKey:
 
         assert pill(widget) == "key ready", told
         key_path = pathlib.Path(controls["ssh_key_file"].value)
-        assert f"Installed a new key on the host: {key_path}" in told
-        assert "press Apply to use it" in told
+        assert f"Installed a new key on the host:\n  {key_path}" in told
+        assert "Press Apply to use it" in told
         # A real private key, inside the (isolated) home, private.
         assert key_path.is_file()
         assert pathlib.Path.home() / ".ssh" in key_path.parents
@@ -1111,19 +1334,23 @@ class TestSetUpSSHKey:
         told = _click(widget, "auto_setup_ssh", capsys)
 
         assert pill(widget) == "password needed"
-        assert "Enter the account password above first" in told
+        assert "Enter the account password first" in told
+        assert "cx-invalid" in widget.widgets["password"]._dom_classes
         assert widget.widgets["ssh_key_file"].value == ""
         assert ssh_host.authentications == []
 
     def test_a_wrong_password_sets_up_nothing(self, ssh_host, capsys):
+        """It connects first, the way a job would, so a wrong password is the
+        connection's own failure rather than a line from the key installer."""
         widget = _pointed_at(ssh_host, password="the-wrong-password")
 
         told = _click(widget, "auto_setup_ssh", capsys)
 
-        assert pill(widget) == "key not set up"
-        assert "SSH key setup failed" in told
+        assert pill(widget) == "not connected"
+        assert "Could not reach the host: AuthenticationException" in told
         assert widget.widgets["ssh_key_file"].value == ""
         assert not (pathlib.Path(ssh_host.root) / ".ssh" / "authorized_keys").exists()
+        assert list((pathlib.Path.home() / ".ssh").glob("id_*")) == []
         # The password is kept so the user can correct it.
         assert widget.widgets["password"].value == "the-wrong-password"
         button = widget.widgets["auto_setup_ssh"]
@@ -1138,7 +1365,8 @@ class TestSetUpSSHKey:
 
         assert pill(widget) == "invalid"
         assert "Cannot set up a key for this configuration" in told
-        assert "A host is required" in told
+        assert "SSH needs a host" in told
+        assert "cx-invalid" in widget.widgets["host"]._dom_classes
         assert list((pathlib.Path.home() / ".ssh").glob("id_*")) == []
 
     def test_a_key_that_already_works_is_reused_unless_replacement_is_ticked(
@@ -1154,7 +1382,7 @@ class TestSetUpSSHKey:
         told = _click(widget, "auto_setup_ssh", capsys)
 
         assert pill(widget) == "key ready"
-        assert f"A key that already works was found: {first_key}" in told
+        assert f"A key that already works was found:\n  {first_key}" in told
         assert pathlib.Path(first_key + ".pub").read_text() == first_public
 
         controls["password"].value = PASSWORD
